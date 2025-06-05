@@ -16,8 +16,10 @@ use anyhow::Result;
 use serde_json::{json, Value};
 use std::sync::Arc;
 use tokio::sync::Mutex;
+use tokio::time::Duration;
 
 use crate::config::Config;
+use crate::mcp::logging::{log_critical_anyhow_error, log_critical_error};
 use crate::mcp::types::McpTool;
 use crate::memory::{MemoryManager, MemoryQuery, MemoryType};
 
@@ -235,8 +237,9 @@ impl MemoryProvider {
 		)
 	}
 
-	/// Execute the memorize tool
+	/// Execute the memorize tool with enhanced error handling
 	pub async fn execute_memorize(&self, arguments: &Value) -> Result<String> {
+		// Validate input parameters exist before processing
 		let title = arguments
 			.get("title")
 			.and_then(|v| v.as_str())
@@ -246,6 +249,14 @@ impl MemoryProvider {
 			.get("content")
 			.and_then(|v| v.as_str())
 			.ok_or_else(|| anyhow::anyhow!("Missing required parameter 'content'"))?;
+
+		// Validate UTF-8 to prevent panics
+		if !title.is_ascii() && std::str::from_utf8(title.as_bytes()).is_err() {
+			return Err(anyhow::anyhow!("Invalid UTF-8 in title"));
+		}
+		if !content.is_ascii() && std::str::from_utf8(content.as_bytes()).is_err() {
+			return Err(anyhow::anyhow!("Invalid UTF-8 in content"));
+		}
 
 		// Sanitize input content to prevent Unicode issues
 		let title = Self::sanitize_content(title);
@@ -273,11 +284,26 @@ impl MemoryProvider {
 		let importance = arguments
 			.get("importance")
 			.and_then(|v| v.as_f64())
-			.map(|v| v as f32);
+			.map(|v| {
+				// Clamp importance to valid range
+				(v as f32).clamp(0.0, 1.0)
+			});
 
+		// Process tags with error handling
 		let tags = arguments.get("tags").and_then(|v| v.as_array()).map(|arr| {
 			arr.iter()
-				.filter_map(|v| v.as_str().map(Self::sanitize_content))
+				.filter_map(|v| {
+					v.as_str().map(|s| {
+						let sanitized = Self::sanitize_content(s);
+						// Limit tag length to prevent issues
+						if sanitized.len() > 50 {
+							sanitized[..50].to_string()
+						} else {
+							sanitized
+						}
+					})
+				})
+				.take(10) // Limit number of tags
 				.collect::<Vec<String>>()
 		});
 
@@ -287,6 +313,7 @@ impl MemoryProvider {
 			.map(|arr| {
 				arr.iter()
 					.filter_map(|v| v.as_str().map(|s| s.to_string()))
+					.take(20) // Limit number of files
 					.collect::<Vec<String>>()
 			});
 
@@ -297,28 +324,46 @@ impl MemoryProvider {
 			);
 		}
 
-		// Change to working directory for Git context
-		let _original_dir = std::env::current_dir()?;
-		std::env::set_current_dir(&self.working_directory)?;
+		// Change to working directory for Git context with error handling
+		let original_dir = std::env::current_dir()
+			.map_err(|e| anyhow::anyhow!("Failed to get current directory: {}", e))?;
 
-		let memory = {
-			let mut manager = self.memory_manager.lock().await;
-			manager
-				.memorize(
-					memory_type,
-					title.to_string(),
-					content.to_string(),
-					importance,
-					tags,
-					related_files,
-				)
-				.await?
+		if let Err(e) = std::env::set_current_dir(&self.working_directory) {
+			return Err(anyhow::anyhow!(
+				"Failed to change to working directory: {}",
+				e
+			));
+		}
+
+		let memory_result = {
+			// Use timeout to prevent hanging
+			let memory_future = async {
+				let mut manager = self.memory_manager.lock().await;
+				manager
+					.memorize(
+						memory_type,
+						title.to_string(),
+						content.to_string(),
+						importance,
+						tags,
+						related_files,
+					)
+					.await
+			};
+
+			tokio::time::timeout(Duration::from_secs(30), memory_future)
+				.await
+				.map_err(|_| anyhow::anyhow!("Memory operation timed out"))?
 		};
 
-		// Restore original directory
-		std::env::set_current_dir(&_original_dir)?;
+		// Restore original directory regardless of result
+		if let Err(e) = std::env::set_current_dir(&original_dir) {
+			eprintln!("Warning: Failed to restore original directory: {}", e);
+		}
 
-		// Return compact JSON response for token efficiency
+		let memory = memory_result?;
+
+		// Return compact JSON response for token efficiency with safe serialization
 		let response = json!({
 			"success": 1,
 			"memory_id": memory.id,
@@ -327,7 +372,17 @@ impl MemoryProvider {
 
 		// Ensure proper JSON encoding to avoid string slicing issues
 		// Use to_string_pretty for better error handling with Unicode
-		Ok(serde_json::to_string_pretty(&response)?)
+		match serde_json::to_string_pretty(&response) {
+			Ok(json_str) => Ok(json_str),
+			Err(e) => {
+				// Fallback to minimal response if JSON encoding fails
+				log_critical_error("Memory response serialization failed", &e);
+				Ok(format!(
+					r#"{{"success": 1, "memory_id": "{}", "message": "Memory stored successfully"}}"#,
+					memory.id
+				))
+			}
+		}
 	}
 
 	/// Execute the remember tool
@@ -485,13 +540,30 @@ impl MemoryProvider {
 
 		// Handle specific memory ID deletion
 		if let Some(memory_id) = arguments.get("memory_id").and_then(|v| v.as_str()) {
+			// Validate memory ID format
+			if memory_id.trim().is_empty() || memory_id.len() > 100 {
+				let response = json!({
+					"success": 0,
+					"error": "Invalid memory ID format"
+				});
+				return Ok(serde_json::to_string(&response)?);
+			}
+
 			if self.debug {
 				eprintln!("Forgetting memory: id='{}'", memory_id);
 			}
 
+			// Execute deletion with timeout
 			let res = {
-				let mut manager = self.memory_manager.lock().await;
-				manager.forget(memory_id).await
+				let delete_future = async {
+					let mut manager = self.memory_manager.lock().await;
+					manager.forget(memory_id).await
+				};
+
+				match tokio::time::timeout(Duration::from_secs(30), delete_future).await {
+					Ok(result) => result,
+					Err(_) => Err(anyhow::anyhow!("Memory deletion timed out")),
+				}
 			};
 			match res {
 				Ok(_) => {
@@ -503,6 +575,7 @@ impl MemoryProvider {
 					Ok(serde_json::to_string(&response)?)
 				}
 				Err(e) => {
+					log_critical_anyhow_error("Memory deletion failed", &e);
 					let response = json!({
 						"success": 0,
 						"memory_id": memory_id,
@@ -514,6 +587,15 @@ impl MemoryProvider {
 		}
 		// Handle query-based deletion
 		else if let Some(query) = arguments.get("query").and_then(|v| v.as_str()) {
+			// Validate UTF-8 to prevent panics
+			if !query.is_ascii() && std::str::from_utf8(query.as_bytes()).is_err() {
+				let response = json!({
+					"success": 0,
+					"error": "Invalid UTF-8 in query"
+				});
+				return Ok(serde_json::to_string(&response)?);
+			}
+
 			if query.len() < 3 || query.len() > 500 {
 				let response = json!({
 					"success": 0,

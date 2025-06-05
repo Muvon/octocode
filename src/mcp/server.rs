@@ -14,6 +14,7 @@
 
 use anyhow::Result;
 use serde_json::json;
+use std::panic;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -24,8 +25,8 @@ use crate::config::Config;
 use crate::indexer;
 use crate::mcp::graphrag::GraphRagProvider;
 use crate::mcp::logging::{
-	init_mcp_logging, log_critical_error, log_indexing_operation, log_mcp_request,
-	log_mcp_response, log_watcher_event,
+	init_mcp_logging, log_critical_anyhow_error, log_critical_error, log_indexing_operation,
+	log_mcp_request, log_mcp_response, log_watcher_event,
 };
 use crate::mcp::memory::MemoryProvider;
 use crate::mcp::semantic_code::SemanticCodeProvider;
@@ -43,11 +44,15 @@ use crate::watcher_config::{
 // - MCP_MAX_PENDING_EVENTS: Maximum number of file events to queue (prevents memory issues)
 // - MCP_INDEX_TIMEOUT_MS: Maximum time to wait for indexing to complete before timing out
 // - MCP_ENABLE_VERBOSE_EVENTS: Whether to log individual file events (useful for debugging)
+// - MCP_MAX_REQUEST_SIZE: Maximum size of incoming JSON-RPC requests (prevents memory exhaustion)
+// - MCP_IO_TIMEOUT_MS: Timeout for stdin/stdout operations (prevents hanging on broken pipes)
 //
 const MCP_DEBOUNCE_MS: u64 = MCP_DEFAULT_DEBOUNCE_MS; // 2000ms = 2 seconds
 const MCP_MAX_PENDING_EVENTS: usize = 100;
 const MCP_INDEX_TIMEOUT_MS: u64 = 300_000; // 5 minutes
 const MCP_ENABLE_VERBOSE_EVENTS: bool = false; // Set to true for detailed event logging
+const MCP_MAX_REQUEST_SIZE: usize = 10_485_760; // 10MB maximum request size
+const MCP_IO_TIMEOUT_MS: u64 = 30_000; // 30 seconds for I/O operations
 
 /// MCP Server implementation with modular tool providers
 pub struct McpServer {
@@ -101,6 +106,14 @@ impl McpServer {
 	}
 
 	pub async fn run(&mut self) -> Result<()> {
+		// Set up panic handler to prevent server crashes from tool execution
+		let original_hook = panic::take_hook();
+		panic::set_hook(Box::new(move |panic_info| {
+			log_critical_anyhow_error("Panic in MCP server", &anyhow::anyhow!("{}", panic_info));
+			// Call original hook for debugging
+			original_hook(panic_info);
+		}));
+
 		// Start the file watcher as a completely independent background task
 		self.start_watcher().await?;
 
@@ -110,41 +123,142 @@ impl McpServer {
 				"Watch configuration: debounce={}ms, timeout={}ms, max_events={}",
 				MCP_DEBOUNCE_MS, MCP_INDEX_TIMEOUT_MS, MCP_MAX_PENDING_EVENTS
 			);
+			eprintln!(
+				"Safety limits: max_request_size={}MB, io_timeout={}ms",
+				MCP_MAX_REQUEST_SIZE / 1_048_576,
+				MCP_IO_TIMEOUT_MS
+			);
 		}
 
 		// Get the index receiver for handling indexing requests
 		let mut index_rx = self.index_rx.take().unwrap();
 
-		// Handle MCP protocol communication (stdin/stdout)
+		// Handle MCP protocol communication (stdin/stdout) with error resilience
 		// This runs independently of file watching and indexing
 		let stdin = tokio::io::stdin();
 		let stdout = tokio::io::stdout();
 		let mut reader = BufReader::new(stdin);
 		let mut writer = stdout;
 
-		let mut line = String::new();
+		let mut line = String::with_capacity(1024); // Pre-allocate reasonable buffer
+		let mut consecutive_errors = 0u32;
+		const MAX_CONSECUTIVE_ERRORS: u32 = 10;
 
 		loop {
 			line.clear();
 
 			tokio::select! {
-				// Handle MCP protocol messages from stdin
-				result = reader.read_line(&mut line) => {
+				// Handle MCP protocol messages from stdin with timeout and error recovery
+				result = tokio::time::timeout(
+					Duration::from_millis(MCP_IO_TIMEOUT_MS),
+					reader.read_line(&mut line)
+				) => {
 					match result {
-						Ok(0) => break, // EOF
-						Ok(_) => {
-							if let Some(response) = self.handle_request(&line).await {
-								let response_json = serde_json::to_string(&response)?;
-								writer.write_all(response_json.as_bytes()).await?;
-								writer.write_all(b"\n").await?;
-								writer.flush().await?;
-							}
-						}
-						Err(e) => {
+						Ok(Ok(0)) => {
+							// EOF reached - normal shutdown
 							if self.debug {
-								eprintln!("Error reading from stdin: {}", e);
+								eprintln!("MCP Server: EOF received, shutting down gracefully");
 							}
 							break;
+						}
+						Ok(Ok(bytes_read)) => {
+							// Check for oversized requests to prevent memory exhaustion
+							if bytes_read > MCP_MAX_REQUEST_SIZE {
+								log_critical_anyhow_error(
+									"Request size limit exceeded",
+									&anyhow::anyhow!("Request size {} exceeds limit {}", bytes_read, MCP_MAX_REQUEST_SIZE)
+								);
+
+								// Send error response for oversized request
+								if let Err(e) = self.send_error_response(
+									&mut writer,
+									None,
+									-32700,
+									"Request too large",
+									Some(json!({"max_size": MCP_MAX_REQUEST_SIZE}))
+								).await {
+									log_critical_anyhow_error("Failed to send error response", &e);
+								}
+								continue;
+							}
+
+							// Process the request with panic recovery
+							match self.handle_request_safe(&line).await {
+								Ok(Some(response)) => {
+									// Send response with error handling
+									if let Err(e) = self.send_response(&mut writer, &response).await {
+										log_critical_anyhow_error("Failed to send response", &e);
+										consecutive_errors += 1;
+										if consecutive_errors >= MAX_CONSECUTIVE_ERRORS {
+											log_critical_anyhow_error(
+												"Too many consecutive errors",
+												&anyhow::anyhow!("Shutting down after {} consecutive errors", consecutive_errors)
+											);
+											break;
+										}
+									} else {
+										consecutive_errors = 0; // Reset on successful send
+									}
+								}
+								Ok(None) => {
+									// No response needed (e.g., empty request)
+									consecutive_errors = 0;
+								}
+								Err(e) => {
+									log_critical_anyhow_error("Request handling failed", &e);
+									consecutive_errors += 1;
+
+									// Try to send error response
+									if let Err(send_err) = self.send_error_response(
+										&mut writer,
+										None,
+										-32603,
+										"Internal server error",
+										Some(json!({"error": e.to_string()}))
+									).await {
+										log_critical_anyhow_error("Failed to send error response", &send_err);
+									}
+
+									if consecutive_errors >= MAX_CONSECUTIVE_ERRORS {
+										log_critical_anyhow_error(
+											"Too many consecutive errors",
+											&anyhow::anyhow!("Shutting down after {} consecutive errors", consecutive_errors)
+										);
+										break;
+									}
+								}
+							}
+						}
+						Ok(Err(e)) => {
+							// I/O error reading from stdin
+							if self.is_broken_pipe_error(&e) {
+								if self.debug {
+									eprintln!("MCP Server: Broken pipe detected, shutting down gracefully");
+								}
+								break;
+							} else {
+								log_critical_error("Error reading from stdin", &e);
+								consecutive_errors += 1;
+								if consecutive_errors >= MAX_CONSECUTIVE_ERRORS {
+									break;
+								}
+								// Brief delay before retrying
+								tokio::time::sleep(Duration::from_millis(100)).await;
+							}
+						}
+						Err(_) => {
+							// Timeout on stdin read - this might indicate broken pipe or slow client
+							if self.debug {
+								eprintln!("MCP Server: Timeout reading from stdin");
+							}
+							consecutive_errors += 1;
+							if consecutive_errors >= MAX_CONSECUTIVE_ERRORS {
+								log_critical_anyhow_error(
+									"Stdin timeout limit exceeded",
+									&anyhow::anyhow!("No input received for {} consecutive timeouts", consecutive_errors)
+								);
+								break;
+							}
 						}
 					}
 				}
@@ -171,11 +285,16 @@ impl McpServer {
 							}
 						}
 						Ok(Err(e)) => {
+							log_critical_anyhow_error("Reindex error", &e);
 							if self.debug {
 								eprintln!("Reindex error: {}", e);
 							}
 						}
 						Err(_) => {
+							log_critical_anyhow_error(
+								"Reindex timeout",
+								&anyhow::anyhow!("Reindex timed out after {}ms", MCP_INDEX_TIMEOUT_MS)
+							);
 							if self.debug {
 								eprintln!("Reindex timed out after {}ms", MCP_INDEX_TIMEOUT_MS);
 							}
@@ -296,14 +415,35 @@ impl McpServer {
 		Ok(())
 	}
 
-	async fn handle_request(&self, line: &str) -> Option<JsonRpcResponse> {
+	/// Safe request handling with comprehensive error recovery
+	async fn handle_request_safe(&self, line: &str) -> Result<Option<JsonRpcResponse>> {
 		let line = line.trim();
 		if line.is_empty() {
-			return None;
+			return Ok(None);
 		}
 
-		// Parse request first to get proper method and ID
-		let parsed_request: Result<JsonRpcRequest, _> = serde_json::from_str(line);
+		// Validate UTF-8 to prevent panics
+		if !line.is_ascii() && std::str::from_utf8(line.as_bytes()).is_err() {
+			return Ok(Some(JsonRpcResponse {
+				jsonrpc: "2.0".to_string(),
+				id: None,
+				result: None,
+				error: Some(JsonRpcError {
+					code: -32700,
+					message: "Invalid UTF-8 in request".to_string(),
+					data: None,
+				}),
+			}));
+		}
+
+		// Parse request with enhanced error handling
+		let parsed_request: Result<JsonRpcRequest, _> =
+			panic::catch_unwind(|| serde_json::from_str(line)).unwrap_or_else(|_| {
+				Err(serde_json::Error::io(std::io::Error::new(
+					std::io::ErrorKind::InvalidData,
+					"JSON parsing panicked",
+				)))
+			});
 
 		let request: JsonRpcRequest = match parsed_request {
 			Ok(req) => {
@@ -313,7 +453,7 @@ impl McpServer {
 			}
 			Err(e) => {
 				log_critical_error("Request parsing", &e);
-				return Some(JsonRpcResponse {
+				return Ok(Some(JsonRpcResponse {
 					jsonrpc: "2.0".to_string(),
 					id: None,
 					result: None,
@@ -322,40 +462,139 @@ impl McpServer {
 						message: format!("Parse error: {}", e),
 						data: None,
 					}),
-				});
+				}));
 			}
 		};
 
 		let start_time = std::time::Instant::now();
-
 		let request_id = request.id.clone();
-		let response = match request.method.as_str() {
-			"initialize" => self.handle_initialize(&request).await,
-			"tools/list" => self.handle_tools_list(&request).await,
-			"tools/call" => self.handle_tools_call(&request).await,
-			"ping" => self.handle_ping(&request).await,
-			_ => JsonRpcResponse {
-				jsonrpc: "2.0".to_string(),
-				id: request.id,
-				result: None,
-				error: Some(JsonRpcError {
-					code: -32601,
-					message: "Method not found".to_string(),
-					data: None,
-				}),
-			},
+		let request_method = request.method.clone(); // Clone for error handling
+		let request_id_for_error = request.id.clone(); // Clone for error response
+
+		// Execute request with panic recovery
+		let response = match panic::catch_unwind(panic::AssertUnwindSafe(|| {
+			// Create a new async runtime for the panic-safe execution
+			// Note: This is a workaround since we can't easily catch panics in async code
+			tokio::task::block_in_place(|| {
+				tokio::runtime::Handle::current().block_on(async {
+					match request.method.as_str() {
+						"initialize" => self.handle_initialize(&request).await,
+						"tools/list" => self.handle_tools_list(&request).await,
+						"tools/call" => self.handle_tools_call(&request).await,
+						"ping" => self.handle_ping(&request).await,
+						_ => JsonRpcResponse {
+							jsonrpc: "2.0".to_string(),
+							id: request.id,
+							result: None,
+							error: Some(JsonRpcError {
+								code: -32601,
+								message: "Method not found".to_string(),
+								data: None,
+							}),
+						},
+					}
+				})
+			})
+		})) {
+			Ok(response) => response,
+			Err(_) => {
+				log_critical_anyhow_error(
+					"Request handler panicked",
+					&anyhow::anyhow!("Method '{}' caused a panic", request_method),
+				);
+				JsonRpcResponse {
+					jsonrpc: "2.0".to_string(),
+					id: request_id_for_error,
+					result: None,
+					error: Some(JsonRpcError {
+						code: -32603,
+						message: "Internal server error (panic recovered)".to_string(),
+						data: Some(json!({"method": request_method})),
+					}),
+				}
+			}
 		};
 
 		// Log the response with timing
 		let duration_ms = start_time.elapsed().as_millis() as u64;
 		log_mcp_response(
-			&request.method,
+			&request_method,
 			response.error.is_none(),
 			request_id.as_ref(),
 			Some(duration_ms),
 		);
 
-		Some(response)
+		Ok(Some(response))
+	}
+
+	/// Helper method to detect broken pipe errors
+	fn is_broken_pipe_error(&self, error: &std::io::Error) -> bool {
+		use std::io::ErrorKind;
+		matches!(
+			error.kind(),
+			ErrorKind::BrokenPipe
+				| ErrorKind::ConnectionAborted
+				| ErrorKind::ConnectionReset
+				| ErrorKind::UnexpectedEof
+		)
+	}
+
+	/// Safe response sending with error handling
+	async fn send_response(
+		&self,
+		writer: &mut tokio::io::Stdout,
+		response: &JsonRpcResponse,
+	) -> Result<()> {
+		// Serialize response with panic recovery
+		let response_json = match panic::catch_unwind(|| serde_json::to_string(response)) {
+			Ok(Ok(json)) => json,
+			Ok(Err(e)) => {
+				log_critical_error("Response serialization failed", &e);
+				// Create a minimal error response
+				r#"{"jsonrpc":"2.0","id":null,"error":{"code":-32603,"message":"Response serialization failed"}}"#.to_string()
+			}
+			Err(_) => {
+				log_critical_anyhow_error(
+					"Response serialization panicked",
+					&anyhow::anyhow!("JSON serialization panicked"),
+				);
+				r#"{"jsonrpc":"2.0","id":null,"error":{"code":-32603,"message":"Response serialization panicked"}}"#.to_string()
+			}
+		};
+
+		// Send with timeout to prevent hanging on broken pipes
+		tokio::time::timeout(Duration::from_millis(MCP_IO_TIMEOUT_MS), async {
+			writer.write_all(response_json.as_bytes()).await?;
+			writer.write_all(b"\n").await?;
+			writer.flush().await
+		})
+		.await
+		.map_err(|_| anyhow::anyhow!("Response send timeout"))??;
+
+		Ok(())
+	}
+
+	/// Helper method to send error responses
+	async fn send_error_response(
+		&self,
+		writer: &mut tokio::io::Stdout,
+		id: Option<&serde_json::Value>,
+		code: i32,
+		message: &str,
+		data: Option<serde_json::Value>,
+	) -> Result<()> {
+		let error_response = JsonRpcResponse {
+			jsonrpc: "2.0".to_string(),
+			id: id.cloned(),
+			result: None,
+			error: Some(JsonRpcError {
+				code,
+				message: message.to_string(),
+				data,
+			}),
+		};
+
+		self.send_response(writer, &error_response).await
 	}
 
 	async fn handle_initialize(&self, request: &JsonRpcRequest) -> JsonRpcResponse {
@@ -445,6 +684,25 @@ impl McpServer {
 
 		let default_args = json!({});
 		let arguments = params.get("arguments").unwrap_or(&default_args);
+
+		// Validate arguments size to prevent memory exhaustion
+		if let Ok(args_str) = serde_json::to_string(arguments) {
+			if args_str.len() > MCP_MAX_REQUEST_SIZE {
+				return JsonRpcResponse {
+					jsonrpc: "2.0".to_string(),
+					id: request.id.clone(),
+					result: None,
+					error: Some(JsonRpcError {
+						code: -32602,
+						message: "Tool arguments too large".to_string(),
+						data: Some(json!({
+							"max_size": MCP_MAX_REQUEST_SIZE,
+							"actual_size": args_str.len()
+						})),
+					}),
+				};
+			}
+		}
 
 		let result = match tool_name {
 			"search_code" => self.semantic_code.execute_search(arguments).await,
@@ -589,7 +847,7 @@ async fn run_watcher(
 
 	let (debouncer_tx, mut debouncer_rx) = mpsc::channel(MCP_MAX_PENDING_EVENTS);
 
-	// Create ignore patterns manager
+	// Create ignore patterns manager with error handling
 	let ignore_patterns = IgnorePatterns::new(working_dir.clone());
 
 	// Use minimal debounce for the file watcher itself - we handle the real debouncing in the event handler
@@ -617,21 +875,34 @@ async fn run_watcher(
 						}
 					}
 
-					// Send notification for each relevant event batch
-					let _ = debouncer_tx.try_send(());
+					// Send notification for each relevant event batch with error handling
+					if let Err(e) = debouncer_tx.try_send(()) {
+						if debug {
+							eprintln!("Warning: Failed to send file event: {:?}", e);
+						}
+						// Don't panic on channel send failure - just log and continue
+					}
 				}
 			}
 			Err(e) => {
+				log_critical_error("File watcher error", &e);
 				if debug {
 					eprintln!("File watcher error: {:?}", e);
 				}
+				// Continue running even on watcher errors
 			}
 		},
-	)?;
+	)
+	.map_err(|e| anyhow::anyhow!("Failed to create file watcher: {}", e))?;
 
-	debouncer
+	// Watch directory with error handling
+	if let Err(e) = debouncer
 		.watcher()
-		.watch(&working_dir, RecursiveMode::Recursive)?;
+		.watch(&working_dir, RecursiveMode::Recursive)
+	{
+		log_critical_error("Failed to start watching directory", &e);
+		return Err(anyhow::anyhow!("Failed to watch directory: {}", e));
+	}
 
 	if debug {
 		eprintln!("File watcher started for: {}", working_dir.display());
@@ -642,13 +913,40 @@ async fn run_watcher(
 		);
 	}
 
-	// Forward events from debouncer to the main event handler
-	while (debouncer_rx.recv().await).is_some() {
-		if tx.send(()).await.is_err() {
-			if debug {
-				eprintln!("Event channel closed, stopping file watcher");
+	// Forward events from debouncer to the main event handler with error recovery
+	let mut consecutive_errors = 0u32;
+	const MAX_WATCHER_ERRORS: u32 = 5;
+
+	while let Some(()) = debouncer_rx.recv().await {
+		match tx.send(()).await {
+			Ok(()) => {
+				consecutive_errors = 0; // Reset on successful send
 			}
-			break;
+			Err(e) => {
+				consecutive_errors += 1;
+				log_critical_error("Event channel send failed", &e);
+
+				if debug {
+					eprintln!(
+						"Event channel closed or failed, error count: {}",
+						consecutive_errors
+					);
+				}
+
+				if consecutive_errors >= MAX_WATCHER_ERRORS {
+					log_critical_anyhow_error(
+						"Too many watcher errors",
+						&anyhow::anyhow!(
+							"Stopping file watcher after {} consecutive errors",
+							consecutive_errors
+						),
+					);
+					break;
+				}
+
+				// Brief delay before retrying
+				tokio::time::sleep(Duration::from_millis(100)).await;
+			}
 		}
 	}
 

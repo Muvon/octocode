@@ -151,6 +151,16 @@ pub fn log_critical_error(context: &str, error: &dyn std::error::Error) {
 	);
 }
 
+/// Log critical errors from anyhow::Error
+pub fn log_critical_anyhow_error(context: &str, error: &anyhow::Error) {
+	error!(
+		context = context,
+		error = %error,
+		error_chain = ?error.source(),
+		"Critical error in MCP server"
+	);
+}
+
 /// Log file watcher events with better context
 pub fn log_watcher_event(event_type: &str, path: Option<&std::path::Path>, count: usize) {
 	let path_info = path.map(|p| p.display().to_string());
