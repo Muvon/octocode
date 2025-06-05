@@ -3,11 +3,11 @@ name: Release
 on:
   push:
     tags:
-      - 'v*'
+      - '[0-9]+.[0-9]+.[0-9]+*'  # Matches semver tags like 0.1.0, 1.0.0, etc.
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Tag to release'
+        description: 'Tag to release (semver format, e.g., 0.1.0)'
         required: true
         type: string
 
@@ -22,126 +22,154 @@ jobs:
     outputs:
       upload_url: ${{ steps.create_release.outputs.upload_url }}
       release_id: ${{ steps.create_release.outputs.id }}
+      version: ${{ steps.get_version.outputs.VERSION }}
+      changelog: ${{ steps.changelog.outputs.CHANGELOG }}
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
+      with:
+        fetch-depth: 0  # Fetch full history for changelog generation
 
     - name: Get version from tag
       id: get_version
       run: |
-        if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-          echo "VERSION=${{ github.event.inputs.tag }}" >> $GITHUB_OUTPUT
+        if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          VERSION="${{ github.event.inputs.tag }}"
         else
-          echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          VERSION="${GITHUB_REF#refs/tags/}"
         fi
+        echo "VERSION=${VERSION}" >> $GITHUB_OUTPUT
+        echo "VERSION_NO_V=${VERSION#v}" >> $GITHUB_OUTPUT
+
+    - name: Validate semver format
+      run: |
+        VERSION="${{ steps.get_version.outputs.VERSION }}"
+        # POSIX-compatible regex check for semver
+        case "$VERSION" in
+          [0-9]*.[0-9]*.[0-9]*)
+            # Basic semver format matched
+            ;;
+          *)
+            echo "Error: Tag '$VERSION' is not a valid semver format"
+            echo "Expected format: X.Y.Z, X.Y.Z-prerelease, or X.Y.Z+build"
+            exit 1
+            ;;
+        esac
+
+    - name: Generate changelog
+      id: changelog
+      run: |
+        # Get the previous tag
+        PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+
+        if [ -z "$PREV_TAG" ]; then
+          CHANGELOG="Initial release"
+        else
+          # Generate changelog from commits since last tag
+          CHANGELOG=$(git log ${PREV_TAG}..HEAD --pretty=format:"- %s" --no-merges | head -20)
+          if [ -z "$CHANGELOG" ]; then
+            CHANGELOG="- No changes since last release"
+          fi
+        fi
+
+        # Escape for GitHub output (POSIX compatible)
+        CHANGELOG=$(printf '%s\n' "$CHANGELOG" | sed 's/%/%25/g; s/\r/%0D/g' | awk '{printf "%s%0A", $0}' | sed 's/%0A$//')
+        echo "CHANGELOG=$CHANGELOG" >> $GITHUB_OUTPUT
+
+    - name: Check if release exists
+      id: check_release
+      run: |
+        VERSION="${{ steps.get_version.outputs.VERSION }}"
+        if gh release view "$VERSION" >/dev/null 2>&1; then
+          echo "exists=true" >> $GITHUB_OUTPUT
+        else
+          echo "exists=false" >> $GITHUB_OUTPUT
+        fi
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Create Release
       id: create_release
-      uses: actions/create-release@v1
+      if: steps.check_release.outputs.exists == 'false'
+      run: |
+        VERSION="${{ steps.get_version.outputs.version }}"
+        IS_PRERELEASE="false"
+
+        # Check if this is a prerelease (contains - or is 0.x.x)
+        case "$VERSION" in
+          *-*|0.*)
+            IS_PRERELEASE="true"
+            ;;
+        esac
+
+        # Create the release as draft
+        if [ "$IS_PRERELEASE" = "true" ]; then
+          gh release create "$VERSION" \
+            --title "Release $VERSION" \
+            --notes "${{ steps.changelog.outputs.CHANGELOG }}" \
+            --draft \
+            --prerelease
+        else
+          gh release create "$VERSION" \
+            --title "Release $VERSION" \
+            --notes "${{ steps.changelog.outputs.CHANGELOG }}" \
+            --draft
+        fi
+
+        # Get release info
+        RELEASE_INFO=$(gh release view "$VERSION" --json id,uploadUrl)
+        RELEASE_ID=$(echo "$RELEASE_INFO" | jq -r '.id')
+        UPLOAD_URL=$(echo "$RELEASE_INFO" | jq -r '.uploadUrl')
+
+        echo "id=${RELEASE_ID}" >> $GITHUB_OUTPUT
+        echo "upload_url=${UPLOAD_URL}" >> $GITHUB_OUTPUT
       env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        tag_name: ${{ steps.get_version.outputs.VERSION }}
-        release_name: Release ${{ steps.get_version.outputs.VERSION }}
-        draft: false
-        prerelease: ${{ contains(steps.get_version.outputs.VERSION, '-') }}
-        body: |
-          ## Changes
-
-          - See [CHANGELOG.md](CHANGELOG.md) for details
-
-          ## Downloads
-
-          ### Static Binaries
-
-          | Platform | Architecture | Download |
-          |----------|--------------|----------|
-          | Linux | x86_64 | [octocode-${{ steps.get_version.outputs.VERSION }}-x86_64-unknown-linux-musl.tar.gz] |
-          | Linux | x86_64 (glibc) | [octocode-${{ steps.get_version.outputs.VERSION }}-x86_64-unknown-linux-gnu.tar.gz] |
-          | macOS | x86_64 | [octocode-${{ steps.get_version.outputs.VERSION }}-x86_64-apple-darwin.tar.gz] |
-          | macOS | ARM64 | [octocode-${{ steps.get_version.outputs.VERSION }}-aarch64-apple-darwin.tar.gz] |
-          | Windows | x86_64 | [octocode-${{ steps.get_version.outputs.VERSION }}-x86_64-pc-windows-gnu.zip] |
-
-          ### Installation
-
-          #### Using Cargo
-          ```bash
-          cargo install octocode
-          ```
-
-          #### Manual Installation
-          1. Download the appropriate binary for your platform
-          2. Extract the archive
-          3. Move the binary to a directory in your PATH
-
-          #### Homebrew (macOS)
-          ```bash
-          brew install octocode
-          ```
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   build:
-    name: Build
+    name: Build ${{ matrix.target }}
     needs: create-release
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
         include:
-        - target: x86_64-unknown-linux-gnu
-          os: ubuntu-latest
-          archive: tar.gz
         - target: x86_64-unknown-linux-musl
           os: ubuntu-latest
           archive: tar.gz
+        - target: aarch64-unknown-linux-musl
+          os: ubuntu-22.04-arm
+          archive: tar.gz
+        - target: x86_64-pc-windows-msvc
+          os: windows-latest
+          archive: zip
+        - target: aarch64-pc-windows-msvc
+          os: windows-11-arm
+          archive: zip
         - target: x86_64-apple-darwin
-          os: macos-latest
+          os: macos-13
           archive: tar.gz
         - target: aarch64-apple-darwin
-          os: macos-latest
+          os: macos-15
           archive: tar.gz
-        - target: x86_64-pc-windows-gnu
-          os: ubuntu-latest
-          archive: zip
 
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
 
-    - name: Get version from tag
-      id: get_version
-      run: |
-        if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-          echo "VERSION=${{ github.event.inputs.tag }}" >> $GITHUB_OUTPUT
-        else
-          echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
-        fi
-        echo "VERSION_NO_V=${VERSION#v}" >> $GITHUB_OUTPUT
-
     - name: Install Rust
-      uses: dtolnay/rust-toolchain@stable
+      uses: dtolnay/rust-toolchain@1.87.0
       with:
         targets: ${{ matrix.target }}
 
-    - name: Install protobuf compiler (Ubuntu)
-      if: matrix.os == 'ubuntu-latest'
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y protobuf-compiler
-
     - name: Install protobuf compiler (macOS)
-      if: matrix.os == 'macos-latest'
+      if: startsWith(matrix.os, 'macos')
       run: brew install protobuf
 
-    - name: Install cross-compilation dependencies
-      if: matrix.target == 'x86_64-unknown-linux-musl'
+    - name: Install protobuf compiler (Windows)
+      if: startsWith(matrix.os, 'windows')
       run: |
-        sudo apt-get update
-        sudo apt-get install -y musl-tools
-
-    - name: Install cross-compilation dependencies (Windows)
-      if: matrix.target == 'x86_64-pc-windows-gnu'
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y mingw-w64
+        choco install protoc
 
     - name: Cache dependencies
       uses: actions/cache@v4
@@ -150,73 +178,147 @@ jobs:
           ~/.cargo/registry
           ~/.cargo/git
           target
-        key: ${{ runner.os }}-${{ matrix.target }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+        key: ${{ endsWith(matrix.target, '-unknown-linux-musl') && 'docker-alpine' || runner.os }}-${{ matrix.target }}-cargo-${{ hashFiles('**/Cargo.lock') }}
         restore-keys: |
-          ${{ runner.os }}-${{ matrix.target }}-cargo-
-          ${{ runner.os }}-cargo-
+          ${{ endsWith(matrix.target, '-unknown-linux-musl') && 'docker-alpine' || runner.os }}-${{ matrix.target }}-cargo-
+          ${{ endsWith(matrix.target, '-unknown-linux-musl') && 'docker-alpine' || runner.os }}-cargo-
 
     - name: Build binary
+      shell: sh
       run: |
-        if [[ "${{ matrix.target }}" == "x86_64-unknown-linux-musl" ]]; then
-          export CC_x86_64_unknown_linux_musl=x86_64-linux-musl-gcc
-          export CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER=x86_64-linux-musl-gcc
-        elif [[ "${{ matrix.target }}" == "x86_64-pc-windows-gnu" ]]; then
-          export CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER=x86_64-w64-mingw32-gcc
+        if [ "${{ runner.os }}" = "Linux" ]; then
+          # Use official Rust Docker image for Linux builds
+          # Disable default features to avoid ONNX Runtime issues (same as Windows)
+          docker run --rm \
+            -v "$(pwd):/workspace" \
+            -w /workspace \
+            rust:1.87.0-alpine3.21 \
+            sh -c "
+              apk add --no-cache musl-dev openssl-dev openssl-libs-static pkgconfig gcc g++ protobuf-dev && \
+              rustup target add ${{ matrix.target }} && \
+              cargo build --release --target ${{ matrix.target }} --no-default-features
+            "
+        elif [ "${{ runner.os }}" = "Windows" ]; then
+          # Windows: disable default features to avoid ONNX Runtime issues
+          cargo build --release --target ${{ matrix.target }} --no-default-features
+        else
+          # Native build for other platforms (macOS)
+          cargo build --release --target ${{ matrix.target }}
         fi
-
-        cargo build --release --target ${{ matrix.target }}
 
     - name: Strip binary (Unix)
       if: matrix.os != 'windows-latest' && !contains(matrix.target, 'windows')
+      shell: sh
       run: |
-        if [[ "${{ matrix.target }}" == "x86_64-unknown-linux-musl" ]]; then
-          x86_64-linux-musl-strip target/${{ matrix.target }}/release/octocode
-        elif [[ "${{ matrix.target }}" == *"apple"* ]]; then
-          strip target/${{ matrix.target }}/release/octocode
-        else
-          strip target/${{ matrix.target }}/release/octocode
-        fi
+        # Strip binaries for smaller size
+        case "${{ matrix.target }}" in
+          *apple*)
+            strip target/${{ matrix.target }}/release/octocode
+            ;;
+          *)
+            strip target/${{ matrix.target }}/release/octocode
+            ;;
+        esac
 
     - name: Create archive directory
+      shell: sh
       run: mkdir -p dist
 
     - name: Create archive (Unix)
       if: matrix.archive == 'tar.gz'
+      shell: sh
       run: |
         cd target/${{ matrix.target }}/release
-        if [[ "${{ matrix.target }}" == *"windows"* ]]; then
-          tar czf ../../../dist/octocode-${{ steps.get_version.outputs.VERSION }}-${{ matrix.target }}.tar.gz octocode.exe
-        else
-          tar czf ../../../dist/octocode-${{ steps.get_version.outputs.VERSION }}-${{ matrix.target }}.tar.gz octocode
-        fi
+        case "${{ matrix.target }}" in
+          *windows*)
+            tar czf ../../../dist/octocode-${{ needs.create-release.outputs.version }}-${{ matrix.target }}.tar.gz octocode.exe
+            ;;
+          *)
+            tar czf ../../../dist/octocode-${{ needs.create-release.outputs.version }}-${{ matrix.target }}.tar.gz octocode
+            ;;
+        esac
 
     - name: Create archive (Windows)
       if: matrix.archive == 'zip'
+      shell: sh
       run: |
         cd target/${{ matrix.target }}/release
-        7z a ../../../dist/octocode-${{ steps.get_version.outputs.VERSION }}-${{ matrix.target }}.zip octocode.exe
+        7z a ../../../dist/octocode-${{ needs.create-release.outputs.version }}-${{ matrix.target }}.zip octocode.exe
 
     - name: Upload release asset
-      uses: actions/upload-release-asset@v1
+      shell: sh
+      run: |
+        gh release upload "${{ needs.create-release.outputs.version }}" \
+          "./dist/octocode-${{ needs.create-release.outputs.version }}-${{ matrix.target }}.${{ matrix.archive }}" \
+          --clobber
       env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        upload_url: ${{ needs.create-release.outputs.upload_url }}
-        asset_path: ./dist/octocode-${{ steps.get_version.outputs.VERSION }}-${{ matrix.target }}.${{ matrix.archive }}
-        asset_name: octocode-${{ steps.get_version.outputs.VERSION }}-${{ matrix.target }}.${{ matrix.archive }}
-        asset_content_type: application/octet-stream
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  publish:
+  finalize-release:
+    name: Finalize Release
+    needs: [create-release, build]
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Publish release
+      run: |
+        VERSION="${{ needs.create-release.outputs.version }}"
+
+        # Update release notes with download links
+        cat > release_notes.md << 'EOF'
+        ## 🚀 What's Changed
+
+        ${{ needs.create-release.outputs.changelog }}
+
+        ## 📦 Installation
+
+        ### Quick Install Script (Universal)
+        ```bash
+        curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/install.sh | sh
+        ```
+
+        **Works on:** Linux, macOS, Windows (Git Bash/WSL/MSYS2), and any Unix-like system
+
+        ### Manual Download
+
+        | Platform | Architecture | Download |
+        |----------|--------------|----------|
+         | Linux | x86_64 (static) | [octocode-${VERSION}-x86_64-unknown-linux-musl.tar.gz](https://github.com/${{ github.repository }}/releases/download/${VERSION}/octocode-${VERSION}-x86_64-unknown-linux-musl.tar.gz) |
+         | Linux | ARM64 (static) | [octocode-${VERSION}-aarch64-unknown-linux-musl.tar.gz](https://github.com/${{ github.repository }}/releases/download/${VERSION}/octocode-${VERSION}-aarch64-unknown-linux-musl.tar.gz) |
+         | Windows | x86_64 | [octocode-${VERSION}-x86_64-pc-windows-msvc.zip](https://github.com/${{ github.repository }}/releases/download/${VERSION}/octocode-${VERSION}-x86_64-pc-windows-msvc.zip) |
+         | Windows | ARM64 | [octocode-${VERSION}-aarch64-pc-windows-msvc.zip](https://github.com/${{ github.repository }}/releases/download/${VERSION}/octocode-${VERSION}-aarch64-pc-windows-msvc.zip) |
+         | macOS | x86_64 | [octocode-${VERSION}-x86_64-apple-darwin.tar.gz](https://github.com/${{ github.repository }}/releases/download/${VERSION}/octocode-${VERSION}-x86_64-apple-darwin.tar.gz) |
+         | macOS | ARM64 | [octocode-${VERSION}-aarch64-apple-darwin.tar.gz](https://github.com/${{ github.repository }}/releases/download/${VERSION}/octocode-${VERSION}-aarch64-apple-darwin.tar.gz) |
+
+        ### Using Cargo
+        ```bash
+        cargo install octocode
+        ```
+
+        ### Verify Installation
+        ```bash
+        octocode --version
+        ```
+        EOF
+
+        # Publish the release (remove draft status)
+        gh release edit "$VERSION" --draft=false --notes-file release_notes.md
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  publish-crates:
     name: Publish to crates.io
     needs: [create-release, build]
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v') && !contains(github.ref, '-')
+    if: "!contains(needs.create-release.outputs.version, '-')"  # Only for stable releases
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
 
     - name: Install Rust
-      uses: dtolnay/rust-toolchain@stable
+      uses: dtolnay/rust-toolchain@1.87.0
 
     - name: Install protobuf compiler
       run: |
@@ -245,16 +347,6 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
 
-    - name: Get version from tag
-      id: get_version
-      run: |
-        if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-          echo "VERSION=${{ github.event.inputs.tag }}" >> $GITHUB_OUTPUT
-        else
-          echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
-        fi
-        echo "VERSION_NO_V=${VERSION#v}" >> $GITHUB_OUTPUT
-
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
 
@@ -273,6 +365,6 @@ jobs:
         push: true
         tags: |
           ghcr.io/${{ github.repository }}:latest
-          ghcr.io/${{ github.repository }}:${{ steps.get_version.outputs.VERSION_NO_V }}
+          ghcr.io/${{ github.repository }}:${{ needs.create-release.outputs.version }}
         cache-from: type=gha
         cache-to: type=gha,mode=max

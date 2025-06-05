@@ -333,8 +333,8 @@ pub fn get_log_directory() -> Option<PathBuf> {
 
 /// Get all log directories for MCP server
 pub fn get_all_log_directories(base_dir: &std::path::Path) -> Result<Vec<PathBuf>, std::io::Error> {
-	let project_storage = crate::storage::get_project_storage_path(base_dir)
-		.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+	let project_storage =
+		crate::storage::get_project_storage_path(base_dir).map_err(std::io::Error::other)?;
 	let logs_dir = project_storage.join("logs");
 
 	if !logs_dir.exists() {
@@ -348,8 +348,8 @@ pub fn get_all_log_directories(base_dir: &std::path::Path) -> Result<Vec<PathBuf
 
 /// Print log directory information
 pub fn print_log_directories(base_dir: &Path) -> Result<(), std::io::Error> {
-	let project_storage = crate::storage::get_project_storage_path(base_dir)
-		.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+	let project_storage =
+		crate::storage::get_project_storage_path(base_dir).map_err(std::io::Error::other)?;
 	let logs_dir = project_storage.join("logs");
 
 	println!("MCP Server Log Directory:");

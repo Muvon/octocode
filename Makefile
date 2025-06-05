@@ -12,10 +12,11 @@ TARGET_DIR := target
 RELEASE_DIR := $(TARGET_DIR)/release
 DEBUG_DIR := $(TARGET_DIR)/debug
 
-# Cross-compilation targets
-TARGETS := x86_64-unknown-linux-gnu \
-					x86_64-unknown-linux-musl \
-					x86_64-pc-windows-gnu \
+# Compilation targets
+TARGETS := x86_64-unknown-linux-musl \
+					aarch64-unknown-linux-musl \
+					x86_64-pc-windows-msvc \
+					aarch64-pc-windows-msvc \
 					x86_64-apple-darwin \
 					aarch64-apple-darwin
 
@@ -45,13 +46,13 @@ install-deps: ## Install development dependencies
 	@echo "$(GREEN)Dependencies installed successfully$(NC)"
 
 .PHONY: install-targets
-install-targets: ## Install cross-compilation targets
-	@echo "$(YELLOW)Installing cross-compilation targets...$(NC)"
+install-targets: ## Install compilation targets
+	@echo "$(YELLOW)Installing compilation targets...$(NC)"
 	@for target in $(TARGETS); do \
 		echo "Installing $$target..."; \
 		rustup target add $$target; \
 	done
-	@echo "$(GREEN)Cross-compilation targets installed$(NC)"
+	@echo "$(GREEN)Compilation targets installed$(NC)"
 
 .PHONY: check
 check: ## Run cargo check
@@ -77,8 +78,13 @@ ifeq ($(shell uname),Darwin)
 	cargo build --release --target x86_64-apple-darwin
 	cargo build --release --target aarch64-apple-darwin
 else ifeq ($(shell uname),Linux)
-	# Linux static build with musl
+	# Linux static build with musl - native compilation
+	# Both x86_64 and ARM64 can be built natively with musl-tools
+ifeq ($(shell uname -m),x86_64)
 	cargo build --release --target x86_64-unknown-linux-musl
+else
+	cargo build --release --target aarch64-unknown-linux-musl
+endif
 else
 	# Fallback to regular release build
 	cargo build --release
@@ -90,14 +96,7 @@ build-all: install-targets ## Build for all supported platforms
 	@echo "$(YELLOW)Building for all supported platforms...$(NC)"
 	@for target in $(TARGETS); do \
 		echo "Building for $$target..."; \
-		if [ "$$target" = "x86_64-unknown-linux-musl" ]; then \
-			CC_x86_64_unknown_linux_musl=x86_64-linux-musl-gcc \
-			cargo build --release --target $$target; \
-		elif [ "$$target" = "x86_64-pc-windows-gnu" ]; then \
-			cargo build --release --target $$target; \
-		else \
-			cargo build --release --target $$target; \
-		fi; \
+		cargo build --release --target $$target; \
 		if [ $$? -eq 0 ]; then \
 			echo "$(GREEN)✓ $$target built successfully$(NC)"; \
 		else \

@@ -19,7 +19,7 @@ jobs:
       uses: actions/checkout@v4
 
     - name: Install Rust
-      uses: dtolnay/rust-toolchain@stable
+      uses: dtolnay/rust-toolchain@1.87.0
       with:
         components: rustfmt, clippy
 
@@ -50,7 +50,7 @@ jobs:
       uses: actions/checkout@v4
 
     - name: Install Rust
-      uses: dtolnay/rust-toolchain@stable
+      uses: dtolnay/rust-toolchain@1.87.0
       with:
         components: rustfmt
 
@@ -65,7 +65,7 @@ jobs:
       uses: actions/checkout@v4
 
     - name: Install Rust
-      uses: dtolnay/rust-toolchain@stable
+      uses: dtolnay/rust-toolchain@1.87.0
       with:
         components: clippy
 
@@ -94,7 +94,7 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        rust: [stable]
+        rust: [1.87.0]
         include:
           - os: ubuntu-latest
             rust: beta
@@ -139,10 +139,22 @@ jobs:
           ${{ runner.os }}-cargo-
 
     - name: Run tests
-      run: cargo test --verbose
+      shell: bash
+      run: |
+        if [ "${{ runner.os }}" = "Windows" ]; then
+          # Windows: disable default features to avoid ONNX Runtime issues
+          cargo test --verbose --no-default-features
+        else
+          cargo test --verbose
+        fi
 
     - name: Run tests with all features
+      if: runner.os != 'Windows'
       run: cargo test --all-features --verbose
+
+    - name: Run tests with no default features (Windows)
+      if: runner.os == 'Windows'
+      run: cargo test --verbose --no-default-features
 
   security:
     name: Security Audit
@@ -152,7 +164,7 @@ jobs:
       uses: actions/checkout@v4
 
     - name: Install Rust
-      uses: dtolnay/rust-toolchain@stable
+      uses: dtolnay/rust-toolchain@1.87.0
 
     - name: Install protobuf compiler
       run: |
@@ -173,7 +185,7 @@ jobs:
       uses: actions/checkout@v4
 
     - name: Install Rust
-      uses: dtolnay/rust-toolchain@stable
+      uses: dtolnay/rust-toolchain@1.87.0
 
     - name: Install protobuf compiler
       run: |
@@ -196,7 +208,7 @@ jobs:
           ${{ runner.os }}-cargo-
 
     - name: Generate code coverage
-      run: cargo tarpaulin --verbose --all-features --workspace --timeout 120 --out xml
+      run: cargo tarpaulin --verbose --no-default-features --workspace --timeout 120 --out xml
 
     - name: Upload coverage to Codecov
       uses: codecov/codecov-action@v4

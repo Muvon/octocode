@@ -4,20 +4,31 @@
 # Use all available CPU cores for compilation (omit for auto-detection)
 # jobs = 0
 
+# Linux musl targets for static linking
 [target.x86_64-unknown-linux-musl]
-linker = "x86_64-linux-musl-gcc"
 rustflags = [
 		"-C", "target-feature=+crt-static",
 		"-C", "link-arg=-static"
 ]
 
-[target.x86_64-pc-windows-gnu]
-linker = "x86_64-w64-mingw32-gcc"
+[target.aarch64-unknown-linux-musl]
 rustflags = [
 		"-C", "target-feature=+crt-static",
-		"-C", "link-arg=-static-libgcc"
+		"-C", "link-arg=-static"
 ]
 
+# Windows MSVC targets for static linking
+[target.x86_64-pc-windows-msvc]
+rustflags = [
+		"-C", "target-feature=+crt-static"
+]
+
+[target.aarch64-pc-windows-msvc]
+rustflags = [
+		"-C", "target-feature=+crt-static"
+]
+
+# macOS targets (dynamic linking)
 [target.aarch64-apple-darwin]
 rustflags = [
 		"-C", "link-arg=-undefined",
