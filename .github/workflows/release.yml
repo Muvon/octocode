@@ -206,20 +206,6 @@ jobs:
           cargo build --release --target ${{ matrix.target }}
         fi
 
-    - name: Strip binary (Unix)
-      if: matrix.os != 'windows-latest' && !contains(matrix.target, 'windows')
-      shell: sh
-      run: |
-        # Strip binaries for smaller size
-        case "${{ matrix.target }}" in
-          *apple*)
-            strip target/${{ matrix.target }}/release/octocode
-            ;;
-          *)
-            strip target/${{ matrix.target }}/release/octocode
-            ;;
-        esac
-
     - name: Create archive directory
       shell: sh
       run: mkdir -p dist
