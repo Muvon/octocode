@@ -144,9 +144,9 @@ pub async fn execute(config: &Config, args: &ReleaseArgs) -> Result<()> {
 	println!("   Type:    {}", version_calculation.version_type);
 	println!("   Reason:  {}", version_calculation.reasoning);
 
-	// Generate changelog content
+	// Generate changelog content with AI enhancement
 	let changelog_content =
-		generate_changelog_content(&version_calculation, &commit_analysis).await?;
+		generate_enhanced_changelog_with_ai(config, &version_calculation, &commit_analysis).await?;
 
 	println!("\n📝 Generated changelog entry:");
 	println!("═══════════════════════════════════");
@@ -428,21 +428,23 @@ async fn calculate_version_with_ai(
 	let analysis_json = serde_json::to_string_pretty(analysis)?;
 
 	let prompt = format!(
-		"Analyze the following git commits and calculate the next semantic version.\n\n\
-        CURRENT VERSION: {}\n\n\
-        COMMIT ANALYSIS:\n{}\n\n\
-        RULES:\n\
-        - MAJOR (x.0.0): Breaking changes or BREAKING CHANGE in commits\n\
-        - MINOR (0.x.0): New features (feat) without breaking changes\n\
-        - PATCH (0.0.x): Bug fixes (fix) and other changes without new features\n\
-        - Follow semantic versioning strictly\n\
-        - Consider the impact and scope of changes\n\n\
-        Respond with JSON in this exact format:\n\
-        {{\n\
-        \"current_version\": \"{}\",\n\
-        \"new_version\": \"X.Y.Z\",\n\
-        \"version_type\": \"major|minor|patch\",\n\
-        \"reasoning\": \"Brief explanation of version choice\"\n\
+		"Analyze the following git commits and calculate the next semantic version.\\n\\n\
+        CURRENT VERSION: {}\\n\\n\
+        COMMIT ANALYSIS:\\n{}\\n\\n\
+        RULES:\\n\
+        - MAJOR (x.0.0): Breaking changes or BREAKING CHANGE in commits\\n\
+        - MINOR (0.x.0): New features (feat) without breaking changes\\n\
+        - PATCH (0.0.x): Bug fixes (fix) and other changes without new features\\n\
+        - Follow semantic versioning strictly\\n\
+        - Consider the impact and scope of changes\\n\
+        - PRESERVE all existing commit information exactly as provided\\n\
+        - Do NOT modify, summarize, or alter commit messages\\n\\n\
+        Respond with JSON in this exact format:\\n\
+        {{\\n\
+        \\\"current_version\\\": \\\"{}\\\",\\n\
+        \\\"new_version\\\": \\\"X.Y.Z\\\",\\n\
+        \\\"version_type\\\": \\\"major|minor|patch\\\",\\n\
+        \\\"reasoning\\\": \\\"Brief explanation of version choice\\\"\\n\
         }}",
 		current_version, analysis_json, current_version
 	);
@@ -586,39 +588,184 @@ async fn generate_changelog_content(
 
 	content.push_str(&format!("## [{}] - {}\n\n", version.new_version, date));
 
-	if !analysis.breaking_changes.is_empty() {
+	// Group commits by type for better organization
+	let mut breaking_commits = Vec::new();
+	let mut feature_commits = Vec::new();
+	let mut fix_commits = Vec::new();
+	let mut other_commits = Vec::new();
+
+	for commit in &analysis.commits {
+		if commit.breaking {
+			breaking_commits.push(commit);
+		} else {
+			match commit.commit_type.as_str() {
+				"feat" => feature_commits.push(commit),
+				"fix" => fix_commits.push(commit),
+				_ => other_commits.push(commit),
+			}
+		}
+	}
+
+	if !breaking_commits.is_empty() {
 		content.push_str("### ⚠️ BREAKING CHANGES\n\n");
-		for change in &analysis.breaking_changes {
-			content.push_str(&format!("- {}\n", change));
+		for commit in breaking_commits {
+			content.push_str(&format_commit_entry(commit));
 		}
 		content.push('\n');
 	}
 
-	if !analysis.features.is_empty() {
+	if !feature_commits.is_empty() {
 		content.push_str("### ✨ Features\n\n");
-		for feature in &analysis.features {
-			content.push_str(&format!("- {}\n", feature));
+		for commit in feature_commits {
+			content.push_str(&format_commit_entry(commit));
 		}
 		content.push('\n');
 	}
 
-	if !analysis.fixes.is_empty() {
+	if !fix_commits.is_empty() {
 		content.push_str("### 🐛 Bug Fixes\n\n");
-		for fix in &analysis.fixes {
-			content.push_str(&format!("- {}\n", fix));
+		for commit in fix_commits {
+			content.push_str(&format_commit_entry(commit));
 		}
 		content.push('\n');
 	}
 
-	if !analysis.other_changes.is_empty() {
+	if !other_commits.is_empty() {
 		content.push_str("### 🔧 Other Changes\n\n");
-		for change in &analysis.other_changes {
-			content.push_str(&format!("- {}\n", change));
+		for commit in other_commits {
+			content.push_str(&format_commit_entry(commit));
+		}
+		content.push('\n');
+	}
+
+	// Add all commits section for complete reference
+	if !analysis.commits.is_empty() {
+		content.push_str("### 📝 All Commits\n\n");
+		for commit in &analysis.commits {
+			let short_hash = &commit.hash[..8];
+			let author = if commit.author.len() > 20 {
+				format!("{}...", &commit.author[..17])
+			} else {
+				commit.author.clone()
+			};
+
+			content.push_str(&format!(
+				"- [`{}`] {} *by {}*\n",
+				short_hash, commit.message, author
+			));
 		}
 		content.push('\n');
 	}
 
 	Ok(content)
+}
+
+fn format_commit_entry(commit: &CommitInfo) -> String {
+	let short_hash = &commit.hash[..8];
+	let mut entry = String::new();
+
+	// Use description if it's different from the full message, otherwise use the full message
+	let display_text = if commit.description != commit.message && !commit.description.is_empty() {
+		&commit.description
+	} else {
+		&commit.message
+	};
+
+	// Add scope if available
+	let scope_text = if let Some(ref scope) = commit.scope {
+		format!("**{}**: ", scope)
+	} else {
+		String::new()
+	};
+
+	entry.push_str(&format!(
+		"- {}{} ([`{}`])\n",
+		scope_text, display_text, short_hash
+	));
+
+	entry
+}
+
+async fn generate_enhanced_changelog_with_ai(
+	config: &Config,
+	version: &VersionCalculation,
+	analysis: &CommitAnalysis,
+) -> Result<String> {
+	// First generate the standard changelog
+	let standard_changelog = generate_changelog_content(version, analysis).await?;
+
+	// Try to enhance with AI summary if API key is available
+	if config.openrouter.api_key.is_some() || std::env::var("OPENROUTER_API_KEY").is_ok() {
+		match generate_ai_changelog_summary(config, analysis).await {
+			Ok(ai_summary) => {
+				let mut enhanced = String::new();
+				let date = chrono::Utc::now().format("%Y-%m-%d").to_string();
+
+				enhanced.push_str(&format!("## [{}] - {}\n\n", version.new_version, date));
+
+				if !ai_summary.trim().is_empty() {
+					enhanced.push_str("### 📋 Release Summary\n\n");
+					enhanced.push_str(&ai_summary);
+					enhanced.push_str("\n\n");
+				}
+
+				// Add the detailed sections from standard changelog (skip the header)
+				let lines: Vec<&str> = standard_changelog.lines().collect();
+				let mut skip_header = true;
+				for line in lines {
+					if skip_header && line.starts_with("## [") {
+						skip_header = false;
+						continue;
+					}
+					if !skip_header && !line.trim().is_empty() {
+						enhanced.push_str(line);
+						enhanced.push('\n');
+					} else if !skip_header {
+						enhanced.push('\n');
+					}
+				}
+
+				Ok(enhanced)
+			}
+			Err(_) => {
+				// Fallback to standard changelog if AI enhancement fails
+				Ok(standard_changelog)
+			}
+		}
+	} else {
+		Ok(standard_changelog)
+	}
+}
+
+async fn generate_ai_changelog_summary(
+	config: &Config,
+	analysis: &CommitAnalysis,
+) -> Result<String> {
+	let commits_summary = analysis
+		.commits
+		.iter()
+		.map(|c| format!("- {} ({}): {}", c.commit_type, &c.hash[..8], c.message))
+		.collect::<Vec<_>>()
+		.join("\n");
+
+	let prompt = format!(
+		"Generate a concise, professional release summary based on these commits:\\n\\n{}\\n\\n\
+		Requirements:\\n\
+		- Write 2-3 sentences maximum\\n\
+		- Focus on user-facing changes and improvements\\n\
+		- Use professional, clear language\\n\
+		- Don't repeat commit hashes or technical details\\n\
+		- Highlight the most important changes\\n\
+		- End with a period\\n\
+		- PRESERVE all existing commit information exactly as provided\\n\
+		- Do NOT modify, summarize, or alter individual commit messages\\n\
+		- Only create a high-level summary, keep all original commits intact\\n\\n\
+		Example good summary: \\\"This release introduces multi-query search capabilities, allowing users to combine multiple search terms for more comprehensive results. Performance improvements include optimized indexing with better batch processing. Several bug fixes improve memory search relevance and error handling.\\\"\\n\\n\
+		Generate summary:",
+		commits_summary
+	);
+
+	call_llm_for_version_calculation(&prompt, config).await
 }
 
 async fn update_project_version(project_type: &ProjectType, new_version: &str) -> Result<()> {

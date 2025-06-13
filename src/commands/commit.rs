@@ -25,7 +25,7 @@ pub struct CommitArgs {
 	#[arg(short, long)]
 	pub all: bool,
 
-	/// Additional context to help AI generate better commit message
+	/// Additional context to help AI generate better commit message (guidance, not the base message)
 	#[arg(short, long)]
 	pub message: Option<String>,
 
@@ -180,22 +180,28 @@ async fn generate_commit_message(
 		.count()
 		.saturating_sub(diff.matches("\n---").count());
 
-	// Build the context section
-	let mut context_section = String::new();
+	// Build the guidance section
+	let mut guidance_section = String::new();
 	if let Some(context) = extra_context {
-		context_section = format!("\n\nUser commit message:\n{}", context);
+		guidance_section = format!("\n\nUser guidance for commit intent:\n{}", context);
 	}
 
 	// Prepare the enhanced prompt for the LLM
 	let prompt = format!(
-		"Create a Git commit message from this diff. Be specific and concise.\n\n\
+		"Analyze this Git diff and create an appropriate commit message. Be specific and concise.\n\n\
 		STRICT RULES:\n\
 		- Format: type(scope): description (under 50 chars)\n\
 		- Types: feat, fix, docs, style, refactor, test, chore, perf, ci, build\n\
+		- Add '!' after type for breaking changes: feat!: or fix!:\n\
 		- Be specific, avoid generic words like \"update\", \"change\", \"modify\", \"various\", \"several\"\n\
 		- Use imperative mood: \"add\" not \"added\"\n\
 		- Focus on WHAT functionality changed, not implementation details\n\
-		- If user message provided, align with that intent{}\n\n\
+		- If user guidance provided, use it to understand the INTENT but create your own message{}\n\n\
+		BREAKING CHANGE DETECTION:\n\
+		- Look for function signature changes, API modifications, removed public methods\n\
+		- Check for interface/trait changes, configuration schema changes\n\
+		- Identify database migrations, dependency version bumps\n\
+		- If breaking changes detected, use type! format and add BREAKING CHANGE footer\n\n\
 		BODY RULES (add body with bullet points if ANY of these apply):\n\
 		- 4+ files changed OR 25+ lines changed\n\
 		- Multiple different types of changes (feat+fix, refactor+feat, etc.)\n\
@@ -207,12 +213,13 @@ async fn generate_commit_message(
 		- Start each point with \"- \"\n\
 		- Focus on key changes and their purpose\n\
 		- Explain WHY if not obvious from subject\n\
-		- Keep each bullet concise (1 line max)\n\n\
+		- Keep each bullet concise (1 line max)\n\
+		- For breaking changes, add footer: \"BREAKING CHANGE: description\"\n\n\
 		Changes: {} files (+{} -{} lines)\n\n\
 		Git diff:\n\
 		```\n{}\n```\n\n\
 		Generate commit message:",
-		context_section,
+		guidance_section,
 		file_count,
 		additions,
 		deletions,
