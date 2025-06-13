@@ -397,19 +397,9 @@ impl McpServer {
 			return Ok(None);
 		}
 
-		// Validate UTF-8 to prevent panics
-		if !line.is_ascii() && std::str::from_utf8(line.as_bytes()).is_err() {
-			return Ok(Some(JsonRpcResponse {
-				jsonrpc: "2.0".to_string(),
-				id: None,
-				result: None,
-				error: Some(JsonRpcError {
-					code: -32700,
-					message: "Invalid UTF-8 in request".to_string(),
-					data: None,
-				}),
-			}));
-		}
+		// Ensure clean UTF-8 by using lossy conversion to handle any potential issues
+		let clean_line = String::from_utf8_lossy(line.as_bytes()).to_string();
+		let line = clean_line.as_str();
 
 		// Parse request with enhanced error handling
 		let parsed_request: Result<JsonRpcRequest, _> =
@@ -446,27 +436,62 @@ impl McpServer {
 		let request_method = request.method.clone(); // Clone for error handling
 		let request_id_for_error = request.id.clone(); // Clone for error response
 
-		// Execute request with panic recovery
-		let response = match panic::catch_unwind(panic::AssertUnwindSafe(|| {
+		// Execute request with comprehensive panic recovery and timeout protection
+		let response = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+			// Clone the method for error handling since request will be moved
+			let method_for_timeout = request.method.clone();
 			// Create a new async runtime for the panic-safe execution
 			// Note: This is a workaround since we can't easily catch panics in async code
 			tokio::task::block_in_place(|| {
 				tokio::runtime::Handle::current().block_on(async {
-					match request.method.as_str() {
-						"initialize" => self.handle_initialize(&request).await,
-						"tools/list" => self.handle_tools_list(&request).await,
-						"tools/call" => self.handle_tools_call(&request).await,
-						"ping" => self.handle_ping(&request).await,
-						_ => JsonRpcResponse {
-							jsonrpc: "2.0".to_string(),
-							id: request.id,
-							result: None,
-							error: Some(JsonRpcError {
-								code: -32601,
-								message: "Method not found".to_string(),
-								data: None,
-							}),
+					// Add timeout protection for tool execution to prevent hanging
+					let execution_result = tokio::time::timeout(
+						Duration::from_millis(MCP_IO_TIMEOUT_MS * 2), // 60s for tool execution
+						async {
+							match request.method.as_str() {
+								"initialize" => self.handle_initialize(&request).await,
+								"tools/list" => self.handle_tools_list(&request).await,
+								"tools/call" => self.handle_tools_call(&request).await,
+								"ping" => self.handle_ping(&request).await,
+								_ => JsonRpcResponse {
+									jsonrpc: "2.0".to_string(),
+									id: request.id,
+									result: None,
+									error: Some(JsonRpcError {
+										code: -32601,
+										message: "Method not found".to_string(),
+										data: None,
+									}),
+								},
+							}
 						},
+					)
+					.await;
+
+					match execution_result {
+						Ok(response) => response,
+						Err(_) => {
+							log_critical_anyhow_error(
+								"Tool execution timeout",
+								&anyhow::anyhow!(
+									"Method '{}' timed out after {}ms",
+									method_for_timeout,
+									MCP_IO_TIMEOUT_MS * 2
+								),
+							);
+							JsonRpcResponse {
+								jsonrpc: "2.0".to_string(),
+								id: request_id_for_error.clone(),
+								result: None,
+								error: Some(JsonRpcError {
+									code: -32603,
+									message: "Tool execution timeout".to_string(),
+									data: Some(
+										json!({"method": method_for_timeout, "timeout_ms": MCP_IO_TIMEOUT_MS * 2}),
+									),
+								}),
+							}
+						}
 					}
 				})
 			})
@@ -514,15 +539,31 @@ impl McpServer {
 		)
 	}
 
-	/// Safe response sending with error handling
+	/// Safe response sending with error handling and size limits
 	async fn send_response(
 		&self,
 		writer: &mut tokio::io::Stdout,
 		response: &JsonRpcResponse,
 	) -> Result<()> {
-		// Serialize response with panic recovery
+		// Serialize response with panic recovery and size checking
 		let response_json = match panic::catch_unwind(|| serde_json::to_string(response)) {
-			Ok(Ok(json)) => json,
+			Ok(Ok(json)) => {
+				// Check response size to prevent memory issues
+				if json.len() > MCP_MAX_REQUEST_SIZE {
+					log_critical_anyhow_error(
+						"Response too large",
+						&anyhow::anyhow!(
+							"Response size {} exceeds limit {}",
+							json.len(),
+							MCP_MAX_REQUEST_SIZE
+						),
+					);
+					// Create a minimal error response instead
+					r#"{"jsonrpc":"2.0","id":null,"error":{"code":-32603,"message":"Response too large"}}"#.to_string()
+				} else {
+					json
+				}
+			}
 			Ok(Err(e)) => {
 				log_critical_error("Response serialization failed", &e);
 				// Create a minimal error response

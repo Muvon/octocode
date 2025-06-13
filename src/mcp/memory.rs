@@ -15,6 +15,7 @@
 use anyhow::Result;
 use serde_json::{json, Value};
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::Mutex;
 
 use tracing::{debug, warn};
@@ -203,13 +204,11 @@ impl MemoryProvider {
 			.and_then(|v| v.as_str())
 			.ok_or_else(|| anyhow::anyhow!("Missing required parameter 'content'"))?;
 
-		// Validate UTF-8 to prevent panics
-		if !title.is_ascii() && std::str::from_utf8(title.as_bytes()).is_err() {
-			return Err(anyhow::anyhow!("Invalid UTF-8 in title"));
-		}
-		if !content.is_ascii() && std::str::from_utf8(content.as_bytes()).is_err() {
-			return Err(anyhow::anyhow!("Invalid UTF-8 in content"));
-		}
+		// Ensure clean UTF-8 content using lossy conversion
+		let clean_title = String::from_utf8_lossy(title.as_bytes()).to_string();
+		let clean_content = String::from_utf8_lossy(content.as_bytes()).to_string();
+		let title = clean_title.as_str();
+		let content = clean_content.as_str();
 
 		// Validate lengths directly on original content
 		if title.len() < 5 || title.len() > 200 {
@@ -238,16 +237,25 @@ impl MemoryProvider {
 				(v as f32).clamp(0.0, 1.0)
 			});
 
-		// Process tags with error handling
+		// Process tags with error handling and UTF-8 safety
 		let tags = arguments.get("tags").and_then(|v| v.as_array()).map(|arr| {
 			arr.iter()
 				.filter_map(|v| {
-					v.as_str().map(|s| {
-						// Just limit tag length, no sanitization
-						if s.chars().count() > 50 {
-							s.chars().take(50).collect()
+					v.as_str().and_then(|s| {
+						// Ensure clean UTF-8 and validate tag
+						let clean_tag = String::from_utf8_lossy(s.as_bytes()).to_string();
+						let tag = clean_tag.trim();
+
+						if tag.is_empty() {
+							None // Skip empty tags
 						} else {
-							s.to_string()
+							// Limit tag length
+							let final_tag = if tag.chars().count() > 50 {
+								tag.chars().take(50).collect()
+							} else {
+								tag.to_string()
+							};
+							Some(final_tag)
 						}
 					})
 				})
@@ -260,7 +268,19 @@ impl MemoryProvider {
 			.and_then(|v| v.as_array())
 			.map(|arr| {
 				arr.iter()
-					.filter_map(|v| v.as_str().map(|s| s.to_string()))
+					.filter_map(|v| {
+						v.as_str().and_then(|s| {
+							// Ensure clean UTF-8 and validate file path
+							let clean_path = String::from_utf8_lossy(s.as_bytes()).to_string();
+							let path = clean_path.trim();
+
+							if path.is_empty() || path.len() > 500 {
+								None // Skip empty or overly long paths
+							} else {
+								Some(path.to_string())
+							}
+						})
+					})
 					.take(20) // Limit number of files
 					.collect::<Vec<String>>()
 			});
@@ -285,8 +305,22 @@ impl MemoryProvider {
 		}
 
 		let memory_result = {
-			let mut manager = self.memory_manager.lock().await;
-			manager
+			// Use try_lock with timeout to prevent deadlocks and handle poisoned mutex
+			let mut manager_guard = match tokio::time::timeout(
+				Duration::from_millis(5000), // 5 second timeout
+				self.memory_manager.lock(),
+			)
+			.await
+			{
+				Ok(guard) => guard,
+				Err(_) => {
+					return Err(anyhow::anyhow!(
+						"Memory manager lock timeout - system may be overloaded"
+					));
+				}
+			};
+
+			manager_guard
 				.memorize(
 					memory_type,
 					title.to_string(),
@@ -402,8 +436,21 @@ impl MemoryProvider {
 		);
 
 		let results = {
-			let manager = self.memory_manager.lock().await;
-			manager.remember(query, Some(memory_query)).await?
+			// Use try_lock with timeout to prevent deadlocks and handle poisoned mutex
+			let manager_guard = match tokio::time::timeout(
+				Duration::from_millis(5000), // 5 second timeout
+				self.memory_manager.lock(),
+			)
+			.await
+			{
+				Ok(guard) => guard,
+				Err(_) => {
+					return Err(anyhow::anyhow!(
+						"Memory manager lock timeout - system may be overloaded"
+					));
+				}
+			};
+			manager_guard.remember(query, Some(memory_query)).await?
 		};
 
 		if results.is_empty() {
@@ -441,10 +488,22 @@ impl MemoryProvider {
 				"Forgetting memory by ID"
 			);
 
-			// Execute deletion
+			// Execute deletion with timeout protection
 			let res = {
-				let mut manager = self.memory_manager.lock().await;
-				manager.forget(memory_id).await
+				let mut manager_guard = match tokio::time::timeout(
+					Duration::from_millis(5000), // 5 second timeout
+					self.memory_manager.lock(),
+				)
+				.await
+				{
+					Ok(guard) => guard,
+					Err(_) => {
+						return Ok(
+							"❌ Memory manager lock timeout - system may be overloaded".to_string()
+						);
+					}
+				};
+				manager_guard.forget(memory_id).await
 			};
 			match res {
 				Ok(_) => Ok(format!(
@@ -459,10 +518,9 @@ impl MemoryProvider {
 		}
 		// Handle query-based deletion
 		else if let Some(query) = arguments.get("query").and_then(|v| v.as_str()) {
-			// Validate UTF-8 to prevent panics
-			if !query.is_ascii() && std::str::from_utf8(query.as_bytes()).is_err() {
-				return Ok("❌ Invalid UTF-8 in query".to_string());
-			}
+			// Ensure clean UTF-8 query using lossy conversion
+			let clean_query = String::from_utf8_lossy(query.as_bytes()).to_string();
+			let query = clean_query.as_str();
 
 			if query.len() < 3 || query.len() > 500 {
 				return Ok("❌ Query must be between 3 and 500 characters".to_string());
@@ -514,8 +572,20 @@ impl MemoryProvider {
 			);
 
 			let res = {
-				let mut manager = self.memory_manager.lock().await;
-				manager.forget_matching(memory_query).await
+				let mut manager_guard = match tokio::time::timeout(
+					Duration::from_millis(5000), // 5 second timeout
+					self.memory_manager.lock(),
+				)
+				.await
+				{
+					Ok(guard) => guard,
+					Err(_) => {
+						return Ok(
+							"❌ Memory manager lock timeout - system may be overloaded".to_string()
+						);
+					}
+				};
+				manager_guard.forget_matching(memory_query).await
 			};
 			match res {
 				Ok(deleted_count) => Ok(format!(

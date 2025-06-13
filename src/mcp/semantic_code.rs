@@ -164,6 +164,10 @@ impl SemanticCodeProvider {
 		}
 
 		for (i, query) in queries.iter().enumerate() {
+			// Ensure clean UTF-8 and validate query
+			let clean_query = String::from_utf8_lossy(query.as_bytes()).to_string();
+			let query = clean_query.trim();
+
 			if query.len() < 3 {
 				return Err(anyhow::anyhow!(
 					"Invalid query {}: must be at least 3 characters long",
@@ -173,6 +177,12 @@ impl SemanticCodeProvider {
 			if query.len() > 500 {
 				return Err(anyhow::anyhow!(
 					"Invalid query {}: must be no more than 500 characters long",
+					i + 1
+				));
+			}
+			if query.is_empty() {
+				return Err(anyhow::anyhow!(
+					"Invalid query {}: cannot be empty or whitespace only",
 					i + 1
 				));
 			}
@@ -228,9 +238,21 @@ impl SemanticCodeProvider {
 			queries.len()
 		);
 
-		// Change to the working directory for the search
-		let original_dir = std::env::current_dir()?;
-		std::env::set_current_dir(&self.working_directory)?;
+		// Change to the working directory for the search with enhanced error handling
+		let original_dir = match std::env::current_dir() {
+			Ok(dir) => dir,
+			Err(e) => {
+				return Err(anyhow::anyhow!("Failed to get current directory: {}", e));
+			}
+		};
+
+		if let Err(e) = std::env::set_current_dir(&self.working_directory) {
+			return Err(anyhow::anyhow!(
+				"Failed to change to working directory '{}': {}",
+				self.working_directory.display(),
+				e
+			));
+		}
 
 		// Use the enhanced search functionality with multi-query support - TEXT FORMAT for token efficiency
 		let results = if queries.len() == 1 {
@@ -255,8 +277,15 @@ impl SemanticCodeProvider {
 			.await
 		};
 
-		// Restore original directory
-		std::env::set_current_dir(&original_dir)?;
+		// Restore original directory with enhanced error handling
+		if let Err(e) = std::env::set_current_dir(&original_dir) {
+			// Log error but don't fail the operation
+			debug!(
+				error = %e,
+				original_dir = %original_dir.display(),
+				"Failed to restore original directory"
+			);
+		}
 
 		results
 	}
@@ -280,7 +309,7 @@ impl SemanticCodeProvider {
 			));
 		}
 
-		// Extract file patterns
+		// Extract file patterns with enhanced validation
 		let mut file_patterns = Vec::new();
 		for file_value in files_array {
 			let pattern = file_value.as_str().ok_or_else(|| {
@@ -290,6 +319,25 @@ impl SemanticCodeProvider {
 			if pattern.trim().is_empty() {
 				return Err(anyhow::anyhow!(
 					"Invalid file pattern: patterns cannot be empty"
+				));
+			}
+
+			// Ensure clean UTF-8 for file patterns
+			let clean_pattern = String::from_utf8_lossy(pattern.as_bytes()).to_string();
+			let pattern = clean_pattern.trim();
+
+			if pattern.len() > 500 {
+				return Err(anyhow::anyhow!(
+					"Invalid file pattern '{}': must be no more than 500 characters long",
+					pattern
+				));
+			}
+
+			// Basic path traversal protection
+			if pattern.contains("..") && (pattern.contains("../") || pattern.contains("..\\")) {
+				return Err(anyhow::anyhow!(
+					"Invalid file pattern '{}': path traversal not allowed",
+					pattern
 				));
 			}
 
@@ -303,9 +351,21 @@ impl SemanticCodeProvider {
 			"Executing view_signatures"
 		);
 
-		// Change to the working directory for processing
-		let original_dir = std::env::current_dir()?;
-		std::env::set_current_dir(&self.working_directory)?;
+		// Change to the working directory for processing with enhanced error handling
+		let original_dir = match std::env::current_dir() {
+			Ok(dir) => dir,
+			Err(e) => {
+				return Err(anyhow::anyhow!("Failed to get current directory: {}", e));
+			}
+		};
+
+		if let Err(e) = std::env::set_current_dir(&self.working_directory) {
+			return Err(anyhow::anyhow!(
+				"Failed to change to working directory '{}': {}",
+				self.working_directory.display(),
+				e
+			));
+		}
 
 		// Get files matching patterns
 		let mut matching_files = std::collections::HashSet::new();
@@ -316,7 +376,13 @@ impl SemanticCodeProvider {
 			let glob_pattern = match globset::Glob::new(pattern) {
 				Ok(g) => g.compile_matcher(),
 				Err(e) => {
-					std::env::set_current_dir(&original_dir)?;
+					// Restore directory before returning error
+					if let Err(restore_err) = std::env::set_current_dir(&original_dir) {
+						debug!(
+							error = %restore_err,
+							"Failed to restore directory after glob error"
+						);
+					}
 					return Err(anyhow::anyhow!("Invalid glob pattern '{}': {}", pattern, e));
 				}
 			};
@@ -354,7 +420,13 @@ impl SemanticCodeProvider {
 		let matching_files: Vec<_> = matching_files.into_iter().collect();
 
 		if matching_files.is_empty() {
-			std::env::set_current_dir(&original_dir)?;
+			// Restore directory before returning
+			if let Err(restore_err) = std::env::set_current_dir(&original_dir) {
+				debug!(
+					error = %restore_err,
+					"Failed to restore directory when no files found"
+				);
+			}
 			return Ok("No matching files found for the specified patterns.".to_string());
 		}
 
@@ -362,13 +434,26 @@ impl SemanticCodeProvider {
 		let signatures = match extract_file_signatures(&matching_files) {
 			Ok(sigs) => sigs,
 			Err(e) => {
-				std::env::set_current_dir(&original_dir)?;
+				// Restore directory before returning error
+				if let Err(restore_err) = std::env::set_current_dir(&original_dir) {
+					debug!(
+						error = %restore_err,
+						"Failed to restore directory after signature extraction error"
+					);
+				}
 				return Err(anyhow::anyhow!("Failed to extract signatures: {}", e));
 			}
 		};
 
-		// Restore original directory
-		std::env::set_current_dir(&original_dir)?;
+		// Restore original directory with enhanced error handling
+		if let Err(e) = std::env::set_current_dir(&original_dir) {
+			// Log error but don't fail the operation
+			debug!(
+				error = %e,
+				original_dir = %original_dir.display(),
+				"Failed to restore original directory after signature extraction"
+			);
+		}
 
 		// Return text format for token efficiency
 		let text_output = signatures_to_text(&signatures);
