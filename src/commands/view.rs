@@ -17,18 +17,16 @@ use clap::Args;
 use octocode::indexer;
 use octocode::storage;
 
+use crate::commands::OutputFormat;
+
 #[derive(Args, Debug)]
 pub struct ViewArgs {
 	/// Files to view (may include glob patterns)
 	pub files: Vec<String>,
 
-	/// Output in JSON format
-	#[arg(long)]
-	pub json: bool,
-
-	/// Output in Markdown format
-	#[arg(long)]
-	pub md: bool,
+	/// Output format
+	#[arg(long, value_enum, default_value = "cli")]
+	pub format: OutputFormat,
 }
 
 pub async fn execute(args: &ViewArgs) -> Result<(), anyhow::Error> {
@@ -85,12 +83,15 @@ pub async fn execute(args: &ViewArgs) -> Result<(), anyhow::Error> {
 	let signatures = indexer::extract_file_signatures(&matching_files)?;
 
 	// Display results in the requested format
-	if args.json {
+	if args.format.is_json() {
 		indexer::render_signatures_json(&signatures)?
-	} else if args.md {
+	} else if args.format.is_md() {
 		// Use markdown format
 		let markdown = indexer::signatures_to_markdown(&signatures);
 		println!("{}", markdown);
+	} else if args.format.is_text() {
+		// Use text format for token efficiency
+		indexer::render_signatures_text(&signatures);
 	} else {
 		indexer::render_signatures_text(&signatures);
 	}

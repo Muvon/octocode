@@ -18,6 +18,8 @@ use octocode::config::Config;
 use octocode::indexer;
 use octocode::store::Store;
 
+use crate::commands::OutputFormat;
+
 #[derive(Args, Debug)]
 pub struct GraphRAGArgs {
 	/// The operation to perform on the GraphRAG knowledge graph
@@ -44,13 +46,9 @@ pub struct GraphRAGArgs {
 	#[arg(long, default_value = "3")]
 	pub max_depth: usize,
 
-	/// Output in JSON format
-	#[arg(long)]
-	pub json: bool,
-
-	/// Output in Markdown format
-	#[arg(long)]
-	pub md: bool,
+	/// Output format
+	#[arg(long, value_enum, default_value = "cli")]
+	pub format: OutputFormat,
 }
 
 #[derive(ValueEnum, Clone, Debug)]
@@ -124,10 +122,10 @@ pub async fn execute(
 			let nodes = graph_builder.search_nodes(query).await?;
 
 			// Display results in the requested format
-			if args.json {
+			if args.format.is_json() {
 				// Use JSON format
 				indexer::graphrag::render_graphrag_nodes_json(&nodes)?
-			} else if args.md {
+			} else if args.format.is_md() {
 				// Use markdown format
 				let markdown = indexer::graphrag::graphrag_nodes_to_markdown(&nodes);
 				println!("{}", markdown);

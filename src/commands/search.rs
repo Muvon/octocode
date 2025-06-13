@@ -23,6 +23,8 @@ use octocode::store::Store;
 use std::cmp::Ordering;
 use std::collections::HashMap;
 
+use crate::commands::OutputFormat;
+
 const MAX_QUERIES: usize = 3;
 
 fn validate_queries(queries: &[String]) -> Result<(), anyhow::Error> {
@@ -56,17 +58,9 @@ pub struct SearchArgs {
 	#[arg(long, short)]
 	pub expand: bool,
 
-	/// Output in JSON format
-	#[arg(long)]
-	pub json: bool,
-
-	/// Output in Markdown format
-	#[arg(long)]
-	pub md: bool,
-
-	/// Output in text format (token-efficient)
-	#[arg(long)]
-	pub text: bool,
+	/// Output format
+	#[arg(long, value_enum, default_value = "cli")]
+	pub format: OutputFormat,
 
 	/// Search mode: all (default), code, docs, or text
 	#[arg(long, default_value = "all")]
@@ -521,12 +515,12 @@ pub async fn execute(
 	// Use EXISTING output formatting with added text support
 	match search_mode {
 		"code" => {
-			if args.json {
+			if args.format.is_json() {
 				indexer::render_results_json(&code_blocks)?
-			} else if args.md {
+			} else if args.format.is_md() {
 				let markdown = indexer::code_blocks_to_markdown_with_config(&code_blocks, config);
 				println!("{}", markdown);
-			} else if args.text {
+			} else if args.format.is_text() {
 				// Use text formatting function for token efficiency
 				let text_output =
 					indexer::search::format_code_search_results_as_text(&code_blocks, "partial");
@@ -536,14 +530,14 @@ pub async fn execute(
 			}
 		}
 		"docs" => {
-			if args.json {
+			if args.format.is_json() {
 				let json = serde_json::to_string_pretty(&doc_blocks)?;
 				println!("{}", json);
-			} else if args.md {
+			} else if args.format.is_md() {
 				let markdown =
 					indexer::document_blocks_to_markdown_with_config(&doc_blocks, config);
 				println!("{}", markdown);
-			} else if args.text {
+			} else if args.format.is_text() {
 				// Use text formatting function for token efficiency
 				let text_output = indexer::search::format_doc_search_results_as_text(&doc_blocks);
 				println!("{}", text_output);
@@ -552,13 +546,13 @@ pub async fn execute(
 			}
 		}
 		"text" => {
-			if args.json {
+			if args.format.is_json() {
 				let json = serde_json::to_string_pretty(&text_blocks)?;
 				println!("{}", json);
-			} else if args.md {
+			} else if args.format.is_md() {
 				let markdown = indexer::text_blocks_to_markdown_with_config(&text_blocks, config);
 				println!("{}", markdown);
-			} else if args.text {
+			} else if args.format.is_text() {
 				// Use text formatting function for token efficiency
 				let text_output = indexer::search::format_text_search_results_as_text(&text_blocks);
 				println!("{}", text_output);
@@ -596,14 +590,14 @@ pub async fn execute(
 				final_code_results = indexer::expand_symbols(store, final_code_results).await?;
 			}
 
-			if args.json {
+			if args.format.is_json() {
 				let combined = serde_json::json!({
 					"code_blocks": final_code_results,
 					"document_blocks": doc_blocks,
 					"text_blocks": text_blocks
 				});
 				println!("{}", serde_json::to_string_pretty(&combined)?);
-			} else if args.md {
+			} else if args.format.is_md() {
 				let mut combined_markdown = String::new();
 
 				if !doc_blocks.is_empty() {
@@ -637,7 +631,7 @@ pub async fn execute(
 				}
 
 				println!("{}", combined_markdown);
-			} else if args.text {
+			} else if args.format.is_text() {
 				// Use text formatting function for token efficiency
 				let text_output = indexer::search::format_combined_search_results_as_text(
 					&final_code_results,
