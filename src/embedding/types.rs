@@ -27,7 +27,14 @@ pub enum EmbeddingProviderType {
 
 impl Default for EmbeddingProviderType {
 	fn default() -> Self {
-		Self::FastEmbed
+		#[cfg(feature = "fastembed")]
+		{
+			Self::FastEmbed
+		}
+		#[cfg(not(feature = "fastembed"))]
+		{
+			Self::Voyage
+		}
 	}
 }
 
@@ -43,9 +50,21 @@ pub struct EmbeddingConfig {
 
 impl Default for EmbeddingConfig {
 	fn default() -> Self {
-		Self {
-			code_model: "fastembed:jinaai/jina-embeddings-v2-base-code".to_string(),
-			text_model: "fastembed:sentence-transformers/all-MiniLM-L6-v2-quantized".to_string(),
+		// Use FastEmbed models if available, otherwise fall back to Voyage
+		#[cfg(feature = "fastembed")]
+		{
+			Self {
+				code_model: "fastembed:jinaai/jina-embeddings-v2-base-code".to_string(),
+				text_model: "fastembed:sentence-transformers/all-MiniLM-L6-v2-quantized"
+					.to_string(),
+			}
+		}
+		#[cfg(not(feature = "fastembed"))]
+		{
+			Self {
+				code_model: "voyage:voyage-code-3".to_string(),
+				text_model: "voyage:voyage-3.5-lite".to_string(),
+			}
 		}
 	}
 }
@@ -61,12 +80,29 @@ pub fn parse_provider_model(input: &str) -> (EmbeddingProviderType, String) {
 			"sentencetransformer" | "st" | "huggingface" | "hf" => {
 				EmbeddingProviderType::SentenceTransformer
 			}
-			_ => EmbeddingProviderType::FastEmbed, // Default fallback
+			_ => {
+				// Default fallback - use FastEmbed if available, otherwise Voyage
+				#[cfg(feature = "fastembed")]
+				{
+					EmbeddingProviderType::FastEmbed
+				}
+				#[cfg(not(feature = "fastembed"))]
+				{
+					EmbeddingProviderType::Voyage
+				}
+			}
 		};
 		(provider, model.to_string())
 	} else {
-		// Legacy format - assume FastEmbed for backward compatibility
-		(EmbeddingProviderType::FastEmbed, input.to_string())
+		// Legacy format - assume FastEmbed if available, otherwise Voyage
+		#[cfg(feature = "fastembed")]
+		{
+			(EmbeddingProviderType::FastEmbed, input.to_string())
+		}
+		#[cfg(not(feature = "fastembed"))]
+		{
+			(EmbeddingProviderType::Voyage, input.to_string())
+		}
 	}
 }
 

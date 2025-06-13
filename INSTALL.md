@@ -9,7 +9,7 @@ curl -fsSL https://raw.githubusercontent.com/muvon/octocode/main/install.sh | sh
 
 **Works on:**
 - Linux (any distribution, x86_64 and ARM64)
-- macOS (Intel and Apple Silicon)  
+- macOS (Intel and Apple Silicon)
 - Windows (x86_64 and ARM64 via Git Bash, WSL, MSYS2, Cygwin)
 - Any Unix-like system with `/bin/sh`
 

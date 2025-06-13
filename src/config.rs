@@ -278,10 +278,22 @@ mod tests {
 		assert_eq!(config.openrouter.model, "openai/gpt-4.1-mini");
 		assert_eq!(config.index.chunk_size, 2000);
 		assert_eq!(config.search.max_results, 50);
-		assert_eq!(
-			config.embedding.get_active_provider(),
-			crate::embedding::types::EmbeddingProviderType::FastEmbed
-		);
+
+		// Test active provider based on available features
+		#[cfg(feature = "fastembed")]
+		{
+			assert_eq!(
+				config.embedding.get_active_provider(),
+				crate::embedding::types::EmbeddingProviderType::FastEmbed
+			);
+		}
+		#[cfg(not(feature = "fastembed"))]
+		{
+			assert_eq!(
+				config.embedding.get_active_provider(),
+				crate::embedding::types::EmbeddingProviderType::Voyage
+			);
+		}
 		// Test new GraphRAG configuration structure
 		assert!(!config.graphrag.enabled);
 		assert!(!config.graphrag.use_llm);

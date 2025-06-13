@@ -313,8 +313,8 @@ impl Svelte {
 	fn is_svelte_keyword(&self, text: &str) -> bool {
 		matches!(
 			text,
-			"export" | "import" | "let" | "const" | "var" | "function" | "class" | "if" | "else" 
-			| "for" | "while" | "do" | "switch" | "case" | "default" | "break" | "continue" 
+			"export" | "import" | "let" | "const" | "var" | "function" | "class" | "if" | "else"
+			| "for" | "while" | "do" | "switch" | "case" | "default" | "break" | "continue"
 			| "return" | "try" | "catch" | "finally" | "throw" | "new" | "this" | "super"
 			| "true" | "false" | "null" | "undefined" | "typeof" | "instanceof" | "in" | "of"
 			// Svelte-specific keywords

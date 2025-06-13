@@ -20,11 +20,14 @@ mod embedding_tests {
 	use crate::config::Config;
 	use crate::embedding::types::{parse_provider_model, EmbeddingConfig};
 	use crate::embedding::{
-		count_tokens, create_embedding_provider_from_parts, split_texts_into_token_limited_batches,
-		EmbeddingProviderType,
+		count_tokens, split_texts_into_token_limited_batches, EmbeddingProviderType,
 	};
 
+	#[cfg(any(feature = "sentence-transformer", feature = "fastembed"))]
+	use crate::embedding::create_embedding_provider_from_parts;
+
 	#[test]
+	#[cfg(feature = "sentence-transformer")]
 	fn test_sentence_transformer_provider_creation() {
 		// Test that we can create a SentenceTransformer provider
 		let provider_type = EmbeddingProviderType::SentenceTransformer;
@@ -40,28 +43,41 @@ mod embedding_tests {
 	#[test]
 	fn test_provider_model_parsing() {
 		// Test the new provider:model syntax parsing
-		let test_cases = vec![
-			(
-				"sentencetransformer:sentence-transformers/all-MiniLM-L6-v2",
-				EmbeddingProviderType::SentenceTransformer,
-				"sentence-transformers/all-MiniLM-L6-v2",
-			),
-			(
+		let mut test_cases = vec![(
+			"jinaai:jina-embeddings-v3",
+			EmbeddingProviderType::Jina,
+			"jina-embeddings-v3",
+		)];
+
+		// Add SentenceTransformer test case only if feature is enabled
+		#[cfg(feature = "sentence-transformer")]
+		test_cases.push((
+			"sentencetransformer:sentence-transformers/all-MiniLM-L6-v2",
+			EmbeddingProviderType::SentenceTransformer,
+			"sentence-transformers/all-MiniLM-L6-v2",
+		));
+
+		// Add FastEmbed test cases only if feature is enabled
+		#[cfg(feature = "fastembed")]
+		{
+			test_cases.push((
 				"fastembed:all-MiniLM-L6-v2",
 				EmbeddingProviderType::FastEmbed,
 				"all-MiniLM-L6-v2",
-			),
-			(
-				"jinaai:jina-embeddings-v3",
-				EmbeddingProviderType::Jina,
-				"jina-embeddings-v3",
-			),
-			(
+			));
+			test_cases.push((
 				"all-MiniLM-L6-v2", // Legacy format without provider
 				EmbeddingProviderType::FastEmbed,
 				"all-MiniLM-L6-v2",
-			),
-		];
+			));
+		}
+
+		// Add Voyage test case (always available)
+		test_cases.push((
+			"voyage:voyage-code-3",
+			EmbeddingProviderType::Voyage,
+			"voyage-code-3",
+		));
 
 		for (input, expected_provider, expected_model) in test_cases {
 			let (provider, model) = parse_provider_model(input);
@@ -96,11 +112,23 @@ mod embedding_tests {
 		// Test parsing the default models
 		let (code_provider, _) = parse_provider_model(&config.embedding.code_model);
 		let (text_provider, _) = parse_provider_model(&config.embedding.text_model);
-		assert_eq!(code_provider, EmbeddingProviderType::FastEmbed);
-		assert_eq!(text_provider, EmbeddingProviderType::FastEmbed);
+
+		// Default provider depends on available features
+		#[cfg(feature = "fastembed")]
+		{
+			assert_eq!(code_provider, EmbeddingProviderType::FastEmbed);
+			assert_eq!(text_provider, EmbeddingProviderType::FastEmbed);
+		}
+		#[cfg(not(feature = "fastembed"))]
+		{
+			// When FastEmbed is not available, should fall back to Voyage
+			assert_eq!(code_provider, EmbeddingProviderType::Voyage);
+			assert_eq!(text_provider, EmbeddingProviderType::Voyage);
+		}
 	}
 
 	#[test]
+	#[cfg(feature = "sentence-transformer")]
 	fn test_embedding_config_methods() {
 		let config = EmbeddingConfig {
 			code_model: "sentencetransformer:microsoft/codebert-base".to_string(),
@@ -123,6 +151,26 @@ mod embedding_tests {
 			"sentence-transformers/all-MiniLM-L6-v2",
 		);
 		assert_eq!(dim2, 384);
+	}
+
+	#[test]
+	#[cfg(not(feature = "sentence-transformer"))]
+	fn test_embedding_config_methods_without_sentence_transformer() {
+		let config = EmbeddingConfig {
+			code_model: "voyage:voyage-code-3".to_string(),
+			text_model: "voyage:voyage-3.5-lite".to_string(),
+		};
+
+		// Test getting active provider
+		let active_provider = config.get_active_provider();
+		assert_eq!(active_provider, EmbeddingProviderType::Voyage);
+
+		// Test vector dimensions for Voyage models
+		let dim = config.get_vector_dimension(&EmbeddingProviderType::Voyage, "voyage-code-3");
+		assert_eq!(dim, 1024);
+
+		let dim2 = config.get_vector_dimension(&EmbeddingProviderType::Voyage, "voyage-3.5-lite");
+		assert_eq!(dim2, 1024);
 	}
 
 	#[test]

@@ -44,7 +44,7 @@ command_exists() {
 # Detect platform and architecture
 detect_platform() {
     local os arch
-    
+
     # Detect OS
     case "$(uname -s)" in
         Linux*)     os="unknown-linux" ;;
@@ -52,14 +52,14 @@ detect_platform() {
         CYGWIN*|MINGW*|MSYS*)    os="pc-windows" ;;
         *)          log_error "Unsupported operating system: $(uname -s)"; exit 1 ;;
     esac
-    
+
     # Detect architecture
     case "$(uname -m)" in
         x86_64|amd64)   arch="x86_64" ;;
         arm64|aarch64)  arch="aarch64" ;;
         *)              log_error "Unsupported architecture: $(uname -m)"; exit 1 ;;
     esac
-    
+
     # Determine target triple and preferred variant
     case "$os-$arch" in
         unknown-linux-x86_64)    echo "x86_64-unknown-linux-musl" ;;   # Static musl binary
@@ -94,7 +94,7 @@ download_and_install() {
     local version="$1"
     local target="$2"
     local tmp_dir
-    
+
     # Create temporary directory (compatible with all systems)
     if command -v mktemp >/dev/null 2>&1; then
         tmp_dir=$(mktemp -d)
@@ -103,17 +103,17 @@ download_and_install() {
         tmp_dir="/tmp/octocode-install-$$"
         mkdir -p "$tmp_dir"
     fi
-    
+
     # Ensure cleanup on exit
     trap "rm -rf '$tmp_dir'" EXIT INT TERM
-    
+
     log_info "Downloading $BINARY_NAME $version for $target..."
-    
+
     # Determine file extension and extract command
     local ext="tar.gz"
     local extract_cmd="tar xzf"
     local binary_name="$BINARY_NAME"
-    
+
     if [ "$target" != "${target#*windows}" ]; then
         ext="zip"
         binary_name="${BINARY_NAME}.exe"
@@ -125,12 +125,12 @@ download_and_install() {
             exit 1
         fi
     fi
-    
+
     local filename="${BINARY_NAME}-${version}-${target}.${ext}"
     local url="https://github.com/$REPO/releases/download/$version/$filename"
-    
+
     log_info "Downloading from: $url"
-    
+
     # Download using curl (required)
     if command_exists curl; then
         if ! curl -fsSL "$url" -o "$tmp_dir/$filename"; then
@@ -148,26 +148,26 @@ download_and_install() {
         log_info "On Windows: curl is available in Windows 10+ or install via chocolatey"
         exit 1
     fi
-    
+
     # Extract
     log_info "Extracting binary..."
     cd "$tmp_dir" || exit 1
-    
+
     if ! $extract_cmd "$filename"; then
         log_error "Failed to extract archive"
         exit 1
     fi
-    
+
     # Find the binary
     local binary_path="$tmp_dir/$binary_name"
-    
+
     if [ ! -f "$binary_path" ]; then
         log_error "Binary '$binary_name' not found in archive"
         log_error "Archive contents:"
         ls -la "$tmp_dir/"
         exit 1
     fi
-    
+
     # Create install directory
     if [ ! -d "$INSTALL_DIR" ]; then
         if ! mkdir -p "$INSTALL_DIR"; then
@@ -175,28 +175,28 @@ download_and_install() {
             exit 1
         fi
     fi
-    
+
     # Install binary
     log_info "Installing to $INSTALL_DIR..."
     local target_path="$INSTALL_DIR/$binary_name"
-    
+
     if ! cp "$binary_path" "$target_path"; then
         log_error "Failed to copy binary to $target_path"
         exit 1
     fi
-    
+
     if ! chmod +x "$target_path"; then
         log_error "Failed to make binary executable"
         exit 1
     fi
-    
+
     log_success "$BINARY_NAME installed successfully!"
 }
 
 # Check if install directory is in PATH
 check_path() {
     case ":$PATH:" in
-        *":$INSTALL_DIR:"*) 
+        *":$INSTALL_DIR:"*)
             return 0
             ;;
         *)
@@ -214,18 +214,18 @@ check_path() {
 # Verify installation
 verify_installation() {
     local binary_name="$BINARY_NAME"
-    
+
     # Add .exe extension for Windows
     case "$(uname -s)" in
         CYGWIN*|MINGW*|MSYS*) binary_name="${BINARY_NAME}.exe" ;;
     esac
-    
+
     local binary_path="$INSTALL_DIR/$binary_name"
-    
+
     if [ -x "$binary_path" ]; then
         log_success "Installation verified!"
         log_info "Run '$BINARY_NAME --version' to check the installed version"
-        
+
         # Try to run the binary if it's in PATH
         if command -v "$BINARY_NAME" >/dev/null 2>&1; then
             local version_output
@@ -255,7 +255,7 @@ check_prerequisites() {
         log_info "After installing curl, run this script again."
         exit 1
     fi
-    
+
     # Test curl functionality
     if ! curl --version >/dev/null 2>&1; then
         log_error "curl is installed but not working properly."
@@ -267,12 +267,12 @@ check_prerequisites() {
 # Main installation function
 main() {
     local version target
-    
+
     log_info "Installing $BINARY_NAME..."
-    
+
     # Check prerequisites first
     check_prerequisites
-    
+
     # Parse command line arguments
     while [ $# -gt 0 ]; do
         case $1 in
@@ -339,17 +339,17 @@ EOF
                 ;;
         esac
     done
-    
+
     # Override with environment variables if set
     version="${version:-$OCTOCODE_VERSION}"
     INSTALL_DIR="${INSTALL_DIR:-$OCTOCODE_INSTALL_DIR}"
-    
+
     # Detect platform if not specified
     if [ -z "$target" ]; then
         target=$(detect_platform)
         log_info "Detected platform: $target"
     fi
-    
+
     # Get latest version if not specified
     if [ -z "$version" ]; then
         log_info "Fetching latest release information..."
@@ -360,16 +360,16 @@ EOF
         fi
         log_info "Latest version: $version"
     fi
-    
+
     # Download and install
     download_and_install "$version" "$target"
-    
+
     # Check PATH
     check_path
-    
+
     # Verify installation
     verify_installation
-    
+
     log_success "Installation complete!"
     echo ""
     log_info "To get started, run: $BINARY_NAME --help"

@@ -137,10 +137,10 @@ mod tests {
         let source = r#"
             // Your language sample code
         "#;
-        
+
         let parser = YourLanguageParser;
         let symbols = parser.extract_symbols(source);
-        
+
         assert!(!symbols.is_empty());
         // Add specific assertions
     }
@@ -288,18 +288,18 @@ Use rustdoc comments for public APIs:
 
 ```rust
 /// Extracts symbols from source code using tree-sitter parsing.
-/// 
+///
 /// # Arguments
-/// 
+///
 /// * `source` - The source code to parse
 /// * `language` - The programming language
-/// 
+///
 /// # Returns
-/// 
+///
 /// A vector of parsed symbols including functions, classes, and variables.
-/// 
+///
 /// # Examples
-/// 
+///
 /// ```
 /// let symbols = extract_symbols("fn main() {}", Language::Rust);
 /// assert!(!symbols.is_empty());
