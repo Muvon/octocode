@@ -29,7 +29,7 @@ pub fn format_memories_as_text(results: &[MemorySearchResult]) -> String {
 		output.push_str(&format!(
 			"{}. {} | Score: {:.2}\n",
 			i + 1,
-			sanitize_content(&result.memory.title),
+			result.memory.title,
 			result.relevance_score
 		));
 
@@ -60,20 +60,131 @@ pub fn format_memories_as_text(results: &[MemorySearchResult]) -> String {
 
 		output.push_str(&format!("ID: {}\n", result.memory.id));
 
-		// Add content as-is without truncation for text mode
-		let content = sanitize_content(&result.memory.content);
-		output.push_str(&content);
-		if !content.ends_with('\n') {
+		// Add content as-is without any modification
+		output.push_str(&result.memory.content);
+		if !result.memory.content.ends_with('\n') {
 			output.push('\n');
 		}
 
-		output.push_str(&format!(
-			"Why: {}\n\n",
-			sanitize_content(&result.selection_reason)
-		));
+		output.push_str(&format!("Why: {}\n\n", result.selection_reason));
 	}
 
 	output
+}
+
+/// Format memory search results as markdown
+pub fn format_memories_as_markdown(results: &[MemorySearchResult]) -> String {
+	if results.is_empty() {
+		return "No stored memories match your query. Try using different search terms, removing filters, or checking if any memories have been stored yet.".to_string();
+	}
+
+	let mut output = String::new();
+	output.push_str(&format!("# Memories ({} found)\n\n", results.len()));
+
+	for (i, result) in results.iter().enumerate() {
+		output.push_str(&format!(
+			"## {}. {} (Score: {:.2})\n\n",
+			i + 1,
+			result.memory.title,
+			result.relevance_score
+		));
+
+		output.push_str(&format!(
+			"**Type:** {} | **Importance:** {:.1} | **Created:** {}\n\n",
+			result.memory.memory_type,
+			result.memory.metadata.importance,
+			result.memory.created_at.format("%Y-%m-%d %H:%M:%S UTC")
+		));
+
+		if !result.memory.metadata.tags.is_empty() {
+			output.push_str(&format!(
+				"**Tags:** {}\n\n",
+				result.memory.metadata.tags.join(", ")
+			));
+		}
+
+		if !result.memory.metadata.related_files.is_empty() {
+			output.push_str(&format!(
+				"**Files:** {}\n\n",
+				result.memory.metadata.related_files.join(", ")
+			));
+		}
+
+		if let Some(git_commit) = &result.memory.metadata.git_commit {
+			output.push_str(&format!("**Git:** {}\n\n", git_commit));
+		}
+
+		output.push_str(&format!("**ID:** {}\n\n", result.memory.id));
+
+		// Add content as-is without any modification
+		output.push_str("**Content:**\n\n");
+		output.push_str(&result.memory.content);
+		if !result.memory.content.ends_with('\n') {
+			output.push('\n');
+		}
+		output.push('\n');
+
+		output.push_str(&format!("**Why:** {}\n\n---\n\n", result.selection_reason));
+	}
+
+	output
+}
+
+/// Format plain Memory objects for CLI (used by recent, by-type, etc.)
+pub fn format_plain_memories_for_cli(memories: &[crate::memory::Memory], format: &str) {
+	match format {
+		"json" => {
+			println!("{}", serde_json::to_string_pretty(memories).unwrap());
+		}
+		"text" => {
+			// Convert to search results format for consistent text formatting
+			let fake_results: Vec<MemorySearchResult> = memories
+				.iter()
+				.map(|m| MemorySearchResult {
+					memory: m.clone(),
+					relevance_score: 1.0, // No relevance score for plain memories
+					selection_reason: "Listed by query".to_string(),
+				})
+				.collect();
+			print!("{}", format_memories_as_text(&fake_results));
+		}
+		"md" | "markdown" => {
+			// Convert to search results format for consistent markdown formatting
+			let fake_results: Vec<MemorySearchResult> = memories
+				.iter()
+				.map(|m| MemorySearchResult {
+					memory: m.clone(),
+					relevance_score: 1.0, // No relevance score for plain memories
+					selection_reason: "Listed by query".to_string(),
+				})
+				.collect();
+			print!("{}", format_memories_as_markdown(&fake_results));
+		}
+		"compact" => {
+			println!("🧠 {} memories:", memories.len());
+			for memory in memories {
+				println!(
+					"- [{}] {} - {}",
+					memory.memory_type, memory.title, memory.id
+				);
+			}
+		}
+		_ => {
+			println!("🧠 {} memories:\n", memories.len());
+			for memory in memories {
+				println!("Memory ID: {}", memory.id);
+				println!("Title: {}", memory.title);
+				println!("Type: {}", memory.memory_type);
+				println!("Importance: {:.2}", memory.metadata.importance);
+				println!("Created: {}", memory.created_at.format("%Y-%m-%d %H:%M:%S"));
+				if !memory.metadata.tags.is_empty() {
+					println!("Tags: {}", memory.metadata.tags.join(", "));
+				}
+				println!("Content: {}", memory.content);
+				println!();
+			}
+		}
+	}
 }
 
 /// Format memory search results for CLI (with emojis and formatting)
@@ -81,6 +192,14 @@ pub fn format_memories_for_cli(results: &[MemorySearchResult], format: &str) {
 	match format {
 		"json" => {
 			println!("{}", serde_json::to_string_pretty(results).unwrap());
+		}
+		"text" => {
+			// Use token-efficient text format
+			print!("{}", format_memories_as_text(results));
+		}
+		"md" | "markdown" => {
+			// Use markdown format
+			print!("{}", format_memories_as_markdown(results));
 		}
 		"compact" => {
 			println!("🧠 {} memories:", results.len());
@@ -115,43 +234,4 @@ pub fn format_memories_for_cli(results: &[MemorySearchResult], format: &str) {
 			}
 		}
 	}
-}
-
-/// Sanitize content by removing control characters while preserving safe Unicode
-pub fn sanitize_content(content: &str) -> String {
-	content
-		.chars()
-		.filter(|&c| !c.is_control() && (c.is_ascii_graphic() || is_safe_unicode(c)))
-		.collect()
-}
-
-/// Check if a character is a safe Unicode character (including emojis)
-pub fn is_safe_unicode(c: char) -> bool {
-	// Allow a broader range of Unicode characters, including emojis
-	let code = c as u32;
-	// Emoji ranges and other safe Unicode ranges
-	matches!(code,
-		// Emoji ranges
-		0x1F600..=0x1F64F | // Emoticons
-		0x1F300..=0x1F5FF | // Misc Symbols and Pictographs
-		0x1F680..=0x1F6FF | // Transport and Map
-		0x1F1E6..=0x1F1FF | // Regional indicators
-		0x2600..=0x26FF   | // Misc symbols
-		0x2700..=0x27BF   | // Dingbats
-
-		// Allow variation selectors and zero-width joiner
-		0xFE0F | 0x200D    |
-
-		// Some additional safe Unicode ranges
-		0x0080..=0x00FF   | // Latin-1 Supplement
-		0x0100..=0x017F   | // Latin Extended-A
-		0x0180..=0x024F   | // Latin Extended-B
-		0x0370..=0x03FF   | // Greek and Coptic
-		0x0400..=0x04FF   | // Cyrillic
-		0x0530..=0x058F   | // Armenian
-		0x0590..=0x05FF   | // Hebrew
-		0x0600..=0x06FF   | // Arabic
-		0x0900..=0x097F   | // Devanagari
-		0x4E00..=0x9FFF     // CJK Unified Ideographs
-	)
 }

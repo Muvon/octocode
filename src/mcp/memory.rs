@@ -211,11 +211,7 @@ impl MemoryProvider {
 			return Err(anyhow::anyhow!("Invalid UTF-8 in content"));
 		}
 
-		// Sanitize input content to prevent Unicode issues
-		let title = crate::memory::formatting::sanitize_content(title);
-		let content = crate::memory::formatting::sanitize_content(content);
-
-		// Validate lengths
+		// Validate lengths directly on original content
 		if title.len() < 5 || title.len() > 200 {
 			return Err(anyhow::anyhow!(
 				"Title must be between 5 and 200 characters"
@@ -247,12 +243,11 @@ impl MemoryProvider {
 			arr.iter()
 				.filter_map(|v| {
 					v.as_str().map(|s| {
-						let sanitized = crate::memory::formatting::sanitize_content(s);
-						// Limit tag length to prevent issues
-						if sanitized.chars().count() > 50 {
-							sanitized.chars().take(50).collect()
+						// Just limit tag length, no sanitization
+						if s.chars().count() > 50 {
+							s.chars().take(50).collect()
 						} else {
-							sanitized
+							s.to_string()
 						}
 					})
 				})

@@ -806,35 +806,8 @@ pub async fn execute(config: &Config, args: &MemoryArgs) -> Result<()> {
 }
 
 fn format_memories(memories: &[octocode::memory::Memory], format: &str) {
-	match format {
-		"json" => {
-			println!("{}", serde_json::to_string_pretty(memories).unwrap());
-		}
-		"compact" => {
-			println!("🧠 {} memories:", memories.len());
-			for memory in memories {
-				println!(
-					"- [{}] {} - {}",
-					memory.memory_type, memory.title, memory.id
-				);
-			}
-		}
-		_ => {
-			println!("🧠 {} memories:\n", memories.len());
-			for memory in memories {
-				println!("Memory ID: {}", memory.id);
-				println!("Title: {}", memory.title);
-				println!("Type: {}", memory.memory_type);
-				println!("Importance: {:.2}", memory.metadata.importance);
-				println!("Created: {}", memory.created_at.format("%Y-%m-%d %H:%M:%S"));
-				if !memory.metadata.tags.is_empty() {
-					println!("Tags: {}", memory.metadata.tags.join(", "));
-				}
-				println!("Content: {}", memory.content);
-				println!();
-			}
-		}
-	}
+	// Use the proper formatting function from the memory module
+	octocode::memory::formatting::format_plain_memories_for_cli(memories, format);
 }
 
 fn format_search_results(results: &[octocode::memory::MemorySearchResult], format: &str) {
