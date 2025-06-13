@@ -116,6 +116,57 @@ pub fn render_graphrag_nodes_json(nodes: &[CodeNode]) -> Result<(), anyhow::Erro
 	Ok(())
 }
 
+// Render GraphRAG nodes to text format (token-efficient, for MCP and CLI)
+pub fn graphrag_nodes_to_text(nodes: &[CodeNode]) -> String {
+	if nodes.is_empty() {
+		return "No matching nodes found.".to_string();
+	}
+
+	let mut output = String::new();
+	output.push_str(&format!("GRAPHRAG NODES ({} found)\n\n", nodes.len()));
+
+	// Group nodes by file path for better organization
+	let mut nodes_by_file: std::collections::HashMap<String, Vec<&CodeNode>> =
+		std::collections::HashMap::new();
+
+	for node in nodes {
+		nodes_by_file
+			.entry(node.path.clone())
+			.or_default()
+			.push(node);
+	}
+
+	// Print results organized by file
+	for (file_path, file_nodes) in nodes_by_file.iter() {
+		output.push_str(&format!("FILE: {}\n", file_path));
+
+		for node in file_nodes {
+			output.push_str(&format!("  {} {}\n", node.kind, node.name));
+			output.push_str(&format!("  ID: {}\n", node.id));
+			output.push_str(&format!("  Description: {}\n", node.description));
+
+			if !node.symbols.is_empty() {
+				output.push_str("  Symbols:\n");
+				// Display symbols
+				let mut display_symbols = node.symbols.clone();
+				display_symbols.sort();
+				display_symbols.dedup();
+
+				for symbol in display_symbols {
+					// Only show non-type symbols to users
+					if !symbol.contains("_") {
+						output.push_str(&format!("    - {}\n", symbol));
+					}
+				}
+			}
+			output.push('\n');
+		}
+		output.push('\n');
+	}
+
+	output
+}
+
 // Render GraphRAG nodes to Markdown format
 pub fn graphrag_nodes_to_markdown(nodes: &[CodeNode]) -> String {
 	let mut markdown = String::new();

@@ -131,19 +131,8 @@ pub async fn execute(
 				println!("{}", markdown);
 			} else {
 				// Use default text format
-				if nodes.is_empty() {
-					println!("No matching nodes found.");
-				} else {
-					println!("Found {} matching nodes:\n", nodes.len());
-					for node in &nodes {
-						println!("\u{2554}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550} Node: {} \u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}", node.name);
-						println!("\u{2551} ID: {}", node.id);
-						println!("\u{2551} Kind: {}", node.kind);
-						println!("\u{2551} Path: {}", node.path);
-						println!("\u{2551} Description: {}", node.description);
-						println!("\u{255a}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\n");
-					}
-				}
+				let text_output = indexer::graphrag::graphrag_nodes_to_text(&nodes);
+				println!("{}", text_output);
 			}
 		}
 		GraphRAGOperation::GetNode => {

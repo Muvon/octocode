@@ -25,8 +25,8 @@ pub mod utils;
 pub use builder::GraphBuilder;
 pub use types::{CodeGraph, CodeNode, CodeRelationship, FunctionInfo};
 pub use utils::{
-	cosine_similarity, detect_project_root, graphrag_nodes_to_markdown, render_graphrag_nodes_json,
-	to_relative_path,
+	cosine_similarity, detect_project_root, graphrag_nodes_to_markdown, graphrag_nodes_to_text,
+	render_graphrag_nodes_json, to_relative_path,
 };
 
 // GraphRAG implementation for searching (backward compatibility)
@@ -45,6 +45,6 @@ impl GraphRAG {
 	pub async fn search(&self, query: &str) -> Result<String> {
 		let builder = GraphBuilder::new(self.config.clone()).await?;
 		let nodes = builder.search_nodes(query).await?;
-		Ok(graphrag_nodes_to_markdown(&nodes))
+		Ok(graphrag_nodes_to_text(&nodes))
 	}
 }

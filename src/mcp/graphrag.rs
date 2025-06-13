@@ -93,12 +93,6 @@ impl GraphRagProvider {
 		std::env::set_current_dir(&original_dir)?;
 
 		let results = results?;
-		Ok(Self::format_results_as_markdown(results))
-	}
-
-	/// Format GraphRAG results as markdown
-	fn format_results_as_markdown(results: String) -> String {
-		// GraphRAG results are already formatted as markdown
-		results
+		Ok(results) // GraphRAG results are already formatted as text
 	}
 }
