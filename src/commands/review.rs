@@ -234,8 +234,9 @@ async fn perform_code_review(
 		analyze_file_types(&changed_files),
 		if file_stats.trim().is_empty() { "No stats available" } else { &file_stats },
 		// Truncate diff if it's too long (keep first 8000 chars for thorough analysis)
-		if diff.len() > 8000 {
-			format!("{}...\n[diff truncated for brevity]", &diff[..8000])
+		if diff.chars().count() > 8000 {
+			let truncated: String = diff.chars().take(8000).collect();
+			format!("{}...\n[diff truncated for brevity]", truncated)
 		} else {
 			diff
 		},

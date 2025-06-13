@@ -217,8 +217,9 @@ async fn generate_commit_message(
 		additions,
 		deletions,
 		// Truncate diff if it's too long (keep first 4000 chars for better analysis)
-		if diff.len() > 4000 {
-			format!("{}...\n[diff truncated for brevity]", &diff[..4000])
+		if diff.chars().count() > 4000 {
+			let truncated: String = diff.chars().take(4000).collect();
+			format!("{}...\n[diff truncated for brevity]", truncated)
 		} else {
 			diff
 		}
@@ -243,7 +244,12 @@ async fn generate_commit_message(
 					let subject = subject.trim();
 					if subject.len() > 72 {
 						// Truncate subject if too long but keep body if present
-						let truncated_subject = format!("{}...", &subject[..69]);
+						let truncated_subject = if subject.chars().count() > 69 {
+							let truncated: String = subject.chars().take(69).collect();
+							format!("{}...", truncated)
+						} else {
+							format!("{}...", subject)
+						};
 						if lines.len() > 1 {
 							let body = lines[1..].join("\n");
 							Ok(format!("{}\n{}", truncated_subject, body))

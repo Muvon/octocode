@@ -249,8 +249,8 @@ impl MemoryProvider {
 					v.as_str().map(|s| {
 						let sanitized = crate::memory::formatting::sanitize_content(s);
 						// Limit tag length to prevent issues
-						if sanitized.len() > 50 {
-							sanitized[..50].to_string()
+						if sanitized.chars().count() > 50 {
+							sanitized.chars().take(50).collect()
 						} else {
 							sanitized
 						}
