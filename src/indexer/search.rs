@@ -659,6 +659,165 @@ fn format_doc_search_results_as_markdown(blocks: &[crate::store::DocumentBlock])
 	output
 }
 
+// Token-efficient text formatting functions for MCP
+
+// Format code search results as text for MCP with detail level control
+pub fn format_code_search_results_as_text(blocks: &[CodeBlock], detail_level: &str) -> String {
+	if blocks.is_empty() {
+		return "No code results found.".to_string();
+	}
+
+	let mut output = String::new();
+	output.push_str(&format!("CODE RESULTS ({})\n", blocks.len()));
+
+	for (idx, block) in blocks.iter().enumerate() {
+		output.push_str(&format!("{}. {}\n", idx + 1, block.path));
+		output.push_str(&format!("Lines {}-{}", block.start_line, block.end_line));
+
+		if let Some(distance) = block.distance {
+			output.push_str(&format!(" | Similarity {:.3}", 1.0 - distance));
+		}
+		output.push('\n');
+
+		// Add symbols if available
+		if !block.symbols.is_empty() {
+			let mut display_symbols = block.symbols.clone();
+			display_symbols.sort();
+			display_symbols.dedup();
+			let relevant_symbols: Vec<String> = display_symbols
+				.iter()
+				.filter(|symbol| !symbol.contains("_"))
+				.cloned()
+				.collect();
+
+			if !relevant_symbols.is_empty() {
+				output.push_str(&format!("Symbols: {}\n", relevant_symbols.join(", ")));
+			}
+		}
+
+		// Add content as-is without truncation for text mode - only efficient labels
+		match detail_level {
+			"signatures" => {
+				// Extract just function/class signatures
+				let preview = get_code_preview(&block.content, &block.language);
+				if !preview.is_empty() {
+					if let Some(first_line) = preview.lines().next() {
+						output.push_str(&format!("{}\n", first_line.trim()));
+					}
+				}
+			}
+			"partial" | "full" => {
+				// Full content as-is without truncation
+				output.push_str(&block.content);
+				if !block.content.ends_with('\n') {
+					output.push('\n');
+				}
+			}
+			_ => {}
+		}
+		output.push('\n');
+	}
+
+	output
+}
+
+// Format text search results as text for MCP
+pub fn format_text_search_results_as_text(blocks: &[crate::store::TextBlock]) -> String {
+	if blocks.is_empty() {
+		return "No text results found.".to_string();
+	}
+
+	let mut output = String::new();
+	output.push_str(&format!("TEXT RESULTS ({})\n", blocks.len()));
+
+	for (idx, block) in blocks.iter().enumerate() {
+		output.push_str(&format!("{}. {}\n", idx + 1, block.path));
+		output.push_str(&format!("Lines {}-{}", block.start_line, block.end_line));
+
+		if let Some(distance) = block.distance {
+			output.push_str(&format!(" | Similarity {:.3}", 1.0 - distance));
+		}
+		output.push('\n');
+
+		// Add content as-is without truncation
+		output.push_str(&block.content);
+		if !block.content.ends_with('\n') {
+			output.push('\n');
+		}
+		output.push('\n');
+	}
+
+	output
+}
+
+// Format document search results as text for MCP
+pub fn format_doc_search_results_as_text(blocks: &[crate::store::DocumentBlock]) -> String {
+	if blocks.is_empty() {
+		return "No documentation results found.".to_string();
+	}
+
+	let mut output = String::new();
+	output.push_str(&format!("DOCUMENTATION RESULTS ({})\n", blocks.len()));
+
+	for (idx, block) in blocks.iter().enumerate() {
+		output.push_str(&format!("{}. {}\n", idx + 1, block.path));
+		output.push_str(&format!("{} (Level {})", block.title, block.level));
+		output.push_str(&format!(" | Lines {}-{}", block.start_line, block.end_line));
+
+		if let Some(distance) = block.distance {
+			output.push_str(&format!(" | Similarity {:.3}", 1.0 - distance));
+		}
+		output.push('\n');
+
+		// Add content as-is without truncation
+		output.push_str(&block.content);
+		if !block.content.ends_with('\n') {
+			output.push('\n');
+		}
+		output.push('\n');
+	}
+
+	output
+}
+
+// Format combined search results as text for MCP with detail level control
+pub fn format_combined_search_results_as_text(
+	code_blocks: &[CodeBlock],
+	text_blocks: &[crate::store::TextBlock],
+	doc_blocks: &[crate::store::DocumentBlock],
+	detail_level: &str,
+) -> String {
+	let total_results = code_blocks.len() + text_blocks.len() + doc_blocks.len();
+	if total_results == 0 {
+		return "No results found.".to_string();
+	}
+
+	let mut output = String::new();
+	output.push_str(&format!("SEARCH RESULTS ({} total)\n\n", total_results));
+
+	// Documentation Results
+	if !doc_blocks.is_empty() {
+		output.push_str(&format_doc_search_results_as_text(doc_blocks));
+		output.push('\n');
+	}
+
+	// Code Results with detail level
+	if !code_blocks.is_empty() {
+		output.push_str(&format_code_search_results_as_text(
+			code_blocks,
+			detail_level,
+		));
+		output.push('\n');
+	}
+
+	// Text Results
+	if !text_blocks.is_empty() {
+		output.push_str(&format_text_search_results_as_text(text_blocks));
+	}
+
+	output
+}
+
 // Format combined search results as markdown for MCP with detail level control
 fn format_combined_search_results_with_detail(
 	code_blocks: &[CodeBlock],
@@ -734,6 +893,179 @@ fn format_combined_search_results_as_markdown(
 
 	output
 }
+
+// Enhanced search function for MCP server with detail level control - returns formatted text results (token-efficient)
+pub async fn search_codebase_with_details_text(
+	query: &str,
+	mode: &str,
+	detail_level: &str,
+	max_results: usize,
+	config: &Config,
+) -> Result<String> {
+	// Initialize store
+	let store = Store::new().await?;
+
+	// Generate embeddings for the query using centralized logic
+	let search_embeddings =
+		crate::embedding::generate_search_embeddings(query, mode, config).await?;
+
+	// Perform the search based on mode
+	match mode {
+		"code" => {
+			let embeddings = search_embeddings.code_embeddings.ok_or_else(|| {
+				anyhow::anyhow!("No code embeddings generated for code search mode")
+			})?;
+			let results = store
+				.get_code_blocks_with_config(
+					embeddings,
+					Some(max_results),
+					Some(config.search.similarity_threshold),
+				)
+				.await?;
+			Ok(format_code_search_results_as_text(&results, detail_level))
+		}
+		"text" => {
+			let embeddings = search_embeddings.text_embeddings.ok_or_else(|| {
+				anyhow::anyhow!("No text embeddings generated for text search mode")
+			})?;
+			let results = store
+				.get_text_blocks_with_config(
+					embeddings,
+					Some(max_results),
+					Some(config.search.similarity_threshold),
+				)
+				.await?;
+			Ok(format_text_search_results_as_text(&results))
+		}
+		"docs" => {
+			let embeddings = search_embeddings.text_embeddings.ok_or_else(|| {
+				anyhow::anyhow!("No text embeddings generated for docs search mode")
+			})?;
+			let results = store
+				.get_document_blocks_with_config(
+					embeddings,
+					Some(max_results),
+					Some(config.search.similarity_threshold),
+				)
+				.await?;
+			Ok(format_doc_search_results_as_text(&results))
+		}
+		"all" => {
+			// "all" mode - search across all types with limited results per type
+			let code_embeddings = search_embeddings.code_embeddings.ok_or_else(|| {
+				anyhow::anyhow!("No code embeddings generated for all search mode")
+			})?;
+			let text_embeddings = search_embeddings.text_embeddings.ok_or_else(|| {
+				anyhow::anyhow!("No text embeddings generated for all search mode")
+			})?;
+
+			let results_per_type = max_results.div_ceil(3); // Distribute results across types
+			let code_results = store
+				.get_code_blocks_with_config(
+					code_embeddings,
+					Some(results_per_type),
+					Some(config.search.similarity_threshold),
+				)
+				.await?;
+			let text_results = store
+				.get_text_blocks_with_config(
+					text_embeddings.clone(),
+					Some(results_per_type),
+					Some(config.search.similarity_threshold),
+				)
+				.await?;
+			let doc_results = store
+				.get_document_blocks_with_config(
+					text_embeddings,
+					Some(results_per_type),
+					Some(config.search.similarity_threshold),
+				)
+				.await?;
+
+			// Format combined results with detail level for code
+			Ok(format_combined_search_results_as_text(
+				&code_results,
+				&text_results,
+				&doc_results,
+				detail_level,
+			))
+		}
+		_ => Err(anyhow::anyhow!(
+			"Invalid search mode '{}'. Use 'all', 'code', 'docs', or 'text'.",
+			mode
+		)),
+	}
+}
+
+// Enhanced search function for MCP server with multi-query support and detail level control - returns text results
+pub async fn search_codebase_with_details_multi_query_text(
+	queries: &[String],
+	mode: &str,
+	detail_level: &str,
+	max_results: usize,
+	config: &Config,
+) -> Result<String> {
+	// Initialize store
+	let store = Store::new().await?;
+
+	// Validate queries (same as CLI)
+	if queries.is_empty() {
+		return Err(anyhow::anyhow!("At least one query is required"));
+	}
+	if queries.len() > 3 {
+		return Err(anyhow::anyhow!(
+			"Maximum 3 queries allowed, got {}. Use fewer, more specific terms.",
+			queries.len()
+		));
+	}
+
+	// Generate batch embeddings for all queries
+	let embeddings = generate_batch_embeddings_for_queries_mcp(queries, mode, config).await?;
+
+	// Zip queries with embeddings
+	let query_embeddings: Vec<_> = queries
+		.iter()
+		.cloned()
+		.zip(embeddings.into_iter())
+		.collect();
+
+	// Execute parallel searches
+	let search_results =
+		execute_parallel_searches_mcp(&store, query_embeddings, mode, max_results).await?;
+
+	// Convert similarity threshold (use default from config)
+	let distance_threshold = 1.0 - config.search.similarity_threshold;
+
+	// Deduplicate and merge with multi-query bonuses
+	let (mut code_blocks, mut doc_blocks, mut text_blocks) =
+		deduplicate_and_merge_results_mcp(search_results, queries, distance_threshold);
+
+	// Apply global result limits
+	code_blocks.truncate(max_results);
+	doc_blocks.truncate(max_results);
+	text_blocks.truncate(max_results);
+
+	// Format results based on mode with detail level control
+	match mode {
+		"code" => Ok(format_code_search_results_as_text(
+			&code_blocks,
+			detail_level,
+		)),
+		"text" => Ok(format_text_search_results_as_text(&text_blocks)),
+		"docs" => Ok(format_doc_search_results_as_text(&doc_blocks)),
+		"all" => Ok(format_combined_search_results_as_text(
+			&code_blocks,
+			&text_blocks,
+			&doc_blocks,
+			detail_level,
+		)),
+		_ => Err(anyhow::anyhow!(
+			"Invalid search mode '{}'. Use 'all', 'code', 'docs', or 'text'.",
+			mode
+		)),
+	}
+}
+
 // Get a clean preview of code content by skipping comments and showing key parts
 fn get_code_preview(content: &str, _language: &str) -> String {
 	let lines: Vec<&str> = content.lines().collect();

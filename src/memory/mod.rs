@@ -15,12 +15,14 @@
 // Memory module for AI context and conversation state management
 // Uses LanceDB for vector storage and semantic search capabilities
 
+pub mod formatting;
 pub mod git_utils;
 pub mod manager;
 pub mod store;
 pub mod types;
 
 // Re-export the main types and interfaces
+pub use formatting::{format_memories_as_text, format_memories_for_cli};
 pub use git_utils::{CommitInfo, GitUtils};
 pub use manager::{MemoryManager, MemoryStats};
 pub use store::MemoryStore;

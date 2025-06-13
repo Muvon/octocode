@@ -838,41 +838,6 @@ fn format_memories(memories: &[octocode::memory::Memory], format: &str) {
 }
 
 fn format_search_results(results: &[octocode::memory::MemorySearchResult], format: &str) {
-	match format {
-		"json" => {
-			println!("{}", serde_json::to_string_pretty(results).unwrap());
-		}
-		"compact" => {
-			println!("🧠 {} memories:", results.len());
-			for result in results {
-				println!(
-					"- [{}] {} (Score: {:.2}) - {}",
-					result.memory.memory_type,
-					result.memory.title,
-					result.relevance_score,
-					result.memory.id
-				);
-			}
-		}
-		_ => {
-			println!("🧠 {} memories:\n", results.len());
-			for result in results {
-				println!("Memory ID: {}", result.memory.id);
-				println!("Title: {}", result.memory.title);
-				println!("Type: {}", result.memory.memory_type);
-				println!("Relevance: {:.2}", result.relevance_score);
-				println!("Importance: {:.2}", result.memory.metadata.importance);
-				println!(
-					"Created: {}",
-					result.memory.created_at.format("%Y-%m-%d %H:%M:%S")
-				);
-				if !result.memory.metadata.tags.is_empty() {
-					println!("Tags: {}", result.memory.metadata.tags.join(", "));
-				}
-				println!("Content: {}", result.memory.content);
-				println!("Why selected: {}", result.selection_reason);
-				println!();
-			}
-		}
-	}
+	// Use shared formatting function
+	octocode::memory::format_memories_for_cli(results, format);
 }

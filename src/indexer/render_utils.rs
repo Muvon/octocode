@@ -199,6 +199,61 @@ pub fn signatures_to_markdown(signatures: &[FileSignature]) -> String {
 	markdown
 }
 
+/// Render signatures as text string (token-efficient)
+pub fn signatures_to_text(signatures: &[FileSignature]) -> String {
+	let mut output = String::new();
+
+	if signatures.is_empty() {
+		output.push_str("No signatures found.");
+		return output;
+	}
+
+	output.push_str(&format!("SIGNATURES ({} files)\n\n", signatures.len()));
+
+	for file in signatures {
+		output.push_str(&format!("FILE: {}\n", file.path));
+		output.push_str(&format!("Language: {}\n", file.language));
+
+		// Show file comment if available
+		if let Some(comment) = &file.file_comment {
+			output.push_str(&format!("Description: {}\n", comment.replace('\n', " ")));
+		}
+
+		if file.signatures.is_empty() {
+			output.push_str("No signatures found.\n");
+		} else {
+			for signature in &file.signatures {
+				// Display line range
+				let line_display = if signature.start_line == signature.end_line {
+					format!("{}", signature.start_line + 1)
+				} else {
+					format!("{}-{}", signature.start_line + 1, signature.end_line + 1)
+				};
+
+				output.push_str(&format!(
+					"{} {} (line {})\n",
+					signature.kind, signature.name, line_display
+				));
+
+				// Show description if available
+				if let Some(desc) = &signature.description {
+					output.push_str(&format!("Description: {}\n", desc.replace('\n', " ")));
+				}
+
+				// Add signature content as-is without truncation
+				output.push_str(&signature.signature);
+				if !signature.signature.ends_with('\n') {
+					output.push('\n');
+				}
+				output.push('\n');
+			}
+		}
+		output.push('\n');
+	}
+
+	output
+}
+
 /// Render code blocks (search results) as markdown string
 pub fn code_blocks_to_markdown(blocks: &[CodeBlock]) -> String {
 	code_blocks_to_markdown_with_config(blocks, &Config::default())

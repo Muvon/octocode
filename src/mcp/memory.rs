@@ -190,49 +190,6 @@ impl MemoryProvider {
 		]
 	}
 
-	/// Sanitize text content to remove Unicode emojis and other problematic characters
-	/// that could cause string slicing panics in consuming systems
-	fn sanitize_content(text: &str) -> String {
-		// Preserve emojis, but remove control characters and other problematic Unicode symbols
-		text.chars()
-			.filter(|&c| {
-				// Keep printable characters, including emojis
-				!c.is_control() && (c.is_ascii_graphic() || Self::is_safe_unicode(c))
-			})
-			.collect()
-	}
-
-	/// Check if a character is a safe Unicode character (including emojis)
-	fn is_safe_unicode(c: char) -> bool {
-		// Allow a broader range of Unicode characters, including emojis
-		let code = c as u32;
-		// Emoji ranges and other safe Unicode ranges
-		matches!(code,
-			// Emoji ranges
-			0x1F600..=0x1F64F | // Emoticons
-			0x1F300..=0x1F5FF | // Misc Symbols and Pictographs
-			0x1F680..=0x1F6FF | // Transport and Map
-			0x1F1E6..=0x1F1FF | // Regional indicators
-			0x2600..=0x26FF   | // Misc symbols
-			0x2700..=0x27BF   | // Dingbats
-
-			// Allow variation selectors and zero-width joiner
-			0xFE0F | 0x200D    |
-
-			// Some additional safe Unicode ranges
-			0x0080..=0x00FF   | // Latin-1 Supplement
-			0x0100..=0x017F   | // Latin Extended-A
-			0x0180..=0x024F   | // Latin Extended-B
-			0x0370..=0x03FF   | // Greek and Coptic
-			0x0400..=0x04FF   | // Cyrillic
-			0x0530..=0x058F   | // Armenian
-			0x0590..=0x05FF   | // Hebrew
-			0x0600..=0x06FF   | // Arabic
-			0x0900..=0x097F   | // Devanagari
-			0x4E00..=0x9FFF     // CJK Unified Ideographs
-		)
-	}
-
 	/// Execute the memorize tool with enhanced error handling
 	pub async fn execute_memorize(&self, arguments: &Value) -> Result<String> {
 		// Validate input parameters exist before processing
@@ -255,8 +212,8 @@ impl MemoryProvider {
 		}
 
 		// Sanitize input content to prevent Unicode issues
-		let title = Self::sanitize_content(title);
-		let content = Self::sanitize_content(content);
+		let title = crate::memory::formatting::sanitize_content(title);
+		let content = crate::memory::formatting::sanitize_content(content);
 
 		// Validate lengths
 		if title.len() < 5 || title.len() > 200 {
@@ -290,7 +247,7 @@ impl MemoryProvider {
 			arr.iter()
 				.filter_map(|v| {
 					v.as_str().map(|s| {
-						let sanitized = Self::sanitize_content(s);
+						let sanitized = crate::memory::formatting::sanitize_content(s);
 						// Limit tag length to prevent issues
 						if sanitized.len() > 50 {
 							sanitized[..50].to_string()
@@ -458,58 +415,8 @@ impl MemoryProvider {
 			return Ok("No stored memories match your query. Try using different search terms, removing filters, or checking if any memories have been stored yet.".to_string());
 		}
 
-		// Create a structured markdown response for better readability
-		let mut response = format!("🧠 Found {} matching memories:\n\n", results.len());
-
-		for (i, result) in results.iter().enumerate() {
-			response.push_str(&format!(
-				"## {}. {} (Score: {:.2})\n\n",
-				i + 1,
-				Self::sanitize_content(&result.memory.title),
-				result.relevance_score
-			));
-
-			response.push_str(&format!(
-				"**Type:** {} | **Importance:** {:.1} | **Created:** {}\n",
-				result.memory.memory_type,
-				result.memory.metadata.importance,
-				result.memory.created_at.format("%Y-%m-%d %H:%M:%S UTC")
-			));
-
-			if !result.memory.metadata.tags.is_empty() {
-				response.push_str(&format!(
-					"**Tags:** {}\n",
-					result.memory.metadata.tags.join(", ")
-				));
-			}
-
-			if !result.memory.metadata.related_files.is_empty() {
-				response.push_str(&format!(
-					"**Related Files:** {}\n",
-					result.memory.metadata.related_files.join(", ")
-				));
-			}
-
-			if let Some(git_commit) = &result.memory.metadata.git_commit {
-				response.push_str(&format!("**Git Commit:** {}\n", git_commit));
-			}
-
-			response.push_str(&format!("**Memory ID:** {}\n\n", result.memory.id));
-
-			response.push_str(&format!(
-				"**Content:**\n{}\n\n",
-				Self::sanitize_content(&result.memory.content)
-			));
-
-			response.push_str(&format!(
-				"**Why selected:** {}\n\n",
-				Self::sanitize_content(&result.selection_reason)
-			));
-
-			response.push_str("---\n\n");
-		}
-
-		Ok(response)
+		// Use shared formatting function for token efficiency
+		Ok(crate::memory::format_memories_as_text(&results))
 	}
 
 	/// Execute the forget tool

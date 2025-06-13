@@ -18,9 +18,9 @@ use tracing::debug;
 
 use crate::config::Config;
 use crate::indexer::search::{
-	search_codebase_with_details, search_codebase_with_details_multi_query,
+	search_codebase_with_details_multi_query_text, search_codebase_with_details_text,
 };
-use crate::indexer::{extract_file_signatures, signatures_to_markdown, NoindexWalker, PathUtils};
+use crate::indexer::{extract_file_signatures, signatures_to_text, NoindexWalker, PathUtils};
 use crate::mcp::types::McpTool;
 
 /// Semantic code search tool provider
@@ -232,14 +232,20 @@ impl SemanticCodeProvider {
 		let original_dir = std::env::current_dir()?;
 		std::env::set_current_dir(&self.working_directory)?;
 
-		// Use the enhanced search functionality with multi-query support
+		// Use the enhanced search functionality with multi-query support - TEXT FORMAT for token efficiency
 		let results = if queries.len() == 1 {
-			// Single query - use existing function
-			search_codebase_with_details(&queries[0], mode, detail_level, max_results, &self.config)
-				.await
+			// Single query - use text function for token efficiency
+			search_codebase_with_details_text(
+				&queries[0],
+				mode,
+				detail_level,
+				max_results,
+				&self.config,
+			)
+			.await
 		} else {
-			// Multi-query - use new function
-			search_codebase_with_details_multi_query(
+			// Multi-query - use text function for token efficiency
+			search_codebase_with_details_multi_query_text(
 				&queries,
 				mode,
 				detail_level,
@@ -364,8 +370,8 @@ impl SemanticCodeProvider {
 		// Restore original directory
 		std::env::set_current_dir(&original_dir)?;
 
-		// Always return markdown format
-		let markdown = signatures_to_markdown(&signatures);
-		Ok(markdown)
+		// Return text format for token efficiency
+		let text_output = signatures_to_text(&signatures);
+		Ok(text_output)
 	}
 }

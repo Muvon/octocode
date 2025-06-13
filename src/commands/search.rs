@@ -64,6 +64,10 @@ pub struct SearchArgs {
 	#[arg(long)]
 	pub md: bool,
 
+	/// Output in text format (token-efficient)
+	#[arg(long)]
+	pub text: bool,
+
 	/// Search mode: all (default), code, docs, or text
 	#[arg(long, default_value = "all")]
 	pub mode: String,
@@ -514,7 +518,7 @@ pub async fn execute(
 		code_blocks = indexer::expand_symbols(store, code_blocks).await?;
 	}
 
-	// Use EXISTING output formatting (completely unchanged)
+	// Use EXISTING output formatting with added text support
 	match search_mode {
 		"code" => {
 			if args.json {
@@ -522,6 +526,11 @@ pub async fn execute(
 			} else if args.md {
 				let markdown = indexer::code_blocks_to_markdown_with_config(&code_blocks, config);
 				println!("{}", markdown);
+			} else if args.text {
+				// Use text formatting function for token efficiency
+				let text_output =
+					indexer::search::format_code_search_results_as_text(&code_blocks, "partial");
+				println!("{}", text_output);
 			} else {
 				indexer::render_code_blocks_with_config(&code_blocks, config);
 			}
@@ -534,6 +543,10 @@ pub async fn execute(
 				let markdown =
 					indexer::document_blocks_to_markdown_with_config(&doc_blocks, config);
 				println!("{}", markdown);
+			} else if args.text {
+				// Use text formatting function for token efficiency
+				let text_output = indexer::search::format_doc_search_results_as_text(&doc_blocks);
+				println!("{}", text_output);
 			} else {
 				render_document_blocks_with_config(&doc_blocks, config);
 			}
@@ -545,6 +558,10 @@ pub async fn execute(
 			} else if args.md {
 				let markdown = indexer::text_blocks_to_markdown_with_config(&text_blocks, config);
 				println!("{}", markdown);
+			} else if args.text {
+				// Use text formatting function for token efficiency
+				let text_output = indexer::search::format_text_search_results_as_text(&text_blocks);
+				println!("{}", text_output);
 			} else {
 				render_text_blocks_with_config(&text_blocks, config);
 			}
@@ -620,6 +637,15 @@ pub async fn execute(
 				}
 
 				println!("{}", combined_markdown);
+			} else if args.text {
+				// Use text formatting function for token efficiency
+				let text_output = indexer::search::format_combined_search_results_as_text(
+					&final_code_results,
+					&text_blocks,
+					&doc_blocks,
+					"partial",
+				);
+				println!("{}", text_output);
 			} else {
 				if !doc_blocks.is_empty() {
 					println!("=== DOCUMENTATION RESULTS ===\n");
