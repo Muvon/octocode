@@ -149,6 +149,81 @@ git push origin main --tags
 
 3. **Use with other MCP-compatible AI assistants** by configuring the server endpoint
 
+### LSP Integration (NEW!)
+
+Octocode now supports Language Server Protocol (LSP) integration for enhanced code navigation and analysis capabilities.
+
+#### Starting MCP Server with LSP
+
+```bash
+# Start MCP server with LSP integration
+octocode mcp --path /path/to/your/project --with-lsp "rust-analyzer"
+
+# For other language servers
+octocode mcp --path /path/to/your/project --with-lsp "pylsp"
+octocode mcp --path /path/to/your/project --with-lsp "typescript-language-server --stdio"
+```
+
+#### Available LSP Tools
+
+| Tool | Description | Parameters |
+|------|-------------|------------|
+| **lsp_goto_definition** | Navigate to symbol definition | `file_path`, `line`, `symbol` |
+| **lsp_hover** | Get symbol information and documentation | `file_path`, `line`, `symbol` |
+| **lsp_find_references** | Find all references to a symbol | `file_path`, `line`, `symbol`, `include_declaration` |
+| **lsp_document_symbols** | List all symbols in a document | `file_path` |
+| **lsp_workspace_symbols** | Search symbols across workspace | `query` |
+| **lsp_completion** | Get code completion suggestions | `file_path`, `line`, `symbol` |
+
+#### LSP Tool Usage Examples
+
+**Simple Symbol Navigation:**
+```json
+{
+  "file_path": "src/main.rs",
+  "line": 15,
+  "symbol": "println"
+}
+```
+
+**Find References:**
+```json
+{
+  "file_path": "src/auth.rs",
+  "line": 42,
+  "symbol": "authenticate_user",
+  "include_declaration": true
+}
+```
+
+**Code Completion:**
+```json
+{
+  "file_path": "src/api.rs",
+  "line": 25,
+  "symbol": "std::vec"
+}
+```
+
+#### LSP Features
+
+- **Simplified Interface**: Use line numbers + symbol names instead of exact character positions
+- **Smart Symbol Resolution**: Automatically finds symbols on specified lines with multiple fallback strategies
+- **AI-Friendly Output**: Clean, readable text responses optimized for AI consumption
+- **Multi-Language Support**: Works with any LSP server (rust-analyzer, pylsp, typescript-language-server, etc.)
+- **Automatic Position Calculation**: Handles character positioning internally
+- **Robust Symbol Matching**: Word boundaries, case-insensitive, partial matching, and namespace handling
+
+#### Supported Language Servers
+
+- **Rust**: `rust-analyzer`
+- **Python**: `pylsp`, `pyright`
+- **TypeScript/JavaScript**: `typescript-language-server --stdio`
+- **Go**: `gopls`
+- **C/C++**: `clangd`
+- **Java**: `jdtls`
+- **And any other LSP-compliant language server**
+
 ### Available MCP Tools
 
 | Tool | Description | Parameters |

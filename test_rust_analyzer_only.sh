@@ -93,11 +93,11 @@ if [ -s ra_output.json ]; then
     echo "📤 Response content:"
     cat ra_output.json
     echo
-    
+
     # Check if it's valid JSON
     if jq . ra_output.json > /dev/null 2>&1; then
         echo "✅ Response is valid JSON"
-        
+
         # Check for initialize response
         if jq -e '.result.capabilities' ra_output.json > /dev/null 2>&1; then
             echo "✅ Found initialize response with capabilities"

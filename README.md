@@ -41,6 +41,7 @@ Octocode is a powerful code indexer and semantic search engine that builds intel
 - Built-in Model Context Protocol server
 - Seamless integration with AI assistants (Claude Desktop, etc.)
 - **Multi-query search support**: Use arrays like `["auth", "middleware"]` in semantic_search tool
+- **LSP Integration**: Language Server Protocol support for enhanced code navigation
 - Real-time file watching and auto-indexing
 - Rich tool ecosystem for code analysis
 
@@ -166,10 +167,16 @@ octocode release            # Create the actual release
 ### 4. MCP Server for AI Assistants
 ```bash
 # Start MCP server
-octocode mcp
+octocode mcp --path /path/to/your/project
+
+# Start with LSP integration (NEW!)
+octocode mcp --path /path/to/your/project --with-lsp "rust-analyzer"
+octocode mcp --path /path/to/your/project --with-lsp "pylsp"
+octocode mcp --path /path/to/your/project --with-lsp "typescript-language-server --stdio"
 
 # Use with Claude Desktop or other MCP-compatible tools
 # Provides: semantic_search, graphrag_search, memorize, remember, forget
+# With LSP: lsp_goto_definition, lsp_hover, lsp_find_references, lsp_completion
 ```
 
 ### 5. Multi-Query Search (NEW!)
@@ -270,7 +277,7 @@ octocode watch
 | `octocode review` | Code review assistant | `octocode review --focus security` |
 | `octocode release` | AI-powered release management | `octocode release --dry-run` |
 | `octocode memory <operation>` | Memory management | `octocode memory remember "auth bugs"` |
-| `octocode mcp` | Start MCP server | `octocode mcp --debug` |
+| `octocode mcp` | Start MCP server | `octocode mcp --with-lsp "rust-analyzer"` |
 | `octocode watch` | Auto-index on changes | `octocode watch --quiet` |
 | `octocode config` | Manage configuration | `octocode config --show` |
 
@@ -460,6 +467,7 @@ octocode config --model "openai/gpt-4o-mini"
 - **[Architecture](doc/ARCHITECTURE.md)** - Core components and system design
 - **[Configuration](doc/CONFIGURATION.md)** - Setup and configuration options
 - **[Advanced Usage](doc/ADVANCED_USAGE.md)** - Advanced features and workflows
+- **[LSP Integration](doc/LSP_INTEGRATION.md)** - Language Server Protocol integration guide
 - **[Contributing](doc/CONTRIBUTING.md)** - Development setup and contribution guidelines
 - **[Performance](doc/PERFORMANCE.md)** - Performance metrics and optimization tips
 
