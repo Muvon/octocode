@@ -49,28 +49,12 @@ pub fn init_mcp_logging(base_dir: PathBuf, debug_mode: bool) -> Result<(), anyho
 		.with_thread_names(true)
 		.json();
 
-	// Console layer (only in debug mode)
-	let console_layer = if debug_mode {
-		Some(
-			Layer::new()
-				.with_writer(std::io::stderr)
-				.with_ansi(true)
-				.with_target(false)
-				.with_thread_ids(false)
-				.with_thread_names(false),
-		)
-	} else {
-		None
-	};
+	// MCP protocol requires clean stdout/stderr - no console output allowed
+	// All logging must go to files only to maintain protocol compliance
 
-	// Create registry with layers
+	// Create registry with file layer only (no console output)
 	let registry = Registry::default().with(file_layer).with(env_filter);
-
-	if let Some(console) = console_layer {
-		registry.with(console).init();
-	} else {
-		registry.init();
-	}
+	registry.init();
 
 	info!(
 		project_path = %base_dir.display(),

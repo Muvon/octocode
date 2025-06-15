@@ -202,6 +202,115 @@ octocode config --max-results 100
 octocode config --similarity-threshold 0.3
 ```
 
+## MCP Server Configuration
+
+### Basic MCP Setup
+
+```bash
+# Start MCP server with default settings
+octocode mcp --path /path/to/project
+
+# Start with custom port
+octocode mcp --path /path/to/project --port 3001
+
+# Start with debug logging
+octocode mcp --path /path/to/project --debug
+```
+
+### LSP Integration
+
+```bash
+# Enable LSP integration with Rust
+octocode mcp --path /path/to/rust/project --with-lsp "rust-analyzer"
+
+# Enable LSP integration with Python
+octocode mcp --path /path/to/python/project --with-lsp "pylsp"
+
+# Enable LSP integration with TypeScript
+octocode mcp --path /path/to/ts/project --with-lsp "typescript-language-server --stdio"
+
+# Custom LSP server with arguments
+octocode mcp --path /path/to/project --with-lsp "custom-lsp --config config.json"
+```
+
+### MCP Configuration File
+
+The MCP server uses command-line arguments rather than configuration file settings. The main configuration is handled through the existing `config.toml` structure:
+
+```toml
+# Octocode configuration (config-templates/default.toml)
+version = 1
+
+[openrouter]
+model = "openai/gpt-4.1-mini"
+base_url = "https://openrouter.ai/api/v1"
+timeout = 120
+
+[index]
+chunk_size = 2000
+chunk_overlap = 100
+embeddings_batch_size = 16
+require_git = true
+
+[search]
+max_results = 20
+similarity_threshold = 0.65
+output_format = "markdown"
+
+[embedding]
+code_model = "voyage:voyage-code-3"
+text_model = "voyage:voyage-3.5-lite"
+
+[graphrag]
+enabled = false
+use_llm = false
+```
+
+**Note**: MCP server settings like port, debug mode, and LSP integration are controlled via command-line flags, not configuration file options.
+
+### Claude Desktop Integration
+
+Add to your Claude Desktop configuration file:
+
+**macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
+**Windows**: `%APPDATA%\Claude\claude_desktop_config.json`
+
+```json
+{
+  "mcpServers": {
+    "octocode": {
+      "command": "octocode",
+      "args": ["mcp", "--path", "/path/to/your/project"]
+    },
+    "octocode-with-lsp": {
+      "command": "octocode",
+      "args": ["mcp", "--path", "/path/to/your/project", "--with-lsp", "rust-analyzer"]
+    }
+  }
+}
+```
+
+### Multiple Projects Setup
+
+```json
+{
+  "mcpServers": {
+    "octocode-rust": {
+      "command": "octocode",
+      "args": ["mcp", "--path", "/path/to/rust/project", "--with-lsp", "rust-analyzer", "--port", "3001"]
+    },
+    "octocode-python": {
+      "command": "octocode",
+      "args": ["mcp", "--path", "/path/to/python/project", "--with-lsp", "pylsp", "--port", "3002"]
+    },
+    "octocode-typescript": {
+      "command": "octocode",
+      "args": ["mcp", "--path", "/path/to/ts/project", "--with-lsp", "typescript-language-server --stdio", "--port", "3003"]
+    }
+  }
+}
+```
+
 ## Performance Tuning
 
 ### For Speed
