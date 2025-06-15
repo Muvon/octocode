@@ -17,6 +17,7 @@ use serde_json::json;
 use std::panic;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use tokio::sync::Mutex;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::mpsc;
 use tokio::time::{sleep, Duration, Instant};
@@ -60,6 +61,7 @@ pub struct McpServer {
 	semantic_code: SemanticCodeProvider,
 	graphrag: Option<GraphRagProvider>,
 	memory: Option<MemoryProvider>,
+	lsp: Option<Arc<Mutex<crate::mcp::lsp::LspProvider>>>,
 	debug: bool,
 	working_directory: std::path::PathBuf,
 	no_git: bool,
@@ -77,6 +79,7 @@ impl McpServer {
 		debug: bool,
 		working_directory: std::path::PathBuf,
 		no_git: bool,
+		lsp_command: Option<String>,
 	) -> Result<Self> {
 		// Initialize the store for the MCP server
 		let store = Store::new().await?;
@@ -89,10 +92,36 @@ impl McpServer {
 		let graphrag = GraphRagProvider::new(config.clone(), working_directory.clone());
 		let memory = MemoryProvider::new(&config, working_directory.clone()).await;
 
+		// Initialize LSP provider if command is provided (lazy initialization)
+		let lsp = if let Some(command) = lsp_command {
+			tracing::info!(
+				"LSP provider will be initialized lazily with command: {}",
+				command
+			);
+			let provider = Arc::new(Mutex::new(crate::mcp::lsp::LspProvider::new(
+				working_directory.clone(),
+				command,
+			)));
+			
+			// Start LSP initialization in background (non-blocking)
+			let provider_clone = provider.clone();
+			tokio::spawn(async move {
+				let mut provider_guard = provider_clone.lock().await;
+				if let Err(e) = provider_guard.start_initialization().await {
+					tracing::warn!("LSP initialization failed: {}", e);
+				}
+			});
+			
+			Some(provider)
+		} else {
+			None
+		};
+
 		Ok(Self {
 			semantic_code,
 			graphrag,
 			memory,
+			lsp,
 			debug,
 			working_directory,
 			no_git,
@@ -267,6 +296,14 @@ impl McpServer {
 					match indexing_result {
 						Ok(Ok(())) => {
 							info!("Reindex completed successfully");
+
+							// Update LSP with changed files if LSP is enabled
+							if let Some(ref lsp_provider) = self.lsp {
+								let mut lsp_guard = lsp_provider.lock().await;
+								if let Err(e) = Self::update_lsp_after_indexing(&mut lsp_guard, &self.working_directory).await {
+									debug!("LSP update after indexing failed: {}", e);
+								}
+							}
 						}
 						Ok(Err(e)) => {
 							log_critical_anyhow_error("Reindex error", &e);
@@ -391,7 +428,7 @@ impl McpServer {
 	}
 
 	/// Safe request handling with comprehensive error recovery
-	async fn handle_request_safe(&self, line: &str) -> Result<Option<JsonRpcResponse>> {
+	async fn handle_request_safe(&mut self, line: &str) -> Result<Option<JsonRpcResponse>> {
 		let line = line.trim();
 		if line.is_empty() {
 			return Ok(None);
@@ -651,6 +688,11 @@ impl McpServer {
 			tools.push(GraphRagProvider::get_tool_definition());
 		}
 
+		// Add LSP tools if LSP provider is configured (always show tools when --with-lsp is used)
+		if self.lsp.is_some() {
+			tools.extend(crate::mcp::lsp::LspProvider::get_tool_definitions());
+		}
+
 		JsonRpcResponse {
 			jsonrpc: "2.0".to_string(),
 			id: request.id.clone(),
@@ -661,7 +703,7 @@ impl McpServer {
 		}
 	}
 
-	async fn handle_tools_call(&self, request: &JsonRpcRequest) -> JsonRpcResponse {
+	async fn handle_tools_call(&mut self, request: &JsonRpcRequest) -> JsonRpcResponse {
 		let params = match &request.params {
 			Some(params) => params,
 			None => {
@@ -739,11 +781,57 @@ impl McpServer {
 				Some(provider) => provider.execute_forget(arguments).await,
 				None => Err(anyhow::anyhow!("Memory system is not available")),
 			},
-			_ => Err(anyhow::anyhow!("Unknown tool '{}'. Available tools: semantic_search, view_signatures{}{}",
-				tool_name,
-				if self.graphrag.is_some() { ", graphrag_search" } else { "" },
-				if self.memory.is_some() { ", memorize, remember, forget" } else { "" }
-			)),
+			// LSP tools
+			"lsp_goto_definition" => match &self.lsp {
+				Some(provider) => {
+					let mut lsp_guard = provider.lock().await;
+					lsp_guard.execute_goto_definition(arguments).await
+				},
+				None => Err(anyhow::anyhow!("LSP server is not available. Start MCP server with --with-lsp=\"<command>\" to enable LSP features.")),
+			},
+			"lsp_hover" => match &self.lsp {
+				Some(provider) => {
+					let mut lsp_guard = provider.lock().await;
+					lsp_guard.execute_hover(arguments).await
+				},
+				None => Err(anyhow::anyhow!("LSP server is not available. Start MCP server with --with-lsp=\"<command>\" to enable LSP features.")),
+			},
+			"lsp_find_references" => match &self.lsp {
+				Some(provider) => {
+					let mut lsp_guard = provider.lock().await;
+					lsp_guard.execute_find_references(arguments).await
+				},
+				None => Err(anyhow::anyhow!("LSP server is not available. Start MCP server with --with-lsp=\"<command>\" to enable LSP features.")),
+			},
+			"lsp_document_symbols" => match &self.lsp {
+				Some(provider) => {
+					let mut lsp_guard = provider.lock().await;
+					lsp_guard.execute_document_symbols(arguments).await
+				},
+				None => Err(anyhow::anyhow!("LSP server is not available. Start MCP server with --with-lsp=\"<command>\" to enable LSP features.")),
+			},
+			"lsp_workspace_symbols" => match &self.lsp {
+				Some(provider) => {
+					let mut lsp_guard = provider.lock().await;
+					lsp_guard.execute_workspace_symbols(arguments).await
+				},
+				None => Err(anyhow::anyhow!("LSP server is not available. Start MCP server with --with-lsp=\"<command>\" to enable LSP features.")),
+			},
+			"lsp_completion" => match &self.lsp {
+				Some(provider) => {
+					let mut lsp_guard = provider.lock().await;
+					lsp_guard.execute_completion(arguments).await
+				},
+				None => Err(anyhow::anyhow!("LSP server is not available. Start MCP server with --with-lsp=\"<command>\" to enable LSP features.")),
+			},
+			_ => {
+				let available_tools = format!("semantic_search, view_signatures{}{}{}",
+					if self.graphrag.is_some() { ", graphrag_search" } else { "" },
+					if self.memory.is_some() { ", memorize, remember, forget" } else { "" },
+					if self.lsp.is_some() { ", lsp_goto_definition, lsp_hover, lsp_find_references, lsp_document_symbols, lsp_workspace_symbols, lsp_completion" } else { "" }
+				);
+				Err(anyhow::anyhow!("Unknown tool '{}'. Available tools: {}", tool_name, available_tools))
+			}
 		};
 
 		match result {
@@ -799,6 +887,47 @@ impl McpServer {
 			result: Some(json!({})),
 			error: None,
 		}
+	}
+
+	/// Update LSP server with recently changed files
+	async fn update_lsp_after_indexing(
+		lsp_provider: &mut crate::mcp::lsp::LspProvider,
+		working_directory: &std::path::Path,
+	) -> Result<()> {
+		use crate::indexer::{detect_language, NoindexWalker, PathUtils};
+
+		debug!("Updating LSP server with changed files");
+
+		// Use existing file walker that respects .gitignore and .noindex
+		let walker = NoindexWalker::create_walker(working_directory).build();
+		let mut files_updated = 0;
+
+		for result in walker {
+			let entry = match result {
+				Ok(entry) => entry,
+				Err(_) => continue,
+			};
+
+			// Skip directories, only process files
+			if !entry.file_type().is_some_and(|ft| ft.is_file()) {
+				continue;
+			}
+
+			// Only process files that have a detected language (code files)
+			if detect_language(entry.path()).is_some() {
+				let relative_path = PathUtils::to_relative_string(entry.path(), working_directory);
+
+				// Try to update the file in LSP
+				if let Err(e) = lsp_provider.update_file(&relative_path).await {
+					debug!("Failed to update file {} in LSP: {}", relative_path, e);
+				} else {
+					files_updated += 1;
+				}
+			}
+		}
+
+		debug!("LSP update completed: {} files updated", files_updated);
+		Ok(())
 	}
 }
 

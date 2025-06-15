@@ -31,6 +31,10 @@ pub struct McpArgs {
 	/// Skip git repository requirement and git-based optimizations
 	#[arg(long)]
 	pub no_git: bool,
+
+	/// External LSP server command to launch (e.g., "rust-analyzer", "typescript-language-server --stdio")
+	#[arg(long, value_name = "COMMAND")]
+	pub with_lsp: Option<String>,
 }
 
 pub async fn run(args: McpArgs) -> Result<()> {
@@ -52,6 +56,13 @@ pub async fn run(args: McpArgs) -> Result<()> {
 	// Note: No console output here - MCP protocol compliance requires clean stdout/stderr
 	// All debug information is logged to files via structured logging in the server
 
-	let mut server = McpServer::new(config, args.debug, working_directory, args.no_git).await?;
+	let mut server = McpServer::new(
+		config,
+		args.debug,
+		working_directory,
+		args.no_git,
+		args.with_lsp,
+	)
+	.await?;
 	server.run().await
 }

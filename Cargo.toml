@@ -78,6 +78,9 @@ tracing = "0.1.40"
 tracing-subscriber = { version = "0.3.18", features = ["env-filter", "json"] }
 tracing-appender = "0.2.3"
 tiktoken-rs = "0.6.0"
+# LSP integration dependencies
+lsp-types = "0.97.0"
+url = "2.4.1"
 
 [profile.dev]
 opt-level = 1          # Basic optimizations without slowing compilation too much

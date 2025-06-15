@@ -12,22 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! MCP (Model Context Protocol) server implementation
+//! LSP (Language Server Protocol) integration for MCP server
 //!
-//! This module provides a modular MCP server with separate tool providers:
-//! - SemanticCodeProvider: Semantic code search functionality
-//! - GraphRagProvider: GraphRAG relationship-aware search
-//! - MemoryProvider: AI memory storage and retrieval
-//! - LspProvider: Language Server Protocol integration
-//!
-//! The server automatically enables available tools based on configuration.
+//! This module provides integration with external LSP servers, allowing users to
+//! specify any LSP server command and expose its capabilities through MCP tools.
 
-pub mod graphrag;
-pub mod logging;
-pub mod lsp;
-pub mod memory;
-pub mod semantic_code;
-pub mod server;
-pub mod types;
+pub mod client;
+pub mod protocol;
+pub mod provider;
+pub mod tools;
 
-pub use server::McpServer;
+pub use provider::LspProvider;
