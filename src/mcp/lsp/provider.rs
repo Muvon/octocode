@@ -359,7 +359,7 @@ impl LspProvider {
 		vec![
             McpTool {
                 name: "lsp_goto_definition".to_string(),
-                description: "Navigate to symbol definition using LSP server. Provides precise cross-file navigation with semantic understanding.".to_string(),
+                description: "Navigate to symbol definition using LSP server. Automatically finds the symbol on the specified line.".to_string(),
                 input_schema: json!({
                     "type": "object",
                     "properties": {
@@ -370,21 +370,20 @@ impl LspProvider {
                         "line": {
                             "type": "integer",
                             "minimum": 1,
-                            "description": "Line number (1-indexed)"
+                            "description": "Line number (1-indexed) where the symbol is located"
                         },
-                        "character": {
-                            "type": "integer",
-                            "minimum": 1,
-                            "description": "Character position (1-indexed)"
+                        "symbol": {
+                            "type": "string",
+                            "description": "Symbol name to find definition for (function name, variable, type, etc.)"
                         }
                     },
-                    "required": ["file_path", "line", "character"],
+                    "required": ["file_path", "line", "symbol"],
                     "additionalProperties": false
                 })
             },
             McpTool {
                 name: "lsp_hover".to_string(),
-                description: "Get symbol information and documentation using LSP server. Returns type information, signatures, and documentation.".to_string(),
+                description: "Get symbol information and documentation using LSP server. Automatically finds the symbol on the specified line.".to_string(),
                 input_schema: json!({
                     "type": "object",
                     "properties": {
@@ -395,21 +394,20 @@ impl LspProvider {
                         "line": {
                             "type": "integer",
                             "minimum": 1,
-                            "description": "Line number (1-indexed)"
+                            "description": "Line number (1-indexed) where the symbol is located"
                         },
-                        "character": {
-                            "type": "integer",
-                            "minimum": 1,
-                            "description": "Character position (1-indexed)"
+                        "symbol": {
+                            "type": "string",
+                            "description": "Symbol name to get information for (function name, variable, type, etc.)"
                         }
                     },
-                    "required": ["file_path", "line", "character"],
+                    "required": ["file_path", "line", "symbol"],
                     "additionalProperties": false
                 })
             },
             McpTool {
                 name: "lsp_find_references".to_string(),
-                description: "Find all references to a symbol using LSP server. Provides semantic reference finding across the entire workspace.".to_string(),
+                description: "Find all references to a symbol using LSP server. Automatically finds the symbol on the specified line.".to_string(),
                 input_schema: json!({
                     "type": "object",
                     "properties": {
@@ -420,12 +418,11 @@ impl LspProvider {
                         "line": {
                             "type": "integer",
                             "minimum": 1,
-                            "description": "Line number (1-indexed)"
+                            "description": "Line number (1-indexed) where the symbol is located"
                         },
-                        "character": {
-                            "type": "integer",
-                            "minimum": 1,
-                            "description": "Character position (1-indexed)"
+                        "symbol": {
+                            "type": "string",
+                            "description": "Symbol name to find references for (function name, variable, type, etc.)"
                         },
                         "include_declaration": {
                             "type": "boolean",
@@ -433,7 +430,7 @@ impl LspProvider {
                             "description": "Include the symbol declaration in results"
                         }
                     },
-                    "required": ["file_path", "line", "character"],
+                    "required": ["file_path", "line", "symbol"],
                     "additionalProperties": false
                 })
             },
@@ -470,7 +467,7 @@ impl LspProvider {
             },
             McpTool {
                 name: "lsp_completion".to_string(),
-                description: "Get code completion suggestions using LSP server. Provides intelligent code completion with context awareness.".to_string(),
+                description: "Get code completion suggestions using LSP server. Provides completions at the end of the specified symbol.".to_string(),
                 input_schema: json!({
                     "type": "object",
                     "properties": {
@@ -481,22 +478,153 @@ impl LspProvider {
                         "line": {
                             "type": "integer",
                             "minimum": 1,
-                            "description": "Line number (1-indexed)"
+                            "description": "Line number (1-indexed) where completion is needed"
                         },
-                        "character": {
-                            "type": "integer",
-                            "minimum": 1,
-                            "description": "Character position (1-indexed)"
+                        "symbol": {
+                            "type": "string",
+                            "description": "Partial symbol or prefix to complete (e.g., 'std::vec', 'my_func')"
                         }
                     },
-                    "required": ["file_path", "line", "character"],
+                    "required": ["file_path", "line", "symbol"],
                     "additionalProperties": false
                 })
             }
         ]
 	}
 
-	/// Execute LSP goto definition tool
+	/// Find symbol position on a specific line
+	async fn find_symbol_position(&self, file_path: &str, line: u32, symbol: &str) -> Result<u32> {
+		// Ensure file is opened first
+		self.ensure_file_opened(file_path).await?;
+
+		// Get the line content
+		let line_content = {
+			let contents = self
+				.document_contents
+				.lock()
+				.map_err(|e| anyhow::anyhow!("Failed to lock document_contents: {}", e))?;
+
+			if let Some(content) = contents.get(file_path) {
+				let lines: Vec<&str> = content.lines().collect();
+				if line == 0 || line as usize > lines.len() {
+					return Err(anyhow::anyhow!("Line {} is out of bounds", line));
+				}
+				lines[(line - 1) as usize].to_string()
+			} else {
+				return Err(anyhow::anyhow!(
+					"File {} not found in document contents",
+					file_path
+				));
+			}
+		};
+
+		debug!(
+			"Looking for symbol '{}' in line {}: '{}'",
+			symbol, line, line_content
+		);
+
+		// Strategy 1: Exact match with word boundaries
+		let symbol_regex = format!(r"\b{}\b", regex::escape(symbol));
+		if let Ok(re) = regex::Regex::new(&symbol_regex) {
+			if let Some(mat) = re.find(&line_content) {
+				debug!(
+					"Found symbol '{}' with word boundary at position {}",
+					symbol,
+					mat.start() + 1
+				);
+				return Ok((mat.start() + 1) as u32);
+			}
+		}
+
+		// Strategy 2: Exact substring match
+		if let Some(pos) = line_content.find(symbol) {
+			debug!(
+				"Found symbol '{}' as substring at position {}",
+				symbol,
+				pos + 1
+			);
+			return Ok((pos + 1) as u32);
+		}
+
+		// Strategy 3: Case-insensitive match
+		if let Some(pos) = line_content.to_lowercase().find(&symbol.to_lowercase()) {
+			debug!(
+				"Found symbol '{}' case-insensitive at position {}",
+				symbol,
+				pos + 1
+			);
+			return Ok((pos + 1) as u32);
+		}
+
+		// Strategy 4: Partial match in identifiers (e.g., "func" in "my_func_name")
+		let words: Vec<&str> = line_content.split_whitespace().collect();
+		for word in words {
+			if word.contains(symbol) {
+				if let Some(pos) = line_content.find(word) {
+					if let Some(symbol_pos) = word.find(symbol) {
+						debug!(
+							"Found symbol '{}' within word '{}' at position {}",
+							symbol,
+							word,
+							pos + symbol_pos + 1
+						);
+						return Ok((pos + symbol_pos + 1) as u32);
+					}
+				}
+			}
+		}
+
+		// Strategy 5: Smart identifier matching for common patterns
+		// Handle cases like "std::vec" where we want to find "vec"
+		if symbol.contains("::") {
+			let parts: Vec<&str> = symbol.split("::").collect();
+			if let Some(last_part) = parts.last() {
+				// Use a simple substring search for the last part instead of recursion
+				if let Some(pos) = line_content.find(last_part) {
+					debug!(
+						"Found symbol '{}' by searching for last part '{}' at position {}",
+						symbol,
+						last_part,
+						pos + 1
+					);
+					return Ok((pos + 1) as u32);
+				}
+			}
+		}
+
+		// Strategy 6: Return position of first meaningful identifier on the line
+		// This is a fallback for when the exact symbol isn't found
+		for (i, ch) in line_content.chars().enumerate() {
+			if ch.is_alphabetic() || ch == '_' {
+				debug!(
+					"Symbol '{}' not found, using first identifier at position {}",
+					symbol,
+					i + 1
+				);
+				return Ok((i + 1) as u32);
+			}
+		}
+
+		Err(anyhow::anyhow!(
+			"Symbol '{}' not found on line {} and no fallback position available",
+			symbol,
+			line
+		))
+	}
+
+	/// Find completion position (end of symbol)
+	async fn find_completion_position(
+		&self,
+		file_path: &str,
+		line: u32,
+		symbol: &str,
+	) -> Result<u32> {
+		let start_pos = self.find_symbol_position(file_path, line, symbol).await?;
+		// For completion, position at the end of the symbol
+		Ok(start_pos + symbol.len() as u32)
+	}
+
+	/// Execute LSP goto definition tool with symbol resolution
 	pub async fn execute_goto_definition(
 		&mut self,
 		arguments: &serde_json::Value,
@@ -514,17 +642,21 @@ impl LspProvider {
 			.get("line")
 			.and_then(|v| v.as_u64())
 			.ok_or_else(|| anyhow::anyhow!("Missing required parameter: line"))? as u32;
-		let character = arguments
-			.get("character")
-			.and_then(|v| v.as_u64())
-			.ok_or_else(|| anyhow::anyhow!("Missing required parameter: character"))?
-			as u32;
+		let symbol = arguments
+			.get("symbol")
+			.and_then(|v| v.as_str())
+			.ok_or_else(|| anyhow::anyhow!("Missing required parameter: symbol"))?;
 
 		// Clean the file path to handle formatted paths like "[Rust file: main.rs]"
 		let clean_file_path = Self::clean_file_path(file_path);
 
 		// Ensure file is opened in LSP before making request
 		self.ensure_file_opened(&clean_file_path).await?;
+
+		// Find the symbol position on the line
+		let character = self
+			.find_symbol_position(&clean_file_path, line, symbol)
+			.await?;
 
 		let result = self
 			.goto_definition(&clean_file_path, line, character)
@@ -562,17 +694,21 @@ impl LspProvider {
 			.get("line")
 			.and_then(|v| v.as_u64())
 			.ok_or_else(|| anyhow::anyhow!("Missing required parameter: line"))? as u32;
-		let character = arguments
-			.get("character")
-			.and_then(|v| v.as_u64())
-			.ok_or_else(|| anyhow::anyhow!("Missing required parameter: character"))?
-			as u32;
+		let symbol = arguments
+			.get("symbol")
+			.and_then(|v| v.as_str())
+			.ok_or_else(|| anyhow::anyhow!("Missing required parameter: symbol"))?;
 
 		// Clean the file path to handle formatted paths like "[Rust file: main.rs]"
 		let clean_file_path = Self::clean_file_path(file_path);
 
 		// Ensure file is opened in LSP before making request
 		self.ensure_file_opened(&clean_file_path).await?;
+
+		// Find the symbol position on the line
+		let character = self
+			.find_symbol_position(&clean_file_path, line, symbol)
+			.await?;
 
 		let result = self.hover(&clean_file_path, line, character).await?;
 		Ok(result)
@@ -596,11 +732,10 @@ impl LspProvider {
 			.get("line")
 			.and_then(|v| v.as_u64())
 			.ok_or_else(|| anyhow::anyhow!("Missing required parameter: line"))? as u32;
-		let character = arguments
-			.get("character")
-			.and_then(|v| v.as_u64())
-			.ok_or_else(|| anyhow::anyhow!("Missing required parameter: character"))?
-			as u32;
+		let symbol = arguments
+			.get("symbol")
+			.and_then(|v| v.as_str())
+			.ok_or_else(|| anyhow::anyhow!("Missing required parameter: symbol"))?;
 		let include_declaration = arguments
 			.get("include_declaration")
 			.and_then(|v| v.as_bool())
@@ -608,6 +743,14 @@ impl LspProvider {
 
 		// Clean the file path to handle formatted paths like "[Rust file: main.rs]"
 		let clean_file_path = Self::clean_file_path(file_path);
+
+		// Ensure file is opened in LSP before making request
+		self.ensure_file_opened(&clean_file_path).await?;
+
+		// Find the symbol position on the line
+		let character = self
+			.find_symbol_position(&clean_file_path, line, symbol)
+			.await?;
 
 		let result = self
 			.find_references(&clean_file_path, line, character, include_declaration)
@@ -678,17 +821,21 @@ impl LspProvider {
 			.get("line")
 			.and_then(|v| v.as_u64())
 			.ok_or_else(|| anyhow::anyhow!("Missing required parameter: line"))? as u32;
-		let character = arguments
-			.get("character")
-			.and_then(|v| v.as_u64())
-			.ok_or_else(|| anyhow::anyhow!("Missing required parameter: character"))?
-			as u32;
+		let symbol = arguments
+			.get("symbol")
+			.and_then(|v| v.as_str())
+			.ok_or_else(|| anyhow::anyhow!("Missing required parameter: symbol"))?;
 
 		// Clean the file path to handle formatted paths like "[Rust file: main.rs]"
 		let clean_file_path = Self::clean_file_path(file_path);
 
 		// Ensure file is opened in LSP before making request
 		self.ensure_file_opened(&clean_file_path).await?;
+
+		// Find the completion position (end of symbol)
+		let character = self
+			.find_completion_position(&clean_file_path, line, symbol)
+			.await?;
 
 		let result = self.completion(&clean_file_path, line, character).await?;
 		Ok(result)
