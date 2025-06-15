@@ -61,9 +61,9 @@ impl LspProvider {
 		if self.initialized {
 			return Ok(());
 		}
-		
+
 		info!("Starting LSP server initialization in background...");
-		
+
 		// Use the existing ensure_initialized method but don't block the MCP server
 		match self.ensure_initialized().await {
 			Ok(()) => {
@@ -529,7 +529,7 @@ impl LspProvider {
 		let result = self
 			.goto_definition(&clean_file_path, line, character)
 			.await?;
-		Ok(serde_json::to_string_pretty(&result)?)
+		Ok(result)
 	}
 
 	/// Clean file path to handle formatted paths like "[Rust file: main.rs]"
@@ -575,7 +575,7 @@ impl LspProvider {
 		self.ensure_file_opened(&clean_file_path).await?;
 
 		let result = self.hover(&clean_file_path, line, character).await?;
-		Ok(serde_json::to_string_pretty(&result)?)
+		Ok(result)
 	}
 
 	/// Execute LSP find references tool
@@ -612,7 +612,7 @@ impl LspProvider {
 		let result = self
 			.find_references(&clean_file_path, line, character, include_declaration)
 			.await?;
-		Ok(serde_json::to_string_pretty(&result)?)
+		Ok(result)
 	}
 
 	/// Execute LSP document symbols tool
@@ -641,7 +641,7 @@ impl LspProvider {
 		self.ensure_file_opened(&clean_file_path).await?;
 
 		let result = self.document_symbols(&clean_file_path).await?;
-		Ok(serde_json::to_string_pretty(&result)?)
+		Ok(result)
 	}
 
 	/// Execute LSP workspace symbols tool
@@ -660,7 +660,7 @@ impl LspProvider {
 			.ok_or_else(|| anyhow::anyhow!("Missing required parameter: query"))?;
 
 		let result = self.workspace_symbols(query).await?;
-		Ok(serde_json::to_string_pretty(&result)?)
+		Ok(result)
 	}
 
 	/// Execute LSP completion tool
@@ -691,7 +691,7 @@ impl LspProvider {
 		self.ensure_file_opened(&clean_file_path).await?;
 
 		let result = self.completion(&clean_file_path, line, character).await?;
-		Ok(serde_json::to_string_pretty(&result)?)
+		Ok(result)
 	}
 
 	/// Start LSP server process and perform initialization handshake

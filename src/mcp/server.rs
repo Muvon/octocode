@@ -17,9 +17,9 @@ use serde_json::json;
 use std::panic;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use tokio::sync::Mutex;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::mpsc;
+use tokio::sync::Mutex;
 use tokio::time::{sleep, Duration, Instant};
 use tracing::{debug, info, trace, warn};
 
@@ -102,7 +102,7 @@ impl McpServer {
 				working_directory.clone(),
 				command,
 			)));
-			
+
 			// Start LSP initialization in background (non-blocking)
 			let provider_clone = provider.clone();
 			tokio::spawn(async move {
@@ -111,7 +111,7 @@ impl McpServer {
 					tracing::warn!("LSP initialization failed: {}", e);
 				}
 			});
-			
+
 			Some(provider)
 		} else {
 			None
