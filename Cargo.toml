@@ -28,15 +28,15 @@ overflow-checks = false # Disable overflow checks in release mode
 # Cross-compilation configuration is in .cargo/config.toml
 
 [dependencies]
-tokio = { version = "1.45.1", features = ["full"] }
+tokio = { version = "1.45.1", features = ["rt-multi-thread", "macros", "time", "sync", "io-util", "io-std", "process"] }
 ignore = "0.4.23"
 parking_lot = "0.12.3"
 lance-table = { version = "0.27.2", default-features = false, features = ["lazy_static"] }
 lance = { version = "0.27.2", default-features = false, features = [] }
 lancedb = { version = "0.19.1", default-features = false }
-arrow = { version = "54.2.1", features = ["prettyprint"] }
+arrow = { version = "54.2.1", default-features = false, features = ["prettyprint"] }
 serde = { version = "1.0.217", features = ["derive"] }
-chrono = { version = "0.4", features = ["serde"] }
+chrono = { version = "0.4", default-features = false, features = ["serde", "clock"] }
 async-trait = "0.1"
 tree-sitter = "0.24.7"
 tree-sitter-php = "0.23.11"
@@ -47,7 +47,7 @@ tree-sitter-json = "0.24.8"
 tree-sitter-go = "0.23.4"
 tree-sitter-cpp = "0.23.4"
 tree-sitter-bash = "0.23.3"
-uuid = { version = "1.12.0", features = ["v4"] }
+uuid = { version = "1.12.0", default-features = false, features = ["v4"] }
 tree-sitter-typescript = "0.23.2"
 tree-sitter-ruby = "0.23.1"
 tree-sitter-svelte-ng = "1.0.2"
@@ -57,14 +57,14 @@ serde_json = "1.0.136"
 sha2 = "0.10.8"
 clap = { version = "4.5.26", features = ["derive"] }
 clap_complete = "4.5.39"
-notify = "6.1.1"
+notify = { version = "6.1.1", default-features = false, features = ["crossbeam-channel", "macos_fsevent"] }
 notify-debouncer-mini = "0.4.1"
 fastembed = { version = "4.9.1", optional = true }
 toml = "0.8.14"
 lazy_static = "1.4.0"
-futures = "0.3.31"
-globset = "0.4.16"
-regex = "1.11.1"
+futures = { version = "0.3.31", default-features = false, features = ["std"] }
+globset = { version = "0.4.16", default-features = false }
+regex = { version = "1.11.1", default-features = false, features = ["std"] }
 dirs = "5.0.1"
 # Candle dependencies for SentenceTransformer support (optional)
 candle-core = { version = "0.8.3", optional = true }
