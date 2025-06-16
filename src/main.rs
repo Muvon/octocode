@@ -25,7 +25,7 @@ mod commands;
 
 #[derive(Parser)]
 #[command(name = "octocode")]
-#[command(version = "0.1.0")]
+#[command(version = env!("CARGO_PKG_VERSION"))]
 #[command(about = "Octocode is a smart code indexer and search tool")]
 struct OctocodeArgs {
 	#[command(subcommand)]
