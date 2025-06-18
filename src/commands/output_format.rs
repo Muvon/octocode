@@ -32,4 +32,9 @@ impl OutputFormat {
 	pub fn is_text(&self) -> bool {
 		matches!(self, OutputFormat::Text)
 	}
+
+	/// Check if this is CLI format
+	pub fn is_cli(&self) -> bool {
+		matches!(self, OutputFormat::Cli)
+	}
 }

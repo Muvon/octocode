@@ -131,6 +131,23 @@ pub fn calculate_unique_content_hash(contents: &str, file_path: &str) -> String 
 	format!("{:x}", hasher.finalize())
 }
 
+/// Calculate a unique hash for content including file path and line ranges
+/// This ensures blocks are reindexed when their position changes in the file
+pub fn calculate_content_hash_with_lines(
+	contents: &str,
+	file_path: &str,
+	start_line: usize,
+	end_line: usize,
+) -> String {
+	use sha2::{Digest, Sha256};
+	let mut hasher = Sha256::new();
+	hasher.update(contents.as_bytes());
+	hasher.update(file_path.as_bytes());
+	hasher.update(start_line.to_string().as_bytes());
+	hasher.update(end_line.to_string().as_bytes());
+	format!("{:x}", hasher.finalize())
+}
+
 /// Calculate content hash without file path
 pub fn calculate_content_hash(contents: &str) -> String {
 	use sha2::{Digest, Sha256};

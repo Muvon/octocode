@@ -90,10 +90,15 @@ pub async fn execute(args: &ViewArgs) -> Result<(), anyhow::Error> {
 		let markdown = indexer::signatures_to_markdown(&signatures);
 		println!("{}", markdown);
 	} else if args.format.is_text() {
-		// Use text format for token efficiency
-		indexer::render_signatures_text(&signatures);
+		// Use minimal text format for token efficiency
+		let text_output = indexer::render_signatures_text(&signatures);
+		println!("{}", text_output);
+	} else if args.format.is_cli() {
+		// CLI format - use the nice format with tab spacing
+		indexer::render_signatures_cli(&signatures);
 	} else {
-		indexer::render_signatures_text(&signatures);
+		// Fallback to CLI format
+		indexer::render_signatures_cli(&signatures);
 	}
 
 	Ok(())

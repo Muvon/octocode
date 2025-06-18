@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.4.1] - 2025-06-17
+
+### 📋 Release Summary
+
+This release includes several bug fixes that improve content accuracy and output formatting. Enhancements to search functionality and indexing provide more precise results, while performance optimizations reduce build times.
+
+
+### 🐛 Bug Fixes
+
+- **embedding**: include line ranges in content hash calculation (cf7c2d1b)
+- **indexer**: correct chunk merging to use sorted line numbers (2ec4d221)
+- **view**: correct output format handling for view command (6fe41063)
+
+### 🔧 Other Changes
+
+- **view, indexer**: add line numbers to text signature and searc... (981aeb8d)
+- **docker**: build release without default Cargo features (8d442bc0)
+
+### 📊 Commit Summary
+
+**Total commits**: 5
+- 🐛 3 bug fixes
+- 🔧 2 other changes
+
 ## [0.4.0] - 2025-06-16
 
 ### 📋 Release Summary

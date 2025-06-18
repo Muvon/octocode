@@ -19,7 +19,7 @@ COPY src ./src
 COPY config-templates ./config-templates
 
 # Build the application
-RUN cargo build --release
+RUN cargo build --release --no-default-features
 
 # Stage 2: Runtime
 FROM debian:bookworm-slim

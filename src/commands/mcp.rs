@@ -35,6 +35,10 @@ pub struct McpArgs {
 	/// External LSP server command to launch (e.g., "rust-analyzer", "typescript-language-server --stdio")
 	#[arg(long, value_name = "COMMAND")]
 	pub with_lsp: Option<String>,
+
+	/// Bind to HTTP server on host:port instead of using stdin/stdout (e.g., "0.0.0.0:12345")
+	#[arg(long, value_name = "HOST:PORT")]
+	pub bind: Option<String>,
 }
 
 pub async fn run(args: McpArgs) -> Result<()> {
@@ -64,5 +68,11 @@ pub async fn run(args: McpArgs) -> Result<()> {
 		args.with_lsp,
 	)
 	.await?;
-	server.run().await
+
+	// Check if HTTP binding is requested
+	if let Some(bind_addr) = args.bind {
+		server.run_http(&bind_addr).await
+	} else {
+		server.run().await
+	}
 }

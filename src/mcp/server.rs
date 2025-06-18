@@ -17,7 +17,8 @@ use serde_json::json;
 use std::panic;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
+use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
 use tokio::sync::Mutex;
 use tokio::time::{sleep, Duration, Instant};
@@ -331,6 +332,142 @@ impl McpServer {
 		}
 
 		debug!("MCP Server stopped");
+
+		Ok(())
+	}
+
+	/// Run MCP server over HTTP instead of stdin/stdout
+	pub async fn run_http(&mut self, bind_addr: &str) -> Result<()> {
+		// Set up panic handler to prevent server crashes from tool execution
+		let original_hook = panic::take_hook();
+		panic::set_hook(Box::new(move |panic_info| {
+			log_critical_anyhow_error("Panic in MCP server", &anyhow::anyhow!("{}", panic_info));
+			// Call original hook for debugging
+			original_hook(panic_info);
+		}));
+
+		// Start the file watcher as a completely independent background task
+		self.start_watcher().await?;
+
+		// Parse bind address
+		let addr = bind_addr
+			.parse::<std::net::SocketAddr>()
+			.map_err(|e| anyhow::anyhow!("Invalid bind address '{}': {}", bind_addr, e))?;
+
+		// Log server startup details
+		info!(
+			debug_mode = self.debug,
+			bind_address = %addr,
+			debounce_ms = MCP_DEBOUNCE_MS,
+			timeout_ms = MCP_INDEX_TIMEOUT_MS,
+			max_events = MCP_MAX_PENDING_EVENTS,
+			max_request_size_mb = MCP_MAX_REQUEST_SIZE / 1_048_576,
+			io_timeout_ms = MCP_IO_TIMEOUT_MS,
+			"MCP Server started in HTTP mode"
+		);
+
+		// Get the index receiver for handling indexing requests
+		let mut index_rx = self.index_rx.take().unwrap();
+
+		// Create shared server state for HTTP handlers
+		let server_state = Arc::new(Mutex::new(HttpServerState {
+			semantic_code: self.semantic_code.clone(),
+			graphrag: self.graphrag.clone(),
+			memory: self.memory.clone(),
+			lsp: self.lsp.clone(),
+		}));
+
+		// Start HTTP server
+		let listener = TcpListener::bind(&addr)
+			.await
+			.map_err(|e| anyhow::anyhow!("Failed to bind to {}: {}", addr, e))?;
+
+		info!("MCP HTTP server listening on {}", addr);
+
+		// Clone state for the server task
+		let state_for_server = server_state.clone();
+		let mut server_handle = tokio::spawn(async move {
+			loop {
+				match listener.accept().await {
+					Ok((stream, addr)) => {
+						let state = state_for_server.clone();
+						tokio::spawn(async move {
+							if let Err(e) = handle_http_connection(stream, state).await {
+								debug!("HTTP connection error from {}: {}", addr, e);
+							}
+						});
+					}
+					Err(e) => {
+						log_critical_anyhow_error(
+							"HTTP server accept error",
+							&anyhow::anyhow!("{}", e),
+						);
+						break;
+					}
+				}
+			}
+		});
+
+		// Handle indexing requests from file watcher (runs independently)
+		loop {
+			tokio::select! {
+				Some(_) = index_rx.recv() => {
+					debug!("Processing index request");
+
+					// Additional delay to ensure all file operations are complete
+					sleep(Duration::from_millis(DEFAULT_ADDITIONAL_DELAY_MS)).await;
+
+					// Perform direct indexing with timeout protection
+					let indexing_result = tokio::time::timeout(
+						Duration::from_millis(MCP_INDEX_TIMEOUT_MS),
+						perform_indexing(&self.store, &self.config, &self.working_directory, self.no_git)
+					).await;
+
+					match indexing_result {
+						Ok(Ok(())) => {
+							info!("Reindex completed successfully");
+
+							// Update LSP with changed files if LSP is enabled
+							if let Some(ref lsp_provider) = self.lsp {
+								let mut lsp_guard = lsp_provider.lock().await;
+								if let Err(e) = Self::update_lsp_after_indexing(&mut lsp_guard, &self.working_directory).await {
+									debug!("LSP update after indexing failed: {}", e);
+								}
+							}
+						}
+						Ok(Err(e)) => {
+							log_critical_anyhow_error("Reindex error", &e);
+						}
+						Err(_) => {
+							log_critical_anyhow_error(
+								"Reindex timeout",
+								&anyhow::anyhow!("Reindex timed out after {}ms", MCP_INDEX_TIMEOUT_MS)
+							);
+						}
+					}
+
+					// Always reset the indexing flag, even on error/timeout
+					self.indexing_in_progress.store(false, Ordering::SeqCst);
+				}
+
+				// Check if HTTP server is still running
+				_ = &mut server_handle => {
+					warn!("HTTP server task completed unexpectedly");
+					break;
+				}
+			}
+		}
+
+		// Cleanup: abort background tasks
+		if let Some(handle) = self.watcher_handle.take() {
+			handle.abort();
+		}
+		if let Some(handle) = self.index_handle.take() {
+			handle.abort();
+		}
+		server_handle.abort();
+
+		debug!("MCP HTTP Server stopped");
 
 		Ok(())
 	}
@@ -1102,4 +1239,396 @@ async fn run_watcher(
 	debug!("File watcher stopped");
 
 	Ok(())
+}
+
+// HTTP server types and handlers for MCP over HTTP
+
+/// Shared state for HTTP handlers
+#[derive(Clone)]
+struct HttpServerState {
+	semantic_code: SemanticCodeProvider,
+	graphrag: Option<GraphRagProvider>,
+	memory: Option<MemoryProvider>,
+	lsp: Option<Arc<Mutex<crate::mcp::lsp::LspProvider>>>,
+}
+
+/// Handle a single HTTP connection
+async fn handle_http_connection(
+	mut stream: TcpStream,
+	state: Arc<Mutex<HttpServerState>>,
+) -> Result<()> {
+	let mut buffer = vec![0; 8192];
+	let bytes_read = stream.read(&mut buffer).await?;
+
+	if bytes_read == 0 {
+		return Ok(());
+	}
+
+	let request_str = String::from_utf8_lossy(&buffer[..bytes_read]);
+
+	// Parse HTTP request - simple implementation for MCP over HTTP
+	let mut lines = request_str.lines();
+	let request_line = lines.next().unwrap_or("");
+
+	// Check if it's a POST request to /mcp
+	if !request_line.starts_with("POST /mcp") && !request_line.starts_with("POST / ") {
+		// Send 404 for non-MCP endpoints
+		let response = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n";
+		stream.write_all(response.as_bytes()).await?;
+		return Ok(());
+	}
+
+	// Find content length
+	let mut content_length = 0;
+	let mut body_start = 0;
+
+	for (i, line) in lines.enumerate() {
+		if line.is_empty() {
+			// Calculate where body starts in the original buffer
+			let lines_before_body: Vec<&str> = request_str.lines().take(i + 2).collect();
+			body_start = lines_before_body.join("\n").len() + 1; // +1 for the final \n
+			break;
+		}
+		if line.to_lowercase().starts_with("content-length:") {
+			if let Some(len_str) = line.split(':').nth(1) {
+				content_length = len_str.trim().parse().unwrap_or(0);
+			}
+		}
+	}
+
+	// Extract JSON body
+	let json_body = if content_length > 0 && body_start < bytes_read {
+		let body_bytes =
+			&buffer[body_start..std::cmp::min(body_start + content_length, bytes_read)];
+		String::from_utf8_lossy(body_bytes).to_string()
+	} else {
+		return send_http_error(&mut stream, 400, "Missing or invalid request body").await;
+	};
+
+	// Parse JSON-RPC request
+	let request: JsonRpcRequest = match serde_json::from_str(&json_body) {
+		Ok(req) => req,
+		Err(e) => {
+			debug!("Failed to parse JSON-RPC request: {}", e);
+			return send_http_error(&mut stream, 400, "Invalid JSON-RPC request").await;
+		}
+	};
+
+	// Log the request
+	log_mcp_request(
+		&request.method,
+		request.params.as_ref(),
+		request.id.as_ref(),
+	);
+
+	let start_time = std::time::Instant::now();
+	let request_id = request.id.clone();
+	let request_method = request.method.clone();
+
+	// Get server state
+	let server_state = state.lock().await;
+
+	// Handle the request
+	let response = match request.method.as_str() {
+		"initialize" => handle_initialize_http(&request),
+		"tools/list" => handle_tools_list_http(&request, &server_state),
+		"tools/call" => handle_tools_call_http(&request, &server_state).await,
+		"ping" => handle_ping_http(&request),
+		_ => JsonRpcResponse {
+			jsonrpc: "2.0".to_string(),
+			id: request.id,
+			result: None,
+			error: Some(JsonRpcError {
+				code: -32601,
+				message: "Method not found".to_string(),
+				data: None,
+			}),
+		},
+	};
+
+	// Log the response
+	let duration_ms = start_time.elapsed().as_millis() as u64;
+	log_mcp_response(
+		&request_method,
+		response.error.is_none(),
+		request_id.as_ref(),
+		Some(duration_ms),
+	);
+
+	// Send HTTP response
+	send_http_response(&mut stream, &response).await
+}
+
+/// Send HTTP error response
+async fn send_http_error(stream: &mut TcpStream, status: u16, message: &str) -> Result<()> {
+	let status_text = match status {
+		400 => "Bad Request",
+		404 => "Not Found",
+		500 => "Internal Server Error",
+		_ => "Error",
+	};
+
+	let response = format!(
+		"HTTP/1.1 {} {}\r\nContent-Type: text/plain\r\nContent-Length: {}\r\nAccess-Control-Allow-Origin: *\r\n\r\n{}",
+		status, status_text, message.len(), message
+	);
+
+	stream.write_all(response.as_bytes()).await?;
+	Ok(())
+}
+
+/// Send HTTP JSON-RPC response
+async fn send_http_response(stream: &mut TcpStream, response: &JsonRpcResponse) -> Result<()> {
+	let json_response = serde_json::to_string(response)?;
+
+	let http_response = format!(
+		"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: POST, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type\r\n\r\n{}",
+		json_response.len(),
+		json_response
+	);
+
+	stream.write_all(http_response.as_bytes()).await?;
+	Ok(())
+}
+
+fn handle_initialize_http(request: &JsonRpcRequest) -> JsonRpcResponse {
+	JsonRpcResponse {
+		jsonrpc: "2.0".to_string(),
+		id: request.id.clone(),
+		result: Some(json!({
+			"protocolVersion": "2024-11-05",
+			"capabilities": {
+				"tools": {
+					"listChanged": false
+				}
+			},
+			"serverInfo": {
+				"name": "octocode-mcp",
+				"version": "0.1.0",
+				"description": "Semantic code search server with vector embeddings, memory system, and optional GraphRAG support"
+			},
+			"instructions": "This server provides modular AI tools: semantic code search, memory management, and GraphRAG. Use 'semantic_search' for code/documentation searches, memory tools for storing/retrieving context, and 'graphrag_search' (if available) for relationship queries."
+		})),
+		error: None,
+	}
+}
+
+fn handle_tools_list_http(request: &JsonRpcRequest, state: &HttpServerState) -> JsonRpcResponse {
+	let mut tools = vec![
+		SemanticCodeProvider::get_tool_definition(),
+		SemanticCodeProvider::get_view_signatures_tool_definition(),
+	];
+
+	// Add memory tools if available
+	if state.memory.is_some() {
+		tools.extend(MemoryProvider::get_tool_definitions());
+	}
+
+	// Add GraphRAG tools if available
+	if state.graphrag.is_some() {
+		tools.push(GraphRagProvider::get_tool_definition());
+	}
+
+	// Add LSP tools if LSP provider is configured
+	if state.lsp.is_some() {
+		tools.extend(crate::mcp::lsp::LspProvider::get_tool_definitions());
+	}
+
+	JsonRpcResponse {
+		jsonrpc: "2.0".to_string(),
+		id: request.id.clone(),
+		result: Some(json!({
+			"tools": tools
+		})),
+		error: None,
+	}
+}
+
+async fn handle_tools_call_http(
+	request: &JsonRpcRequest,
+	state: &HttpServerState,
+) -> JsonRpcResponse {
+	let params = match &request.params {
+		Some(params) => params,
+		None => {
+			return JsonRpcResponse {
+				jsonrpc: "2.0".to_string(),
+				id: request.id.clone(),
+				result: None,
+				error: Some(JsonRpcError {
+					code: -32602,
+					message: "Invalid params: missing parameters object".to_string(),
+					data: Some(json!({
+						"details": "Tool calls require a 'params' object with 'name' and 'arguments' fields"
+					})),
+				}),
+			};
+		}
+	};
+
+	let tool_name = match params.get("name").and_then(|v| v.as_str()) {
+		Some(name) => name,
+		None => {
+			return JsonRpcResponse {
+				jsonrpc: "2.0".to_string(),
+				id: request.id.clone(),
+				result: None,
+				error: Some(JsonRpcError {
+					code: -32602,
+					message: "Invalid params: missing tool name".to_string(),
+					data: Some(json!({
+						"details": "Required field 'name' must be provided with the tool name to call"
+					})),
+				}),
+			};
+		}
+	};
+
+	let default_args = json!({});
+	let arguments = params.get("arguments").unwrap_or(&default_args);
+
+	// Validate arguments size to prevent memory exhaustion
+	if let Ok(args_str) = serde_json::to_string(arguments) {
+		if args_str.len() > MCP_MAX_REQUEST_SIZE {
+			return JsonRpcResponse {
+				jsonrpc: "2.0".to_string(),
+				id: request.id.clone(),
+				result: None,
+				error: Some(JsonRpcError {
+					code: -32602,
+					message: "Tool arguments too large".to_string(),
+					data: Some(json!({
+						"max_size": MCP_MAX_REQUEST_SIZE,
+						"actual_size": args_str.len()
+					})),
+				}),
+			};
+		}
+	}
+
+	let result = match tool_name {
+		"semantic_search" => state.semantic_code.execute_search(arguments).await,
+		"view_signatures" => state.semantic_code.execute_view_signatures(arguments).await,
+		"graphrag_search" => match &state.graphrag {
+			Some(provider) => provider.execute_search(arguments).await,
+			None => Err(anyhow::anyhow!("GraphRAG is not enabled in the current configuration. Please enable GraphRAG in octocode.toml to use relationship-aware search.")),
+		},
+		"memorize" => match &state.memory {
+			Some(provider) => provider.execute_memorize(arguments).await,
+			None => Err(anyhow::anyhow!("Memory system is not available")),
+		},
+		"remember" => match &state.memory {
+			Some(provider) => provider.execute_remember(arguments).await,
+			None => Err(anyhow::anyhow!("Memory system is not available")),
+		},
+		"forget" => match &state.memory {
+			Some(provider) => provider.execute_forget(arguments).await,
+			None => Err(anyhow::anyhow!("Memory system is not available")),
+		},
+		// LSP tools
+		"lsp_goto_definition" => match &state.lsp {
+			Some(provider) => {
+				let mut lsp_guard = provider.lock().await;
+				lsp_guard.execute_goto_definition(arguments).await
+			},
+			None => Err(anyhow::anyhow!("LSP server is not available. Start MCP server with --with-lsp=\"<command>\" to enable LSP features.")),
+		},
+		"lsp_hover" => match &state.lsp {
+			Some(provider) => {
+				let mut lsp_guard = provider.lock().await;
+				lsp_guard.execute_hover(arguments).await
+			},
+			None => Err(anyhow::anyhow!("LSP server is not available. Start MCP server with --with-lsp=\"<command>\" to enable LSP features.")),
+		},
+		"lsp_find_references" => match &state.lsp {
+			Some(provider) => {
+				let mut lsp_guard = provider.lock().await;
+				lsp_guard.execute_find_references(arguments).await
+			},
+			None => Err(anyhow::anyhow!("LSP server is not available. Start MCP server with --with-lsp=\"<command>\" to enable LSP features.")),
+		},
+		"lsp_document_symbols" => match &state.lsp {
+			Some(provider) => {
+				let mut lsp_guard = provider.lock().await;
+				lsp_guard.execute_document_symbols(arguments).await
+			},
+			None => Err(anyhow::anyhow!("LSP server is not available. Start MCP server with --with-lsp=\"<command>\" to enable LSP features.")),
+		},
+		"lsp_workspace_symbols" => match &state.lsp {
+			Some(provider) => {
+				let mut lsp_guard = provider.lock().await;
+				lsp_guard.execute_workspace_symbols(arguments).await
+			},
+			None => Err(anyhow::anyhow!("LSP server is not available. Start MCP server with --with-lsp=\"<command>\" to enable LSP features.")),
+		},
+		"lsp_completion" => match &state.lsp {
+			Some(provider) => {
+				let mut lsp_guard = provider.lock().await;
+				lsp_guard.execute_completion(arguments).await
+			},
+			None => Err(anyhow::anyhow!("LSP server is not available. Start MCP server with --with-lsp=\"<command>\" to enable LSP features.")),
+		},
+		_ => {
+			let available_tools = format!("semantic_search, view_signatures{}{}{}",
+				if state.graphrag.is_some() { ", graphrag_search" } else { "" },
+				if state.memory.is_some() { ", memorize, remember, forget" } else { "" },
+				if state.lsp.is_some() { ", lsp_goto_definition, lsp_hover, lsp_find_references, lsp_document_symbols, lsp_workspace_symbols, lsp_completion" } else { "" }
+			);
+			Err(anyhow::anyhow!("Unknown tool '{}'. Available tools: {}", tool_name, available_tools))
+		}
+	};
+
+	match result {
+		Ok(content) => JsonRpcResponse {
+			jsonrpc: "2.0".to_string(),
+			id: request.id.clone(),
+			result: Some(json!({
+				"content": [{
+					"type": "text",
+					"text": content
+				}]
+			})),
+			error: None,
+		},
+		Err(e) => {
+			let error_message = e.to_string();
+			let error_code =
+				if error_message.contains("Missing") || error_message.contains("Invalid") {
+					-32602 // Invalid params
+				} else if error_message.contains("not enabled")
+					|| error_message.contains("not available")
+				{
+					-32601 // Method not found (feature not available)
+				} else {
+					-32603 // Internal error
+				};
+
+			JsonRpcResponse {
+				jsonrpc: "2.0".to_string(),
+				id: request.id.clone(),
+				result: None,
+				error: Some(JsonRpcError {
+					code: error_code,
+					message: format!("Tool execution failed: {}", error_message),
+					data: Some(json!({
+						"tool": tool_name,
+						"error_type": match error_code {
+							-32602 => "invalid_params",
+							-32601 => "feature_unavailable",
+							_ => "execution_error"
+						}
+					})),
+				}),
+			}
+		}
+	}
+}
+
+fn handle_ping_http(request: &JsonRpcRequest) -> JsonRpcResponse {
+	JsonRpcResponse {
+		jsonrpc: "2.0".to_string(),
+		id: request.id.clone(),
+		result: Some(json!({})),
+		error: None,
+	}
 }

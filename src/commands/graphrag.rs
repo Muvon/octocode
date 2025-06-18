@@ -129,8 +129,16 @@ pub async fn execute(
 				// Use markdown format
 				let markdown = indexer::graphrag::graphrag_nodes_to_markdown(&nodes);
 				println!("{}", markdown);
+			} else if args.format.is_text() {
+				// Use minimal text format for token efficiency
+				let text_output = indexer::graphrag::graphrag_nodes_to_text(&nodes);
+				println!("{}", text_output);
+			} else if args.format.is_cli() {
+				// CLI format - use the rich text format
+				let text_output = indexer::graphrag::graphrag_nodes_to_text(&nodes);
+				println!("{}", text_output);
 			} else {
-				// Use default text format
+				// Fallback to CLI format
 				let text_output = indexer::graphrag::graphrag_nodes_to_text(&nodes);
 				println!("{}", text_output);
 			}

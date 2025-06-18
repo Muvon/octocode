@@ -26,6 +26,7 @@ pub mod graphrag;
 pub mod logging;
 pub mod lsp;
 pub mod memory;
+pub mod proxy;
 pub mod semantic_code;
 pub mod server;
 pub mod types;

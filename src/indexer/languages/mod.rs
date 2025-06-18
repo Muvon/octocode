@@ -20,6 +20,7 @@ use tree_sitter::Node;
 // Import all language modules
 mod bash;
 mod cpp;
+mod css;
 mod go;
 mod javascript;
 mod json;
@@ -33,6 +34,7 @@ mod typescript;
 // Re-export language modules
 pub use bash::Bash;
 pub use cpp::Cpp;
+pub use css::Css;
 pub use go::Go;
 pub use javascript::JavaScript;
 pub use json::Json;
@@ -105,6 +107,7 @@ pub fn get_language(name: &str) -> Option<Box<dyn Language>> {
 		"ruby" => Some(Box::new(Ruby {})),
 		"json" => Some(Box::new(Json {})),
 		"svelte" => Some(Box::new(Svelte {})),
+		"css" => Some(Box::new(Css {})),
 		_ => None,
 	}
 }

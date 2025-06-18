@@ -33,6 +33,7 @@ pub use utils::{
 use crate::config::Config;
 use anyhow::Result;
 
+#[derive(Clone)]
 pub struct GraphRAG {
 	config: Config,
 }

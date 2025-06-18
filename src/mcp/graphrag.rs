@@ -21,6 +21,7 @@ use crate::indexer::graphrag::GraphRAG;
 use crate::mcp::types::McpTool;
 
 /// GraphRAG tool provider
+#[derive(Clone)]
 pub struct GraphRagProvider {
 	graphrag: GraphRAG,
 	working_directory: std::path::PathBuf,

@@ -177,6 +177,10 @@ octocode mcp --path /path/to/your/project --with-lsp "typescript-language-server
 # Use with Claude Desktop or other MCP-compatible tools
 # Provides: semantic_search, graphrag_search, memorize, remember, forget
 # With LSP: lsp_goto_definition, lsp_hover, lsp_find_references, lsp_completion
+
+# MCP Proxy Server - manage multiple repositories (NEW!)
+octocode mcp-proxy --bind "127.0.0.1:8080" --path /path/to/parent/directory
+# Automatically discovers git repositories and creates MCP instances for each
 ```
 
 ### 5. Multi-Query Search (NEW!)
@@ -224,6 +228,53 @@ octocode commit --no-verify
 # - AI commit message generated after pre-commit completes
 ```
 
+### 7. Code Formatting (NEW!)
+```bash
+# Format code according to .editorconfig rules
+octocode format
+
+# Preview changes without applying
+octocode format --dry-run
+
+# Format specific files
+octocode format src/main.rs src/lib.rs
+
+# Format and commit changes
+octocode format --commit
+
+# Verbose output
+octocode format --verbose
+```
+
+### 8. Log Management (NEW!)
+```bash
+# View MCP server logs for current project
+octocode logs
+
+# Follow logs in real-time
+octocode logs --follow
+
+# Show only error logs
+octocode logs --errors-only
+
+# Show more/less lines
+octocode logs --lines 50
+
+# View logs for all projects
+octocode logs --all
+```
+
+### 9. Shell Completions (NEW!)
+```bash
+# Generate completions for your shell
+octocode completion bash > ~/.bash_completion.d/octocode
+octocode completion zsh > ~/.zsh/completions/_octocode
+octocode completion fish > ~/.config/fish/completions/octocode.fish
+
+# Or install directly (requires make)
+make install-completions
+```
+
 **Pre-commit Integration Features:**
 - **Smart Detection**: Automatically detects pre-commit availability and configuration
 - **Intelligent Execution**: Uses `--all-files` when `--all` flag is specified
@@ -265,6 +316,20 @@ octocode graphrag search --query "authentication modules"
 octocode watch
 ```
 
+### 9. Utility Commands (NEW!)
+```bash
+# Clear database tables (useful for debugging)
+octocode clear --all
+
+# Clear specific collections
+octocode clear --documents
+octocode clear --graphs
+octocode clear --memories
+
+# Confirm deletion
+octocode clear --all --yes
+```
+
 ## 📋 Command Reference
 
 | Command | Description | Example |
@@ -278,8 +343,13 @@ octocode watch
 | `octocode release` | AI-powered release management | `octocode release --dry-run` |
 | `octocode memory <operation>` | Memory management | `octocode memory remember "auth bugs"` |
 | `octocode mcp` | Start MCP server | `octocode mcp --with-lsp "rust-analyzer"` |
+| `octocode mcp-proxy` | Start MCP proxy server for multiple repos | `octocode mcp-proxy --bind "127.0.0.1:8080"` |
+| `octocode format` | Format code according to .editorconfig rules | `octocode format --dry-run` |
+| `octocode logs` | View MCP server logs | `octocode logs --follow` |
 | `octocode watch` | Auto-index on changes | `octocode watch --quiet` |
 | `octocode config` | Manage configuration | `octocode config --show` |
+| `octocode clear` | Clear database tables | `octocode clear --all` |
+| `octocode completion <shell>` | Generate shell completion scripts | `octocode completion bash` |
 
 ## 🧠 Memory Management
 

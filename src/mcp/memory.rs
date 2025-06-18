@@ -26,6 +26,7 @@ use crate::mcp::types::McpTool;
 use crate::memory::{MemoryManager, MemoryQuery, MemoryType};
 
 /// Memory tools provider
+#[derive(Clone)]
 pub struct MemoryProvider {
 	memory_manager: Arc<Mutex<MemoryManager>>,
 	working_directory: std::path::PathBuf,

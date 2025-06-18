@@ -43,6 +43,17 @@ if should_process_batch(&blocks_batch, |b| &b.content, config) {
 - `src/commands/` - CLI command implementations
 - `src/mcp/` - Model Context Protocol server
 
+### MCP Server Modes
+- **Stdin Mode** (default): Standard MCP protocol over stdin/stdout for AI assistant integration
+- **HTTP Mode** (`--bind=host:port`): HTTP server for web-based integrations and testing
+  ```bash
+  # Stdin mode (default)
+  octocode mcp --path=/path/to/project
+
+  # HTTP mode
+  octocode mcp --bind=0.0.0.0:12345 --path=/path/to/project
+  ```
+
 ### Key Files
 - `config-templates/default.toml` - Single source of configuration truth
 - `src/config.rs` - Config loading with template fallback
@@ -62,6 +73,13 @@ if should_process_batch(&blocks_batch, |b| &b.content, config) {
 2. Add defaults in `Default` impl
 3. **MANDATORY**: Update `config-templates/default.toml`
 4. Add validation if needed
+
+### Adding MCP Server Features
+1. **Stdin Mode**: Default mode for AI assistant integration
+2. **HTTP Mode**: Add `--bind=host:port` for web-based access
+3. **Tool Providers**: Implement in `src/mcp/{provider}.rs` with Clone trait
+4. **Request Handling**: Use existing pattern for both stdin and HTTP modes
+5. **State Management**: Use `Arc<Mutex<>>` for shared state across async handlers
 
 ### File Processing Pipeline
 1. `create_walker()` - Respects .gitignore/.noindex
@@ -124,3 +142,42 @@ let walker = NoindexWalker::create_walker(&current_dir).build();
 4. **Batch Processing**: Use established batch sizes and flush cycles
 5. **Git Integration**: Leverage commit-based optimization
 6. **Test Incrementally**: Use watch mode for development iteration
+
+## Development Best Practices
+
+### Fast Development Workflow
+- **Use `--no-default-features`** for faster cargo builds during development:
+  ```bash
+  cargo check --no-default-features
+  cargo build --no-default-features
+  cargo test --no-default-features
+  ```
+- **Always run clippy** before finalizing code to ensure clean, warning-free code:
+  ```bash
+  cargo clippy --all-features --all-targets -- -D warnings
+  ```
+- **Prefer tokio primitives** over external dependencies when possible (e.g., use tokio for HTTP instead of axum)
+
+### Code Quality Standards
+- **Zero clippy warnings** - All code must pass `cargo clippy` without warnings
+- **Minimal dependencies** - Reuse existing dependencies before adding new ones
+- **Clone trait** - Add `#[derive(Clone)]` to structs that need to be shared across async contexts
+- **Error handling** - Use proper `Result<T>` types and meaningful error messages
+
+### MCP Server Development
+- **Stdin mode** (default): Use for standard MCP protocol compliance
+- **HTTP mode** (`--bind=host:port`): Use for web-based integrations
+- **Pure tokio** implementation for HTTP to avoid unnecessary dependencies
+- **CORS headers** included for browser compatibility
+
+### Testing Approach
+- **Unit tests** for individual components
+- **Integration tests** for full workflows
+- **Manual testing** with real projects during development
+- **HTTP endpoint testing** using curl or similar tools
+
+### Architecture Decisions
+- **Configuration-first** - All features configurable via `config-templates/default.toml`
+- **Modular providers** - Each tool provider (semantic search, GraphRAG, memory, LSP) is independent
+- **Async-first** - Use tokio throughout for non-blocking operations
+- **Error resilience** - Graceful degradation when optional features fail

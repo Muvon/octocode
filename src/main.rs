@@ -56,6 +56,10 @@ enum Commands {
 	/// Start MCP (Model Context Protocol) server
 	Mcp(commands::McpArgs),
 
+	/// Start MCP proxy server for multiple repositories
+	#[command(name = "mcp-proxy")]
+	McpProxy(commands::McpProxyArgs),
+
 	/// Memory management for storing and retrieving information
 	Memory(commands::MemoryArgs),
 
@@ -100,6 +104,11 @@ async fn main() -> Result<(), anyhow::Error> {
 	// Handle the MCP command separately (doesn't need store)
 	if let Commands::Mcp(mcp_args) = &args.command {
 		return commands::mcp::run(mcp_args.clone()).await;
+	}
+
+	// Handle the MCP Proxy command separately (doesn't need store)
+	if let Commands::McpProxy(mcp_proxy_args) = &args.command {
+		return commands::mcp_proxy::run(mcp_proxy_args.clone()).await;
 	}
 
 	// Handle the Commit command separately (doesn't need store)
@@ -162,6 +171,7 @@ async fn main() -> Result<(), anyhow::Error> {
 		Commands::Clear(clear_args) => commands::clear::execute(&store, clear_args).await?,
 		Commands::Config(_) => unreachable!(), // Already handled above
 		Commands::Mcp(_) => unreachable!(),    // Already handled above
+		Commands::McpProxy(_) => unreachable!(), // Already handled above
 		Commands::Commit(_) => unreachable!(), // Already handled above
 		Commands::Review(_) => unreachable!(), // Already handled above
 		Commands::Release(_) => unreachable!(), // Already handled above

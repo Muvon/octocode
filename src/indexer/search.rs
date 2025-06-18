@@ -672,7 +672,7 @@ pub fn format_code_search_results_as_text(blocks: &[CodeBlock], detail_level: &s
 
 	for (idx, block) in blocks.iter().enumerate() {
 		output.push_str(&format!("{}. {}\n", idx + 1, block.path));
-		output.push_str(&format!("Lines {}-{}", block.start_line, block.end_line));
+		// output.push_str(&format!("{}-{}", block.start_line + 1, block.end_line + 1));
 
 		if let Some(distance) = block.distance {
 			output.push_str(&format!(" | Similarity {:.3}", 1.0 - distance));
@@ -702,14 +702,25 @@ pub fn format_code_search_results_as_text(blocks: &[CodeBlock], detail_level: &s
 				let preview = get_code_preview(&block.content, &block.language);
 				if !preview.is_empty() {
 					if let Some(first_line) = preview.lines().next() {
-						output.push_str(&format!("{}\n", first_line.trim()));
+						output.push_str(&format!(
+							"{}: {}\n",
+							block.start_line + 1,
+							first_line.trim()
+						));
 					}
 				}
 			}
 			"partial" | "full" => {
-				// Full content as-is without truncation
-				output.push_str(&block.content);
-				if !block.content.ends_with('\n') {
+				// Full content with line numbers
+				let content_with_lines = block
+					.content
+					.lines()
+					.enumerate()
+					.map(|(i, line)| format!("{}: {}", block.start_line + 1 + i, line))
+					.collect::<Vec<_>>()
+					.join("\n");
+				output.push_str(&content_with_lines);
+				if !content_with_lines.ends_with('\n') {
 					output.push('\n');
 				}
 			}
@@ -732,16 +743,23 @@ pub fn format_text_search_results_as_text(blocks: &[crate::store::TextBlock]) ->
 
 	for (idx, block) in blocks.iter().enumerate() {
 		output.push_str(&format!("{}. {}\n", idx + 1, block.path));
-		output.push_str(&format!("Lines {}-{}", block.start_line, block.end_line));
+		// output.push_str(&format!("{}-{}", block.start_line + 1, block.end_line + 1));
 
 		if let Some(distance) = block.distance {
 			output.push_str(&format!(" | Similarity {:.3}", 1.0 - distance));
 		}
 		output.push('\n');
 
-		// Add content as-is without truncation
-		output.push_str(&block.content);
-		if !block.content.ends_with('\n') {
+		// Add content with line numbers
+		let content_with_lines = block
+			.content
+			.lines()
+			.enumerate()
+			.map(|(i, line)| format!("{}: {}", block.start_line + 1 + i, line))
+			.collect::<Vec<_>>()
+			.join("\n");
+		output.push_str(&content_with_lines);
+		if !content_with_lines.ends_with('\n') {
 			output.push('\n');
 		}
 		output.push('\n');
@@ -762,16 +780,27 @@ pub fn format_doc_search_results_as_text(blocks: &[crate::store::DocumentBlock])
 	for (idx, block) in blocks.iter().enumerate() {
 		output.push_str(&format!("{}. {}\n", idx + 1, block.path));
 		output.push_str(&format!("{} (Level {})", block.title, block.level));
-		output.push_str(&format!(" | Lines {}-{}", block.start_line, block.end_line));
+		output.push_str(&format!(
+			" | {}-{}",
+			block.start_line + 1,
+			block.end_line + 1
+		));
 
 		if let Some(distance) = block.distance {
 			output.push_str(&format!(" | Similarity {:.3}", 1.0 - distance));
 		}
 		output.push('\n');
 
-		// Add content as-is without truncation
-		output.push_str(&block.content);
-		if !block.content.ends_with('\n') {
+		// Add content with line numbers
+		let content_with_lines = block
+			.content
+			.lines()
+			.enumerate()
+			.map(|(i, line)| format!("{}: {}", block.start_line + 1 + i, line))
+			.collect::<Vec<_>>()
+			.join("\n");
+		output.push_str(&content_with_lines);
+		if !content_with_lines.ends_with('\n') {
 			output.push('\n');
 		}
 		output.push('\n');
