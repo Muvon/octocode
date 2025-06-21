@@ -37,7 +37,7 @@ pub fn truncate_content_smartly(content: &str, max_characters: usize) -> (String
 		let end_part: String = chars.iter().skip(chars.len() - show_end).collect();
 
 		let truncated = format!(
-			"{}\\n[... {} characters omitted ...]\\n{}",
+			"{}\n[... {} characters omitted ...]\n{}",
 			start_part.trim_end(),
 			chars.len() - show_start - show_end,
 			end_part.trim_start()
@@ -102,7 +102,7 @@ pub fn truncate_content_smartly(content: &str, max_characters: usize) -> (String
 
 	// Add truncation message
 	if omitted_lines > 0 {
-		result.push_str(&format!("[... {} more lines ...]\\n", omitted_lines));
+		result.push_str(&format!("[... {} more lines ...]\n", omitted_lines));
 	}
 
 	// Add end lines
@@ -129,22 +129,22 @@ pub fn signatures_to_markdown(signatures: &[FileSignature]) -> String {
 	}
 
 	markdown.push_str(&format!(
-		"# Found signatures in {} files\\n\\n",
+		"# Found signatures in {} files\n\n",
 		signatures.len()
 	));
 
 	for file in signatures {
 		markdown.push_str(&format!("## File: {}\n", file.path));
-		markdown.push_str(&format!("**Language:** {}\n\\n", file.language));
+		markdown.push_str(&format!("**Language:** {}\n\n", file.language));
 
 		// Show file comment if available
 		if let Some(comment) = &file.file_comment {
-			markdown.push_str("### File description\\n");
-			markdown.push_str(&format!("> {}\n\\n", comment.replace("\\n", "\\n> ")));
+			markdown.push_str("### File description\n");
+			markdown.push_str(&format!("> {}\n\n", comment.replace("\n", "\n> ")));
 		}
 
 		if file.signatures.is_empty() {
-			markdown.push_str("*No signatures found in this file.*\\n\\n");
+			markdown.push_str("*No signatures found in this file.*\n\n");
 		} else {
 			for signature in &file.signatures {
 				// Display line range if it spans multiple lines, otherwise just the start line
@@ -155,13 +155,13 @@ pub fn signatures_to_markdown(signatures: &[FileSignature]) -> String {
 				};
 
 				markdown.push_str(&format!(
-					"### {} `{}` (line {})\\n",
+					"### {} `{}` (line {})\n",
 					signature.kind, signature.name, line_display
 				));
 
 				// Show description if available
 				if let Some(desc) = &signature.description {
-					markdown.push_str(&format!("> {}\n\\n", desc.replace("\\n", "\\n> ")));
+					markdown.push_str(&format!("> {}\n\n", desc.replace("\n", "\n> ")));
 				}
 
 				// Format the signature for display
@@ -175,25 +175,29 @@ pub fn signatures_to_markdown(signatures: &[FileSignature]) -> String {
 
 				let lines = signature.signature.lines().collect::<Vec<_>>();
 				if lines.len() > 5 {
-					// Show first 5 lines only to conserve tokens
-					for line in lines.iter().take(5) {
+					// Show first 2 lines and last 2 lines to maintain context
+					for line in lines.iter().take(2) {
 						markdown.push_str(line.as_ref());
 						markdown.push('\n');
 					}
 					// If signature is too long, note how many lines are omitted
-					markdown.push_str(&format!("// ... {} more lines\\n", lines.len() - 5));
+					markdown.push_str(&format!("// ... {} more lines\n", lines.len() - 4));
+					for line in lines.iter().skip(lines.len() - 2) {
+						markdown.push_str(line.as_ref());
+						markdown.push('\n');
+					}
 				} else {
 					for line in &lines {
 						markdown.push_str(line.as_ref());
 						markdown.push('\n');
 					}
 				}
-				markdown.push_str("```\\n\\n");
+				markdown.push_str("```\n\n");
 			}
 		}
 
 		// Add spacing between files
-		markdown.push_str("---\\n\\n");
+		markdown.push_str("---\n\n");
 	}
 
 	markdown
@@ -237,17 +241,43 @@ pub fn render_signatures_text(signatures: &[FileSignature]) -> String {
 
 				// Show description if available
 				if let Some(desc) = &signature.description {
-					output.push_str(&format!("Description: {}\n", desc.replace('\n', " ")));
+					output.push_str(&format!("// {}\n", desc.replace('\n', " ")));
 				}
 
-				// Add signature content with line numbers
-				let content_with_lines = signature
-					.signature
-					.lines()
-					.enumerate()
-					.map(|(i, line)| format!("{}: {}", signature.start_line + 1 + i, line))
-					.collect::<Vec<_>>()
-					.join("\n");
+				// Add signature content with line numbers (smart truncation showing first and last lines)
+				let lines = signature.signature.lines().collect::<Vec<_>>();
+				let content_with_lines = if lines.len() > 5 {
+					// Show first 2 lines, then "...", then last 2 lines to maintain context
+					let first_lines: Vec<String> = lines
+						.iter()
+						.take(2)
+						.enumerate()
+						.map(|(i, line)| format!("{}: {}", signature.start_line + 1 + i, line))
+						.collect();
+
+					let last_lines: Vec<String> = lines
+						.iter()
+						.skip(lines.len() - 2)
+						.enumerate()
+						.map(|(i, line)| {
+							let line_num = signature.start_line + 1 + (lines.len() - 2) + i;
+							format!("{}: {}", line_num, line)
+						})
+						.collect();
+
+					let mut result = first_lines.join("\n");
+					result.push_str(&format!("\n// ... {} more lines", lines.len() - 4));
+					result.push('\n');
+					result.push_str(&last_lines.join("\n"));
+					result
+				} else {
+					lines
+						.iter()
+						.enumerate()
+						.map(|(i, line)| format!("{}: {}", signature.start_line + 1 + i, line))
+						.collect::<Vec<_>>()
+						.join("\n")
+				};
 				output.push_str(&content_with_lines);
 				if !content_with_lines.ends_with('\n') {
 					output.push('\n');
@@ -275,7 +305,7 @@ pub fn code_blocks_to_markdown_with_config(blocks: &[CodeBlock], config: &Config
 		return markdown;
 	}
 
-	markdown.push_str(&format!("# Found {} code blocks\\n\\n", blocks.len()));
+	markdown.push_str(&format!("# Found {} code blocks\n\n", blocks.len()));
 
 	// Group blocks by file path for better organization
 	let mut blocks_by_file: std::collections::HashMap<String, Vec<&CodeBlock>> =
@@ -290,7 +320,7 @@ pub fn code_blocks_to_markdown_with_config(blocks: &[CodeBlock], config: &Config
 
 	// Print results organized by file
 	for (file_path, file_blocks) in blocks_by_file.iter() {
-		markdown.push_str(&format!("## File: {}\n\\n", file_path));
+		markdown.push_str(&format!("## File: {}\n\n", file_path));
 
 		for (idx, block) in file_blocks.iter().enumerate() {
 			markdown.push_str(&format!("### Block {} of {}\n", idx + 1, file_blocks.len()));
@@ -307,7 +337,7 @@ pub fn code_blocks_to_markdown_with_config(blocks: &[CodeBlock], config: &Config
 			markdown.push('\n');
 
 			if !block.symbols.is_empty() {
-				markdown.push_str("**Symbols:**  \\n");
+				markdown.push_str("**Symbols:**  \n");
 				// Deduplicate symbols in display
 				let mut display_symbols = block.symbols.clone();
 				display_symbols.sort();
@@ -316,7 +346,7 @@ pub fn code_blocks_to_markdown_with_config(blocks: &[CodeBlock], config: &Config
 				for symbol in display_symbols {
 					// Only show non-type symbols to users
 					if !symbol.contains("_") {
-						markdown.push_str(&format!("- `{}`  \\n", symbol));
+						markdown.push_str(&format!("- `{}`  \n", symbol));
 					}
 				}
 			}
@@ -340,15 +370,15 @@ pub fn code_blocks_to_markdown_with_config(blocks: &[CodeBlock], config: &Config
 			// Add note if content was truncated
 			if was_truncated {
 				markdown.push_str(&format!(
-					"// Content truncated (limit: {} chars)\\n",
+					"// Content truncated (limit: {} chars)\n",
 					max_chars
 				));
 			}
 
-			markdown.push_str("```\\n\\n");
+			markdown.push_str("```\n\n");
 		}
 
-		markdown.push_str("---\\n\\n");
+		markdown.push_str("---\n\n");
 	}
 
 	markdown
@@ -368,7 +398,7 @@ pub fn text_blocks_to_markdown_with_config(blocks: &[TextBlock], config: &Config
 		return markdown;
 	}
 
-	markdown.push_str(&format!("# Found {} text blocks\\n\\n", blocks.len()));
+	markdown.push_str(&format!("# Found {} text blocks\n\n", blocks.len()));
 
 	// Group blocks by file path for better organization
 	let mut blocks_by_file: std::collections::HashMap<String, Vec<&TextBlock>> =
@@ -383,7 +413,7 @@ pub fn text_blocks_to_markdown_with_config(blocks: &[TextBlock], config: &Config
 
 	// Print results organized by file
 	for (file_path, file_blocks) in blocks_by_file.iter() {
-		markdown.push_str(&format!("## File: {}\n\\n", file_path));
+		markdown.push_str(&format!("## File: {}\n\n", file_path));
 
 		for (idx, block) in file_blocks.iter().enumerate() {
 			markdown.push_str(&format!("### Block {} of {}\n", idx + 1, file_blocks.len()));
@@ -397,7 +427,7 @@ pub fn text_blocks_to_markdown_with_config(blocks: &[TextBlock], config: &Config
 			if let Some(distance) = block.distance {
 				markdown.push_str(&format!("**Relevance:** {:.4}  ", 1.0 - distance));
 			}
-			markdown.push_str("\\n\\n");
+			markdown.push_str("\n\n");
 
 			// Use smart truncation based on configuration
 			let max_chars = config.search.search_block_max_characters;
@@ -411,7 +441,7 @@ pub fn text_blocks_to_markdown_with_config(blocks: &[TextBlock], config: &Config
 			// Add note if content was truncated
 			if was_truncated {
 				markdown.push_str(&format!(
-					"\\n*Content truncated (limit: {} chars)*\\n",
+					"\n*Content truncated (limit: {} chars)*\n",
 					max_chars
 				));
 			}
@@ -419,7 +449,7 @@ pub fn text_blocks_to_markdown_with_config(blocks: &[TextBlock], config: &Config
 			markdown.push('\n');
 		}
 
-		markdown.push_str("---\\n\\n");
+		markdown.push_str("---\n\n");
 	}
 
 	markdown
@@ -443,7 +473,7 @@ pub fn document_blocks_to_markdown_with_config(
 	}
 
 	markdown.push_str(&format!(
-		"# Found {} documentation sections\\n\\n",
+		"# Found {} documentation sections\n\n",
 		blocks.len()
 	));
 
@@ -460,11 +490,11 @@ pub fn document_blocks_to_markdown_with_config(
 
 	// Print results organized by file
 	for (file_path, file_blocks) in blocks_by_file.iter() {
-		markdown.push_str(&format!("## File: {}\n\\n", file_path));
+		markdown.push_str(&format!("## File: {}\n\n", file_path));
 
 		for (idx, block) in file_blocks.iter().enumerate() {
 			markdown.push_str(&format!(
-				"### {} (Section {} of {})\\n",
+				"### {} (Section {} of {})\n",
 				block.title,
 				idx + 1,
 				file_blocks.len()
@@ -479,7 +509,7 @@ pub fn document_blocks_to_markdown_with_config(
 			if let Some(distance) = block.distance {
 				markdown.push_str(&format!("**Relevance:** {:.4}  ", 1.0 - distance));
 			}
-			markdown.push_str("\\n\\n");
+			markdown.push_str("\n\n");
 
 			// Use smart truncation based on configuration
 			let max_chars = config.search.search_block_max_characters;
@@ -493,7 +523,7 @@ pub fn document_blocks_to_markdown_with_config(
 			// Add note if content was truncated
 			if was_truncated {
 				markdown.push_str(&format!(
-					"\\n*Content truncated (limit: {} chars)*\\n",
+					"\n*Content truncated (limit: {} chars)*\n",
 					max_chars
 				));
 			}
@@ -501,7 +531,7 @@ pub fn document_blocks_to_markdown_with_config(
 			markdown.push('\n');
 		}
 
-		markdown.push_str("---\\n\\n");
+		markdown.push_str("---\n\n");
 	}
 
 	markdown
@@ -514,7 +544,7 @@ pub fn render_signatures_cli(signatures: &[FileSignature]) {
 		return;
 	}
 
-	println!("Found signatures in {} files:\\n", signatures.len());
+	println!("Found signatures in {} files:\n", signatures.len());
 
 	for file in signatures {
 		println!("╔══════════════════ File: {} ══════════════════", file.path);
@@ -561,21 +591,35 @@ pub fn render_signatures_cli(signatures: &[FileSignature]) {
 				let lines = signature.signature.lines().collect::<Vec<_>>();
 				if lines.len() > 1 {
 					println!("║ ┌────────────────────────────────────");
-					for line in lines.iter().take(5) {
-						println!("║ │ {}", line);
-					}
-					// If signature is too long, truncate it
 					if lines.len() > 5 {
-						println!("║ │ ... ({} more lines)", lines.len() - 5);
+						// Show first 2 lines with line numbers
+						for (i, line) in lines.iter().take(2).enumerate() {
+							let line_num = signature.start_line + 1 + i;
+							println!("║ │ {}: {}", line_num, line);
+						}
+						// Show truncation message
+						println!("║ │ // ... {} more lines", lines.len() - 4);
+						// Show last 2 lines with line numbers
+						for (i, line) in lines.iter().skip(lines.len() - 2).enumerate() {
+							let line_num = signature.start_line + 1 + (lines.len() - 2) + i;
+							println!("║ │ {}: {}", line_num, line);
+						}
+					} else {
+						// Show all lines with line numbers for short signatures
+						for (i, line) in lines.iter().enumerate() {
+							let line_num = signature.start_line + 1 + i;
+							println!("║ │ {}: {}", line_num, line);
+						}
 					}
 					println!("║ └────────────────────────────────────");
 				} else if !lines.is_empty() {
-					println!("║   {}", lines[0]);
+					let line_num = signature.start_line + 1;
+					println!("║   {}: {}", line_num, lines[0]);
 				}
 			}
 		}
 
-		println!("╚════════════════════════════════════════\\n");
+		println!("╚════════════════════════════════════════\n");
 	}
 }
 

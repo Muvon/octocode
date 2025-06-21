@@ -231,7 +231,7 @@ octocode mcp --path /path/to/your/project --with-lsp "typescript-language-server
 | **semantic_search** | Semantic code search across the codebase (supports multi-query) | `query` (string or array), `mode` (string: all/code/docs/text), `detail_level` (string), `max_results` (integer) |
 | **graphrag_search** | Relationship-aware search using GraphRAG | `query` (string) |
 | **memorize** | Store important information for future reference | `title` (string), `content` (string), `tags` (array) |
-| **remember** | Retrieve stored information by query | `query` (string) |
+| **remember** | Retrieve stored information by query (supports multi-query) | `query` (string or array), `memory_types` (array), `tags` (array), `related_files` (array), `limit` (integer) |
 | **forget** | Remove stored information | `query` (string), `confirm` (boolean) |
 
 #### semantic_search Tool Details

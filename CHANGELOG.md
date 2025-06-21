@@ -1,5 +1,41 @@
 # Changelog
 
+## [0.5.0] - 2025-06-21
+
+### 📋 Release Summary
+
+This release introduces enhanced search and memory features, including detailed output options and multi-query support, along with new CLI commands and expanded protocol integration. Additional language support and improved documentation provide a better user experience. Several bug fixes and refinements improve rendering accuracy and overall system stability.
+
+
+### ✨ Features
+
+- **search**: add detail level option for search output (8ade06ba)
+- **memory**: add multi-query support for memory retrieval (437e7d4f)
+- **docs**: add new CLI commands and usage examples to README (0fdfa552)
+- **mcp_proxy**: add HTTP proxy command for multiple MCP servers (26301f7b)
+- **mcp**: add HTTP server mode for MCP protocol integration (8ff10302)
+- **indexer**: add CSS/SCSS language support with tree-sitter parsers (fe88742a)
+
+### 🐛 Bug Fixes
+
+- **render_utils**: show first 2 and last 2 lines in signature renderings (6a46610f)
+- **render_utils**: correct new line rendering in markdown output (a6453c6d)
+- **indexer**: truncate signature text output to 5 lines with ellipsis (0f2fe910)
+
+### 🔧 Other Changes
+
+- **proxy**: restrict console logging to debug mode only (4199a6c0)
+- **search**: render docs with detail level matching code output (33db16a0)
+- **indexer**: extract file and git utilities into modules (03b8f495)
+- **svelte**: simplify symbol extraction to script/style only (367f99dd)
+
+### 📊 Commit Summary
+
+**Total commits**: 13
+- ✨ 6 new features
+- 🐛 3 bug fixes
+- 🔧 4 other changes
+
 ## [0.4.1] - 2025-06-17
 
 ### 📋 Release Summary

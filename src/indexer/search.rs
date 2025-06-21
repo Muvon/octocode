@@ -732,8 +732,11 @@ pub fn format_code_search_results_as_text(blocks: &[CodeBlock], detail_level: &s
 	output
 }
 
-// Format text search results as text for MCP
-pub fn format_text_search_results_as_text(blocks: &[crate::store::TextBlock]) -> String {
+// Format text search results as text for MCP with detail level control
+pub fn format_text_search_results_as_text(
+	blocks: &[crate::store::TextBlock],
+	detail_level: &str,
+) -> String {
 	if blocks.is_empty() {
 		return "No text results found.".to_string();
 	}
@@ -750,17 +753,33 @@ pub fn format_text_search_results_as_text(blocks: &[crate::store::TextBlock]) ->
 		}
 		output.push('\n');
 
-		// Add content with line numbers
-		let content_with_lines = block
-			.content
-			.lines()
-			.enumerate()
-			.map(|(i, line)| format!("{}: {}", block.start_line + 1 + i, line))
-			.collect::<Vec<_>>()
-			.join("\n");
-		output.push_str(&content_with_lines);
-		if !content_with_lines.ends_with('\n') {
-			output.push('\n');
+		// Add content with line numbers based on detail level
+		match detail_level {
+			"signatures" => {
+				// Show only first line for signatures mode
+				if let Some(first_line) = block.content.lines().next() {
+					output.push_str(&format!(
+						"{}: {}\n",
+						block.start_line + 1,
+						first_line.trim()
+					));
+				}
+			}
+			"partial" | "full" => {
+				// Full content with line numbers
+				let content_with_lines = block
+					.content
+					.lines()
+					.enumerate()
+					.map(|(i, line)| format!("{}: {}", block.start_line + 1 + i, line))
+					.collect::<Vec<_>>()
+					.join("\n");
+				output.push_str(&content_with_lines);
+				if !content_with_lines.ends_with('\n') {
+					output.push('\n');
+				}
+			}
+			_ => {}
 		}
 		output.push('\n');
 	}
@@ -768,8 +787,11 @@ pub fn format_text_search_results_as_text(blocks: &[crate::store::TextBlock]) ->
 	output
 }
 
-// Format document search results as text for MCP
-pub fn format_doc_search_results_as_text(blocks: &[crate::store::DocumentBlock]) -> String {
+// Format document search results as text for MCP with detail level control
+pub fn format_doc_search_results_as_text(
+	blocks: &[crate::store::DocumentBlock],
+	detail_level: &str,
+) -> String {
 	if blocks.is_empty() {
 		return "No documentation results found.".to_string();
 	}
@@ -791,17 +813,33 @@ pub fn format_doc_search_results_as_text(blocks: &[crate::store::DocumentBlock])
 		}
 		output.push('\n');
 
-		// Add content with line numbers
-		let content_with_lines = block
-			.content
-			.lines()
-			.enumerate()
-			.map(|(i, line)| format!("{}: {}", block.start_line + 1 + i, line))
-			.collect::<Vec<_>>()
-			.join("\n");
-		output.push_str(&content_with_lines);
-		if !content_with_lines.ends_with('\n') {
-			output.push('\n');
+		// Add content with line numbers based on detail level
+		match detail_level {
+			"signatures" => {
+				// Show only first line for signatures mode
+				if let Some(first_line) = block.content.lines().next() {
+					output.push_str(&format!(
+						"{}: {}\n",
+						block.start_line + 1,
+						first_line.trim()
+					));
+				}
+			}
+			"partial" | "full" => {
+				// Full content with line numbers
+				let content_with_lines = block
+					.content
+					.lines()
+					.enumerate()
+					.map(|(i, line)| format!("{}: {}", block.start_line + 1 + i, line))
+					.collect::<Vec<_>>()
+					.join("\n");
+				output.push_str(&content_with_lines);
+				if !content_with_lines.ends_with('\n') {
+					output.push('\n');
+				}
+			}
+			_ => {}
 		}
 		output.push('\n');
 	}
@@ -826,7 +864,7 @@ pub fn format_combined_search_results_as_text(
 
 	// Documentation Results
 	if !doc_blocks.is_empty() {
-		output.push_str(&format_doc_search_results_as_text(doc_blocks));
+		output.push_str(&format_doc_search_results_as_text(doc_blocks, detail_level));
 		output.push('\n');
 	}
 
@@ -841,7 +879,10 @@ pub fn format_combined_search_results_as_text(
 
 	// Text Results
 	if !text_blocks.is_empty() {
-		output.push_str(&format_text_search_results_as_text(text_blocks));
+		output.push_str(&format_text_search_results_as_text(
+			text_blocks,
+			detail_level,
+		));
 	}
 
 	output
@@ -964,7 +1005,7 @@ pub async fn search_codebase_with_details_text(
 					Some(config.search.similarity_threshold),
 				)
 				.await?;
-			Ok(format_text_search_results_as_text(&results))
+			Ok(format_text_search_results_as_text(&results, detail_level))
 		}
 		"docs" => {
 			let embeddings = search_embeddings.text_embeddings.ok_or_else(|| {
@@ -977,7 +1018,7 @@ pub async fn search_codebase_with_details_text(
 					Some(config.search.similarity_threshold),
 				)
 				.await?;
-			Ok(format_doc_search_results_as_text(&results))
+			Ok(format_doc_search_results_as_text(&results, detail_level))
 		}
 		"all" => {
 			// "all" mode - search across all types with limited results per type
@@ -1080,8 +1121,11 @@ pub async fn search_codebase_with_details_multi_query_text(
 			&code_blocks,
 			detail_level,
 		)),
-		"text" => Ok(format_text_search_results_as_text(&text_blocks)),
-		"docs" => Ok(format_doc_search_results_as_text(&doc_blocks)),
+		"text" => Ok(format_text_search_results_as_text(
+			&text_blocks,
+			detail_level,
+		)),
+		"docs" => Ok(format_doc_search_results_as_text(&doc_blocks, detail_level)),
 		"all" => Ok(format_combined_search_results_as_text(
 			&code_blocks,
 			&text_blocks,

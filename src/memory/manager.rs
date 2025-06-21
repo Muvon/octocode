@@ -145,6 +145,93 @@ impl MemoryManager {
 		self.store.search_memories(&search_query).await
 	}
 
+	/// Remember (search) memories based on multiple queries with relevance-based merging
+	pub async fn remember_multi(
+		&self,
+		queries: &[String],
+		filters: Option<MemoryQuery>,
+	) -> Result<Vec<MemorySearchResult>> {
+		if queries.is_empty() {
+			return Ok(Vec::new());
+		}
+
+		if queries.len() == 1 {
+			// Single query - use existing method
+			return self.remember(&queries[0], filters).await;
+		}
+
+		// Multiple queries - search each and merge results by relevance
+		let base_filters = filters.unwrap_or_default();
+		let mut all_results: std::collections::HashMap<String, MemorySearchResult> =
+			std::collections::HashMap::new();
+		let mut query_count: std::collections::HashMap<String, usize> =
+			std::collections::HashMap::new();
+
+		// Search with each query
+		for query in queries {
+			let mut search_query = base_filters.clone();
+			search_query.query_text = Some(query.clone());
+
+			let results = self.store.search_memories(&search_query).await?;
+
+			for result in results {
+				let memory_id = result.memory.id.clone();
+
+				// Track how many queries matched this memory
+				*query_count.entry(memory_id.clone()).or_insert(0) += 1;
+
+				// Keep the result with highest relevance score
+				match all_results.get(&memory_id) {
+					Some(existing) if existing.relevance_score >= result.relevance_score => {
+						// Keep existing with higher score
+					}
+					_ => {
+						// Use this result (higher score or first occurrence)
+						all_results.insert(memory_id, result);
+					}
+				}
+			}
+		}
+
+		// Convert to vector and boost scores for memories that matched multiple queries
+		let mut final_results: Vec<MemorySearchResult> = all_results
+			.into_iter()
+			.map(|(memory_id, mut result)| {
+				let matches = query_count.get(&memory_id).unwrap_or(&1);
+
+				// Boost relevance score for memories matching multiple queries
+				if *matches > 1 {
+					let boost_factor = 1.0 + ((*matches as f32 - 1.0) * 0.1); // 10% boost per additional match
+					result.relevance_score = (result.relevance_score * boost_factor).min(1.0);
+
+					// Update selection reason to indicate multi-query match
+					result.selection_reason = format!(
+						"Matched {} of {} queries: {}",
+						matches,
+						queries.len(),
+						result.selection_reason
+					);
+				}
+
+				result
+			})
+			.collect();
+
+		// Sort by relevance score (highest first)
+		final_results.sort_by(|a, b| {
+			b.relevance_score
+				.partial_cmp(&a.relevance_score)
+				.unwrap_or(std::cmp::Ordering::Equal)
+		});
+
+		// Apply limit if specified in filters
+		if let Some(limit) = base_filters.limit {
+			final_results.truncate(limit);
+		}
+
+		Ok(final_results)
+	}
+
 	/// Remember memories with advanced filtering
 	pub async fn remember_advanced(&self, query: MemoryQuery) -> Result<Vec<MemorySearchResult>> {
 		self.store.search_memories(&query).await

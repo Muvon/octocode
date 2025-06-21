@@ -27,6 +27,16 @@ use crate::commands::OutputFormat;
 
 const MAX_QUERIES: usize = 3;
 
+fn validate_detail_level(s: &str) -> Result<String, String> {
+	match s {
+		"signatures" | "partial" | "full" => Ok(s.to_string()),
+		_ => Err(format!(
+			"Invalid detail level '{}'. Must be one of: signatures, partial, full",
+			s
+		)),
+	}
+}
+
 fn validate_queries(queries: &[String]) -> Result<(), anyhow::Error> {
 	if queries.is_empty() {
 		return Err(anyhow::anyhow!("At least one query is required"));
@@ -70,6 +80,10 @@ pub struct SearchArgs {
 	/// Examples: 0.3 (broad results), 0.5 (balanced), 0.7 (high quality), 0.8 (very strict)
 	#[arg(long, short = 't', default_value = "0.5")]
 	pub threshold: f32,
+
+	/// Detail level for output: signatures (first line only), partial (default, full content), full (same as partial)
+	#[arg(long, default_value = "partial", value_parser = validate_detail_level)]
+	pub detail_level: String,
 }
 
 #[derive(Debug)]
@@ -522,8 +536,10 @@ pub async fn execute(
 				println!("{}", markdown);
 			} else if args.format.is_text() {
 				// Use text formatting function for token efficiency
-				let text_output =
-					indexer::search::format_code_search_results_as_text(&code_blocks, "partial");
+				let text_output = indexer::search::format_code_search_results_as_text(
+					&code_blocks,
+					&args.detail_level,
+				);
 				println!("{}", text_output);
 			} else {
 				indexer::render_code_blocks_with_config(&code_blocks, config);
@@ -539,7 +555,10 @@ pub async fn execute(
 				println!("{}", markdown);
 			} else if args.format.is_text() {
 				// Use text formatting function for token efficiency
-				let text_output = indexer::search::format_doc_search_results_as_text(&doc_blocks);
+				let text_output = indexer::search::format_doc_search_results_as_text(
+					&doc_blocks,
+					&args.detail_level,
+				);
 				println!("{}", text_output);
 			} else {
 				render_document_blocks_with_config(&doc_blocks, config);
@@ -554,7 +573,10 @@ pub async fn execute(
 				println!("{}", markdown);
 			} else if args.format.is_text() {
 				// Use text formatting function for token efficiency
-				let text_output = indexer::search::format_text_search_results_as_text(&text_blocks);
+				let text_output = indexer::search::format_text_search_results_as_text(
+					&text_blocks,
+					&args.detail_level,
+				);
 				println!("{}", text_output);
 			} else {
 				render_text_blocks_with_config(&text_blocks, config);
@@ -637,7 +659,7 @@ pub async fn execute(
 					&final_code_results,
 					&text_blocks,
 					&doc_blocks,
-					"partial",
+					&args.detail_level,
 				);
 				println!("{}", text_output);
 			} else {

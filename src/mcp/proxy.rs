@@ -49,11 +49,10 @@ struct ProxyMcpInstance {
 }
 
 impl ProxyMcpInstance {
-	async fn new(config: Config, working_directory: PathBuf, debug: bool) -> Result<Self> {
-		// Initialize logging for this instance (but don't output to console in proxy mode)
-		if debug {
-			init_mcp_logging(working_directory.clone(), false)?;
-		}
+	async fn new(config: Config, working_directory: PathBuf, _debug: bool) -> Result<Self> {
+		// Skip logging initialization in proxy mode since the main proxy server handles logging
+		// Individual repository instances don't need separate logging as they're part of the same process
+		// The `MCP_LOG_DIR` OnceLock can only be set once per process, so subsequent calls would fail
 
 		// Reuse exact same provider initialization as McpServer::new
 		let semantic_code = SemanticCodeProvider::new(config.clone(), working_directory.clone());
@@ -302,8 +301,10 @@ impl McpProxyServer {
 		// Initialize logging for the proxy server
 		init_mcp_logging(root_path.clone(), debug_mode)?;
 
-		// Console output is safe in HTTP mode
-		println!("🔍 Initializing MCP Proxy Server...");
+		// Console output only in debug mode to maintain protocol compliance
+		if debug_mode {
+			println!("🔍 Initializing MCP Proxy Server...");
+		}
 
 		Ok(Self {
 			bind_addr,
@@ -318,11 +319,13 @@ impl McpProxyServer {
 			.await
 			.map_err(|e| anyhow::anyhow!("Failed to bind to {}: {}", self.bind_addr, e))?;
 
-		println!("🌐 MCP Proxy Server listening on {}", self.bind_addr);
-		println!(
-			"📂 Scanning for git repositories under: {}",
-			self.root_path.display()
-		);
+		if self.debug {
+			println!("🌐 MCP Proxy Server listening on {}", self.bind_addr);
+			println!(
+				"📂 Scanning for git repositories under: {}",
+				self.root_path.display()
+			);
+		}
 
 		// Discover and log available repositories
 		self.discover_and_log_repositories().await?;
@@ -648,7 +651,9 @@ impl McpProxyServer {
 		// Store and return
 		instances_guard.insert(repo_path.to_string(), instance.clone());
 
-		println!("✅ MCP instance ready for: {}", repo_path);
+		if debug {
+			println!("✅ MCP instance ready for: {}", repo_path);
+		}
 		Ok(instance)
 	}
 
@@ -662,13 +667,11 @@ impl McpProxyServer {
 			}
 		}
 
-		if !to_remove.is_empty() {
-			println!("🧹 Cleaning up {} idle MCP instances", to_remove.len());
-		}
+		// Note: cleanup logging removed to maintain protocol compliance
+		// Only log to structured logging, not console
 
 		for repo_path in to_remove {
 			instances_guard.remove(&repo_path);
-			println!("   🗑️  Removed idle instance: {}", repo_path);
 		}
 	}
 

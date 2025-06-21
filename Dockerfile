@@ -5,6 +5,7 @@ FROM rust:1.87-slim as builder
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
 		pkg-config \
+		protobuf-compiler \
 		libssl-dev \
 		&& rm -rf /var/lib/apt/lists/*
 

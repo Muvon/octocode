@@ -111,10 +111,26 @@ impl MemoryProvider {
 					"type": "object",
 					"properties": {
 						"query": {
-							"type": "string",
-							"description": "What you want to remember or search for in stored memories",
-							"minLength": 3,
-							"maxLength": 500
+							"oneOf": [
+								{
+									"type": "string",
+									"description": "Single search query - use for specific searches. Express in human terms for semantic search",
+									"minLength": 3,
+									"maxLength": 500
+								},
+								{
+									"type": "array",
+									"items": {
+										"type": "string",
+										"minLength": 3,
+										"maxLength": 500
+									},
+									"minItems": 1,
+									"maxItems": 5,
+									"description": "RECOMMENDED: Array of related search terms for comprehensive results. Example: ['authentication patterns', 'login implementation', 'user session management'] finds all auth-related memories in one search"
+								}
+							],
+							"description": "PREFER ARRAY OF RELATED TERMS: ['user authentication patterns', 'login session management', 'password validation'] for comprehensive search. Single string only for very specific searches. Use multi-term for: Feature exploration: ['database patterns', 'query optimization', 'data persistence'], Related concepts: ['error handling', 'exception recovery', 'failure patterns'], System understanding: ['architecture decisions', 'design patterns', 'implementation choices']. Use descriptive phrases for semantic search."
 						},
 						"memory_types": {
 							"type": "array",
@@ -344,26 +360,67 @@ impl MemoryProvider {
 		let memory = memory_result;
 
 		// Return plain text response for MCP protocol compliance
-		Ok(format!(
-			"✅ Memory stored successfully\n\nMemory ID: {}\nTitle: {}\nType: {}\nCreated: {}",
-			memory.id,
-			memory.title,
-			memory.memory_type,
-			memory.created_at.format("%Y-%m-%d %H:%M:%S UTC")
-		))
+		// Return minimal response for MCP protocol compliance - just success and ID
+		Ok(format!("Memory stored: {}", memory.id))
 	}
 
 	/// Execute the remember tool
 	pub async fn execute_remember(&self, arguments: &Value) -> Result<String> {
-		let query = arguments
-			.get("query")
-			.and_then(|v| v.as_str())
-			.ok_or_else(|| anyhow::anyhow!("Missing required parameter 'query'"))?;
+		// Parse queries - handle both string and array inputs
+		let queries: Vec<String> = match arguments.get("query") {
+			Some(Value::String(s)) => vec![s.clone()],
+			Some(Value::Array(arr)) => {
+				let queries: Vec<String> = arr
+					.iter()
+					.filter_map(|v| v.as_str().map(String::from))
+					.collect();
 
-		if query.len() < 3 || query.len() > 500 {
+				if queries.is_empty() {
+					return Err(anyhow::anyhow!(
+						"Invalid query array: must contain at least one non-empty string"
+					));
+				}
+
+				queries
+			}
+			_ => {
+				return Err(anyhow::anyhow!(
+					"Missing required parameter 'query': must be a string or array of strings describing what to search for"
+				));
+			}
+		};
+
+		// Validate queries
+		if queries.len() > 5 {
 			return Err(anyhow::anyhow!(
-				"Query must be between 3 and 500 characters"
+				"Too many queries: maximum 5 queries allowed, got {}. Use fewer, more specific terms.",
+				queries.len()
 			));
+		}
+
+		for (i, query) in queries.iter().enumerate() {
+			// Ensure clean UTF-8 and validate query
+			let clean_query = String::from_utf8_lossy(query.as_bytes()).to_string();
+			let query = clean_query.trim();
+
+			if query.len() < 3 {
+				return Err(anyhow::anyhow!(
+					"Invalid query {}: must be at least 3 characters long",
+					i + 1
+				));
+			}
+			if query.len() > 500 {
+				return Err(anyhow::anyhow!(
+					"Invalid query {}: must be no more than 500 characters long",
+					i + 1
+				));
+			}
+			if query.is_empty() {
+				return Err(anyhow::anyhow!(
+					"Invalid query {}: cannot be empty or whitespace only",
+					i + 1
+				));
+			}
 		}
 
 		// Parse memory types filter
@@ -431,9 +488,10 @@ impl MemoryProvider {
 
 		// Use structured logging instead of console output for MCP protocol compliance
 		debug!(
-			query = %query,
+			queries = ?queries,
 			limit = memory_query.limit.unwrap_or(10),
-			"Remembering memories"
+			"Remembering memories with {} queries",
+			queries.len()
 		);
 
 		let results = {
@@ -451,7 +509,17 @@ impl MemoryProvider {
 					));
 				}
 			};
-			manager_guard.remember(query, Some(memory_query)).await?
+
+			// Use multi-query method for comprehensive search
+			if queries.len() == 1 {
+				manager_guard
+					.remember(&queries[0], Some(memory_query))
+					.await?
+			} else {
+				manager_guard
+					.remember_multi(&queries, Some(memory_query))
+					.await?
+			}
 		};
 
 		if results.is_empty() {

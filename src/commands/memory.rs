@@ -57,8 +57,8 @@ pub enum MemoryCommand {
 
 	/// Search and retrieve stored memories using semantic search
 	Remember {
-		/// What you want to remember or search for
-		query: String,
+		/// What you want to remember or search for (multiple queries for comprehensive search)
+		queries: Vec<String>,
 
 		/// Filter by memory types (comma-separated)
 		#[arg(short = 'm', long)]
@@ -320,7 +320,7 @@ pub async fn execute(config: &Config, args: &MemoryArgs) -> Result<()> {
 		}
 
 		MemoryCommand::Remember {
-			query,
+			queries,
 			memory_types,
 			tags,
 			files,
@@ -352,7 +352,42 @@ pub async fn execute(config: &Config, args: &MemoryArgs) -> Result<()> {
 				..Default::default()
 			};
 
-			let results = memory_manager.remember(query, Some(memory_query)).await?;
+			// Validate queries
+			if queries.is_empty() {
+				println!("❌ No queries provided.");
+				return Ok(());
+			}
+
+			if queries.len() > 5 {
+				println!(
+					"❌ Too many queries: maximum 5 queries allowed, got {}.",
+					queries.len()
+				);
+				return Ok(());
+			}
+
+			// Validate each query
+			for query in queries {
+				if query.len() < 3 || query.len() > 500 {
+					println!(
+						"❌ Each query must be between 3 and 500 characters. Invalid query: '{}'",
+						query
+					);
+					return Ok(());
+				}
+			}
+
+			let results = if queries.len() == 1 {
+				// Single query - use existing method
+				memory_manager
+					.remember(&queries[0], Some(memory_query))
+					.await?
+			} else {
+				// Multiple queries - use multi-query method
+				memory_manager
+					.remember_multi(queries, Some(memory_query))
+					.await?
+			};
 
 			if results.is_empty() {
 				println!("❌ No memories found matching your query.");
