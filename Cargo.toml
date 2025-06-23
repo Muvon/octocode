@@ -30,59 +30,59 @@ overflow-checks = false # Disable overflow checks in release mode
 [dependencies]
 tokio = { version = "1.45.1", features = ["rt-multi-thread", "macros", "time", "sync", "io-util", "io-std", "process"] }
 ignore = "0.4.23"
-parking_lot = "0.12.3"
-lance-table = { version = "0.27.2", default-features = false, features = ["lazy_static"] }
-lance = { version = "0.27.2", default-features = false, features = [] }
-lancedb = { version = "0.19.1", default-features = false }
-arrow = { version = "54.2.1", default-features = false, features = ["prettyprint"] }
-serde = { version = "1.0.217", features = ["derive"] }
+parking_lot = "0.12.4"
+lance-table = { version = "0.30.0", default-features = false, features = ["lazy_static"] }
+lance = { version = "0.30.0", default-features = false, features = [] }
+lancedb = { version = "0.21.0", default-features = false }
+arrow = { version = "55.1.0", default-features = false, features = ["prettyprint"] }
+serde = { version = "1.0.219", features = ["derive"] }
 chrono = { version = "0.4", default-features = false, features = ["serde", "clock"] }
 async-trait = "0.1"
-tree-sitter = "0.24.7"
+tree-sitter = "0.25.6"
 tree-sitter-php = "0.23.11"
-tree-sitter-rust = "0.23.2"
+tree-sitter-rust = "0.24.0"
 tree-sitter-python = "0.23.6"
 tree-sitter-javascript = "0.23.1"
 tree-sitter-json = "0.24.8"
 tree-sitter-go = "0.23.4"
 tree-sitter-cpp = "0.23.4"
-tree-sitter-bash = "0.23.3"
+tree-sitter-bash = "0.25.0"
 tree-sitter-css = "0.23.2"
 
-uuid = { version = "1.12.0", default-features = false, features = ["v4"] }
+uuid = { version = "1.17.0", default-features = false, features = ["v4"] }
 tree-sitter-typescript = "0.23.2"
 tree-sitter-ruby = "0.23.1"
 tree-sitter-svelte-ng = "1.0.2"
-reqwest = { version = "0.12.12", features = ["json", "rustls-tls"], default-features = false }
-anyhow = "1.0.95"
-serde_json = "1.0.136"
-sha2 = "0.10.8"
-clap = { version = "4.5.26", features = ["derive"] }
-clap_complete = "4.5.39"
-notify = { version = "6.1.1", default-features = false, features = ["crossbeam-channel", "macos_fsevent"] }
-notify-debouncer-mini = "0.4.1"
+reqwest = { version = "0.12.20", features = ["json", "rustls-tls"], default-features = false }
+anyhow = "1.0.98"
+serde_json = "1.0.140"
+sha2 = "0.10.9"
+clap = { version = "4.5.40", features = ["derive"] }
+clap_complete = "4.5.54"
+notify = { version = "8.0.0", default-features = false, features = ["crossbeam-channel", "macos_fsevent"] }
+notify-debouncer-mini = "0.6.0"
 fastembed = { version = "4.9.1", optional = true }
-toml = "0.8.14"
-lazy_static = "1.4.0"
+toml = "0.8.23"
+lazy_static = "1.5.0"
 futures = { version = "0.3.31", default-features = false, features = ["std"] }
 globset = { version = "0.4.16", default-features = false }
 regex = { version = "1.11.1", default-features = false, features = ["std"] }
-dirs = "5.0.1"
+dirs = "6.0.0"
 # Candle dependencies for SentenceTransformer support (optional)
-candle-core = { version = "0.8.3", optional = true }
-candle-nn = { version = "0.8.3", optional = true }
-candle-transformers = { version = "0.8.3", optional = true }
-tokenizers = { version = "0.20.3", optional = true }
-hf-hub = { version = "0.3.2", features = ["tokio"], optional = true }
+candle-core = { version = "0.9.1", optional = true }
+candle-nn = { version = "0.9.1", optional = true }
+candle-transformers = { version = "0.9.1", optional = true }
+tokenizers = { version = "0.21.1", optional = true }
+hf-hub = { version = "0.4.3", features = ["tokio"], optional = true }
 # EditorConfig parsing and formatting
 ec4rs = "1.2.0"
-tracing = "0.1.40"
-tracing-subscriber = { version = "0.3.18", features = ["env-filter", "json"] }
+tracing = "0.1.41"
+tracing-subscriber = { version = "0.3.19", features = ["env-filter", "json"] }
 tracing-appender = "0.2.3"
-tiktoken-rs = "0.6.0"
+tiktoken-rs = "0.7.0"
 # LSP integration dependencies
 lsp-types = "0.97.0"
-url = "2.4.1"
+url = "2.5.4"
 
 [profile.dev]
 opt-level = 1          # Basic optimizations without slowing compilation too much
