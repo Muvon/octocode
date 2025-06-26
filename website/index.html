@@ -1,0 +1,555 @@
+<!DOCTYPE html>
+<html lang="en">
+	<head>
+		<meta charset="UTF-8">
+		<meta name="viewport" content="width=device-width, initial-scale=1.0">
+		<title>Octocode - Open Source Code Intelligence & MCP Server</title>
+		<meta name="description" content="Open source intelligent code indexer with built-in MCP server for AI assistants. Transform codebases into knowledge graphs with semantic search and AI-powered analysis.">
+		<meta name="keywords" content="MCP server, Model Context Protocol, open source code intelligence, AI code assistant, semantic code search, knowledge graph, Claude Desktop integration">
+
+		<!-- Open Graph -->
+		<meta property="og:title" content="Octocode - Open Source Code Intelligence & MCP Server">
+		<meta property="og:description" content="Built-in MCP server connects seamlessly with Claude Desktop, Cursor, and other AI coding assistants. Apache 2.0 licensed.">
+		<meta property="og:type" content="website">
+		<meta property="og:url" content="https://octocode.muvon.io">
+
+		<!-- Twitter -->
+		<meta name="twitter:card" content="summary_large_image">
+		<meta name="twitter:title" content="Octocode - Open Source Code Intelligence & MCP Server">
+		<meta name="twitter:description" content="Built-in MCP server connects seamlessly with Claude Desktop, Cursor, and other AI coding assistants. Apache 2.0 licensed.">
+
+		<link rel="stylesheet" href="styles.css">
+		<link rel="preconnect" href="https://fonts.googleapis.com">
+		<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+		<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+		<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+	</head>
+	<body>
+		<!-- Header -->
+		<header class="header">
+			<nav class="nav">
+				<div class="nav-brand">
+					<div class="logo">
+						<svg width="126" height="40" viewBox="0 0 126 40" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="16.7757" cy="6.04188" r="6.04188" fill="#76B744"></circle><circle cx="37.5282" cy="31.2601" r="6.04188" fill="#76B744"></circle><path fill-rule="evenodd" clip-rule="evenodd" d="M40.4889 14.7002C40.6847 18.0313 38.1431 20.8904 34.812 21.0862C33.2728 21.1767 31.6218 21.4473 30.5785 22.5826L25.4075 28.2087C24.2377 29.4814 24.1311 31.3703 24.1311 33.099C24.1311 36.4359 21.4261 39.1409 18.0892 39.1409C14.7524 39.1409 12.0473 36.4359 12.0473 33.099C12.0473 33.0689 12.0475 33.0387 12.048 33.0087C12.0696 31.5357 11.9005 29.9507 10.8815 28.8867C9.74425 27.6992 7.93379 27.5495 6.29084 27.615C6.01445 27.6261 5.73401 27.6182 5.45092 27.5904C2.13011 27.2638 -0.297169 24.3069 0.0294542 20.9861C0.356077 17.6653 3.31291 15.238 6.63373 15.5646C9.95454 15.8913 12.3818 18.8481 12.0552 22.1689C11.9519 23.2191 12.1129 24.3374 12.8427 25.0995L13.3778 25.6582C14.5465 26.8785 16.3995 27.0571 18.0892 27.0571C19.5836 27.0571 21.1971 26.8255 22.2084 25.7252L27.3209 20.1627C28.456 18.9277 28.5244 17.0838 28.426 15.4092C28.2302 12.0781 30.7718 9.21903 34.1029 9.02323C37.434 8.82742 40.2931 11.3691 40.4889 14.7002Z" fill="#76B744"></path><path d="M65.6534 17.4566C65.3946 16.9132 64.8877 16.6414 64.1329 16.6414C63.2559 16.6414 62.6664 16.9132 62.3644 17.4566C62.1991 17.7661 62.1164 18.227 62.1164 18.8392V25.6079H59V14.3818H61.987V16.0224C62.368 15.4377 62.7275 15.0215 63.0654 14.7739C63.662 14.3336 64.4348 14.1135 65.3838 14.1135C66.2824 14.1135 67.0085 14.3027 67.562 14.681C68.0078 15.0318 68.3456 15.4824 68.5757 16.0327C68.9783 15.3723 69.4779 14.8874 70.0746 14.5778C70.7072 14.2683 71.4117 14.1135 72.1881 14.1135C72.7057 14.1135 73.2161 14.2098 73.7194 14.4024C74.2226 14.595 74.6791 14.9321 75.0889 15.4136C75.4196 15.8057 75.6424 16.2872 75.7574 16.8581C75.8293 17.2365 75.8653 17.7902 75.8653 18.5193L75.8437 25.6079H72.6949V18.4471C72.6949 18.0206 72.6231 17.6698 72.4793 17.3947C72.2061 16.8719 71.7029 16.6105 70.9696 16.6105C70.1213 16.6105 69.5354 16.9475 69.2119 17.6217C69.0466 17.9794 68.9639 18.4093 68.9639 18.9114V25.6079H65.869V18.9114C65.869 18.2442 65.7972 17.7592 65.6534 17.4566Z" fill="white"></path><path d="M85.5764 24.0189C85.5476 24.0533 85.4757 24.1565 85.3607 24.3285C85.2457 24.5004 85.1091 24.6518 84.951 24.7825C84.4693 25.1952 84.002 25.4772 83.5491 25.6285C83.1034 25.7799 82.5786 25.8555 81.9747 25.8555C80.235 25.8555 79.0632 25.2571 78.4593 24.0602C78.1215 23.3998 77.9525 22.4265 77.9525 21.1402V14.3611H81.1013V21.1402C81.1013 21.7799 81.1804 22.2614 81.3385 22.5847C81.6189 23.1556 82.1688 23.4411 82.9884 23.4411C84.038 23.4411 84.7569 23.0353 85.1451 22.2236C85.3463 21.7833 85.447 21.2021 85.447 20.4798V14.3611H88.5634V25.6079H85.5764V24.0189Z" fill="white"></path><path d="M89.7233 14.3611H93.174L95.6218 22.6569L98.1236 14.3611H101.423L97.1854 25.6079H93.9396L89.7233 14.3611Z" fill="white"></path><path d="M112.31 15.785C113.302 16.9751 113.798 18.3818 113.798 20.0052C113.798 21.6561 113.302 23.0696 112.31 24.2459C111.318 25.4153 109.812 26 107.792 26C105.771 26 104.265 25.4153 103.273 24.2459C102.281 23.0696 101.785 21.6561 101.785 20.0052C101.785 18.3818 102.281 16.9751 103.273 15.785C104.265 14.595 105.771 14 107.792 14C109.812 14 111.318 14.595 112.31 15.785ZM107.781 16.4867C106.882 16.4867 106.188 16.7928 105.7 17.405C105.218 18.0103 104.977 18.877 104.977 20.0052C104.977 21.1333 105.218 22.0034 105.7 22.6156C106.188 23.2279 106.882 23.534 107.781 23.534C108.679 23.534 109.37 23.2279 109.851 22.6156C110.333 22.0034 110.574 21.1333 110.574 20.0052C110.574 18.877 110.333 18.0103 109.851 17.405C109.37 16.7928 108.679 16.4867 107.781 16.4867Z" fill="white"></path><path d="M120.878 16.5383C119.835 16.5383 119.12 16.9613 118.732 17.8074C118.531 18.2545 118.43 18.8255 118.43 19.5202V25.6079H115.368V14.3818H118.333V16.0224C118.728 15.4445 119.102 15.0284 119.454 14.7739C120.087 14.3199 120.889 14.0929 121.859 14.0929C123.074 14.0929 124.066 14.399 124.835 15.0112C125.612 15.6165 126 16.6242 126 18.0344V25.6079H122.851V18.767C122.851 18.1754 122.769 17.7214 122.603 17.405C122.301 16.8272 121.726 16.5383 120.878 16.5383Z" fill="white"></path></svg>
+					</div>
+					<span class="open-source-badge">Open Source</span>
+				</div>
+				<div class="nav-links">
+					<a href="#features">Features</a>
+					<a href="#mcp-server">MCP Server</a>
+					<a href="#installation">Installation</a>
+					<a href="#docs" target="_blank">Docs</a>
+					<a href="https://github.com/Muvon/octocode" target="_blank" class="github-link">
+						<svg width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+							<path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.012 8.012 0 0 0 16 8c0-4.42-3.58-8-8-8z"/>
+						</svg>
+						GitHub
+					</a>
+					<div class="github-stars" id="github-stars">
+						⭐ <span id="star-count">Loading...</span>
+					</div>
+				</div>
+				<div class="nav-social">
+					<a href="https://x.com/muvonteam" target="_blank" aria-label="Twitter">
+						<svg width="20" height="20" fill="currentColor" viewBox="0 0 24 24">
+							<path d="M23.953 4.57a10 10 0 01-2.825.775 4.958 4.958 0 002.163-2.723c-.951.555-2.005.959-3.127 1.184a4.92 4.92 0 00-8.384 4.482C7.69 8.095 4.067 6.13 1.64 3.162a4.822 4.822 0 00-.666 2.475c0 1.71.87 3.213 2.188 4.096a4.904 4.904 0 01-2.228-.616v.06a4.923 4.923 0 003.946 4.827 4.996 4.996 0 01-2.212.085 4.936 4.936 0 004.604 3.417 9.867 9.867 0 01-6.102 2.105c-.39 0-.779-.023-1.17-.067a13.995 13.995 0 007.557 2.209c9.053 0 13.998-7.496 13.998-13.985 0-.21 0-.42-.015-.63A9.935 9.935 0 0024 4.59z"/>
+						</svg>
+					</a>
+					<a href="https://linkedin.com/company/muvonteam" target="_blank" aria-label="LinkedIn">
+						<svg width="20" height="20" fill="currentColor" viewBox="0 0 24 24">
+							<path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433c-1.144 0-2.063-.926-2.063-2.065 0-1.138.92-2.063 2.063-2.063 1.14 0 2.064.925 2.064 2.063 0 1.139-.925 2.065-2.064 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z"/>
+						</svg>
+					</a>
+				</div>
+			</nav>
+		</header>
+
+		<!-- Hero Section -->
+		<section class="hero">
+			<div class="hero-content">
+				<div class="hero-badge">BRINGING IDEAS TO LIFE</div>
+				<h1 class="hero-title">
+					Open Source Code<br>
+					<span class="hero-highlight">Intelligence</span>
+				</h1>
+				<h2 class="hero-subtitle">MCP Server & Knowledge Graph Builder for Developers</h2>
+				<p class="hero-description">
+					Transform any codebase into an intelligent knowledge graph. Built-in MCP server with memory
+					and optimized search connects seamlessly with Claude Desktop, Cursor, and other AI assistants.
+					Plus everyday CLI tools for commits, reviews, and releases.
+				</p>
+				<div class="hero-cta">
+					<a href="#installation" class="btn btn-primary">Start MCP Server</a>
+					<a href="https://github.com/Muvon/octocode" target="_blank" class="btn btn-secondary">
+						⭐ Star on GitHub
+					</a>
+				</div>
+				<div class="hero-trust">
+					<span class="trust-item">Apache 2.0</span>
+					<span class="trust-separator">•</span>
+					<span class="trust-item">MCP + CLI Tools</span>
+					<span class="trust-separator">•</span>
+					<span class="trust-item">Local-First</span>
+				</div>
+			</div>
+			<div class="hero-tech-tags">
+				<div class="tech-tag">Software as a Service</div>
+				<div class="tech-tag">Artificial Intelligence</div>
+				<div class="tech-tag">API Integration</div>
+				<div class="tech-tag">Blockchain</div>
+				<div class="tech-tag">E-commerce</div>
+				<div class="tech-tag">Fintech</div>
+				<div class="tech-tag">Open Source</div>
+			</div>
+		</section>
+
+		<!-- Key Features -->
+		<section id="features" class="features">
+			<div class="container">
+				<h2 class="section-title">Key Features</h2>
+				<div class="features-grid">
+					<div class="feature-card">
+						<div class="feature-icon">🔌</div>
+						<h3>MCP Server with Memory</h3>
+						<p>Built-in Model Context Protocol server with persistent memory and optimized search for AI assistants</p>
+					</div>
+					<div class="feature-card">
+						<div class="feature-icon">⚡</div>
+						<h3>CLI Developer Tools</h3>
+						<p>Smart commit messages, AI code reviews, and automated releases - all from your terminal</p>
+					</div>
+					<div class="feature-card">
+						<div class="feature-icon">🔍</div>
+						<h3>Semantic Code Search</h3>
+						<p>Natural language queries with multi-query support across 12+ programming languages</p>
+					</div>
+					<div class="feature-card">
+						<div class="feature-icon">🕸️</div>
+						<h3>Knowledge Graphs</h3>
+						<p>AI-powered relationship discovery with GraphRAG technology</p>
+					</div>
+					<div class="feature-card">
+						<div class="feature-icon">🔒</div>
+						<h3>Privacy & Performance</h3>
+						<p>Local-first processing, intelligent vector optimization, handles codebases of any size</p>
+					</div>
+					<div class="feature-card">
+						<div class="feature-icon">🌍</div>
+						<h3>Open Source</h3>
+						<p>Apache 2.0 license, community-driven, transparent development</p>
+					</div>
+				</div>
+			</div>
+		</section>
+
+		<!-- MCP Server Integration -->
+		<section id="mcp-server" class="mcp-showcase">
+			<div class="container">
+				<div class="mcp-content">
+					<div class="mcp-text">
+						<h2>Advanced MCP Server Integration</h2>
+						<p>Octocode provides a production-ready Model Context Protocol server with persistent memory, optimized search, and intelligent caching. Your AI assistants get comprehensive codebase knowledge that improves over time.</p>
+						<div class="mcp-features">
+							<div class="mcp-feature">
+								<h4>🧠 Persistent Memory</h4>
+								<p>AI assistants remember insights, decisions, and patterns across sessions</p>
+							</div>
+							<div class="mcp-feature">
+								<h4>⚡ Optimized Search</h4>
+								<p>Multi-query semantic search with intelligent result ranking and caching</p>
+							</div>
+							<div class="mcp-feature">
+								<h4>🔗 Universal Integration</h4>
+								<p>Works with Claude Desktop, Cursor, Continue, and any MCP-compatible AI tool</p>
+							</div>
+						</div>
+						<div class="mcp-setup">
+							<h4>One-line setup:</h4>
+							<div class="code-block">
+								<code>octocode mcp --path /your/project</code>
+							</div>
+						</div>
+					</div>
+					<div class="mcp-demo">
+						<div class="demo-placeholder">
+							<div class="demo-icon">🎬</div>
+							<p>MCP Server Features</p>
+							<ul class="demo-features">
+								<li>✅ Semantic search across codebase</li>
+								<li>✅ Persistent memory system</li>
+								<li>✅ Knowledge graph relationships</li>
+								<li>✅ Real-time file watching</li>
+								<li>✅ LSP integration support</li>
+							</ul>
+						</div>
+					</div>
+				</div>
+			</div>
+		</section>
+
+		<!-- CLI Tools Section -->
+		<section class="cli-tools">
+			<div class="container">
+				<h2 class="section-title">Everyday Developer CLI Tools</h2>
+				<p class="section-description">Beyond search and indexing, Octocode provides AI-powered CLI tools for your daily development workflow.</p>
+				<div class="cli-tools-grid">
+					<div class="cli-tool-card">
+						<div class="cli-icon">💬</div>
+						<h3>Smart Commits</h3>
+						<div class="cli-example">
+							<code>octocode commit --all</code>
+						</div>
+						<p>AI analyzes your staged changes and generates contextual commit messages following conventional format with proper scope and detailed descriptions.</p>
+						<div class="cli-features">
+							<span class="cli-feature">Conventional commits</span>
+							<span class="cli-feature">Multi-file analysis</span>
+							<span class="cli-feature">Auto-scope detection</span>
+						</div>
+					</div>
+					<div class="cli-tool-card">
+						<div class="cli-icon">🔍</div>
+						<h3>AI Code Review</h3>
+						<div class="cli-example">
+							<code>octocode review --focus security</code>
+						</div>
+						<p>Get AI-powered code reviews that check for security issues, performance problems, best practices, and maintainability concerns.</p>
+						<div class="cli-features">
+							<span class="cli-feature">Security analysis</span>
+							<span class="cli-feature">Performance checks</span>
+							<span class="cli-feature">Best practices</span>
+						</div>
+					</div>
+					<div class="cli-tool-card">
+						<div class="cli-icon">🚀</div>
+						<h3>Automated Releases</h3>
+						<div class="cli-example">
+							<code>octocode release --dry-run</code>
+						</div>
+						<p>Intelligent release automation with AI-powered version calculation, changelog generation, and semantic versioning based on your changes.</p>
+						<div class="cli-features">
+							<span class="cli-feature">Version calculation</span>
+							<span class="cli-feature">Changelog generation</span>
+							<span class="cli-feature">Multi-language support</span>
+						</div>
+					</div>
+				</div>
+			</div>
+		</section>
+
+		<!-- Use Cases -->
+		<section class="use-cases">
+			<div class="container">
+				<h2 class="section-title">Powerful Use Cases</h2>
+				<div class="use-cases-grid">
+					<div class="use-case-card">
+						<div class="use-case-icon">🚀</div>
+						<h3>Smart Git Workflow</h3>
+						<p>Generate contextual commit messages, get AI-powered code reviews, and automate releases. <code>octocode commit --all</code> analyzes your changes and creates meaningful commit messages following conventional format.</p>
+					</div>
+					<div class="use-case-card">
+						<div class="use-case-icon">🔍</div>
+						<h3>Instant Codebase Understanding</h3>
+						<p>Ask your AI assistant "How does authentication work?" and get comprehensive answers with code examples, relationships, and architecture insights from your MCP-enabled knowledge graph.</p>
+					</div>
+					<div class="use-case-card">
+						<div class="use-case-icon">🧠</div>
+						<h3>Persistent AI Memory</h3>
+						<p>Your AI assistant remembers previous conversations, architectural decisions, and code patterns. Build institutional knowledge that persists across team members and projects.</p>
+					</div>
+					<div class="use-case-card">
+						<div class="use-case-icon">📈</div>
+						<h3>Multi-Query Semantic Search</h3>
+						<p>Search with multiple related terms like <code>["auth", "middleware", "jwt"]</code> for comprehensive results. The MCP server optimizes and caches searches for faster AI assistant responses.</p>
+					</div>
+				</div>
+			</div>
+		</section>
+
+		<!-- Technology Stack -->
+		<section class="tech-stack">
+			<div class="container">
+				<div class="tech-content">
+					<div class="tech-languages">
+						<h3>Supported Languages</h3>
+						<div class="languages-grid">
+							<div class="lang-item">
+								<span class="lang-icon">🦀</span>
+								<span>Rust</span>
+							</div>
+							<div class="lang-item">
+								<span class="lang-icon">🐍</span>
+								<span>Python</span>
+							</div>
+							<div class="lang-item">
+								<span class="lang-icon">📜</span>
+								<span>JavaScript</span>
+							</div>
+							<div class="lang-item">
+								<span class="lang-icon">📘</span>
+								<span>TypeScript</span>
+							</div>
+							<div class="lang-item">
+								<span class="lang-icon">🐹</span>
+								<span>Go</span>
+							</div>
+							<div class="lang-item">
+								<span class="lang-icon">🐘</span>
+								<span>PHP</span>
+							</div>
+							<div class="lang-item">
+								<span class="lang-icon">⚡</span>
+								<span>C++</span>
+							</div>
+							<div class="lang-item">
+								<span class="lang-icon">💎</span>
+								<span>Ruby</span>
+							</div>
+							<div class="lang-item">
+								<span class="lang-icon">📄</span>
+								<span>JSON</span>
+							</div>
+							<div class="lang-item">
+								<span class="lang-icon">🐚</span>
+								<span>Bash</span>
+							</div>
+							<div class="lang-item">
+								<span class="lang-icon">📝</span>
+								<span>Markdown</span>
+							</div>
+							<div class="lang-item">
+								<span class="lang-icon">🎨</span>
+								<span>CSS</span>
+							</div>
+						</div>
+					</div>
+					<div class="tech-performance">
+						<h3>Performance Metrics</h3>
+						<div class="metrics-grid">
+							<div class="metric-item">
+								<div class="metric-value">⚡ 16</div>
+								<div class="metric-label">files/batch processing</div>
+							</div>
+							<div class="metric-item">
+								<div class="metric-value">💾 ~10KB</div>
+								<div class="metric-label">storage per file</div>
+							</div>
+							<div class="metric-item">
+								<div class="metric-value">🔄 Real-time</div>
+								<div class="metric-label">incremental updates</div>
+							</div>
+							<div class="metric-item">
+								<div class="metric-value">🧠 Memory</div>
+								<div class="metric-label">persistent AI insights</div>
+							</div>
+						</div>
+					</div>
+				</div>
+			</div>
+		</section>
+
+		<!-- Open Source Advantages -->
+		<section class="open-source">
+			<div class="container">
+				<h2 class="section-title">Why Choose Open Source Code Intelligence?</h2>
+				<div class="advantages-grid">
+					<div class="advantage-card">
+						<div class="advantage-icon">🔓</div>
+						<h3>No Vendor Lock-in</h3>
+						<p>Your data, your control, Apache 2.0 license</p>
+					</div>
+					<div class="advantage-card">
+						<div class="advantage-icon">🛠️</div>
+						<h3>Extensible</h3>
+						<p>Add custom languages, embedding providers, or AI models</p>
+					</div>
+					<div class="advantage-card">
+						<div class="advantage-icon">🔒</div>
+						<h3>Security First</h3>
+						<p>Audit the code, run locally, enterprise-ready</p>
+					</div>
+					<div class="advantage-card">
+						<div class="advantage-icon">🌱</div>
+						<h3>Community Driven</h3>
+						<p>Backed by Muvon, enhanced by developers worldwide</p>
+					</div>
+				</div>
+			</div>
+		</section>
+
+		<!-- Installation -->
+		<section id="installation" class="installation">
+			<div class="container">
+				<h2 class="section-title">Quick Start</h2>
+				<div class="install-content">
+					<div class="install-steps">
+						<div class="step">
+							<div class="step-number">1</div>
+							<div class="step-content">
+								<h4>Install (Linux, macOS, Windows)</h4>
+								<div class="code-block">
+									<pre><code class="language-bash">curl -fsSL https://raw.githubusercontent.com/Muvon/octocode/master/install.sh | sh</code></pre>
+								</div>
+							</div>
+						</div>
+						<div class="step">
+							<div class="step-number">2</div>
+							<div class="step-content">
+								<h4>Set up API key (200M free tokens)</h4>
+								<div class="code-block">
+									<pre><code class="language-bash">export VOYAGE_API_KEY="your-key"</code></pre>
+								</div>
+							</div>
+						</div>
+						<div class="step">
+							<div class="step-number">3</div>
+							<div class="step-content">
+								<h4>Index your project</h4>
+								<div class="code-block">
+									<pre><code class="language-bash">octocode index</code></pre>
+								</div>
+							</div>
+						</div>
+						<div class="step">
+							<div class="step-number">4</div>
+							<div class="step-content">
+								<h4>Start MCP server & try CLI tools</h4>
+								<div class="code-block">
+									<pre><code class="language-bash"># Start MCP server for AI assistants
+										octocode mcp --path .
+
+										# Try AI-powered git workflow
+										octocode commit --all
+										octocode review --focus security</code></pre>
+								</div>
+							</div>
+						</div>
+					</div>
+					<div class="install-alternatives">
+						<h4>Alternative Installation Methods:</h4>
+						<ul>
+							<li><a href="https://github.com/Muvon/octocode/releases" target="_blank">Download from GitHub Releases</a></li>
+							<li><code>cargo install --git https://github.com/Muvon/octocode</code></li>
+							<li><a href="https://github.com/Muvon/octocode/blob/master/INSTALL.md" target="_blank">Build from source</a></li>
+						</ul>
+					</div>
+				</div>
+			</div>
+		</section>
+
+		<!-- Community & Enterprise -->
+		<section class="community">
+			<div class="container">
+				<div class="community-content">
+					<div class="community-open-source">
+						<h3>Open Source Community</h3>
+						<div class="community-stats">
+							<div class="stat-item">
+								<div class="stat-value" id="github-stars-large">⭐ Loading...</div>
+								<div class="stat-label">GitHub Stars</div>
+							</div>
+							<div class="stat-item">
+								<div class="stat-value">🐛 Issues</div>
+								<div class="stat-label"><a href="https://github.com/Muvon/octocode/issues" target="_blank">Report & Track</a></div>
+							</div>
+							<div class="stat-item">
+								<div class="stat-value">💬 Discussions</div>
+								<div class="stat-label"><a href="https://github.com/Muvon/octocode/discussions" target="_blank">Join Community</a></div>
+							</div>
+							<div class="stat-item">
+								<div class="stat-value">🤝 Contributing</div>
+								<div class="stat-label"><a href="https://github.com/Muvon/octocode/blob/master/doc/CONTRIBUTING.md" target="_blank">Get Involved</a></div>
+							</div>
+						</div>
+					</div>
+					<div class="community-enterprise">
+						<h3>Enterprise Support</h3>
+						<p>Need enterprise features, custom integrations, or dedicated support?</p>
+						<a href="mailto:opensource@muvon.io" class="btn btn-outline">Contact Muvon Team</a>
+						<div class="enterprise-features">
+							<ul>
+								<li>Custom embedding models</li>
+								<li>Enterprise deployment</li>
+								<li>Priority support</li>
+								<li>Custom integrations</li>
+							</ul>
+						</div>
+					</div>
+				</div>
+			</div>
+		</section>
+
+		<!-- Footer -->
+		<footer class="footer">
+			<div class="container">
+				<div class="footer-content">
+					<div class="footer-brand">
+						<div class="logo">
+							<svg width="126" height="40" viewBox="0 0 126 40" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="16.7757" cy="6.04188" r="6.04188" fill="#76B744"></circle><circle cx="37.5282" cy="31.2601" r="6.04188" fill="#76B744"></circle><path fill-rule="evenodd" clip-rule="evenodd" d="M40.4889 14.7002C40.6847 18.0313 38.1431 20.8904 34.812 21.0862C33.2728 21.1767 31.6218 21.4473 30.5785 22.5826L25.4075 28.2087C24.2377 29.4814 24.1311 31.3703 24.1311 33.099C24.1311 36.4359 21.4261 39.1409 18.0892 39.1409C14.7524 39.1409 12.0473 36.4359 12.0473 33.099C12.0473 33.0689 12.0475 33.0387 12.048 33.0087C12.0696 31.5357 11.9005 29.9507 10.8815 28.8867C9.74425 27.6992 7.93379 27.5495 6.29084 27.615C6.01445 27.6261 5.73401 27.6182 5.45092 27.5904C2.13011 27.2638 -0.297169 24.3069 0.0294542 20.9861C0.356077 17.6653 3.31291 15.238 6.63373 15.5646C9.95454 15.8913 12.3818 18.8481 12.0552 22.1689C11.9519 23.2191 12.1129 24.3374 12.8427 25.0995L13.3778 25.6582C14.5465 26.8785 16.3995 27.0571 18.0892 27.0571C19.5836 27.0571 21.1971 26.8255 22.2084 25.7252L27.3209 20.1627C28.456 18.9277 28.5244 17.0838 28.426 15.4092C28.2302 12.0781 30.7718 9.21903 34.1029 9.02323C37.434 8.82742 40.2931 11.3691 40.4889 14.7002Z" fill="#76B744"></path><path d="M65.6534 17.4566C65.3946 16.9132 64.8877 16.6414 64.1329 16.6414C63.2559 16.6414 62.6664 16.9132 62.3644 17.4566C62.1991 17.7661 62.1164 18.227 62.1164 18.8392V25.6079H59V14.3818H61.987V16.0224C62.368 15.4377 62.7275 15.0215 63.0654 14.7739C63.662 14.3336 64.4348 14.1135 65.3838 14.1135C66.2824 14.1135 67.0085 14.3027 67.562 14.681C68.0078 15.0318 68.3456 15.4824 68.5757 16.0327C68.9783 15.3723 69.4779 14.8874 70.0746 14.5778C70.7072 14.2683 71.4117 14.1135 72.1881 14.1135C72.7057 14.1135 73.2161 14.2098 73.7194 14.4024C74.2226 14.595 74.6791 14.9321 75.0889 15.4136C75.4196 15.8057 75.6424 16.2872 75.7574 16.8581C75.8293 17.2365 75.8653 17.7902 75.8653 18.5193L75.8437 25.6079H72.6949V18.4471C72.6949 18.0206 72.6231 17.6698 72.4793 17.3947C72.2061 16.8719 71.7029 16.6105 70.9696 16.6105C70.1213 16.6105 69.5354 16.9475 69.2119 17.6217C69.0466 17.9794 68.9639 18.4093 68.9639 18.9114V25.6079H65.869V18.9114C65.869 18.2442 65.7972 17.7592 65.6534 17.4566Z" fill="white"></path><path d="M85.5764 24.0189C85.5476 24.0533 85.4757 24.1565 85.3607 24.3285C85.2457 24.5004 85.1091 24.6518 84.951 24.7825C84.4693 25.1952 84.002 25.4772 83.5491 25.6285C83.1034 25.7799 82.5786 25.8555 81.9747 25.8555C80.235 25.8555 79.0632 25.2571 78.4593 24.0602C78.1215 23.3998 77.9525 22.4265 77.9525 21.1402V14.3611H81.1013V21.1402C81.1013 21.7799 81.1804 22.2614 81.3385 22.5847C81.6189 23.1556 82.1688 23.4411 82.9884 23.4411C84.038 23.4411 84.7569 23.0353 85.1451 22.2236C85.3463 21.7833 85.447 21.2021 85.447 20.4798V14.3611H88.5634V25.6079H85.5764V24.0189Z" fill="white"></path><path d="M89.7233 14.3611H93.174L95.6218 22.6569L98.1236 14.3611H101.423L97.1854 25.6079H93.9396L89.7233 14.3611Z" fill="white"></path><path d="M112.31 15.785C113.302 16.9751 113.798 18.3818 113.798 20.0052C113.798 21.6561 113.302 23.0696 112.31 24.2459C111.318 25.4153 109.812 26 107.792 26C105.771 26 104.265 25.4153 103.273 24.2459C102.281 23.0696 101.785 21.6561 101.785 20.0052C101.785 18.3818 102.281 16.9751 103.273 15.785C104.265 14.595 105.771 14 107.792 14C109.812 14 111.318 14.595 112.31 15.785ZM107.781 16.4867C106.882 16.4867 106.188 16.7928 105.7 17.405C105.218 18.0103 104.977 18.877 104.977 20.0052C104.977 21.1333 105.218 22.0034 105.7 22.6156C106.188 23.2279 106.882 23.534 107.781 23.534C108.679 23.534 109.37 23.2279 109.851 22.6156C110.333 22.0034 110.574 21.1333 110.574 20.0052C110.574 18.877 110.333 18.0103 109.851 17.405C109.37 16.7928 108.679 16.4867 107.781 16.4867Z" fill="white"></path><path d="M120.878 16.5383C119.835 16.5383 119.12 16.9613 118.732 17.8074C118.531 18.2545 118.43 18.8255 118.43 19.5202V25.6079H115.368V14.3818H118.333V16.0224C118.728 15.4445 119.102 15.0284 119.454 14.7739C120.087 14.3199 120.889 14.0929 121.859 14.0929C123.074 14.0929 124.066 14.399 124.835 15.0112C125.612 15.6165 126 16.6242 126 18.0344V25.6079H122.851V18.767C122.851 18.1754 122.769 17.7214 122.603 17.405C122.301 16.8272 121.726 16.5383 120.878 16.5383Z" fill="white"></path></svg>
+						</div>
+						<p>Muvon Un Limited (Hong Kong)</p>
+						<p class="footer-tagline">Built with ❤️ by developers, for developers</p>
+					</div>
+					<div class="footer-links">
+						<div class="footer-column">
+							<h4>Open Source</h4>
+							<ul>
+								<li><a href="https://github.com/Muvon/octocode" target="_blank">GitHub Repository</a></li>
+								<li><a href="https://github.com/Muvon/octocode/issues" target="_blank">Issues & Bugs</a></li>
+								<li><a href="https://github.com/Muvon/octocode/discussions" target="_blank">Discussions</a></li>
+								<li><a href="https://github.com/Muvon/octocode/blob/master/doc/CONTRIBUTING.md" target="_blank">Contributing</a></li>
+							</ul>
+						</div>
+						<div class="footer-column">
+							<h4>Documentation</h4>
+							<ul>
+								<li><a href="https://github.com/Muvon/octocode/blob/master/doc/GETTING_STARTED.md" target="_blank">Getting Started</a></li>
+								<li><a href="https://github.com/Muvon/octocode/blob/master/doc/API_KEYS.md" target="_blank">API Keys Setup</a></li>
+								<li><a href="https://github.com/Muvon/octocode/blob/master/doc/MCP_INTEGRATION.md" target="_blank">MCP Integration</a></li>
+								<li><a href="https://github.com/Muvon/octocode/blob/master/INSTALL.md" target="_blank">Installation Guide</a></li>
+							</ul>
+						</div>
+						<div class="footer-column">
+							<h4>Resources</h4>
+							<ul>
+								<li><a href="https://github.com/Muvon/octocode/blob/master/doc/ARCHITECTURE.md" target="_blank">Architecture</a></li>
+								<li><a href="https://github.com/Muvon/octocode/blob/master/doc/PERFORMANCE.md" target="_blank">Performance</a></li>
+								<li><a href="https://github.com/Muvon/octocode/releases" target="_blank">Releases</a></li>
+								<li><a href="https://github.com/Muvon/octocode/blob/master/CHANGELOG.md" target="_blank">Changelog</a></li>
+							</ul>
+						</div>
+						<div class="footer-column">
+							<h4>Contact</h4>
+							<ul>
+								<li><a href="mailto:opensource@muvon.io">opensource@muvon.io</a></li>
+								<li><a href="https://muvon.io" target="_blank">Muvon Website</a></li>
+								<li><a href="https://x.com/muvonteam" target="_blank">Twitter</a></li>
+								<li><a href="https://linkedin.com/company/muvonteam" target="_blank">LinkedIn</a></li>
+							</ul>
+						</div>
+					</div>
+				</div>
+				<div class="footer-bottom">
+					<div class="footer-license">
+						<p>&copy; 2025 Muvon Un Limited. Licensed under <a href="https://github.com/Muvon/octocode/blob/master/LICENSE" target="_blank">Apache 2.0</a></p>
+					</div>
+					<div class="footer-social">
+						<a href="https://x.com/muvonteam" target="_blank" aria-label="Twitter">
+							<svg width="20" height="20" fill="currentColor" viewBox="0 0 24 24">
+								<path d="M23.953 4.57a10 10 0 01-2.825.775 4.958 4.958 0 002.163-2.723c-.951.555-2.005.959-3.127 1.184a4.92 4.92 0 00-8.384 4.482C7.69 8.095 4.067 6.13 1.64 3.162a4.822 4.822 0 00-.666 2.475c0 1.71.87 3.213 2.188 4.096a4.904 4.904 0 01-2.228-.616v.06a4.923 4.923 0 003.946 4.827 4.996 4.996 0 01-2.212.085 4.936 4.936 0 004.604 3.417 9.867 9.867 0 01-6.102 2.105c-.39 0-.779-.023-1.17-.067a13.995 13.995 0 007.557 2.209c9.053 0 13.998-7.496 13.998-13.985 0-.21 0-.42-.015-.63A9.935 9.935 0 0024 4.59z"/>
+							</svg>
+						</a>
+						<a href="https://linkedin.com/company/muvonteam" target="_blank" aria-label="LinkedIn">
+							<svg width="20" height="20" fill="currentColor" viewBox="0 0 24 24">
+								<path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433c-1.144 0-2.063-.926-2.063-2.065 0-1.138.92-2.063 2.063-2.063 1.14 0 2.064.925 2.064 2.063 0 1.139-.925 2.065-2.064 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z"/>
+							</svg>
+						</a>
+					</div>
+				</div>
+			</div>
+		</footer>
+
+		<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+		<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+		<script src="script.js"></script>
+	</body>
+</html>

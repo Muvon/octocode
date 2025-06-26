@@ -1,0 +1,110 @@
+name: Deploy Website to Cloudflare Pages
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - 'website/**'
+  pull_request:
+    paths:
+      - 'website/**'
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    name: Deploy to Cloudflare Pages
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Wrangler
+        run: npm install -g wrangler@latest
+
+      - name: Verify website files
+        run: |
+          echo "📁 Website directory contents:"
+          ls -la website/
+          echo ""
+          echo "📄 Checking required files:"
+          test -f website/index.html && echo "✅ index.html found" || echo "❌ index.html missing"
+          test -f website/styles.css && echo "✅ styles.css found" || echo "❌ styles.css missing"
+          test -f website/script.js && echo "✅ script.js found" || echo "❌ script.js missing"
+
+      - name: Optimize website files
+        run: |
+          cd website
+          echo "🔧 Optimizing website files..."
+
+          # Create _headers file for better caching
+          cat > _headers << 'EOF'
+          /*
+            X-Frame-Options: DENY
+            X-Content-Type-Options: nosniff
+            X-XSS-Protection: 1; mode=block
+            Referrer-Policy: strict-origin-when-cross-origin
+            Permissions-Policy: camera=(), microphone=(), geolocation=()
+
+          /*.css
+            Cache-Control: public, max-age=31536000, immutable
+
+          /*.js
+            Cache-Control: public, max-age=31536000, immutable
+
+          /*.html
+            Cache-Control: public, max-age=3600
+          EOF
+
+          # Create _redirects file for SPA routing (if needed)
+          cat > _redirects << 'EOF'
+          # Redirect install script to GitHub
+          /install.sh https://raw.githubusercontent.com/Muvon/octocode/master/install.sh 302
+
+          # Redirect old paths (if any)
+          /docs/* https://github.com/Muvon/octocode/blob/master/doc/:splat 302
+          EOF
+
+          echo "✅ Optimization complete"
+
+      - name: Deploy to Cloudflare Pages (Production)
+        if: github.ref == 'refs/heads/master'
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy website --project-name=octocode
+
+      - name: Deploy to Cloudflare Pages (Preview)
+        if: github.event_name == 'pull_request'
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy website --project-name=octocode
+
+      - name: Comment PR with preview URL
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: deployments } = await github.rest.repos.listDeployments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              ref: context.payload.pull_request.head.sha,
+              per_page: 1
+            });
+
+            if (deployments.length > 0) {
+              const deployment = deployments[0];
+              const previewUrl = `https://${context.payload.pull_request.head.sha.substring(0, 8)}.octocode.pages.dev`;
+
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.payload.pull_request.number,
+                body: `🚀 **Website Preview Deployed**\n\n📄 Preview URL: ${previewUrl}\n\n*This preview will be available for testing the website changes.*`
+              });
+            }
+
