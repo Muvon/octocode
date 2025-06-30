@@ -51,7 +51,7 @@ chrono = { version = "0.4", default-features = false, features = ["serde", "cloc
 async-trait = "0.1"
 tree-sitter = "0.25.6"
 tree-sitter-php = "0.23.11"
-tree-sitter-rust = "0.23.2"
+tree-sitter-rust = "0.24.0"
 tree-sitter-python = "0.23.6"
 tree-sitter-javascript = "0.23.1"
 tree-sitter-json = "0.24.8"
@@ -84,7 +84,7 @@ candle-core = { version = "0.9.1", optional = true }
 candle-nn = { version = "0.9.1", optional = true }
 candle-transformers = { version = "0.9.1", optional = true }
 tokenizers = { version = "0.21.2", optional = true }
-hf-hub = { version = "0.3.2", features = ["tokio"], optional = true }
+hf-hub = { version = "0.4.3", features = ["tokio"], optional = true }
 # EditorConfig parsing and formatting
 ec4rs = "1.2.0"
 tracing = "0.1.41"
