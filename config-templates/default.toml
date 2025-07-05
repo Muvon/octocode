@@ -63,8 +63,8 @@ max_sample_tokens = 1500
 
 # Confidence threshold for filtering AI-discovered relationships (0.0-1.0)
 # Higher values = more selective, only high-confidence relationships
-# Recommended: 0.8 for production, 0.7 for development/exploration
-confidence_threshold = 0.8
+# Recommended: 0.6 for balanced results, 0.8 for high precision
+confidence_threshold = 0.6
 
 # Weight assigned to architectural relationships discovered by AI
 # Higher values make AI-discovered relationships more prominent in graph

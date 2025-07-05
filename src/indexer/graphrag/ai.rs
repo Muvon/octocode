@@ -111,7 +111,17 @@ impl AIEnhancements {
 			.collect();
 
 		if complex_files.is_empty() {
+			if !self.quiet {
+				eprintln!("Debug: No files qualified for AI relationship analysis in this batch");
+			}
 			return Ok(ai_relationships);
+		}
+
+		if !self.quiet {
+			eprintln!(
+				"Info: AI analyzing {} files for architectural relationships",
+				complex_files.len()
+			);
 		}
 
 		// Process in small batches to avoid overwhelming the AI
@@ -130,25 +140,13 @@ impl AIEnhancements {
 
 	// Determine if a file is complex enough to benefit from AI relationship analysis
 	fn should_use_ai_for_relationships(&self, node: &CodeNode) -> bool {
-		// Use AI for relationship discovery on files that are architecturally significant
-		let is_interface_heavy = node
-			.symbols
-			.iter()
-			.any(|s| s.contains("interface_") || s.contains("trait_"));
-		let is_config_or_setup = node
-			.symbols
-			.iter()
-			.any(|s| s.contains("config") || s.contains("setup") || s.contains("init"));
-		let is_core_module = node.path.contains("core")
-			|| node.path.contains("lib")
-			|| node.name == "main"
-			|| node.name == "index";
-		let has_many_exports = node.exports.len() > 5;
-		let is_large_file = node.size_lines > 200;
+		// Use actual code substance, not directory guessing
+		let has_meaningful_exports = node.exports.len() >= 2;
+		let is_substantial_file = node.size_lines >= 50;
+		let has_multiple_symbols = node.symbols.len() >= 3;
 
-		// Focus AI on files that are likely to have complex, non-obvious relationships
-		(is_interface_heavy || is_config_or_setup || is_core_module)
-			&& (has_many_exports || is_large_file)
+		// If file has substance, analyze it
+		has_meaningful_exports || is_substantial_file || has_multiple_symbols
 	}
 
 	// Analyze architectural relationships using AI in small batches
