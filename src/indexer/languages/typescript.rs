@@ -220,27 +220,21 @@ impl Language for TypeScript {
 		let registry = FileRegistry::new(all_files);
 
 		if import_path.starts_with("./") || import_path.starts_with("../") {
-			// Relative import - handle TypeScript-specific extensions
+			// Relative import - handle TypeScript-specific extensions with enhanced matching
 			if let Some(relative_path) = resolve_relative_path(source_file, import_path) {
-				let relative_path_str = relative_path.to_string_lossy().to_string();
-
-				// Check exact match first
-				if registry
-					.get_all_files()
-					.iter()
-					.any(|f| f == &relative_path_str)
-				{
-					return Some(relative_path_str);
-				}
-
-				// Try with TypeScript extensions
-				let without_ext = relative_path.with_extension("");
-				return registry.find_file_with_extensions(&without_ext, &["ts", "tsx", "d.ts"]);
+				// Use enhanced TypeScript file matching
+				return self.find_matching_ts_file(&relative_path, &registry);
 			}
 		} else {
-			// Use JavaScript resolution for absolute/module imports
-			let js = JavaScript {};
-			return js.resolve_import(import_path, source_file, all_files);
+			// Use enhanced JavaScript resolution for absolute/module imports
+			// but also try TypeScript-specific patterns
+			let js = super::javascript::JavaScript {};
+			if let Some(js_result) = js.resolve_import(import_path, source_file, all_files) {
+				return Some(js_result);
+			}
+
+			// Try TypeScript-specific module resolution
+			return self.resolve_ts_module_import(import_path, source_file, &registry);
 		}
 
 		None
@@ -248,6 +242,139 @@ impl Language for TypeScript {
 
 	fn get_file_extensions(&self) -> Vec<&'static str> {
 		vec!["ts", "tsx"]
+	}
+}
+
+impl TypeScript {
+	/// Find matching TypeScript file with robust path comparison (enhanced for TS)
+	fn find_matching_ts_file(
+		&self,
+		target_path: &std::path::Path,
+		registry: &super::resolution_utils::FileRegistry,
+	) -> Option<String> {
+		let target_str = target_path.to_string_lossy().to_string();
+
+		// Try exact string match first (fastest)
+		if let Some(exact_match) = registry.get_all_files().iter().find(|f| *f == &target_str) {
+			return Some(exact_match.clone());
+		}
+
+		// Try with TypeScript extensions (prioritize .ts over .js for TS projects)
+		let ts_extensions = ["ts", "tsx", "d.ts", "js", "jsx", "mjs"];
+		for ext in &ts_extensions {
+			let with_ext = if target_str.ends_with(&format!(".{}", ext)) {
+				target_str.clone()
+			} else {
+				format!("{}.{}", target_str, ext)
+			};
+
+			if let Some(exact_match) = registry.get_all_files().iter().find(|f| *f == &with_ext) {
+				return Some(exact_match.clone());
+			}
+		}
+
+		// Try index files in directory (TypeScript-first)
+		let index_candidates = [
+			"index.ts",
+			"index.tsx",
+			"index.d.ts",
+			"index.js",
+			"index.jsx",
+		];
+		for index_file in &index_candidates {
+			let index_path = target_path.join(index_file);
+			let index_str = index_path.to_string_lossy().to_string();
+			if let Some(exact_match) = registry.get_all_files().iter().find(|f| *f == &index_str) {
+				return Some(exact_match.clone());
+			}
+		}
+
+		// Try normalized path comparison for cross-platform compatibility
+		if let Ok(canonical_target) = target_path.canonicalize() {
+			let canonical_str = canonical_target.to_string_lossy().to_string();
+			for ts_file in registry.get_all_files() {
+				if let Ok(canonical_ts) = std::path::Path::new(ts_file).canonicalize() {
+					let canonical_ts_str = canonical_ts.to_string_lossy().to_string();
+					if canonical_str == canonical_ts_str {
+						return Some(ts_file.clone());
+					}
+				}
+			}
+		}
+
+		// Try relative path matching for different path prefixes
+		if let Some(target_file_name) = target_path.file_name() {
+			if let Some(target_parent) = target_path.parent() {
+				for ts_file in registry.get_all_files() {
+					let ts_path = std::path::Path::new(ts_file);
+					if let Some(ts_file_name) = ts_path.file_name() {
+						if let Some(ts_parent) = ts_path.parent() {
+							// Match if filename and relative parent path match
+							if target_file_name == ts_file_name {
+								if let (Some(target_parent_str), Some(ts_parent_str)) =
+									(target_parent.to_str(), ts_parent.to_str())
+								{
+									// Check if the parent paths end with the same structure
+									if target_parent_str.ends_with(ts_parent_str)
+										|| ts_parent_str.ends_with(target_parent_str)
+									{
+										return Some(ts_file.clone());
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+
+		None
+	}
+
+	/// TypeScript-specific module resolution (types, @types, etc.)
+	fn resolve_ts_module_import(
+		&self,
+		import_path: &str,
+		_source_file: &str,
+		registry: &super::resolution_utils::FileRegistry,
+	) -> Option<String> {
+		// Try TypeScript-specific patterns
+
+		// 1. Try @types packages
+		if !import_path.starts_with('@') {
+			let types_path = format!("node_modules/@types/{}", import_path);
+			let types_index = std::path::Path::new(&types_path).join("index.d.ts");
+			if let Some(found) = self.find_matching_ts_file(&types_index, registry) {
+				return Some(found);
+			}
+		}
+
+		// 2. Try in common TypeScript source directories
+		let ts_source_dirs = ["src", "lib", "types", "typings", "components", "utils"];
+		for src_dir in &ts_source_dirs {
+			let src_path = std::path::Path::new(src_dir).join(import_path);
+			if let Some(found) = self.find_matching_ts_file(&src_path, registry) {
+				return Some(found);
+			}
+		}
+
+		// 3. Try node_modules with TypeScript files
+		let node_modules_patterns = [
+			format!("node_modules/{}/index.d.ts", import_path),
+			format!("node_modules/{}/lib/index.d.ts", import_path),
+			format!("node_modules/{}/src/index.ts", import_path),
+			format!("node_modules/{}/dist/index.d.ts", import_path),
+			format!("node_modules/{}/types/index.d.ts", import_path),
+		];
+
+		for pattern in &node_modules_patterns {
+			let package_path = std::path::Path::new(pattern);
+			if let Some(found) = self.find_matching_ts_file(package_path, registry) {
+				return Some(found);
+			}
+		}
+
+		None
 	}
 }
 

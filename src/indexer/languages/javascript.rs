@@ -230,6 +230,91 @@ impl Language for JavaScript {
 }
 
 impl JavaScript {
+	/// Find matching JavaScript file with robust path comparison (same pattern as Rust/PHP)
+	fn find_matching_js_file(
+		&self,
+		target_path: &std::path::Path,
+		registry: &super::resolution_utils::FileRegistry,
+	) -> Option<String> {
+		let target_str = target_path.to_string_lossy().to_string();
+
+		// Try exact string match first (fastest)
+		if let Some(exact_match) = registry.get_all_files().iter().find(|f| *f == &target_str) {
+			return Some(exact_match.clone());
+		}
+
+		// Try with common JS extensions if not present
+		let extensions = ["js", "jsx", "mjs", "ts", "tsx"];
+		for ext in &extensions {
+			let with_ext = if target_str.ends_with(&format!(".{}", ext)) {
+				target_str.clone()
+			} else {
+				format!("{}.{}", target_str, ext)
+			};
+
+			if let Some(exact_match) = registry.get_all_files().iter().find(|f| *f == &with_ext) {
+				return Some(exact_match.clone());
+			}
+		}
+
+		// Try index files in directory
+		let index_candidates = [
+			"index.js",
+			"index.jsx",
+			"index.mjs",
+			"index.ts",
+			"index.tsx",
+		];
+		for index_file in &index_candidates {
+			let index_path = target_path.join(index_file);
+			let index_str = index_path.to_string_lossy().to_string();
+			if let Some(exact_match) = registry.get_all_files().iter().find(|f| *f == &index_str) {
+				return Some(exact_match.clone());
+			}
+		}
+
+		// Try normalized path comparison for cross-platform compatibility
+		if let Ok(canonical_target) = target_path.canonicalize() {
+			let canonical_str = canonical_target.to_string_lossy().to_string();
+			for js_file in registry.get_all_files() {
+				if let Ok(canonical_js) = std::path::Path::new(js_file).canonicalize() {
+					let canonical_js_str = canonical_js.to_string_lossy().to_string();
+					if canonical_str == canonical_js_str {
+						return Some(js_file.clone());
+					}
+				}
+			}
+		}
+
+		// Try relative path matching for different path prefixes
+		if let Some(target_file_name) = target_path.file_name() {
+			if let Some(target_parent) = target_path.parent() {
+				for js_file in registry.get_all_files() {
+					let js_path = std::path::Path::new(js_file);
+					if let Some(js_file_name) = js_path.file_name() {
+						if let Some(js_parent) = js_path.parent() {
+							// Match if filename and relative parent path match
+							if target_file_name == js_file_name {
+								if let (Some(target_parent_str), Some(js_parent_str)) =
+									(target_parent.to_str(), js_parent.to_str())
+								{
+									// Check if the parent paths end with the same structure
+									if target_parent_str.ends_with(js_parent_str)
+										|| js_parent_str.ends_with(target_parent_str)
+									{
+										return Some(js_file.clone());
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+
+		None
+	}
+
 	/// Extract JavaScript variable declarations within a block
 	#[allow(clippy::only_used_in_recursion)]
 	pub fn extract_js_variable_declarations(
@@ -426,7 +511,7 @@ pub fn parse_js_export_statement(export_text: &str) -> Option<Vec<String>> {
 }
 
 impl JavaScript {
-	/// Resolve relative imports like ./utils or ../components/Button
+	/// Resolve relative imports like ./utils or ../components/Button with enhanced path matching
 	fn resolve_relative_import(
 		&self,
 		import_path: &str,
@@ -436,53 +521,68 @@ impl JavaScript {
 		use super::resolution_utils::resolve_relative_path;
 
 		let relative_path = resolve_relative_path(source_file, import_path)?;
-		let relative_path_str = relative_path.to_string_lossy().to_string();
 
-		// For JavaScript, imports often include the extension already
-		// First try exact match, then try with extensions
-		if registry
-			.get_all_files()
-			.iter()
-			.any(|f| f == &relative_path_str)
-		{
-			return Some(relative_path_str);
-		}
-
-		// Try with extensions if exact match fails
-		registry
-			.find_file_with_extensions(&relative_path, &self.get_file_extensions())
-			.or_else(|| {
-				// Try with index.js in directory
-				let index_path = relative_path.join("index");
-				registry.find_file_with_extensions(&index_path, &self.get_file_extensions())
-			})
+		// Use enhanced file matching
+		self.find_matching_js_file(&relative_path, registry)
 	}
 
-	/// Resolve absolute imports from project root
+	/// Resolve absolute imports from project root with enhanced path matching
 	fn resolve_absolute_import(
 		&self,
 		import_path: &str,
 		registry: &super::resolution_utils::FileRegistry,
 	) -> Option<String> {
 		let path = std::path::Path::new(import_path);
-		registry
-			.find_file_with_extensions(path, &self.get_file_extensions())
-			.or_else(|| {
-				// Try with index.js in directory
-				let index_path = path.join("index");
-				registry.find_file_with_extensions(&index_path, &self.get_file_extensions())
-			})
+
+		// Use enhanced file matching
+		self.find_matching_js_file(path, registry)
 	}
 
-	/// Resolve module imports (could be node_modules or relative)
+	/// Enhanced module import resolution with better patterns
 	fn resolve_module_import(
 		&self,
 		import_path: &str,
 		source_file: &str,
 		registry: &super::resolution_utils::FileRegistry,
 	) -> Option<String> {
-		// For now, treat as relative import from current directory
+		// Try multiple resolution strategies for module imports
+
+		// 1. Try as relative import from current directory
 		let relative_import = format!("./{}", import_path);
-		self.resolve_relative_import(&relative_import, source_file, registry)
+		if let Some(found) = self.resolve_relative_import(&relative_import, source_file, registry) {
+			return Some(found);
+		}
+
+		// 2. Try in common source directories
+		let source_dirs = ["src", "lib", "components", "utils", "modules"];
+		for src_dir in &source_dirs {
+			let src_path = std::path::Path::new(src_dir).join(import_path);
+			if let Some(found) = self.find_matching_js_file(&src_path, registry) {
+				return Some(found);
+			}
+		}
+
+		// 3. Try node_modules resolution (simplified)
+		let node_modules_path = std::path::Path::new("node_modules").join(import_path);
+		if let Some(found) = self.find_matching_js_file(&node_modules_path, registry) {
+			return Some(found);
+		}
+
+		// 4. Try package.json main field simulation (common patterns)
+		let package_patterns = [
+			format!("node_modules/{}/index.js", import_path),
+			format!("node_modules/{}/lib/index.js", import_path),
+			format!("node_modules/{}/src/index.js", import_path),
+			format!("node_modules/{}/dist/index.js", import_path),
+		];
+
+		for pattern in &package_patterns {
+			let package_path = std::path::Path::new(pattern);
+			if let Some(found) = self.find_matching_js_file(package_path, registry) {
+				return Some(found);
+			}
+		}
+
+		None
 	}
 }

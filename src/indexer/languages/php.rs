@@ -193,41 +193,23 @@ impl Language for Php {
 		if import_path.starts_with("./") || import_path.starts_with("../") {
 			// Relative path - resolve directly
 			if let Some(relative_path) = resolve_relative_path(source_file, import_path) {
-				let relative_path_str = relative_path.to_string_lossy().to_string();
-				// Check exact match first
-				if registry
-					.get_all_files()
-					.iter()
-					.any(|f| f == &relative_path_str)
-				{
-					return Some(relative_path_str);
-				}
-				// Try without extension and add .php
-				let without_ext = relative_path.with_extension("");
-				return registry
-					.find_file_with_extensions(&without_ext, &self.get_file_extensions());
+				return self.find_matching_php_file(&relative_path, &registry);
 			}
 		} else if import_path.ends_with(".php") || !import_path.contains("/") {
 			// Simple filename like "Config.php" - look in same directory as source
 			let source_path = std::path::Path::new(source_file);
 			if let Some(source_dir) = source_path.parent() {
 				let target_path = source_dir.join(import_path);
-				let target_path_str = target_path.to_string_lossy().to_string();
-				if registry
-					.get_all_files()
-					.iter()
-					.any(|f| f == &target_path_str)
-				{
-					return Some(target_path_str);
+				if let Some(found) = self.find_matching_php_file(&target_path, &registry) {
+					return Some(found);
 				}
 			}
 			// Also try namespace resolution as fallback
 			let file_path = import_path.replace("\\", "/");
 			return self.resolve_namespace_import(&file_path, source_file, &registry);
 		} else {
-			// Convert namespace to file path
+			// Convert namespace to file path and try PSR-4 patterns
 			let file_path = import_path.replace("\\", "/");
-			// Try different common PHP patterns
 			return self.resolve_namespace_import(&file_path, source_file, &registry);
 		}
 
@@ -268,7 +250,77 @@ fn parse_php_use_statement(use_text: &str) -> Option<Vec<String>> {
 }
 
 impl Php {
-	/// Resolve namespace imports to file paths
+	/// Find matching PHP file with robust path comparison (same pattern as Rust)
+	fn find_matching_php_file(
+		&self,
+		target_path: &std::path::Path,
+		registry: &super::resolution_utils::FileRegistry,
+	) -> Option<String> {
+		let target_str = target_path.to_string_lossy().to_string();
+
+		// Try exact string match first (fastest)
+		if let Some(exact_match) = registry.get_all_files().iter().find(|f| *f == &target_str) {
+			return Some(exact_match.clone());
+		}
+
+		// Try with .php extension if not present
+		let with_php_ext = if target_str.ends_with(".php") {
+			target_str.clone()
+		} else {
+			format!("{}.php", target_str)
+		};
+
+		if let Some(exact_match) = registry
+			.get_all_files()
+			.iter()
+			.find(|f| *f == &with_php_ext)
+		{
+			return Some(exact_match.clone());
+		}
+
+		// Try normalized path comparison for cross-platform compatibility
+		if let Ok(canonical_target) = target_path.canonicalize() {
+			let canonical_str = canonical_target.to_string_lossy().to_string();
+			for php_file in registry.get_all_files() {
+				if let Ok(canonical_php) = std::path::Path::new(php_file).canonicalize() {
+					let canonical_php_str = canonical_php.to_string_lossy().to_string();
+					if canonical_str == canonical_php_str {
+						return Some(php_file.clone());
+					}
+				}
+			}
+		}
+
+		// Try relative path matching for different path prefixes
+		if let Some(target_file_name) = target_path.file_name() {
+			if let Some(target_parent) = target_path.parent() {
+				for php_file in registry.get_all_files() {
+					let php_path = std::path::Path::new(php_file);
+					if let Some(php_file_name) = php_path.file_name() {
+						if let Some(php_parent) = php_path.parent() {
+							// Match if filename and relative parent path match
+							if target_file_name == php_file_name {
+								if let (Some(target_parent_str), Some(php_parent_str)) =
+									(target_parent.to_str(), php_parent.to_str())
+								{
+									// Check if the parent paths end with the same structure
+									if target_parent_str.ends_with(php_parent_str)
+										|| php_parent_str.ends_with(target_parent_str)
+									{
+										return Some(php_file.clone());
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+
+		None
+	}
+
+	/// Enhanced namespace import resolution with PSR-4 autoloading patterns
 	fn resolve_namespace_import(
 		&self,
 		file_path: &str,
@@ -278,26 +330,48 @@ impl Php {
 		let source_path = std::path::Path::new(source_file);
 		let source_dir = source_path.parent()?;
 
-		// Try different common PHP patterns
-		let candidates = vec![
-			format!("{}.php", file_path),
-			format!("{}/index.php", file_path),
-			format!("src/{}.php", file_path),
-			format!("lib/{}.php", file_path),
-		];
+		// PSR-4 autoloading patterns - try multiple namespace-to-path mappings
+		let namespace_parts: Vec<&str> = file_path.split('/').collect();
 
-		for candidate in &candidates {
-			if let Some(found) = registry.find_exact_file(candidate) {
-				return Some(found);
-			}
-		}
+		// Try different PSR-4 patterns working backwards from full path
+		for end_idx in (1..=namespace_parts.len()).rev() {
+			let partial_path = namespace_parts[0..end_idx].join("/");
 
-		// Try relative to source directory
-		for candidate in &candidates {
-			let relative_path = source_dir.join(candidate);
-			let relative_path_str = relative_path.to_string_lossy().to_string();
-			if let Some(found) = registry.find_exact_file(&relative_path_str) {
-				return Some(found);
+			// Common PSR-4 patterns
+			let candidates = vec![
+				// Direct mapping: App\Config -> src/App/Config.php
+				format!("src/{}.php", partial_path),
+				format!("lib/{}.php", partial_path),
+				format!("app/{}.php", partial_path),
+				// Lowercase variants: App\Config -> src/app/config.php
+				format!("src/{}.php", partial_path.to_lowercase()),
+				format!("lib/{}.php", partial_path.to_lowercase()),
+				format!("app/{}.php", partial_path.to_lowercase()),
+				// Direct file: Config -> Config.php
+				format!("{}.php", partial_path),
+				// Index file: Config -> Config/index.php
+				format!("{}/index.php", partial_path),
+				// Vendor autoloading: Vendor\Package\Class -> vendor/package/src/Class.php
+				format!("vendor/{}.php", partial_path.to_lowercase()),
+				format!(
+					"vendor/{}/src/{}.php",
+					namespace_parts.first().unwrap_or(&"").to_lowercase(),
+					namespace_parts[1..].join("/")
+				),
+			];
+
+			// Try each candidate pattern
+			for candidate in &candidates {
+				// Try absolute from project root
+				if let Some(found) = registry.find_exact_file(candidate) {
+					return Some(found);
+				}
+
+				// Try relative to source directory
+				let relative_path = source_dir.join(candidate);
+				if let Some(found) = self.find_matching_php_file(&relative_path, registry) {
+					return Some(found);
+				}
 			}
 		}
 

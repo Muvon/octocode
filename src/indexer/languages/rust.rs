@@ -264,7 +264,7 @@ impl Rust {
 		let crate_root = self.find_crate_root(source_file, rust_files)?;
 		let crate_dir = std::path::Path::new(&crate_root).parent()?;
 
-		// SMART RESOLUTION: Try all possible module path combinations
+		// ENHANCED RESOLUTION: Try all possible module path combinations with better matching
 		// For crate::config::features::TechnicalIndicatorsConfig, try:
 		// 1. src/config/features.rs (most common)
 		// 2. src/config/features/mod.rs (module directory)
@@ -272,19 +272,73 @@ impl Rust {
 		// Work backwards from longest to shortest path
 		for end_idx in (1..=parts.len()).rev() {
 			let module_parts = &parts[0..end_idx];
+			let module_path_str = module_parts.join("/");
 
 			// Try as nested file path: config/features → src/config/features.rs
-			let file_path = crate_dir.join(module_parts.join("/") + ".rs");
-			let file_path_str = file_path.to_string_lossy().to_string();
-			if rust_files.iter().any(|f| f == &file_path_str) {
-				return Some(file_path_str);
+			let file_path = crate_dir.join(&module_path_str).with_extension("rs");
+			if let Some(resolved) = self.find_matching_file(&file_path, rust_files) {
+				return Some(resolved);
 			}
 
 			// Try as module directory: config/features → src/config/features/mod.rs
-			let mod_path = crate_dir.join(module_parts.join("/")).join("mod.rs");
-			let mod_path_str = mod_path.to_string_lossy().to_string();
-			if rust_files.iter().any(|f| f == &mod_path_str) {
-				return Some(mod_path_str);
+			let mod_path = crate_dir.join(&module_path_str).join("mod.rs");
+			if let Some(resolved) = self.find_matching_file(&mod_path, rust_files) {
+				return Some(resolved);
+			}
+		}
+
+		None
+	}
+
+	/// Find matching file with both exact and normalized path comparison
+	fn find_matching_file(
+		&self,
+		target_path: &std::path::Path,
+		rust_files: &[String],
+	) -> Option<String> {
+		let target_str = target_path.to_string_lossy().to_string();
+
+		// Try exact string match first (fastest)
+		if let Some(exact_match) = rust_files.iter().find(|f| *f == &target_str) {
+			return Some(exact_match.clone());
+		}
+
+		// Try normalized path comparison for cross-platform compatibility
+		if let Ok(canonical_target) = target_path.canonicalize() {
+			let canonical_str = canonical_target.to_string_lossy().to_string();
+			for rust_file in rust_files {
+				if let Ok(canonical_rust) = std::path::Path::new(rust_file).canonicalize() {
+					let canonical_rust_str = canonical_rust.to_string_lossy().to_string();
+					if canonical_str == canonical_rust_str {
+						return Some(rust_file.clone());
+					}
+				}
+			}
+		}
+
+		// Try relative path matching (handle cases where paths might have different prefixes)
+		if let Some(target_file_name) = target_path.file_name() {
+			if let Some(target_parent) = target_path.parent() {
+				for rust_file in rust_files {
+					let rust_path = std::path::Path::new(rust_file);
+					if let Some(rust_file_name) = rust_path.file_name() {
+						if let Some(rust_parent) = rust_path.parent() {
+							// Match if filename and relative parent path match
+							if target_file_name == rust_file_name {
+								if let (Some(target_parent_str), Some(rust_parent_str)) =
+									(target_parent.to_str(), rust_parent.to_str())
+								{
+									// Check if the parent paths end with the same structure
+									if target_parent_str.ends_with(rust_parent_str)
+										|| rust_parent_str.ends_with(target_parent_str)
+									{
+										return Some(rust_file.clone());
+									}
+								}
+							}
+						}
+					}
+				}
 			}
 		}
 
@@ -385,23 +439,48 @@ impl Rust {
 		None
 	}
 
-	/// Find the crate root (lib.rs or main.rs)
+	/// Find the crate root (lib.rs or main.rs) with proper path normalization
 	fn find_crate_root(&self, source_file: &str, rust_files: &[String]) -> Option<String> {
 		let source_path = std::path::Path::new(source_file);
 		let mut current_dir = source_path.parent()?;
 
-		loop {
-			// Look for lib.rs or main.rs
-			let lib_path = current_dir.join("lib.rs");
-			let lib_path_str = lib_path.to_string_lossy().to_string();
-			if rust_files.iter().any(|f| f == &lib_path_str) {
-				return Some(lib_path_str);
-			}
+		// Normalize all rust_files paths for comparison
+		let normalized_files: Vec<String> = rust_files
+			.iter()
+			.filter_map(|f| {
+				std::path::Path::new(f)
+					.canonicalize()
+					.ok()
+					.and_then(|p| p.to_str().map(|s| s.to_string()))
+			})
+			.collect();
 
-			let main_path = current_dir.join("main.rs");
-			let main_path_str = main_path.to_string_lossy().to_string();
-			if rust_files.iter().any(|f| f == &main_path_str) {
-				return Some(main_path_str);
+		loop {
+			// Look for lib.rs or main.rs with proper path normalization
+			for root_file in &["lib.rs", "main.rs"] {
+				let root_path = current_dir.join(root_file);
+
+				// Try exact string match first (fastest)
+				let root_path_str = root_path.to_string_lossy().to_string();
+				if rust_files.iter().any(|f| f == &root_path_str) {
+					return Some(root_path_str);
+				}
+
+				// Try normalized path comparison for cross-platform compatibility
+				// Try normalized path comparison for cross-platform compatibility
+				if let Ok(canonical_root) = root_path.canonicalize() {
+					let canonical_str = canonical_root.to_string_lossy().to_string();
+					if normalized_files.iter().any(|f| f == &canonical_str) {
+						// Return the original path format from rust_files
+						for original in rust_files {
+							if let Ok(canonical_f) = std::path::Path::new(original).canonicalize() {
+								if canonical_f.to_string_lossy() == canonical_str {
+									return Some(original.clone());
+								}
+							}
+						}
+					}
+				}
 			}
 
 			// Move up one directory

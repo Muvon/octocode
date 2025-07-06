@@ -769,6 +769,172 @@ def _private_function():
 		}
 	}
 
+	/// Test edge cases for C++ import resolution
+	#[tokio::test]
+	async fn test_cpp_edge_cases() {
+		let lang_impl = get_language("cpp").expect("C++ language should be available");
+
+		let files = vec![
+			"src/main.cpp".to_string(),
+			"src/helper.h".to_string(), // Same directory as main.cpp
+			"include/config.hpp".to_string(),
+			"lib/external/library.h".to_string(),
+			"src/modules/core.cpp".to_string(),
+		];
+
+		// Test local include in same directory
+		let resolved = lang_impl.resolve_import("\"helper.h\"", "src/main.cpp", &files);
+		assert!(
+			resolved.is_some(),
+			"Should resolve local include in same directory"
+		);
+
+		// Test system include that exists in project
+		let resolved = lang_impl.resolve_import("config.hpp", "src/main.cpp", &files);
+		assert!(resolved.is_some(), "Should find system include in project");
+
+		// Test non-existent include
+		let resolved = lang_impl.resolve_import("\"nonexistent.h\"", "src/main.cpp", &files);
+		assert!(
+			resolved.is_none(),
+			"Should not resolve non-existent include"
+		);
+	}
+
+	/// Test edge cases for Ruby import resolution
+	#[tokio::test]
+	async fn test_ruby_edge_cases() {
+		let lang_impl = get_language("ruby").expect("Ruby language should be available");
+
+		let files = vec![
+			"app/main.rb".to_string(),
+			"lib/utils/helper.rb".to_string(),
+			"config/database.rb".to_string(),
+			"app/models/user.rb".to_string(),
+			"vendor/gems/external_gem/lib/external.rb".to_string(),
+		];
+
+		// Test require_relative
+		let resolved =
+			lang_impl.resolve_import("relative:../config/database", "app/main.rb", &files);
+		assert!(resolved.is_some(), "Should resolve require_relative");
+
+		// Test absolute require
+		let resolved = lang_impl.resolve_import("utils/helper", "app/main.rb", &files);
+		assert!(resolved.is_some(), "Should resolve absolute require");
+
+		// Test gem require (should find in vendor)
+		let resolved = lang_impl.resolve_import("external", "app/main.rb", &files);
+		assert!(resolved.is_some(), "Should find gem in vendor directory");
+	}
+
+	/// Test edge cases for CSS import resolution
+	#[tokio::test]
+	async fn test_css_edge_cases() {
+		let lang_impl = get_language("css").expect("CSS language should be available");
+
+		let files = vec![
+			"styles/main.css".to_string(),
+			"styles/components/button.css".to_string(),
+			"styles/utils/variables.css".to_string(),
+			"node_modules/bootstrap/dist/css/bootstrap.css".to_string(),
+			"assets/fonts/custom.css".to_string(),
+		];
+
+		// Test relative import with extension
+		let resolved =
+			lang_impl.resolve_import("./components/button.css", "styles/main.css", &files);
+		assert!(resolved.is_some(), "Should resolve relative CSS import");
+
+		// Test import without extension
+		let resolved = lang_impl.resolve_import("./utils/variables", "styles/main.css", &files);
+		assert!(
+			resolved.is_some(),
+			"Should resolve CSS import without extension"
+		);
+
+		// Test that the function handles unknown imports gracefully
+		let resolved = lang_impl.resolve_import("unknown-module", "styles/main.css", &files);
+		assert!(
+			resolved.is_none(),
+			"Should handle unknown imports gracefully"
+		);
+	}
+
+	/// Test cross-platform path handling
+	#[tokio::test]
+	async fn test_cross_platform_paths() {
+		let lang_impl = get_language("rust").expect("Rust language should be available");
+
+		// Test with normalized paths (the system normalizes them)
+		let files = vec![
+			"src/main.rs".to_string(),
+			"src/utils/helper.rs".to_string(),
+			"src/config/mod.rs".to_string(),
+		];
+
+		let resolved = lang_impl.resolve_import("crate::utils::helper", "src/main.rs", &files);
+		assert!(
+			resolved.is_some(),
+			"Should handle path resolution correctly"
+		);
+
+		// Test that the function doesn't crash with different path formats
+		let resolved = lang_impl.resolve_import("crate::config", "src/main.rs", &files);
+		assert!(resolved.is_some(), "Should resolve module imports");
+	}
+
+	/// Test performance with large file lists
+	#[tokio::test]
+	async fn test_performance_large_filelist() {
+		let lang_impl =
+			get_language("javascript").expect("JavaScript language should be available");
+
+		// Create a large file list (1000 files)
+		let mut files = Vec::new();
+		for i in 0..1000 {
+			files.push(format!("src/module_{}.js", i));
+		}
+		files.push("src/utils/helper.js".to_string());
+
+		let start = std::time::Instant::now();
+		let resolved = lang_impl.resolve_import("./utils/helper", "src/main.js", &files);
+		let duration = start.elapsed();
+
+		assert!(
+			resolved.is_some(),
+			"Should resolve import in large file list"
+		);
+		assert!(
+			duration.as_millis() < 100,
+			"Should resolve quickly even with large file list"
+		);
+	}
+
+	/// Test malformed import statements
+	#[tokio::test]
+	async fn test_malformed_imports() {
+		let lang_impl = get_language("python").expect("Python language should be available");
+
+		let files = vec!["src/main.py".to_string(), "src/utils.py".to_string()];
+
+		// Test empty import
+		let resolved = lang_impl.resolve_import("", "src/main.py", &files);
+		assert!(resolved.is_none(), "Should handle empty import gracefully");
+
+		// Test malformed relative import
+		let resolved = lang_impl.resolve_import("...invalid", "src/main.py", &files);
+		assert!(
+			resolved.is_none(),
+			"Should handle malformed relative import"
+		);
+
+		// Test very long import path
+		let long_path = "a/".repeat(100) + "module";
+		let resolved = lang_impl.resolve_import(&long_path, "src/main.py", &files);
+		assert!(resolved.is_none(), "Should handle very long import paths");
+	}
+
 	/// Helper function to extract imports/exports recursively (same as in builder.rs)
 	fn extract_imports_exports_recursive(
 		node: tree_sitter::Node,
