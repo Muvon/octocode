@@ -312,7 +312,7 @@ mod tests {
 		assert_eq!(config.graphrag.llm.batch_timeout_seconds, 60);
 		assert!(config.graphrag.llm.fallback_to_individual);
 		assert_eq!(config.graphrag.llm.max_sample_tokens, 1500);
-		assert_eq!(config.graphrag.llm.confidence_threshold, 0.8);
+		assert_eq!(config.graphrag.llm.confidence_threshold, 0.6);
 		assert_eq!(config.graphrag.llm.architectural_weight, 0.9);
 		assert!(config
 			.graphrag
@@ -351,7 +351,7 @@ mod tests {
 		assert_eq!(config.graphrag.llm.batch_timeout_seconds, 60);
 		assert!(config.graphrag.llm.fallback_to_individual);
 		assert_eq!(config.graphrag.llm.max_sample_tokens, 1500);
-		assert_eq!(config.graphrag.llm.confidence_threshold, 0.8);
+		assert_eq!(config.graphrag.llm.confidence_threshold, 0.6);
 		assert_eq!(config.graphrag.llm.architectural_weight, 0.9);
 		assert!(config
 			.graphrag
