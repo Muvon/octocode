@@ -141,7 +141,9 @@ impl GraphBuilder {
 			let relative_path = match self.to_relative_path(&file_path) {
 				Ok(path) => path,
 				Err(_) => {
-					eprintln!("Warning: Skipping file outside project root: {}", file_path);
+					if !self.quiet {
+						eprintln!("Warning: Skipping file outside project root: {}", file_path);
+					}
 					continue;
 				}
 			};
@@ -262,7 +264,7 @@ impl GraphBuilder {
 					// Collect file for batch processing
 					let content_sample = self.build_content_sample_for_ai(&file_blocks);
 					let file_for_ai = crate::indexer::graphrag::ai::FileForAI {
-						file_id: file_path.clone(),
+						file_id: relative_path.clone(), // FIXED: Use relative_path to match node.id
 						file_path: file_path.clone(),
 						language: language.clone(),
 						symbols: symbols.clone(),
@@ -400,6 +402,7 @@ impl GraphBuilder {
 						&mut new_nodes,
 						&mut pending_embeddings,
 						&mut batches_processed,
+						&ai_descriptions, // Pass AI descriptions
 					)
 					.await?;
 				}
@@ -479,12 +482,47 @@ impl GraphBuilder {
 			}
 		}
 
+		// CRITICAL FIX: Replace placeholder descriptions with AI descriptions before final persistence
+		if !ai_descriptions.is_empty() && !new_nodes.is_empty() {
+			if !self.quiet {
+				eprintln!(
+					"🔄 Applying AI descriptions to {} pending nodes before persistence",
+					new_nodes.len()
+				);
+			}
+
+			for node in &mut new_nodes {
+				if let Some(ai_description) = ai_descriptions.get(&node.id) {
+					node.description = ai_description.clone();
+					if !self.quiet {
+						eprintln!("✅ Applied AI description to: {}", node.id);
+					}
+				} else {
+					// Replace placeholder with simple description if AI failed
+					let file_name = std::path::Path::new(&node.path)
+						.file_stem()
+						.and_then(|s| s.to_str())
+						.unwrap_or("unknown");
+					node.description = crate::indexer::graphrag::relationships::RelationshipDiscovery::generate_simple_description(
+						file_name,
+						&node.language,
+						&node.symbols,
+						node.size_lines,
+					);
+					if !self.quiet {
+						eprintln!("⚠️  Fallback to simple description for: {}", node.id);
+					}
+				}
+			}
+		}
+
 		// Process any remaining nodes in the final batch
 		if !new_nodes.is_empty() {
 			self.process_nodes_batch(
 				&mut new_nodes,
 				&mut pending_embeddings,
 				&mut batches_processed,
+				&ai_descriptions, // Pass AI descriptions
 			)
 			.await?;
 		}
@@ -902,9 +940,29 @@ impl GraphBuilder {
 		nodes: &mut Vec<CodeNode>,
 		pending_embeddings: &mut Vec<String>,
 		batches_processed: &mut usize,
+		ai_descriptions: &HashMap<String, String>, // Add AI descriptions parameter
 	) -> Result<()> {
 		if nodes.is_empty() || pending_embeddings.is_empty() {
 			return Ok(());
+		}
+
+		// CRITICAL FIX: Apply AI descriptions before persistence
+		for node in nodes.iter_mut() {
+			if let Some(ai_description) = ai_descriptions.get(&node.id) {
+				node.description = ai_description.clone();
+			} else if node.description.starts_with("AI_PENDING:") {
+				// Replace placeholder with simple description if AI failed
+				let file_name = std::path::Path::new(&node.path)
+					.file_stem()
+					.and_then(|s| s.to_str())
+					.unwrap_or("unknown");
+				node.description = crate::indexer::graphrag::relationships::RelationshipDiscovery::generate_simple_description(
+					file_name,
+					&node.language,
+					&node.symbols,
+					node.size_lines,
+				);
+			}
 		}
 
 		// Generate embeddings in batch (same as normal indexing)
