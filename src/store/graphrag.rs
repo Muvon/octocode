@@ -187,9 +187,21 @@ impl<'a> GraphRagOperations<'a> {
 
 	/// Remove GraphRAG nodes associated with a specific file path
 	pub async fn remove_graph_nodes_by_path(&self, file_path: &str) -> Result<usize> {
-		self.table_ops
+		// CRITICAL FIX: Also remove relationships when removing nodes
+		let relationships_removed = self.remove_graph_relationships_by_path(file_path).await?;
+		let nodes_removed = self
+			.table_ops
 			.remove_blocks_by_path(file_path, "graphrag_nodes")
-			.await
+			.await?;
+
+		if nodes_removed > 0 || relationships_removed > 0 {
+			eprintln!(
+				"🗑️  Cleaned up GraphRAG data for {}: {} nodes, {} relationships",
+				file_path, nodes_removed, relationships_removed
+			);
+		}
+
+		Ok(nodes_removed)
 	}
 
 	/// Remove GraphRAG relationships associated with a specific file path

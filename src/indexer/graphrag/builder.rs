@@ -168,7 +168,7 @@ impl GraphBuilder {
 			drop(graph);
 
 			if needs_processing {
-				// Clean up old GraphRAG data for this file if it exists
+				// CRITICAL FIX: Clean up old GraphRAG data for this file if it exists
 				// This ensures we don't have stale data when a file is reprocessed
 				if let Err(e) = self.store.remove_graph_nodes_by_path(&relative_path).await {
 					if !self.quiet {
@@ -176,6 +176,14 @@ impl GraphBuilder {
 							"Warning: Failed to clean up old GraphRAG data for {}: {}",
 							relative_path, e
 						);
+					}
+				}
+
+				// CRITICAL FIX: Also remove from in-memory graph to prevent duplicates
+				{
+					let mut graph = self.graph.write().await;
+					if graph.nodes.remove(&relative_path).is_some() && !self.quiet {
+						eprintln!("🗑️  Removed stale in-memory node: {}", relative_path);
 					}
 				}
 
@@ -979,11 +987,29 @@ impl GraphBuilder {
 			node.embedding = embedding.clone();
 		}
 
-		// Add nodes to the graph
+		// CRITICAL FIX: Add nodes to the graph with deduplication check
 		{
 			let mut graph = self.graph.write().await;
 			for node in nodes.iter() {
-				graph.nodes.insert(node.id.clone(), node.clone());
+				// Check if node already exists to prevent duplicates
+				if let Some(existing_node) = graph.nodes.get(&node.id) {
+					if !self.quiet {
+						eprintln!("⚠️  Preventing duplicate node insertion: {} (existing hash: {}, new hash: {})",
+							node.id, existing_node.hash, node.hash);
+					}
+					// Only replace if the hash is different (content changed)
+					if existing_node.hash != node.hash {
+						graph.nodes.insert(node.id.clone(), node.clone());
+						if !self.quiet {
+							eprintln!("🔄 Updated node with new content: {}", node.id);
+						}
+					}
+				} else {
+					graph.nodes.insert(node.id.clone(), node.clone());
+					if !self.quiet {
+						eprintln!("➕ Added new node: {}", node.id);
+					}
+				}
 			}
 		}
 
