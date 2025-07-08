@@ -254,9 +254,21 @@ impl TypeScript {
 	) -> Option<String> {
 		let target_str = target_path.to_string_lossy().to_string();
 
-		// Try exact string match first (fastest)
-		if let Some(exact_match) = registry.get_all_files().iter().find(|f| *f == &target_str) {
-			return Some(exact_match.clone());
+		// Try exact string match first (fastest) with cross-platform normalization
+		if let Some(exact_match) = crate::utils::path::PathNormalizer::find_path_in_collection(
+			&target_str,
+			registry.get_all_files(),
+		) {
+			return Some(exact_match.to_string());
+		}
+
+		// Try cross-platform string comparison (normalize separators)
+		let normalized_target = target_str.replace('\\', "/");
+		for ts_file in registry.get_all_files() {
+			let normalized_ts = ts_file.replace('\\', "/");
+			if normalized_target == normalized_ts {
+				return Some(ts_file.clone());
+			}
 		}
 
 		// Try with TypeScript extensions (prioritize .ts over .js for TS projects)
@@ -267,9 +279,11 @@ impl TypeScript {
 			} else {
 				format!("{}.{}", target_str, ext)
 			};
-
-			if let Some(exact_match) = registry.get_all_files().iter().find(|f| *f == &with_ext) {
-				return Some(exact_match.clone());
+			if let Some(exact_match) = crate::utils::path::PathNormalizer::find_path_in_collection(
+				&with_ext,
+				registry.get_all_files(),
+			) {
+				return Some(exact_match.to_string());
 			}
 		}
 
@@ -314,10 +328,11 @@ impl TypeScript {
 								if let (Some(target_parent_str), Some(ts_parent_str)) =
 									(target_parent.to_str(), ts_parent.to_str())
 								{
-									// Check if the parent paths end with the same structure
-									if target_parent_str.ends_with(ts_parent_str)
-										|| ts_parent_str.ends_with(target_parent_str)
-									{
+									// Cross-platform path comparison using PathNormalizer
+									if crate::utils::path::PathNormalizer::paths_equal(
+										target_parent_str,
+										ts_parent_str,
+									) {
 										return Some(ts_file.clone());
 									}
 								}

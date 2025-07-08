@@ -37,6 +37,7 @@ pub mod reranker;
 pub mod state;
 pub mod storage;
 pub mod store;
+pub mod utils;
 pub mod watcher_config;
 
 // Re-export commonly used items for convenience

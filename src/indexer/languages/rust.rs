@@ -303,7 +303,14 @@ impl Rust {
 			return Some(exact_match.clone());
 		}
 
-		// Try normalized path comparison for cross-platform compatibility
+		// Try cross-platform string comparison using PathNormalizer
+		if let Some(found) =
+			crate::utils::path::PathNormalizer::find_path_in_collection(&target_str, rust_files)
+		{
+			return Some(found.to_string());
+		}
+
+		// Try normalized path comparison for cross-platform compatibility (for real files)
 		if let Ok(canonical_target) = target_path.canonicalize() {
 			let canonical_str = canonical_target.to_string_lossy().to_string();
 			for rust_file in rust_files {
@@ -328,10 +335,11 @@ impl Rust {
 								if let (Some(target_parent_str), Some(rust_parent_str)) =
 									(target_parent.to_str(), rust_parent.to_str())
 								{
-									// Check if the parent paths end with the same structure
-									if target_parent_str.ends_with(rust_parent_str)
-										|| rust_parent_str.ends_with(target_parent_str)
-									{
+									// Cross-platform path comparison using PathNormalizer
+									if crate::utils::path::PathNormalizer::paths_equal(
+										target_parent_str,
+										rust_parent_str,
+									) {
 										return Some(rust_file.clone());
 									}
 								}

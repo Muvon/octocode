@@ -275,6 +275,31 @@ impl Ruby {
 		registry: &super::resolution_utils::FileRegistry,
 	) -> Option<String> {
 		let path = std::path::Path::new(import_path);
-		registry.find_file_with_extensions(path, &self.get_file_extensions())
+
+		// Try direct path first
+		if let Some(result) = registry.find_file_with_extensions(path, &self.get_file_extensions())
+		{
+			return Some(result);
+		}
+
+		// Try common Ruby load paths
+		let load_paths = ["lib", "app", "config"];
+		for load_path in &load_paths {
+			let full_path = std::path::Path::new(load_path).join(path);
+			if let Some(result) =
+				registry.find_file_with_extensions(&full_path, &self.get_file_extensions())
+			{
+				return Some(result);
+			}
+		}
+
+		// Try vendor gems with deeper search
+		for file in registry.get_all_files() {
+			if file.contains("vendor/gems") && file.ends_with(&format!("{}.rb", import_path)) {
+				return Some(file.clone());
+			}
+		}
+
+		None
 	}
 }

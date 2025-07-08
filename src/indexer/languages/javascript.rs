@@ -243,6 +243,14 @@ impl JavaScript {
 			return Some(exact_match.clone());
 		}
 
+		// Try cross-platform string comparison using PathNormalizer
+		if let Some(found) = crate::utils::path::PathNormalizer::find_path_in_collection(
+			&target_str,
+			registry.get_all_files(),
+		) {
+			return Some(found.to_string());
+		}
+
 		// Try with common JS extensions if not present
 		let extensions = ["js", "jsx", "mjs", "ts", "tsx"];
 		for ext in &extensions {
@@ -252,8 +260,18 @@ impl JavaScript {
 				format!("{}.{}", target_str, ext)
 			};
 
+			// Try exact match with extension
 			if let Some(exact_match) = registry.get_all_files().iter().find(|f| *f == &with_ext) {
 				return Some(exact_match.clone());
+			}
+
+			// Try cross-platform match with extension
+			let normalized_with_ext = with_ext.replace('\\', "/");
+			for js_file in registry.get_all_files() {
+				let normalized_js = js_file.replace('\\', "/");
+				if normalized_with_ext == normalized_js {
+					return Some(js_file.clone());
+				}
 			}
 		}
 

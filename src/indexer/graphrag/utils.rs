@@ -243,9 +243,16 @@ pub fn symbols_match(import: &str, export: &str) -> bool {
 }
 
 // Check if paths have parent-child relationship
+// Check if paths have parent-child relationship
 pub fn is_parent_child_relationship(path1: &str, path2: &str) -> bool {
-	let path1_parts: Vec<&str> = path1.split('/').collect();
-	let path2_parts: Vec<&str> = path2.split('/').collect();
+	use crate::utils::path::PathNormalizer;
+
+	// Normalize path separators to forward slashes for consistent comparison
+	let normalized_path1 = PathNormalizer::normalize_separators(path1);
+	let normalized_path2 = PathNormalizer::normalize_separators(path2);
+
+	let path1_parts: Vec<&str> = normalized_path1.split('/').collect();
+	let path2_parts: Vec<&str> = normalized_path2.split('/').collect();
 
 	// One should be exactly one level deeper than the other
 	if path1_parts.len().abs_diff(path2_parts.len()) == 1 {
@@ -259,5 +266,45 @@ pub fn is_parent_child_relationship(path1: &str, path2: &str) -> bool {
 		shorter.iter().zip(longer.iter()).all(|(a, b)| a == b)
 	} else {
 		false
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn test_is_parent_child_relationship_cross_platform() {
+		// Test Unix-style paths
+		assert!(is_parent_child_relationship("src", "src/main.rs"));
+		assert!(is_parent_child_relationship("src/main.rs", "src"));
+
+		// Test Windows-style paths
+		assert!(is_parent_child_relationship("src", "src\\main.rs"));
+		assert!(is_parent_child_relationship("src\\main.rs", "src"));
+
+		// Test mixed separators
+		assert!(is_parent_child_relationship(
+			"src/utils",
+			"src\\utils\\helper.rs"
+		));
+		assert!(is_parent_child_relationship(
+			"src\\utils\\helper.rs",
+			"src/utils"
+		));
+
+		// Test non-parent-child relationships
+		assert!(!is_parent_child_relationship(
+			"src/main.rs",
+			"lib/helper.rs"
+		));
+		assert!(!is_parent_child_relationship(
+			"src\\main.rs",
+			"lib\\helper.rs"
+		));
+
+		// Test same level (not parent-child)
+		assert!(!is_parent_child_relationship("src/main.rs", "src/lib.rs"));
+		assert!(!is_parent_child_relationship("src\\main.rs", "src\\lib.rs"));
 	}
 }

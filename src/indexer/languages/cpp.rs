@@ -209,9 +209,29 @@ impl Language for Cpp {
 			// Local include: #include "header.h"
 			let header_name = &import_path[1..import_path.len() - 1];
 			self.resolve_local_include(header_name, source_file, &registry)
+		} else if import_path.starts_with('<') && import_path.ends_with('>') {
+			// System include: #include <header.h> - try to find in project
+			let header_name = &import_path[1..import_path.len() - 1];
+			registry.find_exact_file(header_name)
 		} else {
-			// System include or direct path - try to find in project
-			registry.find_exact_file(import_path)
+			// Direct path or unquoted header - try local resolution first, then search common directories
+			if let Some(local_result) =
+				self.resolve_local_include(import_path, source_file, &registry)
+			{
+				Some(local_result)
+			} else if let Some(exact_result) = registry.find_exact_file(import_path) {
+				Some(exact_result)
+			} else {
+				// Search in common include directories
+				let include_dirs = ["include", "inc", "headers", "lib"];
+				for include_dir in &include_dirs {
+					let full_path = std::path::Path::new(include_dir).join(import_path);
+					if let Some(result) = registry.find_exact_file(&full_path.to_string_lossy()) {
+						return Some(result);
+					}
+				}
+				None
+			}
 		}
 	}
 
@@ -385,6 +405,10 @@ impl Cpp {
 		let source_dir = source_path.parent()?;
 		let header_path = source_dir.join(header_name);
 
-		registry.find_exact_file(&header_path.to_string_lossy())
+		// Try to normalize the path to handle .. components
+		let normalized_path =
+			crate::utils::path::PathNormalizer::normalize_path(&header_path.to_string_lossy());
+
+		registry.find_exact_file(&normalized_path)
 	}
 }

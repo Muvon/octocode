@@ -20,6 +20,8 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+use crate::utils::path::PathNormalizer;
+
 /// File registry for efficient file lookup by extension and pattern
 pub struct FileRegistry {
 	/// Files grouped by extension for quick lookup
@@ -81,42 +83,25 @@ impl FileRegistry {
 		None
 	}
 
-	/// Find exact file match in registry
+	/// Find exact file match with cross-platform path comparison
 	pub fn find_exact_file(&self, target_path: &str) -> Option<String> {
-		let target = Path::new(target_path);
-
-		for file_path in &self.all_files {
-			let file = Path::new(file_path);
-
-			// Exact match
-			if file == target {
-				return Some(file_path.clone());
-			}
-
-			// Match by canonical path if possible
-			if let (Ok(file_canonical), Ok(target_canonical)) =
-				(file.canonicalize(), target.canonicalize())
-			{
-				if file_canonical == target_canonical {
-					return Some(file_path.clone());
-				}
-			}
-
-			// Match by file name if paths are similar
-			if let (Some(file_name), Some(target_name)) = (file.file_name(), target.file_name()) {
-				if file_name == target_name {
-					// Additional check: ensure directories are related
-					if let (Some(file_dir), Some(target_dir)) = (file.parent(), target.parent()) {
-						let file_dir_str = file_dir.to_string_lossy().to_string();
-						let target_dir_str = target_dir.to_string_lossy().to_string();
-						if file_dir_str.contains(&target_dir_str)
-							|| target_dir_str.contains(&file_dir_str)
-						{
-							return Some(file_path.clone());
-						}
+		// Try direct canonicalize first (most accurate for real files)
+		if let Ok(canonical_target) = std::path::Path::new(target_path).canonicalize() {
+			let canonical_str = canonical_target.to_string_lossy().to_string();
+			for file_path in &self.all_files {
+				if let Ok(canonical_file) = std::path::Path::new(file_path).canonicalize() {
+					let canonical_file_str = canonical_file.to_string_lossy().to_string();
+					if canonical_str == canonical_file_str {
+						return Some(file_path.clone());
 					}
 				}
 			}
+		}
+
+		// Fallback: normalize separators for cross-platform string comparison
+		// Fallback: normalize separators for cross-platform string comparison
+		if let Some(found) = PathNormalizer::find_path_in_collection(target_path, &self.all_files) {
+			return Some(found.to_string());
 		}
 
 		None
@@ -316,5 +301,62 @@ mod tests {
 		let result = resolve_relative_path("src/main.rs", "../lib.rs");
 		assert!(result.is_some());
 		assert_eq!(result.unwrap().to_string_lossy(), "lib.rs");
+	}
+
+	#[test]
+	fn test_cross_platform_path_comparison() {
+		let files = vec![
+			"src/main.rs".to_string(),
+			"src\\utils\\helper.rs".to_string(), // Windows-style path
+			"lib/config.rs".to_string(),
+		];
+
+		let registry = FileRegistry::new(&files);
+
+		// Test finding Windows-style path with Unix-style query
+		let result = registry.find_exact_file("src/utils/helper.rs");
+		assert!(result.is_some(), "Should find Windows path with Unix query");
+
+		// Test finding Unix-style path with Windows-style query
+		let result = registry.find_exact_file("lib\\config.rs");
+		assert!(result.is_some(), "Should find Unix path with Windows query");
+	}
+
+	#[test]
+	fn test_normalize_path_separators() {
+		// Test Windows to Unix normalization
+		assert_eq!(
+			PathNormalizer::normalize_separators("src\\main.rs"),
+			"src/main.rs"
+		);
+		assert_eq!(
+			PathNormalizer::normalize_separators("src\\utils\\helper.rs"),
+			"src/utils/helper.rs"
+		);
+
+		// Test Unix paths remain unchanged
+		assert_eq!(
+			PathNormalizer::normalize_separators("src/main.rs"),
+			"src/main.rs"
+		);
+		assert_eq!(
+			PathNormalizer::normalize_separators("src/utils/helper.rs"),
+			"src/utils/helper.rs"
+		);
+
+		// Test mixed separators
+		assert_eq!(
+			PathNormalizer::normalize_separators("src\\utils/helper.rs"),
+			"src/utils/helper.rs"
+		);
+		assert_eq!(
+			PathNormalizer::normalize_separators("src/utils\\helper.rs"),
+			"src/utils/helper.rs"
+		);
+
+		// Test empty and single character
+		assert_eq!(PathNormalizer::normalize_separators(""), "");
+		assert_eq!(PathNormalizer::normalize_separators("\\"), "/");
+		assert_eq!(PathNormalizer::normalize_separators("/"), "/");
 	}
 }

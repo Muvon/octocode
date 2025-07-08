@@ -13,6 +13,7 @@
 // limitations under the License.
 
 //! PHP language implementation for the indexer
+use crate::utils::path::PathNormalizer;
 
 use crate::indexer::languages::Language;
 use tree_sitter::Node;
@@ -205,11 +206,11 @@ impl Language for Php {
 				}
 			}
 			// Also try namespace resolution as fallback
-			let file_path = import_path.replace("\\", "/");
+			let file_path = PathNormalizer::normalize_separators(import_path);
 			return self.resolve_namespace_import(&file_path, source_file, &registry);
 		} else {
 			// Convert namespace to file path and try PSR-4 patterns
-			let file_path = import_path.replace("\\", "/");
+			let file_path = PathNormalizer::normalize_separators(import_path);
 			return self.resolve_namespace_import(&file_path, source_file, &registry);
 		}
 
@@ -258,9 +259,12 @@ impl Php {
 	) -> Option<String> {
 		let target_str = target_path.to_string_lossy().to_string();
 
-		// Try exact string match first (fastest)
-		if let Some(exact_match) = registry.get_all_files().iter().find(|f| *f == &target_str) {
-			return Some(exact_match.clone());
+		// Try exact string match first (fastest) with cross-platform normalization
+		if let Some(exact_match) = crate::utils::path::PathNormalizer::find_path_in_collection(
+			&target_str,
+			registry.get_all_files(),
+		) {
+			return Some(exact_match.to_string());
 		}
 
 		// Try with .php extension if not present
@@ -270,12 +274,11 @@ impl Php {
 			format!("{}.php", target_str)
 		};
 
-		if let Some(exact_match) = registry
-			.get_all_files()
-			.iter()
-			.find(|f| *f == &with_php_ext)
-		{
-			return Some(exact_match.clone());
+		if let Some(exact_match) = crate::utils::path::PathNormalizer::find_path_in_collection(
+			&with_php_ext,
+			registry.get_all_files(),
+		) {
+			return Some(exact_match.to_string());
 		}
 
 		// Try normalized path comparison for cross-platform compatibility
