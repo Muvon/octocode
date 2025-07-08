@@ -85,23 +85,51 @@ impl FileRegistry {
 
 	/// Find exact file match with cross-platform path comparison
 	pub fn find_exact_file(&self, target_path: &str) -> Option<String> {
-		// Try direct canonicalize first (most accurate for real files)
+		// Use cross-platform path comparison first (most reliable for tests)
+		if let Some(found) = PathNormalizer::find_path_in_collection(target_path, &self.all_files) {
+			return Some(found.to_string());
+		}
+
+		// Try direct canonicalize only as fallback (for real files)
 		if let Ok(canonical_target) = std::path::Path::new(target_path).canonicalize() {
-			let canonical_str = canonical_target.to_string_lossy().to_string();
+			// Handle Windows UNC paths
+			let canonical_str = canonical_target.to_string_lossy();
+			let normalized_canonical = if canonical_str.starts_with("//?/") {
+				if let Some(drive_pos) = canonical_str.find(":/") {
+					if let Some(relative_part) = canonical_str.get(drive_pos + 2..) {
+						PathNormalizer::normalize_separators(relative_part)
+					} else {
+						PathNormalizer::normalize_separators(&canonical_str)
+					}
+				} else {
+					PathNormalizer::normalize_separators(&canonical_str)
+				}
+			} else {
+				PathNormalizer::normalize_separators(&canonical_str)
+			};
+
 			for file_path in &self.all_files {
 				if let Ok(canonical_file) = std::path::Path::new(file_path).canonicalize() {
-					let canonical_file_str = canonical_file.to_string_lossy().to_string();
-					if canonical_str == canonical_file_str {
+					let canonical_file_str = canonical_file.to_string_lossy();
+					let normalized_file = if canonical_file_str.starts_with("//?/") {
+						if let Some(drive_pos) = canonical_file_str.find(":/") {
+							if let Some(relative_part) = canonical_file_str.get(drive_pos + 2..) {
+								PathNormalizer::normalize_separators(relative_part)
+							} else {
+								PathNormalizer::normalize_separators(&canonical_file_str)
+							}
+						} else {
+							PathNormalizer::normalize_separators(&canonical_file_str)
+						}
+					} else {
+						PathNormalizer::normalize_separators(&canonical_file_str)
+					};
+
+					if normalized_canonical == normalized_file {
 						return Some(file_path.clone());
 					}
 				}
 			}
-		}
-
-		// Fallback: normalize separators for cross-platform string comparison
-		// Fallback: normalize separators for cross-platform string comparison
-		if let Some(found) = PathNormalizer::find_path_in_collection(target_path, &self.all_files) {
-			return Some(found.to_string());
 		}
 
 		None
@@ -163,18 +191,7 @@ pub fn find_project_root(source_file: &str) -> Option<String> {
 pub fn normalize_path(path: &str) -> String {
 	let path_buf = Path::new(path);
 
-	// Try to canonicalize first (resolves .. and . components)
-	if let Ok(canonical) = path_buf.canonicalize() {
-		// If we can canonicalize, try to make it relative to current dir
-		if let Ok(current_dir) = std::env::current_dir() {
-			if let Ok(relative) = canonical.strip_prefix(&current_dir) {
-				return relative.to_string_lossy().to_string();
-			}
-		}
-		return canonical.to_string_lossy().to_string();
-	}
-
-	// If canonicalize fails (file doesn't exist), manually resolve .. components
+	// Manually resolve .. components to avoid Windows canonicalization issues
 	let mut components = Vec::new();
 	for component in path_buf.components() {
 		match component {
@@ -187,15 +204,45 @@ pub fn normalize_path(path: &str) -> String {
 			std::path::Component::CurDir => {
 				// Skip current directory components
 			}
-			_ => {
-				components.push(component);
+			std::path::Component::Prefix(_) => {
+				// Skip Windows drive prefixes for relative path normalization
+			}
+			std::path::Component::RootDir => {
+				// Skip root directory for relative path normalization
+			}
+			std::path::Component::Normal(name) => {
+				components.push(name.to_string_lossy().to_string());
 			}
 		}
 	}
 
-	// Rebuild the path
-	let normalized: PathBuf = components.into_iter().collect();
-	normalized.to_string_lossy().to_string()
+	// If we have components, build relative path with normalized separators
+	if !components.is_empty() {
+		let normalized: PathBuf = components.into_iter().collect();
+		return PathNormalizer::normalize_separators(&normalized.to_string_lossy());
+	}
+
+	// Try canonicalization only as fallback and make relative
+	if let Ok(canonical) = path_buf.canonicalize() {
+		if let Ok(current_dir) = std::env::current_dir() {
+			if let Ok(relative) = canonical.strip_prefix(&current_dir) {
+				return PathNormalizer::normalize_separators(&relative.to_string_lossy());
+			}
+		}
+		// Handle Windows UNC paths like //?/D:/path/to/file
+		let canonical_str = canonical.to_string_lossy();
+		if canonical_str.starts_with("//?/") {
+			if let Some(drive_pos) = canonical_str.find(":/") {
+				if let Some(relative_part) = canonical_str.get(drive_pos + 2..) {
+					return PathNormalizer::normalize_separators(relative_part);
+				}
+			}
+		}
+		return PathNormalizer::normalize_separators(&canonical_str);
+	}
+
+	// Final fallback: just normalize separators
+	PathNormalizer::normalize_separators(path)
 }
 
 /// Detect language from file path extension

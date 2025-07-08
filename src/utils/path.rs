@@ -105,20 +105,11 @@ impl PathNormalizer {
 	/// assert_eq!(PathNormalizer::normalize_path("src\\main.rs"), "src/main.rs");
 	/// ```
 	pub fn normalize_path(path: &str) -> String {
-		let path_buf = Path::new(path);
+		// First normalize separators to handle cross-platform paths
+		let normalized_separators = Self::normalize_separators(path);
+		let path_buf = Path::new(&normalized_separators);
 
-		// Try to canonicalize first (resolves .. and . components)
-		if let Ok(canonical) = path_buf.canonicalize() {
-			// If we can canonicalize, try to make it relative to current dir
-			if let Ok(current_dir) = std::env::current_dir() {
-				if let Ok(relative) = canonical.strip_prefix(&current_dir) {
-					return Self::normalize_separators(&relative.to_string_lossy());
-				}
-			}
-			return Self::normalize_separators(&canonical.to_string_lossy());
-		}
-
-		// Fallback: manually resolve .. components and normalize separators
+		// Always try manual component resolution first to avoid Windows UNC path issues
 		let mut components = Vec::new();
 		for component in path_buf.components() {
 			match component {
@@ -128,12 +119,19 @@ impl PathNormalizer {
 				std::path::Component::CurDir => {
 					// Skip current directory references
 				}
-				_ => {
-					components.push(component.as_os_str().to_string_lossy().to_string());
+				std::path::Component::Prefix(_) => {
+					// Skip Windows drive prefixes for relative path normalization
+				}
+				std::path::Component::RootDir => {
+					// Skip root directory for relative path normalization
+				}
+				std::path::Component::Normal(name) => {
+					components.push(name.to_string_lossy().to_string());
 				}
 			}
 		}
 
+		// Build relative path from components
 		let normalized: PathBuf = components.into_iter().collect();
 		Self::normalize_separators(&normalized.to_string_lossy())
 	}
@@ -254,5 +252,13 @@ mod tests {
 		let result = PathNormalizer::normalize_path("src/utils/../main.rs");
 		// The exact result depends on whether the path exists, but it should be normalized
 		assert!(!result.contains("\\"));
+		// Should resolve .. components
+		assert_eq!(result, "src/main.rs");
+
+		// Test Windows-style paths
+		assert_eq!(
+			PathNormalizer::normalize_path("src\\utils\\..\\main.rs"),
+			"src/main.rs"
+		);
 	}
 }
