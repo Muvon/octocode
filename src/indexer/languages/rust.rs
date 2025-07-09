@@ -395,13 +395,8 @@ impl Rust {
 		let source_path = std::path::Path::new(source_file);
 		let source_dir = source_path.parent()?;
 		let target_file = source_dir.join(format!("{}.rs", import_path));
-		let target_str = target_file.to_string_lossy().to_string();
 
-		if rust_files.iter().any(|f| f == &target_str) {
-			Some(target_str)
-		} else {
-			None
-		}
+		self.find_matching_file(&target_file, rust_files)
 	}
 
 	/// Resolve relative imports from a base directory
@@ -427,16 +422,14 @@ impl Rust {
 				if i == module_parts.len() - 1 {
 					// Last part - try as file
 					let file_path = current_path.join(format!("{}.rs", part));
-					let file_path_str = file_path.to_string_lossy().to_string();
-					if rust_files.iter().any(|f| f == &file_path_str) {
-						return Some(file_path_str);
+					if let Some(resolved) = self.find_matching_file(&file_path, rust_files) {
+						return Some(resolved);
 					}
 
 					// Try as module directory with mod.rs
 					let mod_path = current_path.join(part).join("mod.rs");
-					let mod_path_str = mod_path.to_string_lossy().to_string();
-					if rust_files.iter().any(|f| f == &mod_path_str) {
-						return Some(mod_path_str);
+					if let Some(resolved) = self.find_matching_file(&mod_path, rust_files) {
+						return Some(resolved);
 					}
 				} else {
 					current_path = current_path.join(part);
