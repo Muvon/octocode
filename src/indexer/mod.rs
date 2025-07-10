@@ -81,7 +81,8 @@ impl NoindexWalker {
 			.hidden(true) // Ignore hidden files (like .git/, .vscode/, etc.)
 			.git_ignore(true) // Respect .gitignore files
 			.git_global(true) // Respect global git ignore files
-			.git_exclude(true); // Respect .git/info/exclude files
+			.git_exclude(true) // Respect .git/info/exclude files
+			.follow_links(false); // CRITICAL FIX: Prevent infinite symlink recursion
 
 		// FIXED: Use add_custom_ignore_filename to properly handle .noindex
 		// This method actually works unlike add_ignore()
