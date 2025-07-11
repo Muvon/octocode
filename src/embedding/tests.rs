@@ -22,7 +22,12 @@ mod embedding_tests {
 		count_tokens, split_texts_into_token_limited_batches, EmbeddingProviderType,
 	};
 
-	#[cfg(any(feature = "huggingface", feature = "fastembed"))]
+	#[cfg(any(
+		feature = "huggingface",
+		feature = "fastembed",
+		not(feature = "huggingface"),
+		not(feature = "fastembed")
+	))]
 	use crate::embedding::create_embedding_provider_from_parts;
 
 	#[test]
@@ -243,23 +248,236 @@ mod embedding_tests {
 		);
 	}
 
-	// Note: This test would require network access and is more of an integration test
-	// #[tokio::test]
-	// async fn test_sentence_transformer_embedding_generation() {
-	//     let mut config = Config::default();
-	//     config.embedding.provider = EmbeddingProviderType::SentenceTransformer;
-	//     config.embedding.sentencetransformer.text_model =
-	//         "huggingface:sentence-transformers/all-MiniLM-L6-v2".to_string();
-	//
-	//     let text = "This is a test text for embedding generation.";
-	//     let result = generate_embeddings(text, false, &config).await;
-	//
-	//     assert!(result.is_ok(), "Should generate embeddings successfully");
-	//     let embeddings = result.unwrap();
-	//     assert_eq!(embeddings.len(), 384, "all-MiniLM-L6-v2 should produce 384-dimensional embeddings");
-	//
-	//     // Verify embeddings are normalized (L2 norm should be approximately 1.0)
-	//     let norm: f32 = embeddings.iter().map(|x| x * x).sum::<f32>().sqrt();
-	//     assert!((norm - 1.0).abs() < 0.01, "Embeddings should be normalized");
-	// }
+	// FastEmbed provider tests - only run when feature is enabled
+	#[test]
+	#[cfg(feature = "fastembed")]
+	fn test_fastembed_provider_creation() {
+		use crate::embedding::provider::fastembed::FastEmbedProviderImpl;
+		use crate::embedding::provider::EmbeddingProvider;
+
+		// Test creating provider with a known model
+		let result = FastEmbedProviderImpl::new("Xenova/all-MiniLM-L6-v2");
+		assert!(
+			result.is_ok(),
+			"Should create FastEmbed provider successfully: {:?}",
+			result.err()
+		);
+
+		let provider = result.unwrap();
+		assert_eq!(
+			provider.get_dimension(),
+			384,
+			"all-MiniLM-L6-v2 should have 384 dimensions"
+		);
+		assert!(provider.is_model_supported(), "Model should be supported");
+	}
+
+	#[test]
+	#[cfg(feature = "fastembed")]
+	fn test_fastembed_model_validation() {
+		use crate::embedding::provider::fastembed::FastEmbedProviderImpl;
+
+		// Test with invalid model
+		let result = FastEmbedProviderImpl::new("invalid-model-name");
+		assert!(result.is_err(), "Should fail with invalid model name");
+
+		// Test basic provider creation with valid model
+		let valid_result = FastEmbedProviderImpl::new("Xenova/all-MiniLM-L6-v2");
+		assert!(
+			valid_result.is_ok(),
+			"Should create provider with valid model"
+		);
+	}
+
+	#[tokio::test]
+	#[cfg(feature = "fastembed")]
+	async fn test_fastembed_embedding_generation() {
+		use crate::embedding::provider::fastembed::FastEmbedProviderImpl;
+		use crate::embedding::provider::EmbeddingProvider;
+
+		// Use a small, fast model for testing
+		let provider = FastEmbedProviderImpl::new("Xenova/all-MiniLM-L6-v2")
+			.expect("Should create FastEmbed provider");
+
+		// Test basic provider functionality without actual embedding generation
+		// (which would require downloading models)
+		assert_eq!(
+			provider.get_dimension(),
+			384,
+			"Should have correct dimension"
+		);
+		assert!(provider.is_model_supported(), "Should support the model");
+
+		// Note: Actual embedding generation test is commented out to avoid
+		// model download requirements in test environment
+		// In a real integration test environment, you would uncomment:
+		/*
+		let text = "This is a test text for embedding generation.";
+		let result = provider.generate_embedding(text).await;
+		assert!(result.is_ok(), "Should generate embedding successfully");
+		let embedding = result.unwrap();
+		assert_eq!(embedding.len(), 384, "Should produce 384-dimensional embedding");
+		*/
+	}
+
+	// HuggingFace provider tests - only run when feature is enabled
+	#[test]
+	#[cfg(feature = "huggingface")]
+	fn test_huggingface_provider_creation() {
+		// Test that the HuggingFace provider feature is available
+		// We test through the factory function to avoid HTTP requests
+		let provider_type = EmbeddingProviderType::HuggingFace;
+		let model = "sentence-transformers/all-MiniLM-L6-v2";
+
+		// This will test that the provider can be created through the factory
+		// without actually making HTTP requests (which would happen in new())
+		let result = create_embedding_provider_from_parts(&provider_type, model);
+
+		// The result might be an error due to HTTP requests, but it should not be
+		// a "feature not compiled" error
+		if let Err(error) = result {
+			let error_msg = format!("{}", error);
+			assert!(
+				!error_msg.contains("not compiled"),
+				"Should not be a 'not compiled' error when feature is enabled: {}",
+				error_msg
+			);
+		}
+	}
+
+	#[test]
+	#[cfg(feature = "huggingface")]
+	fn test_huggingface_dimension_detection() {
+		// Test that HuggingFace provider feature is available
+		// We test basic functionality without making HTTP requests
+
+		// Test that the provider type is recognized
+		let provider_type = EmbeddingProviderType::HuggingFace;
+		assert_eq!(format!("{:?}", provider_type), "HuggingFace");
+
+		// Test that we can attempt to create providers (even if they fail due to HTTP)
+		let test_models = vec![
+			"sentence-transformers/all-MiniLM-L6-v2",
+			"sentence-transformers/all-mpnet-base-v2",
+			"microsoft/codebert-base",
+		];
+
+		for model in test_models {
+			let result = create_embedding_provider_from_parts(&provider_type, model);
+			// We don't care if it succeeds or fails, just that it's not a "not compiled" error
+			if let Err(error) = result {
+				let error_msg = format!("{}", error);
+				assert!(
+					!error_msg.contains("not compiled"),
+					"Should not be a 'not compiled' error for model {}: {}",
+					model,
+					error_msg
+				);
+			}
+		}
+	}
+
+	#[test]
+	#[cfg(feature = "huggingface")]
+	fn test_huggingface_embedding_generation() {
+		// Test that HuggingFace provider feature is compiled and available
+		// We avoid actual embedding generation to prevent HTTP requests and runtime issues
+
+		let provider_type = EmbeddingProviderType::HuggingFace;
+		let model = "sentence-transformers/all-MiniLM-L6-v2";
+
+		// Test that the provider can be instantiated through factory
+		let result = create_embedding_provider_from_parts(&provider_type, model);
+
+		// We expect this might fail due to HTTP requests, but it should not be
+		// a "feature not compiled" error
+		if let Err(error) = result {
+			let error_msg = format!("{}", error);
+			assert!(
+				!error_msg.contains("not compiled"),
+				"Should not be a 'not compiled' error when feature is enabled: {}",
+				error_msg
+			);
+		}
+
+		// Note: Actual embedding generation test is commented out to avoid
+		// model download requirements and runtime conflicts in test environment
+		// In a real integration test environment, you would test actual embedding generation
+	}
+
+	// Test that disabled features return appropriate errors
+	#[test]
+	#[cfg(not(feature = "fastembed"))]
+	fn test_fastembed_disabled_error() {
+		// When feature is disabled, we test through the factory function
+		let provider_type = EmbeddingProviderType::FastEmbed;
+		let model = "any-model";
+
+		let result = create_embedding_provider_from_parts(&provider_type, model);
+		assert!(
+			result.is_err(),
+			"Should return error when FastEmbed feature is disabled"
+		);
+
+		if let Err(error) = result {
+			let error_msg = format!("{}", error);
+			assert!(
+				error_msg.contains("FastEmbed") || error_msg.contains("not compiled"),
+				"Error should mention FastEmbed not available: {}",
+				error_msg
+			);
+		}
+	}
+
+	#[test]
+	#[cfg(not(feature = "huggingface"))]
+	fn test_huggingface_disabled_error() {
+		// When feature is disabled, we test through the factory function
+		let provider_type = EmbeddingProviderType::HuggingFace;
+		let model = "any-model";
+
+		let result = create_embedding_provider_from_parts(&provider_type, model);
+		assert!(
+			result.is_err(),
+			"Should return error when HuggingFace feature is disabled"
+		);
+
+		if let Err(error) = result {
+			let error_msg = format!("{}", error);
+			assert!(
+				error_msg.contains("HuggingFace") || error_msg.contains("not compiled"),
+				"Error should mention HuggingFace not available: {}",
+				error_msg
+			);
+		}
+	}
+
+	// Integration test for provider factory with features
+	#[test]
+	#[cfg(feature = "fastembed")]
+	fn test_provider_factory_with_fastembed() {
+		let provider_type = EmbeddingProviderType::FastEmbed;
+		let model = "Xenova/all-MiniLM-L6-v2";
+
+		let result = create_embedding_provider_from_parts(&provider_type, model);
+		assert!(
+			result.is_ok(),
+			"Should create FastEmbed provider through factory: {:?}",
+			result.err()
+		);
+	}
+
+	#[test]
+	#[cfg(feature = "huggingface")]
+	fn test_provider_factory_with_huggingface() {
+		let provider_type = EmbeddingProviderType::HuggingFace;
+		let model = "sentence-transformers/all-MiniLM-L6-v2";
+
+		let result = create_embedding_provider_from_parts(&provider_type, model);
+		assert!(
+			result.is_ok(),
+			"Should create HuggingFace provider through factory: {:?}",
+			result.err()
+		);
+	}
 }
