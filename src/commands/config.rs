@@ -174,7 +174,6 @@ pub fn execute(args: &ConfigArgs, mut config: Config) -> Result<()> {
 			"   Similarity threshold: {:.2}",
 			config.search.similarity_threshold
 		);
-		println!("   Top-k results: {}", config.search.top_k);
 		println!("   Output format: {}", config.search.output_format);
 		println!("   Max files: {}", config.search.max_files);
 		println!("   Context lines: {}", config.search.context_lines);

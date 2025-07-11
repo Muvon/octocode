@@ -131,7 +131,6 @@ impl Default for IndexConfig {
 pub struct SearchConfig {
 	pub max_results: usize,
 	pub similarity_threshold: f32,
-	pub top_k: usize,
 	pub output_format: String,
 	pub max_files: usize,
 	pub context_lines: usize,
@@ -146,7 +145,6 @@ impl Default for SearchConfig {
 		Self {
 			max_results: 50,
 			similarity_threshold: 0.6,
-			top_k: 20,
 			output_format: "markdown".to_string(),
 			max_files: 20,
 			context_lines: 3,

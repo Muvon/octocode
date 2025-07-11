@@ -20,7 +20,6 @@ require_git = true  # Require git repository for indexing
 [search]
 max_results = 20
 similarity_threshold = 0.65
-top_k = 10
 output_format = "markdown"
 max_files = 10
 context_lines = 3
