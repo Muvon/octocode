@@ -9,6 +9,8 @@ Octocode is built with a modular architecture that separates concerns and enable
 - **AST extraction** for semantic understanding
 - **Symbol detection** (functions, classes, imports, exports)
 - **Chunk-based processing** for large files
+- **Safe symlink handling** - Prevents infinite recursion by disabling symlink following
+- **Intelligent file discovery** with .gitignore and .noindex pattern support
 
 ### 2. Embedding System
 - **Multiple providers**: FastEmbed (local), SentenceTransformer (local), Jina AI, Voyage AI, Google, OpenAI (cloud)
@@ -26,9 +28,12 @@ Octocode is built with a modular architecture that separates concerns and enable
 
 ### 4. GraphRAG Builder
 - **AI-powered relationship extraction** between files
-- **Import/export dependency tracking**
-- **Module hierarchy analysis**
+- **Multi-language import resolver** - Maps import statements to actual file paths
+- **Import/export dependency tracking** with intelligent path resolution
+- **Module hierarchy analysis** with cross-language support
 - **Intelligent file descriptions** using LLMs
+- **Cached import resolution** for optimized repeated lookups
+- **Language-specific import handling** (Rust, JavaScript/TypeScript, Python, Go, PHP, C/C++, Ruby, Bash)
 
 ### 5. Search Engine
 - **Semantic similarity search** using vector embeddings

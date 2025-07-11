@@ -18,13 +18,13 @@ octocode config \
 
 # Use FastEmbed (recommended for speed)
 octocode config \
-  --code-embedding-model "fastembed:all-MiniLM-L6-v2" \
-  --text-embedding-model "fastembed:multilingual-e5-small"
+  --code-embedding-model "fastembed:Xenova/all-MiniLM-L6-v2" \
+  --text-embedding-model "fastembed:intfloat/multilingual-e5-small"
 
 # Mix providers as needed
 octocode config \
   --code-embedding-model "huggingface:microsoft/codebert-base" \
-  --text-embedding-model "fastembed:multilingual-e5-small"
+  --text-embedding-model "fastembed:intfloat/multilingual-e5-small"
 ```
 
 ### Cloud Embedding Models (API Keys Required)
@@ -113,8 +113,8 @@ openai:text-embedding-3-small                         # 1536 dim, versatile for 
 
 **Fast Local:**
 ```bash
-fastembed:all-MiniLM-L6-v2                        # 384 dim, fast and efficient
-fastembed:BAAI/bge-small-en-v1.5                  # 384 dim, good balance
+fastembed:Xenova/all-MiniLM-L6-v2                     # 384 dim, fast and efficient
+fastembed:Xenova/bge-small-en-v1.5                    # 384 dim, good balance
 ```
 
 #### For Text Understanding (text_model)
@@ -131,7 +131,7 @@ openai:text-embedding-3-small                         # 1536 dim, cost-effective
 
 **Fast Local:**
 ```bash
-fastembed:multilingual-e5-small                       # 384 dim, supports multiple languages
+fastembed:intfloat/multilingual-e5-small                 # 384 dim, supports multiple languages
 huggingface:sentence-transformers/all-MiniLM-L6-v2    # 384 dim, BERT, fast
 ```
 

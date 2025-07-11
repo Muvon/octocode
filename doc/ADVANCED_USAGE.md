@@ -388,6 +388,26 @@ octocode graphrag search --query "authentication" --json
 octocode graphrag get-node --node-id "src/main.rs" --json
 ```
 
+### Import Resolution Features
+
+The GraphRAG system includes an intelligent import resolver that maps import statements to actual file paths across multiple languages:
+
+**Supported Languages:**
+- **Rust**: `use`, `mod` statements with crate resolution
+- **JavaScript/TypeScript**: `import`, `require` with node_modules and relative paths
+- **Python**: `import`, `from` statements with package resolution
+- **Go**: `import` statements with module path resolution
+- **PHP**: `require`, `include`, `use` statements
+- **C/C++**: `#include` directives
+- **Ruby**: `require`, `load` statements
+- **Bash**: `source`, `.` commands
+
+**Features:**
+- **Cached resolution**: Import paths cached for performance
+- **Cross-language support**: Handles mixed-language projects
+- **Intelligent path mapping**: Resolves relative and absolute imports
+- **File grouping**: Processes files by language for efficient resolution
+
 ## Memory Management
 
 ### Through MCP Server

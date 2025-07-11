@@ -107,8 +107,8 @@ octocode config --show
 ```bash
 # Use faster local models (macOS only)
 octocode config \
-  --code-embedding-model "fastembed:all-MiniLM-L6-v2" \
-  --text-embedding-model "fastembed:multilingual-e5-small"
+  --code-embedding-model "fastembed:Xenova/all-MiniLM-L6-v2" \
+  --text-embedding-model "fastembed:intfloat/multilingual-e5-small"
 
 # Enable GraphRAG for relationship analysis
 octocode config --graphrag-enabled true
@@ -217,8 +217,8 @@ octocode search "your query" --mode docs     # Only documentation
 ```bash
 # Switch to local models (macOS only)
 octocode config \
-  --code-embedding-model "fastembed:all-MiniLM-L6-v2" \
-  --text-embedding-model "fastembed:multilingual-e5-small"
+  --code-embedding-model "fastembed:Xenova/all-MiniLM-L6-v2" \
+  --text-embedding-model "fastembed:intfloat/multilingual-e5-small"
 ```
 
 ## Next Steps

@@ -28,6 +28,8 @@ octocode index /path/to/project
 - Generates embeddings for semantic search
 - Builds knowledge graph relationships (if enabled)
 - Stores everything in local LanceDB database
+- **Safe file discovery** - Prevents infinite recursion from symlinks
+- **Respects ignore patterns** - Honors .gitignore and .noindex files
 
 ### `octocode search`
 
@@ -138,10 +140,16 @@ octocode models info jina:jina-embeddings-v4
 octocode models info google:text-embedding-004
 ```
 
+**Output format:**
+- **Enumerated lists**: Models displayed with numbers and dimensions (e.g., "1. voyage-3.5 (1024d)")
+- **Model count headers**: Shows total number of models found per provider
+- **Dimension information**: Each model shows its embedding dimension
+- **Unified format**: Consistent output across all providers
+
 **Supported providers:**
-- `voyage` - Voyage AI models (voyage-code-3, voyage-3.5-lite, etc.)
+- `voyage` - Voyage AI models (8 models: voyage-code-3, voyage-3.5-lite, etc.)
 - `openai` - OpenAI embedding models (text-embedding-3-small, text-embedding-3-large, etc.)
-- `jina` - Jina AI models (jina-embeddings-v4, jina-clip-v2, etc.)
+- `jina` - Jina AI models (9 models: jina-embeddings-v4, jina-clip-v2, etc.)
 - `google` - Google AI models (text-embedding-004, gemini-embedding-001, etc.)
 - `fastembed` - Local FastEmbed models (macOS only)
 - `huggingface` - HuggingFace models (macOS only)
@@ -452,20 +460,22 @@ octocode watch --no-git
 
 ### `octocode clear`
 
-Clear database tables.
+Clear database tables (preserves memory tables).
 
 ```bash
-# Clear all data
-octocode clear --all
+# Clear all data (preserves memory tables)
+octocode clear --mode all
 
-# Clear specific collections
-octocode clear --documents
-octocode clear --graphs
-octocode clear --memories
+# Clear specific data types
+octocode clear --mode code
+octocode clear --mode docs
+octocode clear --mode text
 
-# Skip confirmation prompt
-octocode clear --all --yes
+# Default mode (all)
+octocode clear
 ```
+
+**Note**: The clear command now preserves memory-related tables to maintain your memory system data. Use `octocode memory clear-all` to clear memories specifically.
 
 ### `octocode completion`
 
