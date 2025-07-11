@@ -1,5 +1,82 @@
 # Changelog
 
+## [0.8.0] - 2025-07-11
+
+### 📋 Release Summary
+
+This release introduces enhanced multi-language import resolution and expanded semantic graph operations for improved code indexing and search (f53d5bc9, 10841fbe, c1e4e5f7). New AI architectural analysis settings and additional embedding providers, including OpenAI and Google models, offer greater flexibility and accuracy (386526a7, 3aec68da, e920ae56). Several bug fixes and refinements improve cross-platform stability, indexing reliability, and relationship extraction, enhancing overall system robustness (e6340d09, 2efe3df3, aed122e3, 8b648f71).
+
+
+### ✨ New Features & Enhancements
+
+- **graphrag**: add import resolver for multi-language imports `f53d5bc9`
+- **graphrag**: store relationships incrementally during processing `10841fbe`
+- **graphrag**: expand GraphRAG with node and path operations `c1e4e5f7`
+- **config**: add AI architectural analysis settings and prompts `386526a7`
+- **embedding**: add OpenAI as new embeddings provider `3aec68da`
+- **jina**: add new jina embedding models with dimensions `bd0d3146`
+- **embedding**: rename get_model_dimension and add Google models map `e726cdda`
+- **embedding**: add modular Google embedding provider and docs `e920ae56`
+- **models**: add dynamic model discovery and CLI commands `5beba7c0`
+- **markdown**: add signature extraction for markdown files `b27a50dc`
+
+### 🔧 Improvements & Optimizations
+
+- **rust**: unify file existence checks with helper method `0385c5e8`
+- **import**: remove legacy GraphRAG import resolver module `e8e8740f`
+- **models**: unify models list output format with dimensions `123be1db`
+- **fastembed**: use fully qualified model names in mapping and l... `e6f1647a`
+- **embedding**: unify huggingface prefix and improve model docs `4709ce2d`
+- **huggingface**: rename sentence transformers and fix URL resol... `ac193c4b`
+- **watch**: remove deprecated ignore patterns and config field `66df3c6c`
+
+### 🐛 Bug Fixes & Stability
+
+- **config**: remove deprecated top_k in favor of max_results `e6340d09`
+- **indexer**: prevent infinite recursion by disabling symlink follow `2efe3df3`
+- **test**: normalize paths to fix Windows test failures `83b415cd`
+- **indexer**: normalize paths and fix Windows tests for parent-child ... `510047b2`
+- **graphrag**: prevent duplicate nodes and clean up stale data `aed122e3`
+- **config**: correct confidence_threshold value in tests `b014ab7a`
+- **graphrag**: apply AI descriptions before node persistence `93f40ddf`
+- **graphrag**: improve AI relationship fetching criteria and logging `8b648f71`
+- **graphrag**: correctly update nodes with AI-generated descriptions `3ee81fd6`
+- **graphrag**: improve import/export extraction and relationship dete... `12d199a0`
+- **clear**: skip memory tables when clearing all data `b8075122`
+- **test**: simplify embedding provider tests to assume Voyage only `a6383b36`
+- **graphrag**: extract and display node relationships with correct in... `34bf6c3e`
+- **graphrag**: correct node indexing and display relationships `e93ea0cb`
+- **graphrag**: fix incremental indexing and cleanup for GraphRAG data `abc32e2b`
+- **graphrag**: fix graph_nodes persistence by unifying storage method `a9ab31af`
+- **store**: update file metadata using LanceDB UpdateBuilder API `e1d39b9a`
+- **search**: use config default for similarity threshold if unset `103ef056`
+- **website**: correct code block indentation in index.html `41676c9f`
+
+### 📚 Documentation & Examples
+
+- add import resolution and safe discovery details in docs `ded521dd`
+- **cli**: update model commands and GraphRAG usage details `57abf90d`
+- **readme**: remove accidental OpenAI promo from README `0aa869c6`
+- **commands**: expand Voyage models list and add OpenAI provider `1bff845a`
+- **mcp**: clarify view_signatures tool description and add Markdown ... `ea64de3e`
+
+### 🔄 Other Changes
+
+- **embedding**: add FastEmbed provider creation and validation tests `fb4b38ca`
+- **graphrag**: add edge case tests for import resolution `d84f90a5`
+- **graphrag**: upgrade config with LLM batching and fallback options `ea884005`
+- **release**: clarify purpose of crates upload release `86a490ad`
+
+### 📊 Release Summary
+
+**Total commits**: 45 across 5 categories
+
+✨ **10** new features - *Enhanced functionality*
+🔧 **7** improvements - *Better performance & code quality*
+🐛 **19** bug fixes - *Improved stability*
+📚 **5** documentation updates - *Better developer experience*
+🔄 **4** other changes - *Maintenance & tooling*
+
 ## [0.7.1] - 2025-06-28
 
 ### 📋 Release Summary
