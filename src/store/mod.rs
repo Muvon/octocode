@@ -674,8 +674,10 @@ impl Store {
 		table_ops
 			.remove_blocks_by_path(file_path, "graphrag_nodes")
 			.await?;
-		table_ops
-			.remove_blocks_by_path(file_path, "graphrag_relationships")
+		// Use specific GraphRAG operation for relationships (they don't have a 'path' field)
+		let graphrag_ops = GraphRagOperations::new(&self.db, self.code_vector_dim);
+		graphrag_ops
+			.remove_graph_relationships_by_path(file_path)
 			.await?;
 		Ok(())
 	}

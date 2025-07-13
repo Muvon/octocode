@@ -16,7 +16,7 @@ use anyhow::Result;
 use std::sync::Arc;
 
 // Arrow imports
-use arrow::array::StringArray;
+use arrow::array::{Array, StringArray};
 use arrow::datatypes::{DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
 
@@ -206,13 +206,18 @@ impl<'a> GraphRagOperations<'a> {
 
 	/// Remove GraphRAG relationships associated with a specific file path
 	pub async fn remove_graph_relationships_by_path(&self, file_path: &str) -> Result<usize> {
-		// For relationships, we need to check both source_path and target_path
 		if !self
 			.table_ops
 			.table_exists("graphrag_relationships")
 			.await?
 		{
 			return Ok(0);
+		}
+
+		// First, get all node IDs for this file path from graphrag_nodes
+		let node_ids = self.get_node_ids_for_file_path(file_path).await?;
+		if node_ids.is_empty() {
+			return Ok(0); // No nodes for this file, so no relationships to remove
 		}
 
 		let table = self
@@ -224,18 +229,65 @@ impl<'a> GraphRagOperations<'a> {
 		// Count rows before deletion for reporting
 		let before_count = table.count_rows(None).await?;
 
-		// Delete rows where either source_path or target_path matches
-		let filter = format!("source = '{}' OR target = '{}'", file_path, file_path);
-		table
-			.delete(&filter)
-			.await
-			.map_err(|e| anyhow::anyhow!("Failed to delete from graphrag_relationships: {}", e))?;
+		// Create filter for relationships where source OR target is any of the node IDs
+		let node_filters: Vec<String> = node_ids
+			.iter()
+			.flat_map(|node_id| {
+				vec![
+					format!("source = '{}'", node_id),
+					format!("target = '{}'", node_id),
+				]
+			})
+			.collect();
+
+		if !node_filters.is_empty() {
+			let filter = node_filters.join(" OR ");
+			table.delete(&filter).await.map_err(|e| {
+				anyhow::anyhow!("Failed to delete from graphrag_relationships: {}", e)
+			})?;
+		}
 
 		// Count rows after deletion
 		let after_count = table.count_rows(None).await?;
 		let deleted_count = before_count.saturating_sub(after_count);
 
 		Ok(deleted_count)
+	}
+
+	/// Get all node IDs for a specific file path from graphrag_nodes
+	async fn get_node_ids_for_file_path(&self, file_path: &str) -> Result<Vec<String>> {
+		let mut node_ids = Vec::new();
+
+		if !self.table_ops.table_exists("graphrag_nodes").await? {
+			return Ok(node_ids);
+		}
+
+		let table = self.db.open_table("graphrag_nodes").execute().await?;
+
+		// Query for nodes matching the file path, only selecting id column
+		let mut results = table
+			.query()
+			.only_if(format!("path = '{}'", file_path))
+			.select(lancedb::query::Select::Columns(vec!["id".to_string()]))
+			.execute()
+			.await?;
+
+		// Process all result batches
+		while let Some(batch) = results.try_next().await? {
+			if batch.num_rows() > 0 {
+				if let Some(column) = batch.column_by_name("id") {
+					if let Some(id_array) =
+						column.as_any().downcast_ref::<arrow::array::StringArray>()
+					{
+						for i in 0..id_array.len() {
+							node_ids.push(id_array.value(i).to_string());
+						}
+					}
+				}
+			}
+		}
+
+		Ok(node_ids)
 	}
 
 	/// Search for graph nodes by vector similarity
