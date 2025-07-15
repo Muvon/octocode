@@ -105,7 +105,9 @@ pub async fn execute(config: &Config, args: &CommitArgs) -> Result<()> {
 
 	// Run pre-commit hooks if available and not skipped
 	if !args.no_verify {
-		run_precommit_hooks(&current_dir, args.all).await?;
+		let originally_staged_files: Vec<String> =
+			staged_files.lines().map(|s| s.to_string()).collect();
+		run_precommit_hooks(&current_dir, args.all, &originally_staged_files).await?;
 	}
 
 	// Check staged changes again after pre-commit (files might have been modified)
@@ -457,7 +459,11 @@ fn has_precommit_config(repo_path: &std::path::Path) -> bool {
 }
 
 /// Run pre-commit hooks intelligently based on the situation
-async fn run_precommit_hooks(repo_path: &std::path::Path, run_all: bool) -> Result<()> {
+async fn run_precommit_hooks(
+	repo_path: &std::path::Path,
+	run_all: bool,
+	originally_staged_files: &[String],
+) -> Result<()> {
 	// Check if pre-commit is available and configured
 	if !is_precommit_available() {
 		// No pre-commit binary available, skip silently
@@ -509,16 +515,25 @@ async fn run_precommit_hooks(repo_path: &std::path::Path, run_all: bool) -> Resu
 				.output()?;
 
 			if modified_output.status.success() {
-				let modified_files = String::from_utf8_lossy(&modified_output.stdout);
-				if !modified_files.trim().is_empty() {
-					println!("🔄 Pre-commit hooks modified files:");
-					for file in modified_files.lines() {
+				let all_modified_files = String::from_utf8_lossy(&modified_output.stdout);
+				let all_modified_set: std::collections::HashSet<&str> =
+					all_modified_files.lines().collect();
+
+				// Only consider files that were originally staged AND were modified by pre-commit
+				let staged_and_modified: Vec<&String> = originally_staged_files
+					.iter()
+					.filter(|file| all_modified_set.contains(file.as_str()))
+					.collect();
+
+				if !staged_and_modified.is_empty() {
+					println!("🔄 Pre-commit hooks modified originally staged files:");
+					for file in &staged_and_modified {
 						println!("  • {}", file);
 					}
 
 					// Re-add modified files to staging area
 					println!("📂 Re-staging modified files...");
-					for file in modified_files.lines() {
+					for file in &staged_and_modified {
 						let add_output = Command::new("git")
 							.args(["add", file.trim()])
 							.current_dir(repo_path)
