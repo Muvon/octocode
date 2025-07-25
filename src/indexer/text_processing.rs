@@ -80,7 +80,7 @@ impl TextProcessor {
 				end_idx
 			};
 
-			current_line += next_start - start_idx;
+			current_line += end_idx - start_idx;
 			start_idx = next_start;
 		}
 

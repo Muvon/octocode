@@ -82,7 +82,8 @@ impl NoindexWalker {
 			.git_ignore(true) // Respect .gitignore files
 			.git_global(true) // Respect global git ignore files
 			.git_exclude(true) // Respect .git/info/exclude files
-			.follow_links(false); // CRITICAL FIX: Prevent infinite symlink recursion
+			.follow_links(false)
+			.max_depth(Some(24));
 
 		// FIXED: Use add_custom_ignore_filename to properly handle .noindex
 		// This method actually works unlike add_ignore()
@@ -502,12 +503,17 @@ pub async fn index_files_with_quiet(
 		// Check if this file would be indexed (for progressive counting)
 		let is_indexable = if let Some(ref changed_files) = git_changed_files {
 			// Git optimization: only count changed files that are indexable
-			changed_files.contains(&file_path)
-				&& (detect_language(entry.path()).is_some()
-					|| is_allowed_text_extension(entry.path()))
+			let in_changed_files = changed_files.contains(&file_path);
+			let has_language = detect_language(entry.path()).is_some();
+			let has_text_ext = is_allowed_text_extension(entry.path());
+
+			in_changed_files && (has_language || has_text_ext)
 		} else {
 			// Normal mode: count all indexable files
-			detect_language(entry.path()).is_some() || is_allowed_text_extension(entry.path())
+			let has_language = detect_language(entry.path()).is_some();
+			let has_text_ext = is_allowed_text_extension(entry.path());
+
+			has_language || has_text_ext
 		};
 
 		if is_indexable {
@@ -832,12 +838,25 @@ pub async fn index_files_with_quiet(
 	);
 
 	// Store current git commit hash for future optimization
+	// Only store git metadata if files were actually processed OR if this is a legitimate empty repository
 	if let Some(git_root) = git_repo_root {
 		if let Ok(current_commit) = git::get_current_commit_hash(git_root) {
-			if let Err(e) = store.store_git_metadata(&current_commit).await {
-				if !quiet {
-					eprintln!("Warning: Could not store git metadata: {}", e);
+			// Only store git metadata if:
+			// 1. Files were actually processed (final_files > 0), OR
+			// 2. This is a legitimate empty repository (total_files_found == 0 and no git optimization was used)
+			let should_store_metadata =
+				final_files > 0 || (total_files_found == 0 && git_changed_files.is_none());
+
+			if should_store_metadata {
+				if let Err(e) = store.store_git_metadata(&current_commit).await {
+					if !quiet {
+						eprintln!("Warning: Could not store git metadata: {}", e);
+					}
 				}
+			} else if !quiet {
+				println!(
+					"⚠️  No files processed - git metadata not stored to allow proper reindexing"
+				);
 			}
 		}
 	}
