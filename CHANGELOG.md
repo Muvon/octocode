@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.8.1] - 2025-07-25
+
+### 📋 Release Summary
+
+This release improves indexing accuracy and metadata handling while enhancing knowledge graph consistency for more reliable code search results (254b3ac2, 42fea8e4, 5219091d). Additionally, it fixes staging issues to ensure smoother commit workflows (86ce9f85).
+
+
+### 🐛 Bug Fixes & Stability
+
+- **indexer**: avoid .noindex errors by checking file existence `254b3ac2`
+- **indexer**: correct initial indexing and git metadata storage `42fea8e4`
+- **commit**: re-stage only originally staged files modified by pre-co... `86ce9f85`
+- **graphrag**: remove relationships by node IDs instead of file paths `5219091d`
+
+### 📊 Release Summary
+
+**Total commits**: 4 across 1 categories
+
+🐛 **4** bug fixes - *Improved stability*
+
 ## [0.8.0] - 2025-07-11
 
 ### 📋 Release Summary
