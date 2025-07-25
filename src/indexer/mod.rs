@@ -72,24 +72,75 @@ pub struct NoindexWalker;
 
 impl NoindexWalker {
 	/// Creates a WalkBuilder that respects .gitignore and .noindex files
-	/// FIXED: Properly handles .noindex patterns using custom filter
+	/// FIXED: Only adds .noindex support when .noindex files actually exist
 	pub fn create_walker(current_dir: &Path) -> ignore::WalkBuilder {
 		let mut builder = ignore::WalkBuilder::new(current_dir);
 
 		// Standard git ignore settings
 		builder
-			.hidden(true) // Ignore hidden files (like .git/, .vscode/, etc.)
+			.hidden(true) // Don't ignore all hidden files - let gitignore handle it
 			.git_ignore(true) // Respect .gitignore files
 			.git_global(true) // Respect global git ignore files
 			.git_exclude(true) // Respect .git/info/exclude files
-			.follow_links(false)
-			.max_depth(Some(24));
+			.follow_links(false);
 
-		// FIXED: Use add_custom_ignore_filename to properly handle .noindex
-		// This method actually works unlike add_ignore()
-		builder.add_custom_ignore_filename(".noindex");
+		// SMART FIX: Only add .noindex support if .noindex files actually exist
+		// This prevents the walker from breaking when no .noindex files are present
+		if Self::has_noindex_files(current_dir) {
+			builder.add_custom_ignore_filename(".noindex");
+		}
 
 		builder
+	}
+
+	/// Check if there are any .noindex files in the current git repository only
+	/// IMPORTANT: Never check parent directories outside the current git repo
+	fn has_noindex_files(current_dir: &Path) -> bool {
+		// Find the git repository root for the current directory
+		let _git_root = Self::find_git_root(current_dir);
+
+		// Check if there's a .noindex file in the current directory
+		if current_dir.join(".noindex").exists() {
+			return true;
+		}
+
+		// Check if there are any .noindex files in subdirectories within the git repo
+		let simple_walker = ignore::WalkBuilder::new(current_dir)
+			.hidden(true)
+			.git_ignore(false) // Don't use git ignore for this check
+			.build();
+
+		for entry in simple_walker.flatten() {
+			if entry.file_name() == ".noindex" {
+				// Make sure the .noindex file is within our git repository
+				if let Some(ref git_root_path) = _git_root {
+					if entry.path().starts_with(git_root_path) {
+						return true;
+					}
+				} else {
+					// No git repo, so any .noindex file in subdirectories counts
+					return true;
+				}
+			}
+		}
+
+		false
+	}
+
+	/// Find the git repository root for the given directory
+	/// Returns None if not in a git repository
+	fn find_git_root(current_dir: &Path) -> Option<std::path::PathBuf> {
+		let mut path = current_dir;
+		loop {
+			if path.join(".git").exists() {
+				return Some(path.to_path_buf());
+			}
+
+			match path.parent() {
+				Some(parent) => path = parent,
+				None => return None,
+			}
+		}
 	}
 
 	/// Creates a GitignoreBuilder for checking individual files against both .gitignore and .noindex
@@ -748,10 +799,15 @@ pub async fn index_files_with_quiet(
 
 	// Build GraphRAG if enabled
 	if config.graphrag.enabled {
-		// Check if we have new blocks from this indexing run OR if GraphRAG needs initial indexing
+		// Check if we have new blocks from this indexing run OR if GraphRAG needs building from existing database
 		let needs_graphrag_from_existing = if all_code_blocks.is_empty() {
-			// No new blocks, check if GraphRAG needs indexing from existing database
-			store.graphrag_needs_indexing().await.unwrap_or(false)
+			// No new blocks from this run - check if we have existing blocks in database to build from
+			// This handles the case where GraphRAG is enabled after database is already indexed
+			let existing_blocks = store
+				.get_all_code_blocks_for_graphrag()
+				.await
+				.unwrap_or_default();
+			!existing_blocks.is_empty() && store.graphrag_needs_indexing().await.unwrap_or(false)
 		} else {
 			false // We have new blocks, process them normally
 		};
