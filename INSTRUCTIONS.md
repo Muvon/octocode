@@ -69,8 +69,22 @@ parser.set_language(&lang_impl.get_ts_language())?;
 extract_meaningful_regions(tree.root_node(), contents, lang_impl.as_ref(), &mut regions);
 ```
 
+#### MANDATORY BUILD COMMANDS:
+- ALWAYS use `--no-default-features` for ALL cargo commands during development
+- cargo build --no-default-features
+- cargo check --no-default-features --message-format=short
+- cargo test --no-default-features
+- NEVER use --release unless explicitly requested
+- NEVER use default cargo build - ALWAYS add --no-default-features flag
+- **Always run clippy** before finalizing code to ensure clean, warning-free code:
+  ```bash
+  cargo clippy --all-features --all-targets -- -D warnings
+  ```
+- **Prefer tokio primitives** over external dependencies when possible (e.g., use tokio for HTTP instead of axum)
+
 #### Watcher Integration
 - Use `NoindexWalker` for file discovery (respects .gitignore + .noindex)
+- **PERFORMANCE**: NoindexWalker now uses fast targeted file system checks with caching
 - Git optimization: only reindex changed files between commits
 - File metadata caching for skip-unchanged logic
 
