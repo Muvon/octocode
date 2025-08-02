@@ -126,6 +126,8 @@ struct ReviewIssue {
 	category: String,
 	title: String,
 	description: String,
+	file_path: Option<String>,
+	line_number: Option<u32>,
 }
 
 async fn perform_code_review_chunked(
@@ -352,18 +354,13 @@ fn create_review_prompt(
 		- CRITICAL: Security vulnerabilities, data corruption risks, breaking changes\n\
 		- HIGH: Performance issues, major bugs, significant technical debt\n\
 		- MEDIUM: Code quality issues, minor bugs, style violations\n\
-		- LOW: Suggestions, optimizations, documentation improvements\n\n\
-		COMPLEXITY LEVELS:\n\
-		- low: Simple, straightforward code\n\
-		- medium: Moderate complexity with some logic\n\
-		- high: Complex logic, multiple responsibilities\n\
-		- very_high: Highly complex, difficult to understand\n\n\
-		MAINTAINABILITY LEVELS:\n\
-		- poor: Difficult to modify, lacks structure\n\
-		- fair: Some issues but manageable\n\
-		- good: Well-structured, easy to understand\n\
-		- excellent: Exemplary code quality\n\n\
-		File Statistics:\n\
+		- LOW: Suggestions, optimizations, documentation improvements\\n\\n\\\
+		LOCATION INFORMATION:\\n\\\
+		For each issue, provide the specific file path and line number where the issue occurs.\\n\\\
+		- file_path: The relative path to the file (e.g., 'src/main.rs', 'lib/utils.js')\\n\\\
+		- line_number: The specific line number where the issue is found\\n\\\
+		Extract this information from the git diff context. If you cannot determine the exact location, omit these fields.\\n\\n\\\
+		File Statistics:\\n\\
 		{}\n\n\
 		Git Diff:\n\
 		```\n{}\n```{}\n\n\
@@ -433,6 +430,8 @@ fn create_fallback_review(
 			description:
 				"The automated review could not complete fully. Manual review recommended."
 					.to_string(),
+			file_path: None,
+			line_number: None,
 		}],
 		recommendations: vec![
 			"Consider running the review again".to_string(),
@@ -468,8 +467,15 @@ fn display_review_results(review: &ReviewResult, severity_filter: &str) {
 				_ => "❓",
 			};
 
-			println!("\n{} {} [{}]", severity_emoji, issue.title, issue.severity);
+			println!("\\n{} {} [{}]", severity_emoji, issue.title, issue.severity);
 			println!("   Category: {}", issue.category);
+			if let Some(file_path) = &issue.file_path {
+				if let Some(line_num) = issue.line_number {
+					println!("   Location: {} (Line {})", file_path, line_num);
+				} else {
+					println!("   File: {}", file_path);
+				}
+			}
 			println!("   Description: {}", issue.description);
 		}
 	}
@@ -555,13 +561,15 @@ async fn call_llm_for_review(prompt: &str, config: &Config) -> Result<String> {
 							"type": "array",
 							"items": {
 								"type": "object",
-								"properties": {
-									"severity": {"type": "string"},
-									"category": {"type": "string"},
-									"title": {"type": "string"},
-									"description": {"type": "string"}
-								},
-								"required": ["severity", "category", "title", "description"],
+				"properties": {
+					"severity": {"type": "string"},
+					"category": {"type": "string"},
+					"title": {"type": "string"},
+					"description": {"type": "string"},
+					"file_path": {"type": ["string", "null"]},
+					"line_number": {"type": ["integer", "null"]}
+				},
+				"required": ["severity", "category", "title", "description", "file_path", "line_number"],
 								"additionalProperties": false
 							}
 						},
