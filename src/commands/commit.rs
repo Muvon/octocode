@@ -19,6 +19,7 @@ use std::process::Command;
 
 use octocode::config::Config;
 use octocode::indexer::git_utils::GitUtils;
+use octocode::utils::diff_chunker;
 
 #[derive(Args, Debug)]
 pub struct CommitArgs {
@@ -138,10 +139,10 @@ pub async fn execute(config: &Config, args: &CommitArgs) -> Result<()> {
 		}
 	}
 
-	// Generate commit message using AI (always, but with optional context)
+	// Generate commit message using AI with intelligent chunking for large diffs
 	println!("\n🤖 Generating commit message...");
 	let commit_message =
-		generate_commit_message(&current_dir, config, args.message.as_deref()).await?;
+		generate_commit_message_chunked(&current_dir, config, args.message.as_deref()).await?;
 
 	println!("\n📝 Generated commit message:");
 	println!("═══════════════════════════════════");
@@ -196,7 +197,7 @@ pub async fn execute(config: &Config, args: &CommitArgs) -> Result<()> {
 	Ok(())
 }
 
-async fn generate_commit_message(
+async fn generate_commit_message_chunked(
 	repo_path: &std::path::Path,
 	config: &Config,
 	extra_context: Option<&str>,
@@ -272,8 +273,69 @@ async fn generate_commit_message(
 		""
 	};
 
-	// Prepare the enhanced prompt for the LLM
-	let prompt = format!(
+	// Check if we need to chunk the diff
+	let chunks = diff_chunker::chunk_diff(&diff);
+
+	if chunks.len() == 1 {
+		// Single chunk - use existing logic
+		let prompt = create_commit_prompt(
+			&chunks[0].content,
+			file_count,
+			additions,
+			deletions,
+			&guidance_section,
+			docs_restriction,
+		);
+		return call_llm_for_commit_message(&prompt, config).await;
+	}
+
+	// Multiple chunks - process each and combine
+	println!("📝 Processing large diff in {} chunks...", chunks.len());
+	let mut responses = Vec::new();
+
+	for (i, chunk) in chunks.iter().enumerate() {
+		println!(
+			"  Processing chunk {}/{}: {}",
+			i + 1,
+			chunks.len(),
+			chunk.file_summary
+		);
+
+		let chunk_prompt = create_commit_prompt(
+			&chunk.content,
+			file_count,
+			additions,
+			deletions,
+			&guidance_section,
+			docs_restriction,
+		);
+
+		match call_llm_for_commit_message(&chunk_prompt, config).await {
+			Ok(response) => responses.push(response),
+			Err(e) => {
+				eprintln!("Warning: Chunk {} failed ({}), continuing...", i + 1, e);
+			}
+		}
+	}
+
+	if responses.is_empty() {
+		return Ok("chore: update files".to_string());
+	}
+
+	// Combine responses into final commit message
+	let combined = diff_chunker::combine_commit_messages(responses);
+	Ok(combined)
+}
+
+fn create_commit_prompt(
+	diff_content: &str,
+	file_count: usize,
+	additions: usize,
+	deletions: usize,
+	guidance_section: &str,
+	docs_restriction: &str,
+) -> String {
+	format!(
 		"Analyze this Git diff and create an appropriate commit message. Be specific and concise.\n\n\
 		STRICT FORMATTING RULES:\n\
 		- Format: type(scope): description (under 50 chars)\n\
@@ -328,59 +390,8 @@ async fn generate_commit_message(
 		file_count,
 		additions,
 		deletions,
-		// Truncate diff if it's too long (keep first 4000 chars for better analysis)
-		if diff.chars().count() > 4000 {
-			let truncated: String = diff.chars().take(4000).collect();
-			format!("{}...\n[diff truncated for brevity]", truncated)
-		} else {
-			diff
-		}
-	);
-
-	// Call the LLM using existing infrastructure
-	match call_llm_for_commit_message(&prompt, config).await {
-		Ok(message) => {
-			// Clean up the response but preserve multi-line structure
-			let cleaned = message
-				.trim()
-				.trim_matches('"') // Remove quotes if present
-				.trim();
-
-			// Validate the message
-			if cleaned.is_empty() {
-				Ok("chore: update files".to_string())
-			} else {
-				// Split into lines and validate subject line length
-				let lines: Vec<&str> = cleaned.lines().collect();
-				if let Some(subject) = lines.first() {
-					let subject = subject.trim();
-					if subject.len() > 72 {
-						// Truncate subject if too long but keep body if present
-						let truncated_subject = if subject.chars().count() > 69 {
-							let truncated: String = subject.chars().take(69).collect();
-							format!("{}...", truncated)
-						} else {
-							format!("{}...", subject)
-						};
-						if lines.len() > 1 {
-							let body = lines[1..].join("\n");
-							Ok(format!("{}\n{}", truncated_subject, body))
-						} else {
-							Ok(truncated_subject)
-						}
-					} else {
-						Ok(cleaned.to_string())
-					}
-				} else {
-					Ok("chore: update files".to_string())
-				}
-			}
-		}
-		Err(e) => {
-			eprintln!("Warning: LLM call failed ({}), using fallback", e);
-			Ok("chore: update files".to_string())
-		}
-	}
+		diff_content
+	)
 }
 
 async fn call_llm_for_commit_message(prompt: &str, config: &Config) -> Result<String> {
@@ -408,7 +419,7 @@ async fn call_llm_for_commit_message(prompt: &str, config: &Config) -> Result<St
 			}
 		],
 		"temperature": 0.1,
-		"max_tokens": 180
+		"max_tokens": 300
 	});
 
 	let response = client

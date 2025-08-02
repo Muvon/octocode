@@ -14,4 +14,5 @@
 
 //! Shared utilities for the Octocode application
 
+pub mod diff_chunker;
 pub mod path;

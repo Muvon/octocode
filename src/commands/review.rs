@@ -19,6 +19,7 @@ use std::process::Command;
 
 use octocode::config::Config;
 use octocode::indexer::git_utils::GitUtils;
+use octocode::utils::diff_chunker;
 
 #[derive(Args, Debug)]
 pub struct ReviewArgs {
@@ -90,9 +91,9 @@ pub async fn execute(config: &Config, args: &ReviewArgs) -> Result<()> {
 		println!("  • {}", file);
 	}
 
-	// Perform the code review
+	// Perform the code review with intelligent chunking for large diffs
 	println!("\n🤖 Analyzing changes for best practices and potential issues...");
-	let review_result = perform_code_review(&current_dir, config, args).await?;
+	let review_result = perform_code_review_chunked(&current_dir, config, args).await?;
 
 	// Output the results
 	if args.json {
@@ -126,7 +127,7 @@ struct ReviewIssue {
 	description: String,
 }
 
-async fn perform_code_review(
+async fn perform_code_review_chunked(
 	repo_path: &std::path::Path,
 	config: &Config,
 	args: &ReviewArgs,
@@ -195,8 +196,76 @@ async fn perform_code_review(
 		String::new()
 	};
 
-	// Prepare the enhanced prompt for code review
-	let prompt = format!(
+	// Check if we need to chunk the diff
+	let chunks = diff_chunker::chunk_diff(&diff);
+
+	if chunks.len() == 1 {
+		// Single chunk - use existing logic
+		let prompt = create_review_prompt(
+			&chunks[0].content,
+			file_count,
+			additions,
+			deletions,
+			&analyze_file_types(&changed_files),
+			&file_stats,
+			&focus_context,
+		);
+		let response = call_llm_for_review(&prompt, config).await?;
+		return parse_review_response(&response, file_count, &changed_files);
+	}
+
+	// Multiple chunks - process each and combine
+	println!(
+		"🔍 Processing large diff in {} chunks for comprehensive review...",
+		chunks.len()
+	);
+	let mut responses = Vec::new();
+
+	for (i, chunk) in chunks.iter().enumerate() {
+		println!(
+			"  Analyzing chunk {}/{}: {}",
+			i + 1,
+			chunks.len(),
+			chunk.file_summary
+		);
+
+		let chunk_prompt = create_review_prompt(
+			&chunk.content,
+			file_count,
+			additions,
+			deletions,
+			&analyze_file_types(&changed_files),
+			&file_stats,
+			&focus_context,
+		);
+
+		match call_llm_for_review(&chunk_prompt, config).await {
+			Ok(response) => responses.push(response),
+			Err(e) => {
+				eprintln!("Warning: Chunk {} failed ({}), continuing...", i + 1, e);
+			}
+		}
+	}
+
+	if responses.is_empty() {
+		return create_fallback_review(file_count, &changed_files, "All chunks failed");
+	}
+
+	// Combine responses into final review result
+	let combined_json = diff_chunker::combine_review_results(responses)?;
+	parse_review_response(&combined_json, file_count, &changed_files)
+}
+
+fn create_review_prompt(
+	diff_content: &str,
+	file_count: usize,
+	additions: usize,
+	deletions: usize,
+	file_types: &str,
+	file_stats: &str,
+	focus_context: &str,
+) -> String {
+	format!(
 		"You are an expert code reviewer. Analyze the following git diff and provide a comprehensive code review focusing on best practices, potential issues, and maintainability.\n\n\
 		ANALYSIS SCOPE:\n\
 		- Files changed: {}\n\
@@ -234,37 +303,28 @@ async fn perform_code_review(
 		file_count,
 		additions,
 		deletions,
-		analyze_file_types(&changed_files),
-		if file_stats.trim().is_empty() { "No stats available" } else { &file_stats },
-		// Truncate diff if it's too long (keep first 8000 chars for thorough analysis)
-		if diff.chars().count() > 8000 {
-			let truncated: String = diff.chars().take(8000).collect();
-			format!("{}...\n[diff truncated for brevity]", truncated)
-		} else {
-			diff
-		},
+		file_types,
+		if file_stats.trim().is_empty() { "No stats available" } else { file_stats },
+		diff_content,
 		focus_context
-	);
+	)
+}
 
-	// Call the LLM for code review
-	match call_llm_for_review(&prompt, config).await {
-		Ok(response) => {
-			// Parse the JSON response (should be valid due to structured output)
-			match serde_json::from_str::<ReviewResult>(&response) {
-				Ok(review_result) => Ok(review_result),
-				Err(e) => {
-					eprintln!(
-						"Warning: Failed to parse LLM response as JSON ({}), creating fallback",
-						e
-					);
-					eprintln!("Raw response: {}", response);
-					create_fallback_review(file_count, &changed_files, &response)
-				}
-			}
-		}
+fn parse_review_response(
+	response: &str,
+	file_count: usize,
+	files: &[String],
+) -> Result<ReviewResult> {
+	// Try to parse as JSON first
+	match serde_json::from_str::<ReviewResult>(response) {
+		Ok(review_result) => Ok(review_result),
 		Err(e) => {
-			eprintln!("Warning: LLM call failed ({}), creating basic review", e);
-			create_fallback_review(file_count, &changed_files, "LLM analysis failed")
+			eprintln!(
+				"Warning: Failed to parse LLM response as JSON ({}), creating fallback",
+				e
+			);
+			eprintln!("Raw response: {}", response);
+			create_fallback_review(file_count, files, response)
 		}
 	}
 }
@@ -404,7 +464,7 @@ async fn call_llm_for_review(prompt: &str, config: &Config) -> Result<String> {
 			}
 		],
 		"temperature": 0.2,
-		"max_tokens": 2000,
+		"max_tokens": 4000,
 		"response_format": {
 			"type": "json_schema",
 			"json_schema": {
