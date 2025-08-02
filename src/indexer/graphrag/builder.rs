@@ -609,6 +609,8 @@ impl GraphBuilder {
 				"GraphRAG processing complete: {} files processed ({} skipped)",
 				processed_count, skipped_count
 			);
+			// CRITICAL FIX: Update the graphrag_blocks counter
+			state_guard.graphrag_blocks += processed_count;
 		} else {
 			println!(
 				"GraphRAG: Processed {} files ({} skipped)",
@@ -747,6 +749,8 @@ impl GraphBuilder {
 				"GraphRAG built from existing database: {} blocks processed",
 				all_code_blocks.len()
 			);
+			// CRITICAL FIX: Update the graphrag_blocks counter
+			state_guard.graphrag_blocks += all_code_blocks.len();
 		} else {
 			println!(
 				"GraphRAG: Built from existing database with {} code blocks",
