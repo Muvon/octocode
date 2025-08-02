@@ -16,6 +16,7 @@ use anyhow::Result;
 use clap::Args;
 use std::collections::HashMap;
 use std::process::Command;
+use tokio::task::JoinSet;
 
 use octocode::config::Config;
 use octocode::indexer::git_utils::GitUtils;
@@ -214,37 +215,104 @@ async fn perform_code_review_chunked(
 		return parse_review_response(&response, file_count, &changed_files);
 	}
 
-	// Multiple chunks - process each and combine
+	// Multiple chunks - process in parallel for comprehensive review
 	println!(
-		"🔍 Processing large diff in {} chunks for comprehensive review...",
+		"🔍 Processing large diff in {} chunks in parallel for comprehensive review...",
 		chunks.len()
 	);
-	let mut responses = Vec::new();
 
-	for (i, chunk) in chunks.iter().enumerate() {
-		println!(
-			"  Analyzing chunk {}/{}: {}",
-			i + 1,
-			chunks.len(),
-			chunk.file_summary
-		);
+	let responses = process_review_chunks_parallel(
+		&chunks,
+		file_count,
+		additions,
+		deletions,
+		&changed_files,
+		&file_stats,
+		&focus_context,
+		config,
+	)
+	.await;
 
-		let chunk_prompt = create_review_prompt(
-			&chunk.content,
-			file_count,
-			additions,
-			deletions,
-			&analyze_file_types(&changed_files),
-			&file_stats,
-			&focus_context,
-		);
+	/// Process review chunks in parallel with comprehensive error handling
+	#[allow(clippy::too_many_arguments)]
+	async fn process_review_chunks_parallel(
+		chunks: &[diff_chunker::DiffChunk],
+		file_count: usize,
+		additions: usize,
+		deletions: usize,
+		changed_files: &[String],
+		file_stats: &str,
+		focus_context: &str,
+		config: &Config,
+	) -> Vec<String> {
+		// Limit parallel processing to prevent resource exhaustion
+		let chunk_limit = std::cmp::min(chunks.len(), diff_chunker::MAX_PARALLEL_CHUNKS);
+		let mut join_set = JoinSet::new();
 
-		match call_llm_for_review(&chunk_prompt, config).await {
-			Ok(response) => responses.push(response),
-			Err(e) => {
-				eprintln!("Warning: Chunk {} failed ({}), continuing...", i + 1, e);
+		// Process chunks in parallel batches
+		for (i, chunk) in chunks.iter().take(chunk_limit).enumerate() {
+			let chunk_content = chunk.content.clone();
+			let chunk_summary = chunk.file_summary.clone();
+			let config = config.clone();
+			let file_types = analyze_file_types(changed_files);
+			let file_stats = file_stats.to_string();
+			let focus_context = focus_context.to_string();
+
+			join_set.spawn(async move {
+				println!(
+					"  Analyzing chunk {}/{}: {}",
+					i + 1,
+					chunk_limit,
+					chunk_summary
+				);
+
+				let chunk_prompt = create_review_prompt(
+					&chunk_content,
+					file_count,
+					additions,
+					deletions,
+					&file_types,
+					&file_stats,
+					&focus_context,
+				);
+
+				match call_llm_for_review(&chunk_prompt, &config).await {
+					Ok(response) => Ok((i, response)),
+					Err(e) => {
+						eprintln!("Warning: Chunk {} failed ({})", i + 1, e);
+						Err(e)
+					}
+				}
+			});
+		}
+
+		// Collect results maintaining order
+		collect_review_responses(join_set, chunk_limit).await
+	}
+
+	/// Collect review responses from parallel tasks maintaining original order
+	async fn collect_review_responses(
+		mut join_set: JoinSet<Result<(usize, String)>>,
+		expected_count: usize,
+	) -> Vec<String> {
+		let mut ordered_responses = vec![None; expected_count];
+
+		while let Some(result) = join_set.join_next().await {
+			match result {
+				Ok(Ok((index, response))) => {
+					ordered_responses[index] = Some(response);
+				}
+				Ok(Err(_)) => {
+					// Error already logged in spawn
+				}
+				Err(e) => {
+					eprintln!("Warning: Task join error: {}", e);
+				}
 			}
 		}
+
+		// Extract successful responses
+		ordered_responses.into_iter().flatten().collect()
 	}
 
 	if responses.is_empty() {

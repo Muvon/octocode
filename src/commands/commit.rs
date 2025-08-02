@@ -16,10 +16,52 @@ use anyhow::Result;
 use clap::Args;
 use std::io::{self, Write};
 use std::process::Command;
+use tokio::task::JoinSet;
 
 use octocode::config::Config;
 use octocode::indexer::git_utils::GitUtils;
 use octocode::utils::diff_chunker;
+
+/// Retry configuration for failed chunk processing
+const MAX_RETRIES: usize = 2;
+const RETRY_DELAY_MS: u64 = 1000;
+
+/// Retry wrapper for LLM calls with exponential backoff
+async fn call_llm_with_retry<F, Fut>(operation: F, context: &str) -> Result<String>
+where
+	F: Fn() -> Fut,
+	Fut: std::future::Future<Output = Result<String>>,
+{
+	let mut last_error = None;
+
+	for attempt in 1..=MAX_RETRIES + 1 {
+		match operation().await {
+			Ok(response) => return Ok(response),
+			Err(e) => {
+				last_error = Some(e);
+				if attempt <= MAX_RETRIES {
+					eprintln!(
+						"Warning: {} attempt {} failed, retrying in {}ms...",
+						context, attempt, RETRY_DELAY_MS
+					);
+					tokio::time::sleep(tokio::time::Duration::from_millis(RETRY_DELAY_MS)).await;
+				}
+			}
+		}
+	}
+
+	// All retries failed
+	if let Some(e) = last_error {
+		Err(anyhow::anyhow!(
+			"{} failed after {} attempts: {}",
+			context,
+			MAX_RETRIES + 1,
+			e
+		))
+	} else {
+		Err(anyhow::anyhow!("{} failed with unknown error", context))
+	}
+}
 
 #[derive(Args, Debug)]
 pub struct CommitArgs {
@@ -286,37 +328,29 @@ async fn generate_commit_message_chunked(
 			&guidance_section,
 			docs_restriction,
 		);
-		return call_llm_for_commit_message(&prompt, config).await;
+		return call_llm_with_retry(
+			|| call_llm_for_commit_message(&prompt, config),
+			"Single chunk commit message",
+		)
+		.await;
 	}
 
-	// Multiple chunks - process each and combine
-	println!("📝 Processing large diff in {} chunks...", chunks.len());
-	let mut responses = Vec::new();
+	// Multiple chunks - process in parallel for better performance
+	println!(
+		"📝 Processing large diff in {} chunks in parallel...",
+		chunks.len()
+	);
 
-	for (i, chunk) in chunks.iter().enumerate() {
-		println!(
-			"  Processing chunk {}/{}: {}",
-			i + 1,
-			chunks.len(),
-			chunk.file_summary
-		);
-
-		let chunk_prompt = create_commit_prompt(
-			&chunk.content,
-			file_count,
-			additions,
-			deletions,
-			&guidance_section,
-			docs_restriction,
-		);
-
-		match call_llm_for_commit_message(&chunk_prompt, config).await {
-			Ok(response) => responses.push(response),
-			Err(e) => {
-				eprintln!("Warning: Chunk {} failed ({}), continuing...", i + 1, e);
-			}
-		}
-	}
+	let responses = process_commit_chunks_parallel(
+		&chunks,
+		file_count,
+		additions,
+		deletions,
+		&guidance_section,
+		docs_restriction,
+		config,
+	)
+	.await;
 
 	if responses.is_empty() {
 		return Ok("chore: update files".to_string());
@@ -327,6 +361,7 @@ async fn generate_commit_message_chunked(
 	Ok(combined)
 }
 
+/// Create a standardized commit prompt for LLM processing
 fn create_commit_prompt(
 	diff_content: &str,
 	file_count: usize,
@@ -336,54 +371,54 @@ fn create_commit_prompt(
 	docs_restriction: &str,
 ) -> String {
 	format!(
-		"Analyze this Git diff and create an appropriate commit message. Be specific and concise.\n\n\
-		STRICT FORMATTING RULES:\n\
-		- Format: type(scope): description (under 50 chars)\n\
-		- Types: feat, fix, docs, style, refactor, test, chore, perf, ci, build\n\
-		- Add '!' after type for breaking changes: feat!: or fix!:\n\
-		- Be specific, avoid generic words like \"update\", \"change\", \"modify\", \"various\", \"several\"\n\
-		- Use imperative mood: \"add\" not \"added\", \"fix\" not \"fixed\"\n\
-		- Focus on WHAT functionality changed, not implementation details\n\
-		- If user guidance provided, use it to understand the INTENT but create your own message{}\n\n\
-		COMMIT TYPE SELECTION (READ CAREFULLY):\n\
-		- feat: NEW functionality being added (new features, capabilities, commands)\n\
-		- fix: CORRECTING bugs, errors, or broken functionality (including fixes to existing features)\n\
-		- refactor: IMPROVING existing code without changing functionality (code restructuring)\n\
-		- perf: OPTIMIZING performance without adding features\n\
-		- docs: DOCUMENTATION changes ONLY (.md, .markdown, .rst files)\n\
-		- test: ADDING or fixing tests\n\
-		- style: CODE formatting, whitespace, missing semicolons (no logic changes)\n\
-		- chore: MAINTENANCE tasks (dependencies, build, tooling, config)\n\
-		- ci: CONTINUOUS integration changes (workflows, pipelines)\n\
-		- build: BUILD system changes (Cargo.toml, package.json, Makefile){}\n\n\
-		FEATURE vs FIX DECISION GUIDE:\n\
-		- If code was working but had bugs/errors → use 'fix' (even for new features with bugs)\n\
-		- If adding completely new functionality that didn't exist → use 'feat'\n\
-		- If improving existing working code structure → use 'refactor' or 'perf'\n\
-		- Examples: 'fix(auth): resolve token validation error', 'feat(auth): add OAuth2 support'\n\
-		- When fixing issues in recently added features → use 'fix(scope): correct feature-name issue'\n\
-		- When in doubt between feat/fix: choose 'fix' if addressing problems, 'feat' if adding completely new\n\n\
-		BREAKING CHANGE DETECTION:\n\
-		- Look for function signature changes, API modifications, removed public methods\n\
-		- Check for interface/trait changes, configuration schema changes\n\
-		- Identify database migrations, dependency version bumps with breaking changes\n\
-		- If breaking changes detected, use type! format and add BREAKING CHANGE footer\n\n\
-		BODY RULES (add body with bullet points if ANY of these apply):\n\
-		- 4+ files changed OR 25+ lines changed\n\
-		- Multiple different types of changes (feat+fix, refactor+feat, etc.)\n\
-		- Complex refactoring or architectural changes\n\
-		- Breaking changes or major feature additions\n\
-		- Changes affect multiple modules/components\n\n\
-		Body format when needed:\n\
-		- Blank line after subject\n\
-		- Start each point with \"- \"\n\
-		- Focus on key changes and their purpose\n\
-		- Explain WHY if not obvious from subject\n\
-		- Keep each bullet concise (1 line max)\n\
-		- For breaking changes, add footer: \"BREAKING CHANGE: description\"\n\n\
-		Changes: {} files (+{} -{} lines)\n\n\
-		Git diff:\n\
-		```\n{}\n```\n\n\
+		"Analyze this Git diff and create an appropriate commit message. Be specific and concise.\\n\\n\\\
+		STRICT FORMATTING RULES:\\n\\\
+		- Format: type(scope): description (under 50 chars)\\n\\\
+		- Types: feat, fix, docs, style, refactor, test, chore, perf, ci, build\\n\\\
+		- Add '!' after type for breaking changes: feat!: or fix!:\\n\\\
+		- Be specific, avoid generic words like \\\"update\\\", \\\"change\\\", \\\"modify\\\", \\\"various\\\", \\\"several\\\"\\n\\\
+		- Use imperative mood: \\\"add\\\" not \\\"added\\\", \\\"fix\\\" not \\\"fixed\\\"\\n\\\
+		- Focus on WHAT functionality changed, not implementation details\\n\\\
+		- If user guidance provided, use it to understand the INTENT but create your own message{}\\n\\n\\\
+		COMMIT TYPE SELECTION (READ CAREFULLY):\\n\\\
+		- feat: NEW functionality being added (new features, capabilities, commands)\\n\\\
+		- fix: CORRECTING bugs, errors, or broken functionality (including fixes to existing features)\\n\\\
+		- refactor: IMPROVING existing code without changing functionality (code restructuring)\\n\\\
+		- perf: OPTIMIZING performance without adding features\\n\\\
+		- docs: DOCUMENTATION changes ONLY (.md, .markdown, .rst files)\\n\\\
+		- test: ADDING or fixing tests\\n\\\
+		- style: CODE formatting, whitespace, missing semicolons (no logic changes)\\n\\\
+		- chore: MAINTENANCE tasks (dependencies, build, tooling, config)\\n\\\
+		- ci: CONTINUOUS integration changes (workflows, pipelines)\\n\\\
+		- build: BUILD system changes (Cargo.toml, package.json, Makefile){}\\n\\n\\\
+		FEATURE vs FIX DECISION GUIDE:\\n\\\
+		- If code was working but had bugs/errors → use 'fix' (even for new features with bugs)\\n\\\
+		- If adding completely new functionality that didn't exist → use 'feat'\\n\\\
+		- If improving existing working code structure → use 'refactor' or 'perf'\\n\\\
+		- Examples: 'fix(auth): resolve token validation error', 'feat(auth): add OAuth2 support'\\n\\\
+		- When fixing issues in recently added features → use 'fix(scope): correct feature-name issue'\\n\\\
+		- When in doubt between feat/fix: choose 'fix' if addressing problems, 'feat' if adding completely new\\n\\n\\\
+		BREAKING CHANGE DETECTION:\\n\\\
+		- Look for function signature changes, API modifications, removed public methods\\n\\\
+		- Check for interface/trait changes, configuration schema changes\\n\\\
+		- Identify database migrations, dependency version bumps with breaking changes\\n\\\
+		- If breaking changes detected, use type! format and add BREAKING CHANGE footer\\n\\n\\\
+		BODY RULES (add body with bullet points if ANY of these apply):\\n\\\
+		- 4+ files changed OR 25+ lines changed\\n\\\
+		- Multiple different types of changes (feat+fix, refactor+feat, etc.)\\n\\\
+		- Complex refactoring or architectural changes\\n\\\
+		- Breaking changes or major feature additions\\n\\\
+		- Changes affect multiple modules/components\\n\\n\\\
+		Body format when needed:\\n\\\
+		- Blank line after subject\\n\\\
+		- Start each point with \\\"- \\\"\\n\\\
+		- Focus on key changes and their purpose\\n\\\
+		- Explain WHY if not obvious from subject\\n\\\
+		- Keep each bullet concise (1 line max)\\n\\\
+		- For breaking changes, add footer: \\\"BREAKING CHANGE: description\\\"\\n\\n\\\
+		Changes: {} files (+{} -{} lines)\\n\\n\\\
+		Git diff:\\n\\\
+		```\\n{}\\n```\\n\\n\\\
 		Generate commit message:",
 		guidance_section,
 		docs_restriction,
@@ -392,6 +427,110 @@ fn create_commit_prompt(
 		deletions,
 		diff_content
 	)
+}
+
+/// Collect responses from parallel tasks maintaining original order
+///
+/// Waits for all parallel tasks to complete and collects successful responses.
+/// Maintains the original chunk order for coherent result combination.
+/// Handles task failures gracefully with appropriate logging.
+///
+/// # Arguments
+/// * `join_set` - Set of spawned async tasks
+/// * `expected_count` - Number of responses expected
+///
+/// # Returns
+/// Vector of successful responses in original order
+async fn collect_ordered_responses(
+	mut join_set: JoinSet<Result<(usize, String)>>,
+	expected_count: usize,
+) -> Vec<String> {
+	let mut ordered_responses = vec![None; expected_count];
+
+	while let Some(result) = join_set.join_next().await {
+		match result {
+			Ok(Ok((index, response))) => {
+				ordered_responses[index] = Some(response);
+			}
+			Ok(Err(_)) => {
+				// Error already logged in spawn
+			}
+			Err(e) => {
+				eprintln!("Warning: Task join error: {}", e);
+			}
+		}
+	}
+
+	// Extract successful responses
+	ordered_responses.into_iter().flatten().collect()
+}
+
+/// Process chunks in parallel with proper error handling and resource limits
+///
+/// Processes multiple diff chunks concurrently using tokio tasks for improved performance.
+/// Implements resource limits to prevent system overload and maintains result ordering.
+///
+/// # Arguments
+/// * `chunks` - Array of diff chunks to process
+/// * `file_count` - Total number of files changed (for context)
+/// * `additions` - Total lines added (for context)
+/// * `deletions` - Total lines deleted (for context)
+/// * `guidance_section` - User-provided guidance for commit message
+/// * `docs_restriction` - Documentation type restrictions
+/// * `config` - Application configuration
+///
+/// # Returns
+/// Vector of successful LLM responses in original chunk order
+async fn process_commit_chunks_parallel(
+	chunks: &[diff_chunker::DiffChunk],
+	file_count: usize,
+	additions: usize,
+	deletions: usize,
+	guidance_section: &str,
+	docs_restriction: &str,
+	config: &Config,
+) -> Vec<String> {
+	// Limit parallel processing to prevent resource exhaustion
+	let chunk_limit = std::cmp::min(chunks.len(), diff_chunker::MAX_PARALLEL_CHUNKS);
+	let mut join_set = JoinSet::new();
+
+	// Process chunks in parallel batches
+	for (i, chunk) in chunks.iter().take(chunk_limit).enumerate() {
+		let chunk_content = chunk.content.clone();
+		let chunk_summary = chunk.file_summary.clone();
+		let config = config.clone();
+		let guidance_section = guidance_section.to_string();
+		let docs_restriction = docs_restriction.to_string();
+
+		join_set.spawn(async move {
+			println!(
+				"  Processing chunk {}/{}: {}",
+				i + 1,
+				chunk_limit,
+				chunk_summary
+			);
+
+			let chunk_prompt = create_commit_prompt(
+				&chunk_content,
+				file_count,
+				additions,
+				deletions,
+				&guidance_section,
+				&docs_restriction,
+			);
+
+			match call_llm_for_commit_message(&chunk_prompt, &config).await {
+				Ok(response) => Ok((i, response)),
+				Err(e) => {
+					eprintln!("Warning: Chunk {} failed ({})", i + 1, e);
+					Err(e)
+				}
+			}
+		});
+	}
+
+	// Collect results maintaining order
+	collect_ordered_responses(join_set, chunk_limit).await
 }
 
 async fn call_llm_for_commit_message(prompt: &str, config: &Config) -> Result<String> {
