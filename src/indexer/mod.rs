@@ -553,10 +553,6 @@ pub async fn index_files_with_quiet(
 		state_guard.status_message = "Starting indexing...".to_string();
 	}
 
-	// Single pass: progressive counting + processing combined
-	// Use NoindexWalker to respect both .gitignore and .noindex files
-	let walker = NoindexWalker::create_walker(&current_dir).build();
-
 	// Progressive counting variables
 	let mut total_files_found = 0;
 	let mut files_processed = 0;
@@ -564,202 +560,301 @@ pub async fn index_files_with_quiet(
 	// Log file processing phase start
 	log_indexing_progress("file_processing", 0, 0, None, 0);
 
-	for result in walker {
-		let entry = match result {
-			Ok(entry) => entry,
-			Err(_) => continue,
-		};
-
-		// Skip directories, only process files
-		if !entry.file_type().is_some_and(|ft| ft.is_file()) {
-			continue;
-		}
-
-		// Create relative path from the current directory using our utility
-		let file_path = path_utils::PathUtils::to_relative_string(entry.path(), &current_dir);
-
-		// Check if this file would be indexed (for progressive counting)
-		let is_indexable = if let Some(ref changed_files) = git_changed_files {
-			// Git optimization: only count changed files that are indexable
-			let in_changed_files = changed_files.contains(&file_path);
-			let has_language = detect_language(entry.path()).is_some();
-			let has_text_ext = is_allowed_text_extension(entry.path());
-
-			in_changed_files && (has_language || has_text_ext)
-		} else {
-			// Normal mode: count all indexable files
-			let has_language = detect_language(entry.path()).is_some();
-			let has_text_ext = is_allowed_text_extension(entry.path());
-
-			has_language || has_text_ext
-		};
-
-		if is_indexable {
-			total_files_found += 1;
-
-			// Update total count progressively every 10 files to avoid too frequent updates
-			if total_files_found % 10 == 0 {
-				let mut state_guard = state.write();
-				state_guard.total_files = total_files_found;
-				if total_files_found <= 50 {
-					// Still in early discovery phase
-					state_guard.status_message = format!("Found {} files...", total_files_found);
+	// PERFORMANCE FIX: Fast-path for git optimization - process only changed files
+	if let Some(ref changed_files) = git_changed_files {
+		// Git optimization: Pre-count indexable files from the known changed set
+		for file_path in changed_files {
+			let full_path = current_dir.join(file_path);
+			if full_path.is_file() {
+				let has_language = detect_language(&full_path).is_some();
+				let has_text_ext = is_allowed_text_extension(&full_path);
+				if has_language || has_text_ext {
+					total_files_found += 1;
 				}
 			}
 		}
 
-		// GIT OPTIMIZATION: Skip files not in the changed set (if git optimization is active)
-		if let Some(ref changed_files) = git_changed_files {
-			if !changed_files.contains(&file_path) {
-				// File not in git changes, skip processing entirely
+		// Update state with final count and switch to processing mode
+		{
+			let mut state_guard = state.write();
+			state_guard.total_files = total_files_found;
+			state_guard.counting_files = false;
+			state_guard.status_message = "".to_string();
+		}
+
+		// Process only the changed files directly
+		for file_path in changed_files {
+			let full_path = current_dir.join(file_path);
+			if !full_path.is_file() {
 				continue;
 			}
-		}
 
-		// PERFORMANCE OPTIMIZATION: Fast file modification time check using preloaded metadata
-		// This replaces individual database queries with HashMap lookup
-		let force_reindex = state.read().force_reindex;
-		if !force_reindex {
-			if let Ok(actual_mtime) = get_file_mtime(entry.path()) {
-				// Fast HashMap lookup instead of database query
-				if let Some(stored_mtime) = file_metadata_map.get(&file_path) {
-					if actual_mtime <= *stored_mtime {
-						// File hasn't changed, skip processing entirely but count as skipped
-						{
-							let mut state_guard = state.write();
-							state_guard.skipped_files += 1;
+			// PERFORMANCE OPTIMIZATION: Fast file modification time check using preloaded metadata
+			let force_reindex = state.read().force_reindex;
+			if !force_reindex {
+				if let Ok(actual_mtime) = get_file_mtime(&full_path) {
+					// Fast HashMap lookup instead of database query
+					if let Some(stored_mtime) = file_metadata_map.get(file_path) {
+						if actual_mtime <= *stored_mtime {
+							// File hasn't changed, skip processing entirely but count as skipped
+							{
+								let mut state_guard = state.write();
+								state_guard.skipped_files += 1;
+							}
+							continue;
 						}
-						continue;
 					}
 				}
 			}
-		}
 
-		if let Some(language) = detect_language(entry.path()) {
-			match fs::read_to_string(entry.path()) {
-				Ok(contents) => {
-					// Store the file modification time after successful processing
-					let file_processed;
+			// Process the file (same logic as walker loop below)
+			if let Some(language) = detect_language(&full_path) {
+				match fs::read_to_string(&full_path) {
+					Ok(contents) => {
+						// Store the file modification time after successful processing
+						let file_processed;
 
-					if language == "markdown" {
-						// Handle markdown files specially - index as document blocks
-						process_markdown_file_differential(
-							store,
-							&contents,
-							&file_path,
-							&mut document_blocks_batch,
-							config,
-							state.clone(),
-						)
-						.await?;
-						file_processed = true;
-					} else {
-						// Handle code files - index as semantic code blocks only
-						let ctx = ProcessFileContext {
-							store,
-							config,
-							state: state.clone(),
-						};
-						process_file_differential(
-							&ctx,
-							&contents,
-							&file_path,
-							language,
-							&mut code_blocks_batch,
-							&mut text_blocks_batch, // Will remain empty for code files
-							&mut all_code_blocks,
-						)
-						.await?;
-						file_processed = true;
-					}
-
-					// Store file modification time after successful processing
-					if file_processed {
-						if let Ok(actual_mtime) = get_file_mtime(entry.path()) {
-							let _ = store.store_file_metadata(&file_path, actual_mtime).await;
-						}
-					}
-
-					files_processed += 1;
-					state.write().indexed_files = files_processed;
-
-					// Update counting phase status
-					{
-						let mut state_guard = state.write();
-						if state_guard.counting_files && total_files_found > 50 {
-							// Switch from counting to processing mode
-							state_guard.counting_files = false;
-							state_guard.total_files = total_files_found;
-							state_guard.status_message = "".to_string();
-						}
-					}
-
-					// Log progress periodically for code files
-					if files_processed % 50 == 0 {
-						let current_total = state.read().total_files;
-						log_indexing_progress(
-							"file_processing",
-							files_processed,
-							current_total,
-							Some(&file_path),
-							embedding_calls,
-						);
-					}
-
-					// Process batches when they reach the batch size or token limit
-					if should_process_batch(&code_blocks_batch, |b| &b.content, config) {
-						embedding_calls += code_blocks_batch.len();
-						process_code_blocks_batch(store, &code_blocks_batch, config).await?;
-						code_blocks_batch.clear();
-						batches_processed += 1;
-						// Intelligent flush based on configuration
-						flush_if_needed(store, &mut batches_processed, config, false).await?;
-					}
-					// Only process text_blocks_batch if we have any (from unsupported files)
-					if should_process_batch(&text_blocks_batch, |b| &b.content, config) {
-						embedding_calls += text_blocks_batch.len();
-						process_text_blocks_batch(store, &text_blocks_batch, config).await?;
-						text_blocks_batch.clear();
-						batches_processed += 1;
-						// Intelligent flush based on configuration
-						flush_if_needed(store, &mut batches_processed, config, false).await?;
-					}
-					if should_process_batch(&document_blocks_batch, |b| &b.content, config) {
-						embedding_calls += document_blocks_batch.len();
-						process_document_blocks_batch(store, &document_blocks_batch, config)
+						if language == "markdown" {
+							// Handle markdown files specially - index as document blocks
+							process_markdown_file_differential(
+								store,
+								&contents,
+								file_path,
+								&mut document_blocks_batch,
+								config,
+								state.clone(),
+							)
 							.await?;
-						document_blocks_batch.clear();
-						batches_processed += 1;
-						// Intelligent flush based on configuration
-						flush_if_needed(store, &mut batches_processed, config, false).await?;
-					}
-				}
-				Err(e) => {
-					// Log file reading error
-					log_file_processing_error(&file_path, "read_file", &e);
-				}
-			}
-		} else {
-			// Handle unsupported file types as chunked text
-			// First check if the file extension is in our whitelist
-			// BUT exclude markdown files since they're already processed as documents
-			if is_allowed_text_extension(entry.path()) && !is_markdown_file(entry.path()) {
-				if let Ok(contents) = fs::read_to_string(entry.path()) {
-					// Only process files that are likely to contain readable text
-					if is_text_file(&contents) {
-						process_text_file_differential(
-							store,
-							&contents,
-							&file_path,
-							&mut text_blocks_batch,
-							config,
-							state.clone(),
-						)
-						.await?;
+							file_processed = true;
+						} else {
+							// Handle code files - index as semantic code blocks only
+							let ctx = ProcessFileContext {
+								store,
+								config,
+								state: state.clone(),
+							};
+							process_file_differential(
+								&ctx,
+								&contents,
+								file_path,
+								language,
+								&mut code_blocks_batch,
+								&mut text_blocks_batch, // Will remain empty for code files
+								&mut all_code_blocks,
+							)
+							.await?;
+							file_processed = true;
+						}
 
 						// Store file modification time after successful processing
-						if let Ok(actual_mtime) = get_file_mtime(entry.path()) {
-							let _ = store.store_file_metadata(&file_path, actual_mtime).await;
+						if file_processed {
+							if let Ok(actual_mtime) = get_file_mtime(&full_path) {
+								let _ = store.store_file_metadata(file_path, actual_mtime).await;
+							}
+						}
+
+						files_processed += 1;
+						state.write().indexed_files = files_processed;
+
+						// Log progress periodically for code files
+						if files_processed % 50 == 0 {
+							let current_total = state.read().total_files;
+							log_indexing_progress(
+								"file_processing",
+								files_processed,
+								current_total,
+								Some(file_path),
+								embedding_calls,
+							);
+						}
+
+						// Process batches when they reach the batch size or token limit
+						if should_process_batch(&code_blocks_batch, |b| &b.content, config) {
+							embedding_calls += code_blocks_batch.len();
+							process_code_blocks_batch(store, &code_blocks_batch, config).await?;
+							code_blocks_batch.clear();
+							batches_processed += 1;
+							// Intelligent flush based on configuration
+							flush_if_needed(store, &mut batches_processed, config, false).await?;
+						}
+						// Only process text_blocks_batch if we have any (from unsupported files)
+						if should_process_batch(&text_blocks_batch, |b| &b.content, config) {
+							embedding_calls += text_blocks_batch.len();
+							process_text_blocks_batch(store, &text_blocks_batch, config).await?;
+							text_blocks_batch.clear();
+							batches_processed += 1;
+							// Intelligent flush based on configuration
+							flush_if_needed(store, &mut batches_processed, config, false).await?;
+						}
+						if should_process_batch(&document_blocks_batch, |b| &b.content, config) {
+							embedding_calls += document_blocks_batch.len();
+							process_document_blocks_batch(store, &document_blocks_batch, config)
+								.await?;
+							document_blocks_batch.clear();
+							batches_processed += 1;
+							// Intelligent flush based on configuration
+							flush_if_needed(store, &mut batches_processed, config, false).await?;
+						}
+					}
+					Err(e) => {
+						// Log file reading error
+						log_file_processing_error(file_path, "read_file", &e);
+					}
+				}
+			} else {
+				// Handle unsupported file types as chunked text
+				// First check if the file extension is in our whitelist
+				// BUT exclude markdown files since they're already processed as documents
+				if is_allowed_text_extension(&full_path) && !is_markdown_file(&full_path) {
+					if let Ok(contents) = fs::read_to_string(&full_path) {
+						// Only process files that are likely to contain readable text
+						if is_text_file(&contents) {
+							process_text_file_differential(
+								store,
+								&contents,
+								file_path,
+								&mut text_blocks_batch,
+								config,
+								state.clone(),
+							)
+							.await?;
+
+							// Store file modification time after successful processing
+							if let Ok(actual_mtime) = get_file_mtime(&full_path) {
+								let _ = store.store_file_metadata(file_path, actual_mtime).await;
+							}
+
+							files_processed += 1;
+							state.write().indexed_files = files_processed;
+
+							// Log progress periodically for text files
+							if files_processed % 50 == 0 {
+								let current_total = state.read().total_files;
+								log_indexing_progress(
+									"file_processing",
+									files_processed,
+									current_total,
+									Some(file_path),
+									embedding_calls,
+								);
+							}
+
+							// Process batch when it reaches the batch size or token limit
+							if should_process_batch(&text_blocks_batch, |b| &b.content, config) {
+								embedding_calls += text_blocks_batch.len();
+								process_text_blocks_batch(store, &text_blocks_batch, config)
+									.await?;
+								text_blocks_batch.clear();
+								batches_processed += 1;
+								// Intelligent flush based on configuration
+								flush_if_needed(store, &mut batches_processed, config, false)
+									.await?;
+							}
+						}
+					}
+				}
+			}
+		}
+	} else {
+		// Normal mode: Use walker for full repository traversal
+		let walker = NoindexWalker::create_walker(&current_dir).build();
+
+		for result in walker {
+			let entry = match result {
+				Ok(entry) => entry,
+				Err(_) => continue,
+			};
+
+			// Skip directories, only process files
+			if !entry.file_type().is_some_and(|ft| ft.is_file()) {
+				continue;
+			}
+
+			// Create relative path from the current directory using our utility
+			let file_path = path_utils::PathUtils::to_relative_string(entry.path(), &current_dir);
+
+			// Check if this file would be indexed (for progressive counting)
+			let has_language = detect_language(entry.path()).is_some();
+			let has_text_ext = is_allowed_text_extension(entry.path());
+			let is_indexable = has_language || has_text_ext;
+
+			if is_indexable {
+				total_files_found += 1;
+
+				// Update total count progressively every 10 files to avoid too frequent updates
+				if total_files_found % 10 == 0 {
+					let mut state_guard = state.write();
+					state_guard.total_files = total_files_found;
+					if total_files_found <= 50 {
+						// Still in early discovery phase
+						state_guard.status_message =
+							format!("Found {} files...", total_files_found);
+					}
+				}
+			}
+
+			// PERFORMANCE OPTIMIZATION: Fast file modification time check using preloaded metadata
+			// This replaces individual database queries with HashMap lookup
+			let force_reindex = state.read().force_reindex;
+			if !force_reindex {
+				if let Ok(actual_mtime) = get_file_mtime(entry.path()) {
+					// Fast HashMap lookup instead of database query
+					if let Some(stored_mtime) = file_metadata_map.get(&file_path) {
+						if actual_mtime <= *stored_mtime {
+							// File hasn't changed, skip processing entirely but count as skipped
+							{
+								let mut state_guard = state.write();
+								state_guard.skipped_files += 1;
+							}
+							continue;
+						}
+					}
+				}
+			}
+
+			if let Some(language) = detect_language(entry.path()) {
+				match fs::read_to_string(entry.path()) {
+					Ok(contents) => {
+						// Store the file modification time after successful processing
+						let file_processed;
+
+						if language == "markdown" {
+							// Handle markdown files specially - index as document blocks
+							process_markdown_file_differential(
+								store,
+								&contents,
+								&file_path,
+								&mut document_blocks_batch,
+								config,
+								state.clone(),
+							)
+							.await?;
+							file_processed = true;
+						} else {
+							// Handle code files - index as semantic code blocks only
+							let ctx = ProcessFileContext {
+								store,
+								config,
+								state: state.clone(),
+							};
+							process_file_differential(
+								&ctx,
+								&contents,
+								&file_path,
+								language,
+								&mut code_blocks_batch,
+								&mut text_blocks_batch, // Will remain empty for code files
+								&mut all_code_blocks,
+							)
+							.await?;
+							file_processed = true;
+						}
+
+						// Store file modification time after successful processing
+						if file_processed {
+							if let Ok(actual_mtime) = get_file_mtime(entry.path()) {
+								let _ = store.store_file_metadata(&file_path, actual_mtime).await;
+							}
 						}
 
 						files_processed += 1;
@@ -776,7 +871,7 @@ pub async fn index_files_with_quiet(
 							}
 						}
 
-						// Log progress periodically for text files
+						// Log progress periodically for code files
 						if files_processed % 50 == 0 {
 							let current_total = state.read().total_files;
 							log_indexing_progress(
@@ -788,7 +883,16 @@ pub async fn index_files_with_quiet(
 							);
 						}
 
-						// Process batch when it reaches the batch size or token limit
+						// Process batches when they reach the batch size or token limit
+						if should_process_batch(&code_blocks_batch, |b| &b.content, config) {
+							embedding_calls += code_blocks_batch.len();
+							process_code_blocks_batch(store, &code_blocks_batch, config).await?;
+							code_blocks_batch.clear();
+							batches_processed += 1;
+							// Intelligent flush based on configuration
+							flush_if_needed(store, &mut batches_processed, config, false).await?;
+						}
+						// Only process text_blocks_batch if we have any (from unsupported files)
 						if should_process_batch(&text_blocks_batch, |b| &b.content, config) {
 							embedding_calls += text_blocks_batch.len();
 							process_text_blocks_batch(store, &text_blocks_batch, config).await?;
@@ -796,6 +900,82 @@ pub async fn index_files_with_quiet(
 							batches_processed += 1;
 							// Intelligent flush based on configuration
 							flush_if_needed(store, &mut batches_processed, config, false).await?;
+						}
+						if should_process_batch(&document_blocks_batch, |b| &b.content, config) {
+							embedding_calls += document_blocks_batch.len();
+							process_document_blocks_batch(store, &document_blocks_batch, config)
+								.await?;
+							document_blocks_batch.clear();
+							batches_processed += 1;
+							// Intelligent flush based on configuration
+							flush_if_needed(store, &mut batches_processed, config, false).await?;
+						}
+					}
+					Err(e) => {
+						// Log file reading error
+						log_file_processing_error(&file_path, "read_file", &e);
+					}
+				}
+			} else {
+				// Handle unsupported file types as chunked text
+				// First check if the file extension is in our whitelist
+				// BUT exclude markdown files since they're already processed as documents
+				if is_allowed_text_extension(entry.path()) && !is_markdown_file(entry.path()) {
+					if let Ok(contents) = fs::read_to_string(entry.path()) {
+						// Only process files that are likely to contain readable text
+						if is_text_file(&contents) {
+							process_text_file_differential(
+								store,
+								&contents,
+								&file_path,
+								&mut text_blocks_batch,
+								config,
+								state.clone(),
+							)
+							.await?;
+
+							// Store file modification time after successful processing
+							if let Ok(actual_mtime) = get_file_mtime(entry.path()) {
+								let _ = store.store_file_metadata(&file_path, actual_mtime).await;
+							}
+
+							files_processed += 1;
+							state.write().indexed_files = files_processed;
+
+							// Update counting phase status
+							{
+								let mut state_guard = state.write();
+								if state_guard.counting_files && total_files_found > 50 {
+									// Switch from counting to processing mode
+									state_guard.counting_files = false;
+									state_guard.total_files = total_files_found;
+									state_guard.status_message = "".to_string();
+								}
+							}
+
+							// Log progress periodically for text files
+							if files_processed % 50 == 0 {
+								let current_total = state.read().total_files;
+								log_indexing_progress(
+									"file_processing",
+									files_processed,
+									current_total,
+									Some(&file_path),
+									embedding_calls,
+								);
+							}
+
+							// Process batch when it reaches the batch size or token limit
+							if should_process_batch(&text_blocks_batch, |b| &b.content, config) {
+								embedding_calls += text_blocks_batch.len();
+								process_text_blocks_batch(store, &text_blocks_batch, config)
+									.await?;
+								text_blocks_batch.clear();
+								batches_processed += 1;
+								// Intelligent flush based on configuration
+								flush_if_needed(store, &mut batches_processed, config, false)
+									.await?;
+							}
 						}
 					}
 				}
