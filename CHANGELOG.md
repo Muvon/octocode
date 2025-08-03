@@ -1,5 +1,32 @@
 # Changelog
 
+## [0.8.2] - 2025-08-03
+
+### 📋 Release Summary
+
+This release enhances indexing performance with improved caching and incremental file counting, alongside refined diff processing and AI-assisted commit message generation (07758f96, 32ab2c2c, 6ca8e2ee, 4f5a5241, fd32737d). Several bug fixes improve review accuracy, knowledge graph tracking, and overall system stability (270f80c5, 542836f9).
+
+
+### 🔧 Improvements & Optimizations
+
+- **commit**: add AI refinement for chunked commit messages `4f5a5241`
+- **diff_chunker**: improve diff chunking and response combination `fd32737d`
+- **indexer**: optimize .noindex detection with caching and targeted ... `07758f96`
+
+### 🐛 Bug Fixes & Stability
+
+- **review**: add file path and line number to review schema `270f80c5`
+- **indexer**: correct file counting for incremental indexing with git changes `32ab2c2c`
+- **diff_chunker**: add utility to split large diffs for chunked processing `6ca8e2ee`
+- **graphrag**: correctly increment graphrag_blocks counter `542836f9`
+
+### 📊 Release Summary
+
+**Total commits**: 7 across 2 categories
+
+🔧 **3** improvements - *Better performance & code quality*
+🐛 **4** bug fixes - *Improved stability*
+
 ## [0.8.1] - 2025-07-25
 
 ### 📋 Release Summary
