@@ -195,8 +195,16 @@ fn get_chunk_overlap(chunk: &str) -> String {
 		return chunk.to_string();
 	}
 
-	// Get last CHUNK_OVERLAP characters, but try to break at line boundary
-	let start_pos = chunk.len() - CHUNK_OVERLAP;
+	// Get last CHUNK_OVERLAP characters, but ensure we're on a UTF-8 character boundary
+	let target_start = chunk.len().saturating_sub(CHUNK_OVERLAP);
+
+	// Find the nearest character boundary at or after target_start
+	let start_pos = chunk
+		.char_indices()
+		.find(|(byte_idx, _)| *byte_idx >= target_start)
+		.map(|(byte_idx, _)| byte_idx)
+		.unwrap_or(chunk.len());
+
 	let overlap_section = &chunk[start_pos..];
 
 	// Find the first newline to avoid cutting lines mid-way
@@ -658,5 +666,32 @@ mod tests {
 		let chunks = chunk_diff(malformed);
 		assert_eq!(chunks.len(), 1);
 		assert_eq!(chunks[0].file_summary, "header"); // Will extract "header" as filename
+	}
+
+	#[test]
+	fn test_utf8_character_boundaries() {
+		// Test with UTF-8 characters that could cause boundary issues
+		let utf8_content = "├── some content with UTF-8 chars: 🚀 ✨ 🎯\n".repeat(300);
+
+		// This should not panic due to UTF-8 boundary issues
+		let overlap = get_chunk_overlap(&utf8_content);
+
+		// Verify the overlap is valid UTF-8 and not empty
+		assert!(!overlap.is_empty());
+		assert!(overlap.is_ascii() || overlap.chars().count() > 0); // Valid UTF-8
+
+		// Test chunking with UTF-8 content
+		let diff_with_utf8 = format!(
+			"diff --git a/README.md b/README.md\nindex 5f16baa..a49d7dc 100644\n--- a/README.md\n+++ b/README.md\n@@ -1,3 +1,3 @@\n{}",
+			utf8_content
+		);
+
+		let chunks = chunk_diff(&diff_with_utf8);
+		assert!(!chunks.is_empty());
+
+		// All chunks should contain valid UTF-8
+		for chunk in &chunks {
+			assert!(chunk.content.chars().count() > 0); // Valid UTF-8
+		}
 	}
 }
