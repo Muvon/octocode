@@ -143,7 +143,7 @@ fn extract_signatures(
 				let sig_text = node_text(node, contents);
 
 				// Map tree-sitter node kinds to our simplified kinds
-				let kind = map_node_kind_to_simple(node_kind);
+				let kind = map_node_kind_to_simple_with_context(node, contents);
 
 				signatures.push(SignatureItem {
 					kind,
@@ -306,6 +306,29 @@ fn map_node_kind_to_simple(kind: &str) -> String {
 		k if k.contains("type") => "type".to_string(),
 		_ => kind.to_string(), // Fall back to the original kind
 	}
+}
+
+/// Map tree-sitter node kinds to simpler, unified kinds for display with context
+fn map_node_kind_to_simple_with_context(node: Node, _contents: &str) -> String {
+	let kind = node.kind();
+
+	// Special handling for C++ declaration nodes
+	if kind == "declaration" {
+		// Check if this declaration contains a function_declarator
+		for child in node.children(&mut node.walk()) {
+			if child.kind() == "function_declarator" {
+				return "function".to_string();
+			}
+		}
+	}
+
+	// Special handling for namespace_definition
+	if kind == "namespace_definition" {
+		return "namespace".to_string();
+	}
+
+	// Fall back to the regular mapping
+	map_node_kind_to_simple(kind)
 }
 
 /// Detect language based on file extension (re-exported from file_utils)

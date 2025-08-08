@@ -31,6 +31,7 @@ impl Language for Cpp {
 	fn get_meaningful_kinds(&self) -> Vec<&'static str> {
 		vec![
 			"function_definition",
+			"declaration", // For function declarations in headers
 			"class_specifier",
 			"struct_specifier",
 			"enum_specifier",
@@ -63,6 +64,22 @@ impl Language for Cpp {
 				for child in node.children(&mut node.walk()) {
 					if child.kind() == "compound_statement" {
 						self.extract_cpp_variables(child, contents, &mut symbols);
+						break;
+					}
+				}
+			}
+			"declaration" => {
+				// Handle function declarations (like in header files)
+				for child in node.children(&mut node.walk()) {
+					if child.kind() == "function_declarator" {
+						for decl_child in child.children(&mut child.walk()) {
+							if decl_child.kind() == "identifier" {
+								if let Ok(name) = decl_child.utf8_text(contents.as_bytes()) {
+									symbols.push(name.to_string());
+								}
+								break;
+							}
+						}
 						break;
 					}
 				}
