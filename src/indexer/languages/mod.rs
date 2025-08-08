@@ -49,7 +49,7 @@ pub use svelte::Svelte;
 pub use typescript::TypeScript;
 
 /// Common trait for all language parsers
-pub trait Language {
+pub trait Language: Send + Sync {
 	/// Name of the language
 	fn name(&self) -> &'static str;
 

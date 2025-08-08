@@ -68,8 +68,9 @@ pub struct McpServer {
 	no_git: bool,
 	watcher_handle: Option<tokio::task::JoinHandle<()>>,
 	index_handle: Option<tokio::task::JoinHandle<()>>,
+	indexing_handle: Option<tokio::task::JoinHandle<()>>,
 	indexing_in_progress: Arc<AtomicBool>,
-	store: Store,
+	store: Arc<Store>,
 	config: Config,
 	index_rx: Option<mpsc::Receiver<()>>,
 }
@@ -94,6 +95,7 @@ impl McpServer {
 		// Initialize the store for the MCP server
 		let store = Store::new().await?;
 		store.initialize_collections().await?;
+		let store = Arc::new(store);
 
 		// Initialize logging
 		init_mcp_logging(working_directory.clone(), debug)?;
@@ -137,6 +139,7 @@ impl McpServer {
 			no_git,
 			watcher_handle: None,
 			index_handle: None,
+			indexing_handle: None,
 			indexing_in_progress: Arc::new(AtomicBool::new(false)),
 			store,
 			config,
@@ -156,6 +159,9 @@ impl McpServer {
 		// Start the file watcher as a completely independent background task
 		self.start_watcher().await?;
 
+		// Start background indexing task - separate from MCP request handling
+		self.start_background_indexing().await?;
+
 		// Log server startup details using structured logging (no console output for MCP protocol compliance)
 		info!(
 			debug_mode = self.debug,
@@ -166,9 +172,6 @@ impl McpServer {
 			io_timeout_ms = MCP_IO_TIMEOUT_MS,
 			"MCP Server started"
 		);
-
-		// Get the index receiver for handling indexing requests
-		let mut index_rx = self.index_rx.take().unwrap();
 
 		// Handle MCP protocol communication (stdin/stdout) with error resilience
 		// This runs independently of file watching and indexing
@@ -290,45 +293,7 @@ impl McpServer {
 					}
 				}
 
-				// Handle indexing requests from file watcher (runs independently)
-				Some(_) = index_rx.recv() => {
-					debug!("Processing index request");
-
-					// Additional delay to ensure all file operations are complete
-					sleep(Duration::from_millis(DEFAULT_ADDITIONAL_DELAY_MS)).await;
-
-					// Perform direct indexing with timeout protection
-					let indexing_result = tokio::time::timeout(
-						Duration::from_millis(MCP_INDEX_TIMEOUT_MS),
-						perform_indexing(&self.store, &self.config, &self.working_directory, self.no_git)
-					).await;
-
-					match indexing_result {
-						Ok(Ok(())) => {
-							info!("Reindex completed successfully");
-
-							// Update LSP with changed files if LSP is enabled
-							if let Some(ref lsp_provider) = self.lsp {
-								let mut lsp_guard = lsp_provider.lock().await;
-								if let Err(e) = Self::update_lsp_after_indexing(&mut lsp_guard, &self.working_directory).await {
-									debug!("LSP update after indexing failed: {}", e);
-								}
-							}
-						}
-						Ok(Err(e)) => {
-							log_critical_anyhow_error("Reindex error", &e);
-						}
-						Err(_) => {
-							log_critical_anyhow_error(
-								"Reindex timeout",
-								&anyhow::anyhow!("Reindex timed out after {}ms", MCP_INDEX_TIMEOUT_MS)
-							);
-						}
-					}
-
-					// Always reset the indexing flag, even on error/timeout
-					self.indexing_in_progress.store(false, Ordering::SeqCst);
-				}
+				// MCP request handling only - indexing moved to background task
 			}
 		}
 
@@ -337,6 +302,9 @@ impl McpServer {
 			handle.abort();
 		}
 		if let Some(handle) = self.index_handle.take() {
+			handle.abort();
+		}
+		if let Some(handle) = self.indexing_handle.take() {
 			handle.abort();
 		}
 
@@ -570,6 +538,70 @@ impl McpServer {
 		self.index_rx = Some(index_rx);
 		self.watcher_handle = Some(watcher_handle);
 		self.index_handle = Some(index_handle);
+		Ok(())
+	}
+
+	/// Start background indexing task - separate from MCP request handling
+	async fn start_background_indexing(&mut self) -> Result<()> {
+		// Get the index receiver for handling indexing requests
+		let mut index_rx = self.index_rx.take().unwrap();
+		let store = self.store.clone();
+		let config = self.config.clone();
+		let working_directory = self.working_directory.clone();
+		let no_git = self.no_git;
+		let indexing_in_progress = self.indexing_in_progress.clone();
+
+		// Start background indexing task
+		let indexing_handle = tokio::spawn(async move {
+			loop {
+				// Wait for indexing requests from file watcher
+				match index_rx.recv().await {
+					Some(_) => {
+						debug!("Processing index request in background");
+
+						// Additional delay to ensure all file operations are complete
+						sleep(Duration::from_millis(DEFAULT_ADDITIONAL_DELAY_MS)).await;
+
+						// Perform direct indexing with timeout protection
+						let indexing_result = tokio::time::timeout(
+							Duration::from_millis(MCP_INDEX_TIMEOUT_MS),
+							perform_indexing(&store, &config, &working_directory, no_git),
+						)
+						.await;
+
+						match indexing_result {
+							Ok(Ok(())) => {
+								info!("Background reindex completed successfully");
+								// LSP update removed from background task to avoid Send issues
+								// LSP updates can be handled separately if needed
+							}
+							Ok(Err(e)) => {
+								log_critical_anyhow_error("Background reindex error", &e);
+							}
+							Err(_) => {
+								log_critical_anyhow_error(
+									"Background reindex timeout",
+									&anyhow::anyhow!(
+										"Background reindex timed out after {}ms",
+										MCP_INDEX_TIMEOUT_MS
+									),
+								);
+							}
+						}
+
+						// Always reset the indexing flag, even on error/timeout
+						indexing_in_progress.store(false, Ordering::SeqCst);
+					}
+					None => {
+						debug!("Background indexing channel closed, stopping indexing task");
+						break;
+					}
+				}
+			}
+		});
+
+		// Store the indexing handle for cleanup
+		self.indexing_handle = Some(indexing_handle);
 		Ok(())
 	}
 

@@ -67,6 +67,9 @@ impl MemoryStore {
 		// Initialize tables
 		store.initialize_tables().await?;
 
+		// Ensure optimal vector index (only during initialization, not on every store)
+		store.ensure_optimal_index().await?;
+
 		Ok(store)
 	}
 
@@ -210,7 +213,78 @@ impl MemoryStore {
 		let batch_reader = arrow::record_batch::RecordBatchIterator::new(batches, schema);
 		table.add(batch_reader).execute().await?;
 
-		// Create optimized vector index based on dataset size
+		// Index management moved to separate method for performance
+
+		Ok(())
+	}
+
+	/// Store multiple memories in batch with optimized embedding generation
+	pub async fn store_memories(&mut self, memories: &[Memory]) -> Result<()> {
+		if memories.is_empty() {
+			return Ok(());
+		}
+
+		// Collect all searchable texts for batch embedding generation
+		let texts: Vec<String> = memories
+			.iter()
+			.map(|memory| memory.get_searchable_text())
+			.collect();
+
+		// Generate ALL embeddings in ONE API request using the same high-level function as indexer
+		// This includes token-aware batching and respects config limits
+		let embeddings = crate::embedding::generate_embeddings_batch(
+			texts,
+			false,
+			&self.main_config,
+			crate::embedding::types::InputType::Query,
+		)
+		.await?;
+
+		if embeddings.len() != memories.len() {
+			return Err(anyhow::anyhow!(
+				"Embedding count mismatch: expected {}, got {}",
+				memories.len(),
+				embeddings.len()
+			));
+		}
+
+		// Store all memories with their pre-computed embeddings
+		for (memory, embedding) in memories.iter().zip(embeddings.into_iter()) {
+			self.store_memory_with_embedding(memory, embedding).await?;
+		}
+
+		Ok(())
+	}
+
+	/// Update an existing memory
+	pub async fn update_memory(&mut self, memory: &Memory) -> Result<()> {
+		// Just use store_memory as it handles updates by deleting and re-inserting
+		self.store_memory(memory).await
+	}
+
+	/// Delete a memory by ID
+	pub async fn delete_memory(&mut self, memory_id: &str) -> Result<()> {
+		let table = self.db.open_table("memories").execute().await?;
+		table.delete(&format!("id = '{}'", memory_id)).await?;
+
+		// Also delete any relationships involving this memory
+		let rel_table = self.db.open_table("memory_relationships").execute().await?;
+		rel_table
+			.delete(&format!(
+				"source_id = '{}' OR target_id = '{}'",
+				memory_id, memory_id
+			))
+			.await
+			.ok();
+
+		Ok(())
+	}
+
+	/// Ensure optimal vector index for memories table (call periodically, not on every store)
+	pub async fn ensure_optimal_index(&self) -> Result<()> {
+		let table = self.db.open_table("memories").execute().await?;
+
+		// Get current dataset statistics
 		let row_count = table.count_rows(None).await?;
 		let has_index = table
 			.list_indices()
@@ -284,68 +358,6 @@ impl MemoryStore {
 				}
 			}
 		}
-
-		Ok(())
-	}
-
-	/// Store multiple memories in batch with optimized embedding generation
-	pub async fn store_memories(&mut self, memories: &[Memory]) -> Result<()> {
-		if memories.is_empty() {
-			return Ok(());
-		}
-
-		// Collect all searchable texts for batch embedding generation
-		let texts: Vec<String> = memories
-			.iter()
-			.map(|memory| memory.get_searchable_text())
-			.collect();
-
-		// Generate ALL embeddings in ONE API request using the same high-level function as indexer
-		// This includes token-aware batching and respects config limits
-		let embeddings = crate::embedding::generate_embeddings_batch(
-			texts,
-			false,
-			&self.main_config,
-			crate::embedding::types::InputType::Query,
-		)
-		.await?;
-
-		if embeddings.len() != memories.len() {
-			return Err(anyhow::anyhow!(
-				"Embedding count mismatch: expected {}, got {}",
-				memories.len(),
-				embeddings.len()
-			));
-		}
-
-		// Store all memories with their pre-computed embeddings
-		for (memory, embedding) in memories.iter().zip(embeddings.into_iter()) {
-			self.store_memory_with_embedding(memory, embedding).await?;
-		}
-
-		Ok(())
-	}
-
-	/// Update an existing memory
-	pub async fn update_memory(&mut self, memory: &Memory) -> Result<()> {
-		// Just use store_memory as it handles updates by deleting and re-inserting
-		self.store_memory(memory).await
-	}
-
-	/// Delete a memory by ID
-	pub async fn delete_memory(&mut self, memory_id: &str) -> Result<()> {
-		let table = self.db.open_table("memories").execute().await?;
-		table.delete(&format!("id = '{}'", memory_id)).await?;
-
-		// Also delete any relationships involving this memory
-		let rel_table = self.db.open_table("memory_relationships").execute().await?;
-		rel_table
-			.delete(&format!(
-				"source_id = '{}' OR target_id = '{}'",
-				memory_id, memory_id
-			))
-			.await
-			.ok();
 
 		Ok(())
 	}
