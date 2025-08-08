@@ -69,9 +69,13 @@ impl Language for Cpp {
 				}
 			}
 			"declaration" => {
-				// Handle function declarations (like in header files)
+				// Handle both function declarations and variable declarations
+				let mut found_function = false;
+
+				// First, check if this is a function declaration
 				for child in node.children(&mut node.walk()) {
 					if child.kind() == "function_declarator" {
+						found_function = true;
 						for decl_child in child.children(&mut child.walk()) {
 							if decl_child.kind() == "identifier" {
 								if let Ok(name) = decl_child.utf8_text(contents.as_bytes()) {
@@ -81,6 +85,22 @@ impl Language for Cpp {
 							}
 						}
 						break;
+					}
+				}
+
+				// If not a function declaration, extract variable names
+				if !found_function {
+					for child in node.children(&mut node.walk()) {
+						if child.kind() == "init_declarator" || child.kind() == "declarator" {
+							for decl_child in child.children(&mut child.walk()) {
+								if decl_child.kind() == "identifier" {
+									if let Ok(name) = decl_child.utf8_text(contents.as_bytes()) {
+										symbols.push(name.to_string());
+									}
+									break;
+								}
+							}
+						}
 					}
 				}
 			}
@@ -159,6 +179,8 @@ impl Language for Cpp {
 			&["namespace_definition"],
 			// Templates
 			&["template_declaration"],
+			// Variable declarations (group standalone variable declarations together)
+			&["declaration"],
 			// Preprocessor directives
 			&[
 				"preproc_include",
@@ -189,6 +211,7 @@ impl Language for Cpp {
 			"enum_specifier" => "enum declarations",
 			"namespace_definition" => "namespace declarations",
 			"template_declaration" => "template declarations",
+			"declaration" => "variable declarations",
 			"preproc_include" | "preproc_define" | "preproc_ifdef" | "preproc_ifndef" => {
 				"preprocessor directives"
 			}
