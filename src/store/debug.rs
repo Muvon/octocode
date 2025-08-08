@@ -119,7 +119,11 @@ impl<'a> DebugOperations<'a> {
 
 					for (i, chunk) in chunks.iter().enumerate() {
 						println!("🔹 Chunk #{} (Code)", i + 1);
-						println!("   📍 Lines: {}-{}", chunk.start_line, chunk.end_line);
+						println!(
+							"   📍 Lines: {}-{}",
+							chunk.start_line + 1,
+							chunk.end_line + 1
+						);
 						println!("   🏷️  Language: {}", chunk.language);
 						println!("   🔑 Hash: {}", chunk.hash);
 						println!("   📝 Symbols: {:?}", chunk.symbols);
@@ -142,7 +146,11 @@ impl<'a> DebugOperations<'a> {
 
 					for (i, chunk) in chunks.iter().enumerate() {
 						println!("🔹 Chunk #{} (Text)", i + 1);
-						println!("   📍 Lines: {}-{}", chunk.start_line, chunk.end_line);
+						println!(
+							"   📍 Lines: {}-{}",
+							chunk.start_line + 1,
+							chunk.end_line + 1
+						);
 						println!("   🔑 Hash: {}", chunk.hash);
 						println!("   📄 Content preview:");
 						self.print_content_preview(&chunk.content, 3);
@@ -163,7 +171,11 @@ impl<'a> DebugOperations<'a> {
 
 					for (i, chunk) in chunks.iter().enumerate() {
 						println!("🔹 Chunk #{} (Document)", i + 1);
-						println!("   📍 Lines: {}-{}", chunk.start_line, chunk.end_line);
+						println!(
+							"   📍 Lines: {}-{}",
+							chunk.start_line + 1,
+							chunk.end_line + 1
+						);
 						println!("   🏷️  Title: {}", chunk.title);
 						println!("   🔑 Hash: {}", chunk.hash);
 						if !chunk.context.is_empty() {

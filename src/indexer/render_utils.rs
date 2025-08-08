@@ -327,7 +327,8 @@ pub fn code_blocks_to_markdown_with_config(blocks: &[CodeBlock], config: &Config
 			markdown.push_str(&format!("**Language:** {}  ", block.language));
 			markdown.push_str(&format!(
 				"**Lines:** {}-{}  ",
-				block.start_line, block.end_line
+				block.start_line + 1,
+				block.end_line + 1
 			));
 
 			// Show similarity score if available
@@ -420,7 +421,8 @@ pub fn text_blocks_to_markdown_with_config(blocks: &[TextBlock], config: &Config
 			markdown.push_str(&format!("**Language:** {}  ", block.language));
 			markdown.push_str(&format!(
 				"**Lines:** {}-{}  ",
-				block.start_line, block.end_line
+				block.start_line + 1,
+				block.end_line + 1
 			));
 
 			// Show relevance score if available
@@ -502,7 +504,8 @@ pub fn document_blocks_to_markdown_with_config(
 			markdown.push_str(&format!("**Level:** {}  ", block.level));
 			markdown.push_str(&format!(
 				"**Lines:** {}-{}  ",
-				block.start_line, block.end_line
+				block.start_line + 1,
+				block.end_line + 1
 			));
 
 			// Show relevance score if available

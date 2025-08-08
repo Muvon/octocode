@@ -42,7 +42,7 @@ pub fn render_code_blocks_with_config(blocks: &[CodeBlock], config: &Config, det
 		println!("║");
 		println!("║ Result {} of {}", idx + 1, blocks.len());
 		println!("║ Language: {}", block.language);
-		println!("║ Lines: {}-{}", block.start_line, block.end_line);
+		println!("║ Lines: {}-{}", block.start_line + 1, block.end_line + 1);
 
 		// Show similarity score if available
 		if let Some(distance) = block.distance {

@@ -416,7 +416,7 @@ fn render_text_blocks_with_config(
 		for (idx, block) in file_blocks.iter().enumerate() {
 			println!("║");
 			println!("║ Block {} of {}: Text Block", idx + 1, file_blocks.len());
-			println!("║ Lines: {}-{}", block.start_line, block.end_line);
+			println!("║ Lines: {}-{}", block.start_line + 1, block.end_line + 1);
 
 			// Show similarity score if available
 			if let Some(distance) = block.distance {
@@ -540,7 +540,7 @@ fn render_document_blocks_with_config(
 				idx + 1,
 				file_blocks.len()
 			);
-			println!("║ Lines: {}-{}", block.start_line, block.end_line);
+			println!("║ Lines: {}-{}", block.start_line + 1, block.end_line + 1);
 
 			// Show similarity score if available
 			if let Some(distance) = block.distance {
