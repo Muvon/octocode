@@ -516,8 +516,8 @@ impl BatchConverter {
 				language: language_array.value(i).to_string(),
 				content: content_array.value(i).to_string(),
 				symbols,
-				start_line: start_line_array.value(i) as usize,
-				end_line: end_line_array.value(i) as usize,
+				start_line: (start_line_array.value(i) as usize) + 1, // Convert 0-indexed to 1-indexed
+				end_line: (end_line_array.value(i) as usize) + 1,     // Convert 0-indexed to 1-indexed
 				hash: hash_array.value(i).to_string(),
 				distance: distance_array.get(i).copied(),
 			};
@@ -592,8 +592,8 @@ impl BatchConverter {
 				path: path_array.value(i).to_string(),
 				language: language_array.value(i).to_string(),
 				content: content_array.value(i).to_string(),
-				start_line: start_line_array.value(i) as usize,
-				end_line: end_line_array.value(i) as usize,
+				start_line: (start_line_array.value(i) as usize) + 1, // Convert 0-indexed to 1-indexed
+				end_line: (end_line_array.value(i) as usize) + 1,     // Convert 0-indexed to 1-indexed
 				hash: hash_array.value(i).to_string(),
 				distance: distance_array.get(i).copied(),
 			};
@@ -704,8 +704,8 @@ impl BatchConverter {
 				content: content_array.value(i).to_string(),
 				context,
 				level,
-				start_line: start_line_array.value(i) as usize,
-				end_line: end_line_array.value(i) as usize,
+				start_line: (start_line_array.value(i) as usize) + 1, // Convert 0-indexed to 1-indexed
+				end_line: (end_line_array.value(i) as usize) + 1,     // Convert 0-indexed to 1-indexed
 				hash: hash_array.value(i).to_string(),
 				distance: distance_array.get(i).copied(),
 			};

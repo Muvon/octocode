@@ -42,7 +42,7 @@ pub fn render_code_blocks_with_config(blocks: &[CodeBlock], config: &Config, det
 		println!("║");
 		println!("║ Result {} of {}", idx + 1, blocks.len());
 		println!("║ Language: {}", block.language);
-		println!("║ Lines: {}-{}", block.start_line + 1, block.end_line + 1);
+		println!("║ Lines: {}-{}", block.start_line, block.end_line);
 
 		// Show similarity score if available
 		if let Some(distance) = block.distance {
@@ -74,7 +74,7 @@ pub fn render_code_blocks_with_config(blocks: &[CodeBlock], config: &Config, det
 				let lines: Vec<&str> = block.content.lines().collect();
 				if !lines.is_empty() {
 					if let Some(first_line) = lines.first() {
-						println!("║ │ {:4} │ {}", block.start_line + 1, first_line.trim());
+						println!("║ │ {:4} │ {}", block.start_line, first_line.trim());
 					}
 				}
 			}
@@ -117,7 +117,7 @@ pub fn render_code_blocks_with_config(blocks: &[CodeBlock], config: &Config, det
 						crate::indexer::truncate_content_smartly(&block.content, max_chars);
 					// Add line numbers to truncated content with │ format
 					for (i, line) in content.lines().enumerate() {
-						println!("║ │ {:4} │ {}", block.start_line + 1 + i, line);
+						println!("║ │ {:4} │ {}", block.start_line + i, line);
 					}
 					if was_truncated {
 						println!(
@@ -128,7 +128,7 @@ pub fn render_code_blocks_with_config(blocks: &[CodeBlock], config: &Config, det
 				} else {
 					// Show full content with line numbers using │ format
 					for (i, line) in block.content.lines().enumerate() {
-						println!("║ │ {:4} │ {}", block.start_line + 1 + i, line);
+						println!("║ │ {:4} │ {}", block.start_line + i, line);
 					}
 				}
 			}
@@ -753,7 +753,7 @@ pub fn format_code_search_results_as_text(blocks: &[CodeBlock], detail_level: &s
 
 	for (idx, block) in blocks.iter().enumerate() {
 		output.push_str(&format!("{}. {}\n", idx + 1, block.path));
-		// output.push_str(&format!("{}-{}", block.start_line + 1, block.end_line + 1));
+		// output.push_str(&format!("{}-{}", block.start_line, block.end_line));
 
 		if let Some(distance) = block.distance {
 			output.push_str(&format!(" | Similarity {:.3}", 1.0 - distance));
@@ -803,7 +803,7 @@ pub fn format_code_search_results_as_text(blocks: &[CodeBlock], detail_level: &s
 					.content
 					.lines()
 					.enumerate()
-					.map(|(i, line)| format!("{}: {}", block.start_line + 1 + i, line))
+					.map(|(i, line)| format!("{}: {}", block.start_line + i, line))
 					.collect::<Vec<_>>()
 					.join("\n");
 				output.push_str(&content_with_lines);
@@ -833,7 +833,7 @@ pub fn format_text_search_results_as_text(
 
 	for (idx, block) in blocks.iter().enumerate() {
 		output.push_str(&format!("{}. {}\n", idx + 1, block.path));
-		// output.push_str(&format!("{}-{}", block.start_line + 1, block.end_line + 1));
+		// output.push_str(&format!("{}-{}", block.start_line, block.end_line));
 
 		if let Some(distance) = block.distance {
 			output.push_str(&format!(" | Similarity {:.3}", 1.0 - distance));
@@ -865,7 +865,7 @@ pub fn format_text_search_results_as_text(
 					.content
 					.lines()
 					.enumerate()
-					.map(|(i, line)| format!("{}: {}", block.start_line + 1 + i, line))
+					.map(|(i, line)| format!("{}: {}", block.start_line + i, line))
 					.collect::<Vec<_>>()
 					.join("\n");
 				output.push_str(&content_with_lines);
@@ -896,11 +896,7 @@ pub fn format_doc_search_results_as_text(
 	for (idx, block) in blocks.iter().enumerate() {
 		output.push_str(&format!("{}. {}\n", idx + 1, block.path));
 		output.push_str(&format!("{} (Level {})", block.title, block.level));
-		output.push_str(&format!(
-			" | {}-{}",
-			block.start_line + 1,
-			block.end_line + 1
-		));
+		output.push_str(&format!(" | {}-{}", block.start_line, block.end_line));
 
 		if let Some(distance) = block.distance {
 			output.push_str(&format!(" | Similarity {:.3}", 1.0 - distance));
@@ -932,7 +928,7 @@ pub fn format_doc_search_results_as_text(
 					.content
 					.lines()
 					.enumerate()
-					.map(|(i, line)| format!("{}: {}", block.start_line + 1 + i, line))
+					.map(|(i, line)| format!("{}: {}", block.start_line + i, line))
 					.collect::<Vec<_>>()
 					.join("\n");
 				output.push_str(&content_with_lines);
@@ -1337,7 +1333,7 @@ fn get_text_preview_with_lines(content: &str, start_line: usize) -> String {
 		return lines
 			.iter()
 			.enumerate()
-			.map(|(i, line)| format!("{}: {}", start_line + 1 + i, line))
+			.map(|(i, line)| format!("{}: {}", start_line + i, line))
 			.collect::<Vec<_>>()
 			.join("\n");
 	}
@@ -1360,7 +1356,7 @@ fn get_text_preview_with_lines(content: &str, start_line: usize) -> String {
 
 	// Add first few lines with line numbers
 	for (i, line) in lines.iter().skip(start_idx).take(preview_start).enumerate() {
-		result.push(format!("{}: {}", start_line + 1 + start_idx + i, line));
+		result.push(format!("{}: {}", start_line + start_idx + i, line));
 	}
 
 	// If there's more content, add separator and last few lines
@@ -1372,14 +1368,14 @@ fn get_text_preview_with_lines(content: &str, start_line: usize) -> String {
 			// Add last few lines with correct line numbers
 			let end_start_idx = lines.len() - preview_end;
 			for (i, line) in lines.iter().skip(end_start_idx).enumerate() {
-				result.push(format!("{}: {}", start_line + 1 + end_start_idx + i, line));
+				result.push(format!("{}: {}", start_line + end_start_idx + i, line));
 			}
 		} else {
 			// Just add the remaining lines with line numbers
 			for (i, line) in lines.iter().skip(start_idx + preview_start).enumerate() {
 				result.push(format!(
 					"{}: {}",
-					start_line + 1 + start_idx + preview_start + i,
+					start_line + start_idx + preview_start + i,
 					line
 				));
 			}
@@ -1398,7 +1394,7 @@ fn get_doc_preview_with_lines(content: &str, start_line: usize) -> String {
 		return lines
 			.iter()
 			.enumerate()
-			.map(|(i, line)| format!("{}: {}", start_line + 1 + i, line))
+			.map(|(i, line)| format!("{}: {}", start_line + i, line))
 			.collect::<Vec<_>>()
 			.join("\n");
 	}
@@ -1421,7 +1417,7 @@ fn get_doc_preview_with_lines(content: &str, start_line: usize) -> String {
 
 	// Add first few lines with line numbers
 	for (i, line) in lines.iter().skip(start_idx).take(preview_start).enumerate() {
-		result.push(format!("{}: {}", start_line + 1 + start_idx + i, line));
+		result.push(format!("{}: {}", start_line + start_idx + i, line));
 	}
 
 	// If there's more content, add separator and last few lines
@@ -1433,14 +1429,14 @@ fn get_doc_preview_with_lines(content: &str, start_line: usize) -> String {
 			// Add last few lines with correct line numbers
 			let end_start_idx = lines.len() - preview_end;
 			for (i, line) in lines.iter().skip(end_start_idx).enumerate() {
-				result.push(format!("{}: {}", start_line + 1 + end_start_idx + i, line));
+				result.push(format!("{}: {}", start_line + end_start_idx + i, line));
 			}
 		} else {
 			// Just add the remaining lines with line numbers
 			for (i, line) in lines.iter().skip(start_idx + preview_start).enumerate() {
 				result.push(format!(
 					"{}: {}",
-					start_line + 1 + start_idx + preview_start + i,
+					start_line + start_idx + preview_start + i,
 					line
 				));
 			}
@@ -1459,7 +1455,7 @@ fn get_code_preview_with_lines(content: &str, start_line: usize, _language: &str
 		return lines
 			.iter()
 			.enumerate()
-			.map(|(i, line)| format!("{}: {}", start_line + 1 + i, line))
+			.map(|(i, line)| format!("{}: {}", start_line + i, line))
 			.collect::<Vec<_>>()
 			.join("\n");
 	}
@@ -1503,7 +1499,7 @@ fn get_code_preview_with_lines(content: &str, start_line: usize, _language: &str
 
 	// Add first few lines with line numbers
 	for (i, line) in lines.iter().skip(start_idx).take(preview_start).enumerate() {
-		result.push(format!("{}: {}", start_line + 1 + start_idx + i, line));
+		result.push(format!("{}: {}", start_line + start_idx + i, line));
 	}
 
 	// If there's more content, add separator and last few lines
@@ -1515,14 +1511,14 @@ fn get_code_preview_with_lines(content: &str, start_line: usize, _language: &str
 			// Add last few lines with correct line numbers
 			let end_start_idx = lines.len() - preview_end;
 			for (i, line) in lines.iter().skip(end_start_idx).enumerate() {
-				result.push(format!("{}: {}", start_line + 1 + end_start_idx + i, line));
+				result.push(format!("{}: {}", start_line + end_start_idx + i, line));
 			}
 		} else {
 			// Just add the remaining lines with line numbers
 			for (i, line) in lines.iter().skip(start_idx + preview_start).enumerate() {
 				result.push(format!(
 					"{}: {}",
-					start_line + 1 + start_idx + preview_start + i,
+					start_line + start_idx + preview_start + i,
 					line
 				));
 			}
@@ -2306,6 +2302,8 @@ pub fn deduplicate_and_merge_results(
 					// Keep block with better score (lower distance)
 					if block.distance < existing_block.distance {
 						*existing_block = block.clone();
+						existing_block.start_line = block.start_line + 1;
+						existing_block.end_line = block.end_line + 1;
 					}
 				}
 			}
@@ -2326,6 +2324,8 @@ pub fn deduplicate_and_merge_results(
 					query_indices.push(result.query_index);
 					if block.distance < existing_block.distance {
 						*existing_block = block.clone();
+						existing_block.start_line = block.start_line + 1;
+						existing_block.end_line = block.end_line + 1;
 					}
 				}
 			}
@@ -2346,6 +2346,8 @@ pub fn deduplicate_and_merge_results(
 					query_indices.push(result.query_index);
 					if block.distance < existing_block.distance {
 						*existing_block = block.clone();
+						existing_block.start_line = block.start_line + 1;
+						existing_block.end_line = block.end_line + 1;
 					}
 				}
 			}

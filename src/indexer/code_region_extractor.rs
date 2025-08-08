@@ -168,7 +168,7 @@ fn apply_smart_merging(
 /// Checks if a code region is a single-line declaration
 fn is_single_line_declaration(region: &CodeRegion) -> bool {
 	// Consider it single-line if it's 1 line or very short content
-	let line_count = region.end_line - region.start_line + 1;
+	let line_count = region.end_line - region.start_line;
 	let is_short = region.content.trim().lines().count() <= 1 || region.content.len() < 80;
 
 	line_count <= 1 || (line_count <= 2 && is_short)

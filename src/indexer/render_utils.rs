@@ -149,9 +149,9 @@ pub fn signatures_to_markdown(signatures: &[FileSignature]) -> String {
 			for signature in &file.signatures {
 				// Display line range if it spans multiple lines, otherwise just the start line
 				let line_display = if signature.start_line == signature.end_line {
-					format!("{}", signature.start_line + 1)
+					format!("{}", signature.start_line)
 				} else {
-					format!("{}-{}", signature.start_line + 1, signature.end_line + 1)
+					format!("{}-{}", signature.start_line, signature.end_line)
 				};
 
 				markdown.push_str(&format!(
@@ -229,9 +229,9 @@ pub fn render_signatures_text(signatures: &[FileSignature]) -> String {
 			for signature in &file.signatures {
 				// Display line range
 				// let line_display = if signature.start_line == signature.end_line {
-				// 	format!("{}", signature.start_line + 1)
+				// 	format!("{}", signature.start_line)
 				// } else {
-				// 	format!("{}-{}", signature.start_line + 1, signature.end_line + 1)
+				// 	format!("{}-{}", signature.start_line, signature.end_line)
 				// };
 
 				// output.push_str(&format!(
@@ -252,7 +252,7 @@ pub fn render_signatures_text(signatures: &[FileSignature]) -> String {
 						.iter()
 						.take(2)
 						.enumerate()
-						.map(|(i, line)| format!("{}: {}", signature.start_line + 1 + i, line))
+						.map(|(i, line)| format!("{}: {}", signature.start_line + i, line))
 						.collect();
 
 					let last_lines: Vec<String> = lines
@@ -260,7 +260,7 @@ pub fn render_signatures_text(signatures: &[FileSignature]) -> String {
 						.skip(lines.len() - 2)
 						.enumerate()
 						.map(|(i, line)| {
-							let line_num = signature.start_line + 1 + (lines.len() - 2) + i;
+							let line_num = signature.start_line + (lines.len() - 2) + i;
 							format!("{}: {}", line_num, line)
 						})
 						.collect();
@@ -274,7 +274,7 @@ pub fn render_signatures_text(signatures: &[FileSignature]) -> String {
 					lines
 						.iter()
 						.enumerate()
-						.map(|(i, line)| format!("{}: {}", signature.start_line + 1 + i, line))
+						.map(|(i, line)| format!("{}: {}", signature.start_line + i, line))
 						.collect::<Vec<_>>()
 						.join("\n")
 				};
@@ -327,8 +327,7 @@ pub fn code_blocks_to_markdown_with_config(blocks: &[CodeBlock], config: &Config
 			markdown.push_str(&format!("**Language:** {}  ", block.language));
 			markdown.push_str(&format!(
 				"**Lines:** {}-{}  ",
-				block.start_line + 1,
-				block.end_line + 1
+				block.start_line, block.end_line
 			));
 
 			// Show similarity score if available
@@ -421,8 +420,7 @@ pub fn text_blocks_to_markdown_with_config(blocks: &[TextBlock], config: &Config
 			markdown.push_str(&format!("**Language:** {}  ", block.language));
 			markdown.push_str(&format!(
 				"**Lines:** {}-{}  ",
-				block.start_line + 1,
-				block.end_line + 1
+				block.start_line, block.end_line
 			));
 
 			// Show relevance score if available
@@ -504,8 +502,7 @@ pub fn document_blocks_to_markdown_with_config(
 			markdown.push_str(&format!("**Level:** {}  ", block.level));
 			markdown.push_str(&format!(
 				"**Lines:** {}-{}  ",
-				block.start_line + 1,
-				block.end_line + 1
+				block.start_line, block.end_line
 			));
 
 			// Show relevance score if available
@@ -571,9 +568,9 @@ pub fn render_signatures_cli(signatures: &[FileSignature]) {
 
 				// Display line range if it spans multiple lines, otherwise just the start line
 				let line_display = if signature.start_line == signature.end_line {
-					format!("{}", signature.start_line + 1)
+					format!("{}", signature.start_line)
 				} else {
-					format!("{}-{}", signature.start_line + 1, signature.end_line + 1)
+					format!("{}-{}", signature.start_line, signature.end_line)
 				};
 
 				println!(
@@ -597,26 +594,26 @@ pub fn render_signatures_cli(signatures: &[FileSignature]) {
 					if lines.len() > 5 {
 						// Show first 2 lines with line numbers
 						for (i, line) in lines.iter().take(2).enumerate() {
-							let line_num = signature.start_line + 1 + i;
+							let line_num = signature.start_line + i;
 							println!("║ │ {}: {}", line_num, line);
 						}
 						// Show truncation message
 						println!("║ │ // ... {} more lines", lines.len() - 4);
 						// Show last 2 lines with line numbers
 						for (i, line) in lines.iter().skip(lines.len() - 2).enumerate() {
-							let line_num = signature.start_line + 1 + (lines.len() - 2) + i;
+							let line_num = signature.start_line + (lines.len() - 2) + i;
 							println!("║ │ {}: {}", line_num, line);
 						}
 					} else {
 						// Show all lines with line numbers for short signatures
 						for (i, line) in lines.iter().enumerate() {
-							let line_num = signature.start_line + 1 + i;
+							let line_num = signature.start_line + i;
 							println!("║ │ {}: {}", line_num, line);
 						}
 					}
 					println!("║ └────────────────────────────────────");
 				} else if !lines.is_empty() {
-					let line_num = signature.start_line + 1;
+					let line_num = signature.start_line;
 					println!("║   {}: {}", line_num, lines[0]);
 				}
 			}
