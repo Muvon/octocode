@@ -59,6 +59,7 @@ tree-sitter-go = "0.23.4"
 tree-sitter-cpp = "0.23.4"
 tree-sitter-bash = "0.25.0"
 tree-sitter-css = "0.23.2"
+tree-sitter-lua = "0.2.0"
 
 uuid = { version = "1.17.0", default-features = false, features = ["v4"] }
 tree-sitter-typescript = "0.23.2"

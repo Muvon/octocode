@@ -108,6 +108,8 @@ impl FileUtils {
 			"sh" | "bash" => Some("bash"),
 			// Ruby
 			"rb" => Some("ruby"),
+			// Lua
+			"lua" => Some("lua"),
 			// JSON
 			"json" => Some("json"),
 			// Svelte
