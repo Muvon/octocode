@@ -221,14 +221,90 @@ impl Language for Cpp {
 
 	fn extract_imports_exports(&self, node: Node, contents: &str) -> (Vec<String>, Vec<String>) {
 		let mut imports = Vec::new();
-		let exports = Vec::new(); // C++ doesn't have explicit exports like modules
+		let mut exports = Vec::new();
 
-		// Look for preproc_include nodes
-		if node.kind() == "preproc_include" {
-			if let Ok(include_text) = node.utf8_text(contents.as_bytes()) {
-				if let Some(header) = Self::parse_cpp_include(include_text) {
-					imports.push(header);
+		match node.kind() {
+			// Extract imports from #include statements
+			"preproc_include" => {
+				if let Ok(include_text) = node.utf8_text(contents.as_bytes()) {
+					if let Some(header) = Self::parse_cpp_include(include_text) {
+						imports.push(header);
+					}
 				}
+			}
+			// Extract exports from function definitions and declarations
+			"function_definition" | "declaration" => {
+				// For function definitions, always consider them as exports
+				if node.kind() == "function_definition" {
+					if let Some(function_name) = self.extract_function_name(node, contents) {
+						exports.push(function_name);
+					}
+				} else {
+					// For declarations, check if it's a function declaration
+					let mut is_function_declaration = false;
+					for child in node.children(&mut node.walk()) {
+						if child.kind() == "function_declarator" {
+							is_function_declaration = true;
+							if let Some(function_name) = self.extract_function_name(node, contents)
+							{
+								exports.push(function_name);
+							}
+							break;
+						}
+					}
+
+					// If not a function declaration, it might be a variable declaration
+					// Export global variables and constants
+					if !is_function_declaration {
+						if let Some(var_names) = self.extract_variable_names(node, contents) {
+							exports.extend(var_names);
+						}
+					}
+				}
+			}
+			// Extract exports from class, struct, and enum declarations
+			"class_specifier" | "struct_specifier" | "enum_specifier" => {
+				if let Some(type_name) = self.extract_type_name(node, contents) {
+					exports.push(type_name);
+				}
+			}
+			// Extract exports from namespace declarations
+			"namespace_definition" => {
+				if let Some(namespace_name) = self.extract_namespace_name(node, contents) {
+					exports.push(namespace_name);
+				}
+			}
+			// Extract exports from template declarations
+			"template_declaration" => {
+				// Template declarations can contain functions, classes, etc.
+				// Look for the actual declaration inside the template
+				for child in node.children(&mut node.walk()) {
+					match child.kind() {
+						"function_definition" | "class_specifier" | "struct_specifier" => {
+							if let Some(template_name) = self.extract_template_name(child, contents)
+							{
+								exports.push(format!("template<{}>", template_name));
+							}
+						}
+						_ => {}
+					}
+				}
+			}
+			// Extract exports from macro definitions
+			"preproc_define" => {
+				if let Some(macro_name) = self.extract_macro_name(node, contents) {
+					exports.push(macro_name);
+				}
+			}
+			// Extract exports from typedef declarations
+			"type_definition" => {
+				if let Some(typedef_name) = self.extract_typedef_name(node, contents) {
+					exports.push(typedef_name);
+				}
+			}
+			_ => {
+				// For other node types, don't extract anything
+				// This prevents noise and focuses on meaningful exports
 			}
 		}
 
@@ -434,6 +510,104 @@ impl Cpp {
 }
 
 impl Cpp {
+	/// Extract function name from function definition or declaration
+	fn extract_function_name(&self, node: Node, contents: &str) -> Option<String> {
+		for child in node.children(&mut node.walk()) {
+			if child.kind() == "function_declarator" {
+				for decl_child in child.children(&mut child.walk()) {
+					if decl_child.kind() == "identifier" {
+						if let Ok(name) = decl_child.utf8_text(contents.as_bytes()) {
+							return Some(name.to_string());
+						}
+					}
+				}
+			}
+		}
+		None
+	}
+
+	/// Extract variable names from declaration nodes
+	fn extract_variable_names(&self, node: Node, contents: &str) -> Option<Vec<String>> {
+		let mut var_names = Vec::new();
+
+		for child in node.children(&mut node.walk()) {
+			if child.kind() == "init_declarator" || child.kind() == "declarator" {
+				for decl_child in child.children(&mut child.walk()) {
+					if decl_child.kind() == "identifier" {
+						if let Ok(name) = decl_child.utf8_text(contents.as_bytes()) {
+							var_names.push(name.to_string());
+						}
+					}
+				}
+			}
+		}
+
+		if var_names.is_empty() {
+			None
+		} else {
+			Some(var_names)
+		}
+	}
+
+	/// Extract type name from class, struct, or enum declarations
+	fn extract_type_name(&self, node: Node, contents: &str) -> Option<String> {
+		for child in node.children(&mut node.walk()) {
+			if child.kind() == "type_identifier" || child.kind() == "identifier" {
+				if let Ok(name) = child.utf8_text(contents.as_bytes()) {
+					return Some(name.to_string());
+				}
+			}
+		}
+		None
+	}
+
+	/// Extract namespace name from namespace definition
+	fn extract_namespace_name(&self, node: Node, contents: &str) -> Option<String> {
+		for child in node.children(&mut node.walk()) {
+			if child.kind() == "identifier" || child.kind() == "namespace_identifier" {
+				if let Ok(name) = child.utf8_text(contents.as_bytes()) {
+					return Some(name.to_string());
+				}
+			}
+		}
+		None
+	}
+
+	/// Extract template name from template declarations
+	fn extract_template_name(&self, node: Node, contents: &str) -> Option<String> {
+		match node.kind() {
+			"function_definition" => self.extract_function_name(node, contents),
+			"class_specifier" | "struct_specifier" => self.extract_type_name(node, contents),
+			_ => None,
+		}
+	}
+
+	/// Extract macro name from preprocessor define
+	fn extract_macro_name(&self, node: Node, contents: &str) -> Option<String> {
+		// Look for the identifier after #define
+		for child in node.children(&mut node.walk()) {
+			if child.kind() == "identifier" {
+				if let Ok(name) = child.utf8_text(contents.as_bytes()) {
+					return Some(name.to_string());
+				}
+			}
+		}
+		None
+	}
+
+	/// Extract typedef name from type definition
+	fn extract_typedef_name(&self, node: Node, contents: &str) -> Option<String> {
+		// Look for the new type name in typedef
+		for child in node.children(&mut node.walk()) {
+			if child.kind() == "type_identifier" {
+				if let Ok(name) = child.utf8_text(contents.as_bytes()) {
+					return Some(name.to_string());
+				}
+			}
+		}
+		None
+	}
+
 	/// Resolve local includes relative to source file
 	fn resolve_local_include(
 		&self,
