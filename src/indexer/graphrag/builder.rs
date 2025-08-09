@@ -59,6 +59,7 @@ impl GraphBuilder {
 		let (provider_type, model) = parse_provider_model(model_string);
 		let embedding_provider = Arc::new(
 			create_embedding_provider_from_parts(&provider_type, &model)
+				.await
 				.context("Failed to initialize embedding provider from config")?,
 		);
 

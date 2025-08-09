@@ -79,7 +79,7 @@ pub trait EmbeddingProvider: Send + Sync {
 }
 
 /// Create an embedding provider from provider type and model
-pub fn create_embedding_provider_from_parts(
+pub async fn create_embedding_provider_from_parts(
 	provider: &EmbeddingProviderType,
 	model: &str,
 ) -> Result<Box<dyn EmbeddingProvider>> {
@@ -101,7 +101,7 @@ pub fn create_embedding_provider_from_parts(
 		EmbeddingProviderType::HuggingFace => {
 			#[cfg(feature = "huggingface")]
 			{
-				Ok(Box::new(HuggingFaceProviderImpl::new(model)?))
+				Ok(Box::new(HuggingFaceProviderImpl::new(model).await?))
 			}
 			#[cfg(not(feature = "huggingface"))]
 			{

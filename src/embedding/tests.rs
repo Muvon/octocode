@@ -30,14 +30,14 @@ mod embedding_tests {
 	))]
 	use crate::embedding::create_embedding_provider_from_parts;
 
-	#[test]
+	#[tokio::test]
 	#[cfg(feature = "huggingface")]
-	fn test_sentence_transformer_provider_creation() {
+	async fn test_sentence_transformer_provider_creation() {
 		// Test that we can create a SentenceTransformer provider
 		let provider_type = EmbeddingProviderType::HuggingFace;
 		let model = "sentence-transformers/all-MiniLM-L6-v2";
 
-		let result = create_embedding_provider_from_parts(&provider_type, model);
+		let result = create_embedding_provider_from_parts(&provider_type, model).await;
 		if let Err(e) = &result {
 			eprintln!("Error creating HuggingFace provider: {}", e);
 		}
@@ -127,9 +127,9 @@ mod embedding_tests {
 		assert_eq!(text_provider, EmbeddingProviderType::Voyage);
 	}
 
-	#[test]
+	#[tokio::test]
 	#[cfg(feature = "huggingface")]
-	fn test_embedding_config_methods() {
+	async fn test_embedding_config_methods() {
 		let config = EmbeddingConfig {
 			code_model: "huggingface:microsoft/codebert-base".to_string(),
 			text_model: "huggingface:sentence-transformers/all-mpnet-base-v2".to_string(),
@@ -140,22 +140,26 @@ mod embedding_tests {
 		assert_eq!(active_provider, EmbeddingProviderType::HuggingFace);
 
 		// Test vector dimensions
-		let dim = config.get_vector_dimension(
-			&EmbeddingProviderType::HuggingFace,
-			"jinaai/jina-embeddings-v2-base-code",
-		);
+		let dim = config
+			.get_vector_dimension(
+				&EmbeddingProviderType::HuggingFace,
+				"jinaai/jina-embeddings-v2-base-code",
+			)
+			.await;
 		assert_eq!(dim, 768);
 
-		let dim2 = config.get_vector_dimension(
-			&EmbeddingProviderType::HuggingFace,
-			"sentence-transformers/all-MiniLM-L6-v2",
-		);
+		let dim2 = config
+			.get_vector_dimension(
+				&EmbeddingProviderType::HuggingFace,
+				"sentence-transformers/all-MiniLM-L6-v2",
+			)
+			.await;
 		assert_eq!(dim2, 384);
 	}
 
-	#[test]
+	#[tokio::test]
 	#[cfg(not(feature = "huggingface"))]
-	fn test_embedding_config_methods_without_sentence_transformer() {
+	async fn test_embedding_config_methods_without_sentence_transformer() {
 		let config = EmbeddingConfig {
 			code_model: "voyage:voyage-code-3".to_string(),
 			text_model: "voyage:voyage-3.5-lite".to_string(),
@@ -166,10 +170,14 @@ mod embedding_tests {
 		assert_eq!(active_provider, EmbeddingProviderType::Voyage);
 
 		// Test vector dimensions for Voyage models
-		let dim = config.get_vector_dimension(&EmbeddingProviderType::Voyage, "voyage-code-3");
+		let dim = config
+			.get_vector_dimension(&EmbeddingProviderType::Voyage, "voyage-code-3")
+			.await;
 		assert_eq!(dim, 1024);
 
-		let dim2 = config.get_vector_dimension(&EmbeddingProviderType::Voyage, "voyage-3.5-lite");
+		let dim2 = config
+			.get_vector_dimension(&EmbeddingProviderType::Voyage, "voyage-3.5-lite")
+			.await;
 		assert_eq!(dim2, 1024);
 	}
 
@@ -321,9 +329,9 @@ mod embedding_tests {
 	}
 
 	// HuggingFace provider tests - only run when feature is enabled
-	#[test]
+	#[tokio::test]
 	#[cfg(feature = "huggingface")]
-	fn test_huggingface_provider_creation() {
+	async fn test_huggingface_provider_creation() {
 		// Test that the HuggingFace provider feature is available
 		// We test through the factory function to avoid HTTP requests
 		let provider_type = EmbeddingProviderType::HuggingFace;
@@ -331,7 +339,7 @@ mod embedding_tests {
 
 		// This will test that the provider can be created through the factory
 		// without actually making HTTP requests (which would happen in new())
-		let result = create_embedding_provider_from_parts(&provider_type, model);
+		let result = create_embedding_provider_from_parts(&provider_type, model).await;
 
 		// The result might be an error due to HTTP requests, but it should not be
 		// a "feature not compiled" error
@@ -345,9 +353,9 @@ mod embedding_tests {
 		}
 	}
 
-	#[test]
+	#[tokio::test]
 	#[cfg(feature = "huggingface")]
-	fn test_huggingface_dimension_detection() {
+	async fn test_huggingface_dimension_detection() {
 		// Test that HuggingFace provider feature is available
 		// We test basic functionality without making HTTP requests
 
@@ -363,7 +371,7 @@ mod embedding_tests {
 		];
 
 		for model in test_models {
-			let result = create_embedding_provider_from_parts(&provider_type, model);
+			let result = create_embedding_provider_from_parts(&provider_type, model).await;
 			// We don't care if it succeeds or fails, just that it's not a "not compiled" error
 			if let Err(error) = result {
 				let error_msg = format!("{}", error);
@@ -377,9 +385,9 @@ mod embedding_tests {
 		}
 	}
 
-	#[test]
+	#[tokio::test]
 	#[cfg(feature = "huggingface")]
-	fn test_huggingface_embedding_generation() {
+	async fn test_huggingface_embedding_generation() {
 		// Test that HuggingFace provider feature is compiled and available
 		// We avoid actual embedding generation to prevent HTTP requests and runtime issues
 
@@ -387,7 +395,7 @@ mod embedding_tests {
 		let model = "sentence-transformers/all-MiniLM-L6-v2";
 
 		// Test that the provider can be instantiated through factory
-		let result = create_embedding_provider_from_parts(&provider_type, model);
+		let result = create_embedding_provider_from_parts(&provider_type, model).await;
 
 		// We expect this might fail due to HTTP requests, but it should not be
 		// a "feature not compiled" error
@@ -406,14 +414,14 @@ mod embedding_tests {
 	}
 
 	// Test that disabled features return appropriate errors
-	#[test]
+	#[tokio::test]
 	#[cfg(not(feature = "fastembed"))]
-	fn test_fastembed_disabled_error() {
+	async fn test_fastembed_disabled_error() {
 		// When feature is disabled, we test through the factory function
 		let provider_type = EmbeddingProviderType::FastEmbed;
 		let model = "any-model";
 
-		let result = create_embedding_provider_from_parts(&provider_type, model);
+		let result = create_embedding_provider_from_parts(&provider_type, model).await;
 		assert!(
 			result.is_err(),
 			"Should return error when FastEmbed feature is disabled"
@@ -429,14 +437,14 @@ mod embedding_tests {
 		}
 	}
 
-	#[test]
+	#[tokio::test]
 	#[cfg(not(feature = "huggingface"))]
-	fn test_huggingface_disabled_error() {
+	async fn test_huggingface_disabled_error() {
 		// When feature is disabled, we test through the factory function
 		let provider_type = EmbeddingProviderType::HuggingFace;
 		let model = "any-model";
 
-		let result = create_embedding_provider_from_parts(&provider_type, model);
+		let result = create_embedding_provider_from_parts(&provider_type, model).await;
 		assert!(
 			result.is_err(),
 			"Should return error when HuggingFace feature is disabled"
@@ -453,13 +461,13 @@ mod embedding_tests {
 	}
 
 	// Integration test for provider factory with features
-	#[test]
+	#[tokio::test]
 	#[cfg(feature = "fastembed")]
-	fn test_provider_factory_with_fastembed() {
+	async fn test_provider_factory_with_fastembed() {
 		let provider_type = EmbeddingProviderType::FastEmbed;
 		let model = "Xenova/all-MiniLM-L6-v2";
 
-		let result = create_embedding_provider_from_parts(&provider_type, model);
+		let result = create_embedding_provider_from_parts(&provider_type, model).await;
 		assert!(
 			result.is_ok(),
 			"Should create FastEmbed provider through factory: {:?}",
@@ -467,13 +475,13 @@ mod embedding_tests {
 		);
 	}
 
-	#[test]
+	#[tokio::test]
 	#[cfg(feature = "huggingface")]
-	fn test_provider_factory_with_huggingface() {
+	async fn test_provider_factory_with_huggingface() {
 		let provider_type = EmbeddingProviderType::HuggingFace;
 		let model = "sentence-transformers/all-MiniLM-L6-v2";
 
-		let result = create_embedding_provider_from_parts(&provider_type, model);
+		let result = create_embedding_provider_from_parts(&provider_type, model).await;
 		assert!(
 			result.is_ok(),
 			"Should create HuggingFace provider through factory: {:?}",

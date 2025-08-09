@@ -307,7 +307,7 @@ pub struct HuggingFaceProviderImpl {
 
 #[cfg(feature = "huggingface")]
 impl HuggingFaceProviderImpl {
-	pub fn new(model: &str) -> Result<Self> {
+	pub async fn new(model: &str) -> Result<Self> {
 		#[cfg(not(feature = "huggingface"))]
 		{
 			Err(anyhow::anyhow!("HuggingFace provider requires 'huggingface' feature to be enabled. Cannot validate model '{}' without Hub API access.", model))
@@ -315,7 +315,7 @@ impl HuggingFaceProviderImpl {
 
 		#[cfg(feature = "huggingface")]
 		{
-			let dimension = Self::get_model_dimension(model)?;
+			let dimension = Self::get_model_dimension(model).await?;
 			Ok(Self {
 				model_name: model.to_string(),
 				dimension,
@@ -324,16 +324,15 @@ impl HuggingFaceProviderImpl {
 	}
 
 	#[cfg(feature = "huggingface")]
-	fn get_model_dimension(model: &str) -> Result<usize> {
-		Self::get_dimension_from_config(model)
+	async fn get_model_dimension(model: &str) -> Result<usize> {
+		Self::get_dimension_from_config(model).await
 	}
 
 	/// Get model dimension using Candle config structs (like examples)
 	#[cfg(feature = "huggingface")]
-	fn get_dimension_from_config(model_name: &str) -> Result<usize> {
+	async fn get_dimension_from_config(model_name: &str) -> Result<usize> {
 		// Download config.json
-		let rt = tokio::runtime::Runtime::new()?;
-		let config_json = rt.block_on(Self::download_config_direct(model_name))?;
+		let config_json = Self::download_config_direct(model_name).await?;
 
 		// Try different Candle config types - JinaBert first, then standard Bert
 		if let Ok(config) = Self::parse_as_jina_bert_config(&config_json) {

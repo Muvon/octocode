@@ -43,7 +43,7 @@ impl MemoryManager {
 		// Create embedding provider using text model from config
 		let model_string = &config.embedding.text_model;
 		let (provider, model) = parse_provider_model(model_string);
-		let embedding_provider = create_embedding_provider_from_parts(&provider, &model)?;
+		let embedding_provider = create_embedding_provider_from_parts(&provider, &model).await?;
 
 		let store = MemoryStore::new(
 			&db_path_str,
@@ -69,7 +69,7 @@ impl MemoryManager {
 		// Create embedding provider using text model from config
 		let model_string = &config.embedding.text_model;
 		let (provider, model) = parse_provider_model(model_string);
-		let embedding_provider = create_embedding_provider_from_parts(&provider, &model)?;
+		let embedding_provider = create_embedding_provider_from_parts(&provider, &model).await?;
 
 		let store = MemoryStore::new(
 			&db_path_str,

@@ -40,7 +40,7 @@ pub async fn generate_embeddings(
 	// Parse provider and model from the string
 	let (provider, model) = parse_provider_model(model_string);
 
-	let provider_impl = create_embedding_provider_from_parts(&provider, &model)?;
+	let provider_impl = create_embedding_provider_from_parts(&provider, &model).await?;
 	provider_impl.generate_embedding(contents).await
 }
 
@@ -136,7 +136,7 @@ pub async fn generate_embeddings_batch(
 	// Parse provider and model from the string
 	let (provider, model) = parse_provider_model(model_string);
 
-	let provider_impl = create_embedding_provider_from_parts(&provider, &model)?;
+	let provider_impl = create_embedding_provider_from_parts(&provider, &model).await?;
 
 	// Split texts into token-limited batches
 	let batches = split_texts_into_token_limited_batches(

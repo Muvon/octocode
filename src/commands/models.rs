@@ -181,7 +181,7 @@ async fn get_model_info(model_spec: &str) -> Result<()> {
 	println!("Model: {}", model_name);
 
 	// Create provider instance to test validation
-	match create_embedding_provider_from_parts(&provider, &model_name) {
+	match create_embedding_provider_from_parts(&provider, &model_name).await {
 		Ok(provider_impl) => {
 			let supported = provider_impl.is_model_supported();
 
