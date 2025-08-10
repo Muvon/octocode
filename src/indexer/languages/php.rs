@@ -33,7 +33,7 @@ impl Language for Php {
 		vec![
 			"function_definition",
 			"method_declaration",
-			"class_declaration",
+			// Removed: "class_declaration" - too large, extract methods individually instead
 			"namespace_definition",
 			"namespace_use_declaration",
 			// Removed: "trait_declaration" - too large, not semantic

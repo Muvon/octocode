@@ -27,6 +27,8 @@ mod json;
 mod lua;
 mod markdown;
 mod php;
+#[cfg(test)]
+mod php_test;
 mod python;
 pub mod resolution_utils;
 mod ruby;
