@@ -129,13 +129,21 @@ pub async fn execute(config: &Config, args: &ReleaseArgs) -> Result<()> {
 		commit_analysis.commits.len()
 	);
 
-	// Calculate new version using AI
+	// Calculate new version
 	let version_calculation = if let Some(forced_version) = &args.force_version {
 		VersionCalculation {
 			current_version: current_version.clone(),
 			new_version: forced_version.clone(),
 			version_type: "forced".to_string(),
 			reasoning: "Version forced by user".to_string(),
+		}
+	} else if last_tag.is_none() {
+		// First release: use current version without bumping
+		VersionCalculation {
+			current_version: current_version.clone(),
+			new_version: current_version.clone(),
+			version_type: "initial".to_string(),
+			reasoning: "First release: using current version without bump".to_string(),
 		}
 	} else {
 		calculate_version_with_ai(config, &current_version, &commit_analysis).await?
