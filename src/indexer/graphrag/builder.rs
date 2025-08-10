@@ -539,6 +539,23 @@ impl GraphBuilder {
 		// Discover relationships incrementally for processed nodes
 		// This ensures relationships are stored during processing, not just at the end
 		if processed_count > 0 {
+			// CRITICAL FIX: Ensure all nodes are loaded from database for relationship discovery
+			// During initial indexing, nodes are stored to DB but in-memory graph is empty
+			{
+				let graph = self.graph.read().await;
+				if graph.nodes.is_empty() && !self.quiet {
+					eprintln!("📊 Loading nodes from database for relationship discovery...");
+				}
+			}
+
+			// Force load all nodes from database if in-memory graph is empty
+			if self.graph.read().await.nodes.is_empty() {
+				let db_ops = DatabaseOperations::new(&self.store);
+				let loaded_graph = db_ops.load_graph(&self.project_root, true).await?;
+				let mut graph = self.graph.write().await;
+				*graph = loaded_graph;
+			}
+
 			// Collect all processed nodes for relationship discovery
 			let all_processed_nodes = {
 				let graph = self.graph.read().await;
