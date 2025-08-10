@@ -353,6 +353,104 @@ async fn flush_if_needed(
 	}
 }
 
+/// Fast file counting function that performs minimal checks
+/// Returns the total count of indexable files without expensive operations
+fn fast_count_indexable_files(
+	current_dir: &Path,
+	git_changed_files: Option<&std::collections::HashSet<String>>,
+) -> usize {
+	let mut count = 0;
+
+	// If we have git optimization, just count the changed files
+	if let Some(changed_files) = git_changed_files {
+		for file_path in changed_files {
+			let full_path = current_dir.join(file_path);
+			// Quick extension check only - no language detection
+			if full_path.extension().is_some() {
+				count += 1;
+			}
+		}
+		return count;
+	}
+
+	// Otherwise, do a fast walk with minimal checks
+	let walker = NoindexWalker::create_walker(current_dir).build();
+
+	for result in walker {
+		let entry = match result {
+			Ok(entry) => entry,
+			Err(_) => continue,
+		};
+
+		// Skip directories
+		if !entry.file_type().is_some_and(|ft| ft.is_file()) {
+			continue;
+		}
+
+		// Quick check: just see if file has an extension that might be indexable
+		// This is much faster than full language detection
+		if let Some(ext) = entry.path().extension() {
+			let ext_str = ext.to_str().unwrap_or("");
+			// Quick list of common extensions we index
+			if matches!(
+				ext_str,
+				"rs" | "js"
+					| "ts" | "jsx" | "tsx"
+					| "py" | "go" | "java"
+					| "c" | "cpp" | "h"
+					| "hpp" | "cs" | "php"
+					| "rb" | "swift"
+					| "kt" | "scala"
+					| "r" | "m" | "mm"
+					| "md" | "markdown"
+					| "txt" | "json"
+					| "yaml" | "yml"
+					| "toml" | "xml"
+					| "html" | "css"
+					| "scss" | "sass"
+					| "less" | "sql"
+					| "sh" | "bash" | "zsh"
+					| "fish" | "vim"
+					| "lua" | "pl" | "pm"
+					| "t" | "pod" | "raku"
+					| "rakumod" | "rakudoc"
+					| "nix" | "dhall"
+					| "tf" | "tfvars"
+					| "hcl" | "vue" | "svelte"
+					| "elm" | "purs"
+					| "hs" | "lhs" | "ml"
+					| "mli" | "fs" | "fsi"
+					| "fsx" | "clj" | "cljs"
+					| "cljc" | "edn"
+					| "ex" | "exs" | "erl"
+					| "hrl" | "zig" | "v"
+					| "vsh" | "nim" | "nims"
+					| "cr" | "jl" | "d"
+					| "dart" | "pas"
+					| "pp" | "inc" | "asm"
+					| "s" | "S" | "rst"
+					| "adoc" | "tex"
+					| "bib" | "org" | "wiki"
+					| "pod6" | "rakutest"
+					| "cfg" | "conf"
+					| "config" | "ini"
+					| "env" | "properties"
+					| "gradle" | "cmake"
+					| "make" | "makefile"
+					| "dockerfile" | "containerfile"
+					| "vagrantfile" | "gemfile"
+					| "rakefile" | "guardfile"
+					| "podfile" | "fastfile"
+					| "brewfile"
+			) {
+				count += 1;
+			}
+		}
+	}
+
+	count
+}
+
 /// Render signatures and search results as markdown output (more efficient for AI tools)
 // Rendering functions have been moved to src/indexer/render_utils.rs
 // Main function to index files with optional git optimization
@@ -554,7 +652,7 @@ pub async fn index_files_with_quiet(
 	}
 
 	// Progressive counting variables
-	let mut total_files_found = 0;
+	let total_files_found;
 	let mut files_processed = 0;
 
 	// Log file processing phase start
@@ -562,17 +660,8 @@ pub async fn index_files_with_quiet(
 
 	// PERFORMANCE FIX: Fast-path for git optimization - process only changed files
 	if let Some(ref changed_files) = git_changed_files {
-		// Git optimization: Pre-count indexable files from the known changed set
-		for file_path in changed_files {
-			let full_path = current_dir.join(file_path);
-			if full_path.is_file() {
-				let has_language = detect_language(&full_path).is_some();
-				let has_text_ext = is_allowed_text_extension(&full_path);
-				if has_language || has_text_ext {
-					total_files_found += 1;
-				}
-			}
-		}
+		// Use fast counting function for git optimization
+		total_files_found = fast_count_indexable_files(&current_dir, Some(changed_files));
 
 		// Update state with final count and switch to processing mode
 		{
@@ -756,7 +845,20 @@ pub async fn index_files_with_quiet(
 			}
 		}
 	} else {
-		// Normal mode: Use walker for full repository traversal
+		// Normal mode: First do a fast count, then process files
+
+		// PERFORMANCE FIX: Do a fast count first without expensive operations
+		total_files_found = fast_count_indexable_files(&current_dir, None);
+
+		// Update state with the total count immediately
+		{
+			let mut state_guard = state.write();
+			state_guard.total_files = total_files_found;
+			state_guard.counting_files = false;
+			state_guard.status_message = "".to_string();
+		}
+
+		// Now do the actual processing with proper language detection
 		let walker = NoindexWalker::create_walker(&current_dir).build();
 
 		for result in walker {
@@ -772,26 +874,6 @@ pub async fn index_files_with_quiet(
 
 			// Create relative path from the current directory using our utility
 			let file_path = path_utils::PathUtils::to_relative_string(entry.path(), &current_dir);
-
-			// Check if this file would be indexed (for progressive counting)
-			let has_language = detect_language(entry.path()).is_some();
-			let has_text_ext = is_allowed_text_extension(entry.path());
-			let is_indexable = has_language || has_text_ext;
-
-			if is_indexable {
-				total_files_found += 1;
-
-				// Update total count progressively every 10 files to avoid too frequent updates
-				if total_files_found % 10 == 0 {
-					let mut state_guard = state.write();
-					state_guard.total_files = total_files_found;
-					if total_files_found <= 50 {
-						// Still in early discovery phase
-						state_guard.status_message =
-							format!("Found {} files...", total_files_found);
-					}
-				}
-			}
 
 			// PERFORMANCE OPTIMIZATION: Fast file modification time check using preloaded metadata
 			// This replaces individual database queries with HashMap lookup
@@ -859,17 +941,6 @@ pub async fn index_files_with_quiet(
 
 						files_processed += 1;
 						state.write().indexed_files = files_processed;
-
-						// Update counting phase status
-						{
-							let mut state_guard = state.write();
-							if state_guard.counting_files && total_files_found > 50 {
-								// Switch from counting to processing mode
-								state_guard.counting_files = false;
-								state_guard.total_files = total_files_found;
-								state_guard.status_message = "".to_string();
-							}
-						}
 
 						// Log progress periodically for code files
 						if files_processed % 50 == 0 {
@@ -941,17 +1012,6 @@ pub async fn index_files_with_quiet(
 
 							files_processed += 1;
 							state.write().indexed_files = files_processed;
-
-							// Update counting phase status
-							{
-								let mut state_guard = state.write();
-								if state_guard.counting_files && total_files_found > 50 {
-									// Switch from counting to processing mode
-									state_guard.counting_files = false;
-									state_guard.total_files = total_files_found;
-									state_guard.status_message = "".to_string();
-								}
-							}
 
 							// Log progress periodically for text files
 							if files_processed % 50 == 0 {
@@ -1078,15 +1138,6 @@ pub async fn index_files_with_quiet(
 		let mut state_guard = state.write();
 		state_guard.indexing_complete = true;
 		state_guard.embedding_calls = embedding_calls;
-	}
-
-	// Finalize counting if still in progress
-	{
-		let mut state_guard = state.write();
-		if state_guard.counting_files {
-			state_guard.counting_files = false;
-			state_guard.total_files = total_files_found;
-		}
 	}
 
 	// Log indexing completion
