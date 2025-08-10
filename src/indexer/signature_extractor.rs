@@ -108,7 +108,7 @@ pub fn extract_file_signatures(files: &[PathBuf]) -> Result<Vec<FileSignature>> 
 }
 
 /// Extract signatures from a parsed file
-fn extract_signatures(
+pub fn extract_signatures(
 	node: Node,
 	contents: &str,
 	lang_impl: &dyn languages::Language,
