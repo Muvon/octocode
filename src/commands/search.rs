@@ -163,9 +163,6 @@ pub async fn execute(
 		}
 	}
 
-	// Convert similarity threshold to distance threshold
-	let distance_threshold = 1.0 - threshold;
-
 	// Get effective detail level (default to "partial" for cli/text formats)
 	let effective_detail_level = args.detail_level.as_deref().unwrap_or("partial");
 
@@ -182,16 +179,19 @@ pub async fn execute(
 		.zip(embeddings.into_iter())
 		.collect();
 
-	// Execute parallel searches - FIXED: Use distance_threshold instead of args.threshold
+	// Execute parallel searches - pass similarity threshold directly (conversion happens inside)
 	let search_results = indexer::search::execute_parallel_searches(
 		store,
 		query_embeddings,
 		search_mode,
 		config.search.max_results,
-		distance_threshold, // FIXED: Was args.threshold, now distance_threshold
+		threshold, // Pass similarity threshold directly - conversion to distance happens inside
 		args.language.as_deref(),
 	)
 	.await?;
+
+	// Convert similarity threshold to distance threshold for deduplication
+	let distance_threshold = 1.0 - threshold;
 
 	// Deduplicate and merge with multi-query bonuses
 	let (mut code_blocks, mut doc_blocks, mut text_blocks) =

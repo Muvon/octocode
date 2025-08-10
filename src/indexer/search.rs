@@ -2175,12 +2175,12 @@ pub async fn execute_single_search_with_embeddings(
 					store.get_text_blocks_with_config(
 						text_emb,
 						Some(results_per_type),
-						Some(similarity_threshold),
+						Some(distance_threshold),
 					),
 					store.get_document_blocks_with_config(
 						text_emb_clone,
 						Some(results_per_type),
-						Some(similarity_threshold),
+						Some(distance_threshold),
 					)
 				)?;
 
