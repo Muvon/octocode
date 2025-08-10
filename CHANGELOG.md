@@ -1,5 +1,42 @@
 # Changelog
 
+## [0.9.0] - 2025-08-10
+
+### 📋 Release Summary
+
+This release adds Lua language support and enhances code indexing with enriched context for improved search accuracy (60eeadca, 8e741cd4). Performance and responsiveness are improved through faster file counting and optimized memory handling (c891595a, f9ca0766). Several bug fixes address search threshold accuracy, code parsing, rendering issues, and stability across multiple components (9461b83a, 0d04a53c, 72f31414, b8e4eb43, fdd9e5d8, bae5806d, 0b927b2a).
+
+
+### ✨ New Features & Enhancements
+
+- **indexer**: enrich code block embeddings with file context `8e741cd4`
+- **parser**: add Lua language support with tree-sitter `60eeadca`
+
+### 🔧 Improvements & Optimizations
+
+- **indexer**: add fast file counting to optimize indexing performance `c891595a`
+- **store**: unify line indexing to zero-based internally `1c282523`
+- **cpp**: extract variable names from declarations alongside functions `bb941c5e`
+
+### 🐛 Bug Fixes & Stability
+
+- **graphrag**: load nodes from DB before relationship discovery `9461b83a`
+- **search**: correct threshold handling for -t parameter `0d04a53c`
+- **huggingface**: await async model init to prevent panic `72f31414`
+- **cpp**: correct import and export extraction logic `b8e4eb43`
+- **render**: correct line number display offset in outputs `fdd9e5d8`
+- **cpp**: handle function declarations in indexing and signatures `bae5806d`
+- **memory**: improve MCP responsiveness and indexing efficiency `f9ca0766`
+- **diff_chunker**: prevent panic on UTF-8 boundary slicing `0b927b2a`
+
+### 📊 Release Summary
+
+**Total commits**: 13 across 3 categories
+
+✨ **2** new features - *Enhanced functionality*
+🔧 **3** improvements - *Better performance & code quality*
+🐛 **8** bug fixes - *Improved stability*
+
 ## [0.8.2] - 2025-08-03
 
 ### 📋 Release Summary
