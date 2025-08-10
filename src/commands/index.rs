@@ -19,6 +19,7 @@ use std::sync::Arc;
 
 use octocode::config::Config;
 use octocode::indexer;
+use octocode::lock::IndexLock;
 use octocode::state;
 use octocode::store::Store;
 
@@ -99,7 +100,12 @@ pub async fn execute(
 	}
 
 	let state = state::create_shared_state();
-	state.write().current_directory = current_dir;
+	state.write().current_directory = current_dir.clone();
+
+	// Acquire indexing lock before starting
+	let mut lock = IndexLock::new(&current_dir)?;
+	lock.acquire()?;
+	tracing::info!("Acquired indexing lock for {:?}", current_dir);
 
 	// Spawn the progress display task
 	let progress_handle = tokio::spawn(display_indexing_progress(state.clone()));
@@ -112,6 +118,11 @@ pub async fn execute(
 
 	// Flush index to disk
 	store.flush().await?;
+
+	// Release the lock (also happens automatically on drop)
+	lock.release()?;
+	tracing::info!("Released indexing lock");
+
 	Ok(())
 }
 

@@ -26,6 +26,7 @@ use tracing::{debug, info, trace, warn};
 
 use crate::config::Config;
 use crate::indexer;
+use crate::lock::IndexLock;
 use crate::mcp::graphrag::GraphRagProvider;
 use crate::mcp::logging::{
 	init_mcp_logging, log_critical_anyhow_error, log_critical_error, log_indexing_operation,
@@ -1089,6 +1090,11 @@ async fn perform_indexing(
 	let start_time = std::time::Instant::now();
 	log_indexing_operation("direct_reindex_start", None, None, true);
 
+	// Acquire indexing lock before starting
+	let mut lock = IndexLock::new(working_directory)?;
+	lock.acquire()?;
+	debug!("MCP server: acquired indexing lock");
+
 	// Create shared state for indexing (same as watch command)
 	let state = state::create_shared_state();
 	state.write().current_directory = working_directory.to_path_buf();
@@ -1109,6 +1115,10 @@ async fn perform_indexing(
 		true,
 	)
 	.await;
+
+	// Release the lock
+	lock.release()?;
+	debug!("MCP server: released indexing lock");
 
 	let duration_ms = start_time.elapsed().as_millis() as u64;
 

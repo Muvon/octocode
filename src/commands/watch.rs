@@ -16,6 +16,7 @@ use clap::Args;
 
 use octocode::config::Config;
 use octocode::indexer;
+use octocode::lock::IndexLock;
 use octocode::state;
 use octocode::store::Store;
 use octocode::watcher_config::{
@@ -100,7 +101,16 @@ pub async fn execute(
 			None
 		};
 
+		// Acquire lock for initial indexing
+		let mut lock = IndexLock::new(&current_dir)?;
+		lock.acquire()?;
+		tracing::debug!("Watch mode: acquired indexing lock for initial scan");
+
 		indexer::index_files(store, state.clone(), config, git_repo_root.as_deref()).await?;
+
+		// Release lock after initial indexing
+		lock.release()?;
+		tracing::debug!("Watch mode: released indexing lock after initial scan");
 	}
 
 	if !args.quiet {
@@ -195,13 +205,24 @@ pub async fn execute(
 					.await?
 				} else {
 					// In quiet mode, just do the indexing without progress display
+					let current_dir = state.read().current_directory.clone();
 					let git_repo_root = if !args.no_git {
-						indexer::git::find_git_root(&state.read().current_directory)
+						indexer::git::find_git_root(&current_dir)
 					} else {
 						None
 					};
+
+					// Acquire lock for re-indexing
+					let mut lock = IndexLock::new(&current_dir)?;
+					lock.acquire()?;
+					tracing::debug!("Watch mode: acquired indexing lock for re-indexing");
+
 					indexer::index_files(store, state.clone(), &config, git_repo_root.as_deref())
 						.await?;
+
+					// Release lock after re-indexing
+					lock.release()?;
+					tracing::debug!("Watch mode: released indexing lock after re-indexing");
 				}
 			}
 			Err(e) => {

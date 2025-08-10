@@ -17,6 +17,7 @@ pub mod config;
 pub mod constants;
 pub mod embedding;
 pub mod indexer;
+pub mod lock;
 pub mod mcp;
 pub mod memory;
 pub mod reranker;
