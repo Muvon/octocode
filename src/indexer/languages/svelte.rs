@@ -477,13 +477,53 @@ impl Svelte {
 			}
 
 			// Handle export statements
-			if trimmed.starts_with("export ") {
+			if let Some(export_content) = trimmed.strip_prefix("export ") {
 				if trimmed.contains("export default") {
 					exports.push("default".to_string());
-				} else if let Some(name_start) = trimmed.find("export ") {
-					let export_part = &trimmed[name_start + 7..].trim();
-					if let Some(name) = export_part.split_whitespace().next() {
-						exports.push(name.to_string());
+				} else {
+					// Handle export let/const/var statements
+					let export_part = export_content.trim();
+
+					// Check if it's a variable declaration export
+					if let Some(var_part) = export_part
+						.strip_prefix("let ")
+						.or_else(|| export_part.strip_prefix("const "))
+						.or_else(|| export_part.strip_prefix("var "))
+					{
+						// Extract the variable name (everything before = or ; or whitespace after trimming)
+						let var_name = var_part
+							.trim()
+							.split(|c: char| c == '=' || c == ';' || c == ':' || c.is_whitespace())
+							.next()
+							.unwrap_or("")
+							.trim();
+
+						if !var_name.is_empty() {
+							exports.push(var_name.to_string());
+						}
+					} else if let Some(func_part) = export_part.strip_prefix("function ") {
+						// Handle export function name()
+						if let Some(name_end) = func_part.find('(') {
+							let func_name = func_part[..name_end].trim();
+							if !func_name.is_empty() {
+								exports.push(func_name.to_string());
+							}
+						}
+					} else if let Some(class_part) = export_part.strip_prefix("class ") {
+						// Handle export class Name
+						if let Some(name) = class_part.split_whitespace().next() {
+							let class_name = name.trim_end_matches('{');
+							if !class_name.is_empty() {
+								exports.push(class_name.to_string());
+							}
+						}
+					} else {
+						// Handle other export patterns (e.g., export { name })
+						if let Some(name) = export_part.split_whitespace().next() {
+							if !name.starts_with('{') {
+								exports.push(name.to_string());
+							}
+						}
 					}
 				}
 			}
