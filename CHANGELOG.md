@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.9.1] - 2025-08-14
+
+### 📋 Release Summary
+
+This release includes several bug fixes that enhance code indexing accuracy and stability, such as improved parsing of export statements, serialized indexing to prevent conflicts, refined method-level indexing for PHP, and better handling of code fences in markdown files (bd5bc26e, ae71a02e, 19acf3d4, 9df2c44d). Additionally, the initial release process now correctly uses the current version without requiring a manual bump (693e2fd7).
+
+
+### 🐛 Bug Fixes & Stability
+
+- **svelte**: improve parsing of export statements in indexer `bd5bc26e`
+- **lock**: serialize indexing with file-based lock `ae71a02e`
+- **php**: index classes by methods instead of whole class `19acf3d4`
+- **markdown**: prevent unrelated chunks from code fence splits `9df2c44d`
+- **release**: use current version for initial release without bump `693e2fd7`
+
+### 📊 Release Summary
+
+**Total commits**: 5 across 1 categories
+
+🐛 **5** bug fixes - *Improved stability*
+
 ## [0.9.0] - 2025-08-10
 
 ### 📋 Release Summary
