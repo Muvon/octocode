@@ -38,7 +38,7 @@ use anyhow::{Context, Result};
 #[cfg(feature = "fastembed")]
 use fastembed::{EmbeddingModel, InitOptions, TextEmbedding};
 #[cfg(feature = "fastembed")]
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 #[cfg(feature = "fastembed")]
 use super::super::{types::InputType, EmbeddingProvider};
@@ -46,7 +46,7 @@ use super::super::{types::InputType, EmbeddingProvider};
 #[cfg(feature = "fastembed")]
 /// FastEmbed provider implementation for trait
 pub struct FastEmbedProviderImpl {
-	model: Arc<TextEmbedding>,
+	model: Arc<Mutex<TextEmbedding>>,
 }
 
 #[cfg(feature = "fastembed")]
@@ -74,7 +74,7 @@ impl FastEmbedProviderImpl {
 		.context("Failed to initialize FastEmbed model")?;
 
 		Ok(Self {
-			model: Arc::new(model),
+			model: Arc::new(Mutex::new(model)),
 		})
 	}
 
@@ -140,6 +140,7 @@ impl EmbeddingProvider for FastEmbedProviderImpl {
 		let model = self.model.clone();
 
 		let embedding = tokio::task::spawn_blocking(move || -> Result<Vec<f32>> {
+			let mut model = model.lock().unwrap();
 			let embedding = model.embed(vec![text], None)?;
 
 			if embedding.is_empty() {
@@ -168,6 +169,7 @@ impl EmbeddingProvider for FastEmbedProviderImpl {
 
 		let embeddings = tokio::task::spawn_blocking(move || -> Result<Vec<Vec<f32>>> {
 			let text_refs: Vec<&str> = processed_texts.iter().map(|s| s.as_str()).collect();
+			let mut model = model.lock().unwrap();
 			let embeddings = model.embed(text_refs, None)?;
 
 			Ok(embeddings)
@@ -188,13 +190,21 @@ impl EmbeddingProvider for FastEmbedProviderImpl {
 		let model = self.model.clone();
 
 		// Use a simple test text to get dimension
-		match model.embed(vec!["test"], None) {
-			Ok(embeddings) if !embeddings.is_empty() => embeddings[0].len(),
-			_ => {
-				tracing::warn!("Failed to get dimension from FastEmbed model, using fallback");
-				768 // Safe fallback
+		// We need to block here since this is a sync method
+		let dimension = std::thread::spawn(move || {
+			let mut model = model.lock().unwrap();
+			match model.embed(vec!["test"], None) {
+				Ok(embeddings) if !embeddings.is_empty() => embeddings[0].len(),
+				_ => {
+					tracing::warn!("Failed to get dimension from FastEmbed model, using fallback");
+					768 // Safe fallback
+				}
 			}
-		}
+		})
+		.join()
+		.unwrap_or(768);
+
+		dimension
 	}
 
 	fn is_model_supported(&self) -> bool {

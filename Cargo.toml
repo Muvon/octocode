@@ -42,8 +42,8 @@ overflow-checks = false # Disable overflow checks in release mode
 tokio = { version = "1.47.1", features = ["rt-multi-thread", "macros", "time", "sync", "io-util", "io-std", "process"] }
 ignore = "0.4.23"
 parking_lot = "0.12.4"
-lance-table = { version = "0.30.0", default-features = false, features = ["lazy_static"] }
-lance = { version = "0.30.0", default-features = false, features = [] }
+lance-table = { version = "0.32.0", default-features = false, features = [] }
+lance = { version = "0.32.0", default-features = false, features = [] }
 lancedb = { version = "0.21.2", default-features = false }
 arrow = { version = "55.2.0", default-features = false, features = ["prettyprint"] }
 serde = { version = "1.0.219", features = ["derive"] }
@@ -72,9 +72,9 @@ sha2 = "0.10.9"
 clap = { version = "4.5.45", features = ["derive"] }
 clap_complete = "4.5.57"
 notify = { version = "8.2.0", default-features = false, features = ["crossbeam-channel", "macos_fsevent"] }
-notify-debouncer-mini = "0.6.0"
-fastembed = { version = "4.9.1", optional = true }
-toml = "0.8.23"
+notify-debouncer-mini = "0.7.0"
+fastembed = { version = "5.0.2", optional = true }
+toml = "0.9.5"
 lazy_static = "1.5.0"
 futures = { version = "0.3.31", default-features = false, features = ["std"] }
 globset = { version = "0.4.16", default-features = false }
@@ -85,7 +85,7 @@ candle-core = { version = "0.9.1", optional = true }
 candle-nn = { version = "0.9.1", optional = true }
 candle-transformers = { version = "0.9.1", optional = true }
 tokenizers = { version = "0.21.4", optional = true }
-hf-hub = { version = "0.3.2", features = ["tokio"], optional = true }
+hf-hub = { version = "0.4.3", features = ["tokio"], optional = true }
 # EditorConfig parsing and formatting
 ec4rs = "1.2.0"
 tracing = "0.1.41"
