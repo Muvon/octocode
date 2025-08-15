@@ -39,19 +39,19 @@ overflow-checks = false # Disable overflow checks in release mode
 # Cross-compilation configuration is in .cargo/config.toml
 
 [dependencies]
-tokio = { version = "1.45.1", features = ["rt-multi-thread", "macros", "time", "sync", "io-util", "io-std", "process"] }
+tokio = { version = "1.47.1", features = ["rt-multi-thread", "macros", "time", "sync", "io-util", "io-std", "process"] }
 ignore = "0.4.23"
 parking_lot = "0.12.4"
 lance-table = { version = "0.30.0", default-features = false, features = ["lazy_static"] }
 lance = { version = "0.30.0", default-features = false, features = [] }
-lancedb = { version = "0.21.0", default-features = false }
+lancedb = { version = "0.21.2", default-features = false }
 arrow = { version = "55.2.0", default-features = false, features = ["prettyprint"] }
 serde = { version = "1.0.219", features = ["derive"] }
 chrono = { version = "0.4", default-features = false, features = ["serde", "clock"] }
 async-trait = "0.1"
-tree-sitter = "0.25.6"
+tree-sitter = "0.25.8"
 tree-sitter-php = "0.23.11"
-tree-sitter-rust = "0.23.2"
+tree-sitter-rust = "0.23.3"
 tree-sitter-python = "0.23.6"
 tree-sitter-javascript = "0.23.1"
 tree-sitter-json = "0.24.8"
@@ -61,17 +61,17 @@ tree-sitter-bash = "0.25.0"
 tree-sitter-css = "0.23.2"
 tree-sitter-lua = "0.2.0"
 
-uuid = { version = "1.17.0", default-features = false, features = ["v4"] }
+uuid = { version = "1.18.0", default-features = false, features = ["v4"] }
 tree-sitter-typescript = "0.23.2"
 tree-sitter-ruby = "0.23.1"
 tree-sitter-svelte-ng = "1.0.2"
-reqwest = { version = "0.12.20", features = ["json", "rustls-tls"], default-features = false }
-anyhow = "1.0.98"
-serde_json = "1.0.140"
+reqwest = { version = "0.12.23", features = ["json", "rustls-tls"], default-features = false }
+anyhow = "1.0.99"
+serde_json = "1.0.142"
 sha2 = "0.10.9"
-clap = { version = "4.5.40", features = ["derive"] }
-clap_complete = "4.5.54"
-notify = { version = "8.0.0", default-features = false, features = ["crossbeam-channel", "macos_fsevent"] }
+clap = { version = "4.5.45", features = ["derive"] }
+clap_complete = "4.5.57"
+notify = { version = "8.2.0", default-features = false, features = ["crossbeam-channel", "macos_fsevent"] }
 notify-debouncer-mini = "0.6.0"
 fastembed = { version = "4.9.1", optional = true }
 toml = "0.8.23"
@@ -84,7 +84,7 @@ dirs = "6.0.0"
 candle-core = { version = "0.9.1", optional = true }
 candle-nn = { version = "0.9.1", optional = true }
 candle-transformers = { version = "0.9.1", optional = true }
-tokenizers = { version = "0.21.2", optional = true }
+tokenizers = { version = "0.21.4", optional = true }
 hf-hub = { version = "0.3.2", features = ["tokio"], optional = true }
 # EditorConfig parsing and formatting
 ec4rs = "1.2.0"
