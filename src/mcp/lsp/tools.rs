@@ -240,9 +240,6 @@ impl LspProvider {
 		// Ensure file is opened in LSP server before making position-based requests
 		self.ensure_file_opened(file_path).await?;
 
-		// Add a small delay to ensure the file is fully processed by rust-analyzer
-		tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-
 		let params = GotoDefinitionParams {
 			text_document_position_params: self
 				.text_document_position(file_path, line, character)?,
@@ -273,9 +270,6 @@ impl LspProvider {
 
 		// Ensure file is opened in LSP server before making position-based requests
 		self.ensure_file_opened(file_path).await?;
-
-		// Add a small delay to ensure the file is fully processed by rust-analyzer
-		tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
 		let params = HoverParams {
 			text_document_position_params: match self
@@ -348,9 +342,6 @@ impl LspProvider {
 
 		// Ensure file is opened in LSP server before making position-based requests
 		self.ensure_file_opened(file_path).await?;
-
-		// Add a small delay to ensure the file is fully processed by rust-analyzer
-		tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
 		let params = ReferenceParams {
 			text_document_position: self.text_document_position(file_path, line, character)?,

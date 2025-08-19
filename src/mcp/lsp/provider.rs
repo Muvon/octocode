@@ -87,24 +87,11 @@ impl LspProvider {
 
 		info!("Lazy initializing LSP server...");
 
-		// Add timeout to prevent hanging during initialization
-		let timeout_duration = tokio::time::Duration::from_secs(30);
-		match tokio::time::timeout(timeout_duration, self.start_and_initialize()).await {
-			Ok(result) => {
-				if result.is_ok() {
-					// Don't open all files immediately - let them be opened on-demand
-					// This prevents overwhelming rust-analyzer during startup
-					debug!("LSP initialization successful, files will be opened on-demand");
-				}
-				result
-			}
-			Err(_) => {
-				error!("LSP server initialization timed out after 30 seconds");
-				Err(anyhow::anyhow!(
-					"LSP server initialization timed out after 30 seconds"
-				))
-			}
-		}
+		// Initialize without artificial timeouts - let external timeout handling manage this
+		self.start_and_initialize().await?;
+
+		info!("LSP server initialized successfully");
+		Ok(())
 	}
 
 	/// Open a single file in LSP server
@@ -234,15 +221,28 @@ impl LspProvider {
 			}
 		};
 
-		// Check if content actually changed
+		// Check if content actually changed from what we sent to server
 		let content_changed = {
 			let contents = self
 				.document_contents
 				.lock()
 				.map_err(|e| anyhow::anyhow!("Failed to lock document_contents: {}", e))?;
 			if let Some(existing_content) = contents.get(relative_path) {
-				existing_content != &new_content
+				let changed = existing_content != &new_content;
+				if changed {
+					debug!(
+						"File {} content changed: {} chars -> {} chars",
+						relative_path,
+						existing_content.len(),
+						new_content.len()
+					);
+				}
+				changed
 			} else {
+				debug!(
+					"File {} has no stored content, treating as changed",
+					relative_path
+				);
 				true // No existing content, so it's a change
 			}
 		};
@@ -260,15 +260,19 @@ impl LspProvider {
 		// Convert to URI
 		let uri = crate::mcp::lsp::protocol::file_path_to_uri(&absolute_path)?;
 
-		// Get and increment version
+		// Get and increment version (didOpen uses 1, didChange starts from 2)
 		let version = {
 			let mut versions = self
 				.document_versions
 				.lock()
 				.map_err(|e| anyhow::anyhow!("Failed to lock document_versions: {}", e))?;
-			let current_version = versions.get(relative_path).unwrap_or(&1);
+			let current_version = *versions.get(relative_path).unwrap_or(&1);
 			let new_version = current_version + 1;
 			versions.insert(relative_path.to_string(), new_version);
+			debug!(
+				"Document version update for {}: {} -> {}",
+				relative_path, current_version, new_version
+			);
 			new_version
 		};
 
@@ -1041,45 +1045,10 @@ impl LspProvider {
 				anyhow::anyhow!("Failed to send initialized notification: {}", e)
 			})?;
 
-		// Wait for the LSP server to fully initialize before marking as ready
-		// Use workspace symbols as a readiness check
-		self.wait_for_server_ready().await?;
-
+		// Mark as initialized - server readiness will be determined by progress notifications
 		self.initialized = true;
 		info!("LSP server initialized successfully");
 
-		Ok(())
-	}
-
-	/// Wait for LSP server to be ready by polling with workspace symbols
-	async fn wait_for_server_ready(&self) -> Result<()> {
-		info!("Waiting for LSP server to be ready...");
-
-		for attempt in 1..=10 {
-			// Try a simple workspace symbols request as a health check
-			let params = WorkspaceSymbolParams {
-				query: "test".to_string(),
-				work_done_progress_params: WorkDoneProgressParams::default(),
-				partial_result_params: PartialResultParams::default(),
-			};
-
-			let request = LspRequest::workspace_symbols(999, params)?;
-
-			match self.client.send_request(request).await {
-				Ok(_) => {
-					info!("LSP server is ready after {} attempts", attempt);
-					return Ok(());
-				}
-				Err(e) => {
-					debug!("LSP readiness check attempt {} failed: {}", attempt, e);
-					if attempt < 10 {
-						tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-					}
-				}
-			}
-		}
-
-		warn!("LSP server readiness check failed after 10 attempts, proceeding anyway");
 		Ok(())
 	}
 
@@ -1168,10 +1137,6 @@ impl LspProvider {
 		)
 		.await?;
 
-		// Wait a bit for the LSP server to process the didOpen notification
-		// This prevents "content modified" errors by ensuring the server has processed the file
-		tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-
 		Ok(())
 	}
 
@@ -1218,9 +1183,6 @@ impl LspProvider {
 
 		let notification = LspNotification::did_change(did_change_params)?;
 		self.client.send_notification(notification).await?;
-
-		// Wait a bit for the LSP server to process the didChange notification
-		tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
 
 		debug!("Updated file content in LSP: {}", relative_path);
 		Ok(())

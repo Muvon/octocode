@@ -167,12 +167,22 @@ pub struct LspIncomingNotification {
 	pub params: Option<Value>,
 }
 
-/// Generic LSP message that can be either response or notification
+/// LSP incoming request wrapper (from server to client)
+#[derive(Debug, Clone, Deserialize)]
+pub struct LspIncomingRequest {
+	pub jsonrpc: String,
+	pub id: u32,
+	pub method: String,
+	pub params: Option<Value>,
+}
+
+/// Generic LSP message that can be response, notification, or incoming request
 #[derive(Debug, Clone, Deserialize)]
 #[serde(untagged)]
 pub enum LspMessage {
 	Response(LspResponse),
 	Notification(LspIncomingNotification),
+	IncomingRequest(LspIncomingRequest),
 }
 
 /// LSP error type
