@@ -42,9 +42,9 @@ overflow-checks = false # Disable overflow checks in release mode
 tokio = { version = "1.47.1", features = ["rt-multi-thread", "macros", "time", "sync", "io-util", "io-std", "process"] }
 ignore = "0.4.23"
 parking_lot = "0.12.4"
-lance-table = { version = "0.32.0", default-features = false, features = [] }
-lance = { version = "0.32.0", default-features = false, features = [] }
-lancedb = { version = "0.21.2", default-features = false }
+lance-table = { version = "0.33.0", default-features = false, features = [] }
+lance = { version = "0.33.0", default-features = false, features = [] }
+lancedb = { version = "0.21.3", default-features = false }
 arrow = { version = "55.2.0", default-features = false, features = ["prettyprint"] }
 serde = { version = "1.0.219", features = ["derive"] }
 chrono = { version = "0.4", default-features = false, features = ["serde", "clock"] }
