@@ -1159,8 +1159,9 @@ pub async fn index_files_with_quiet(
 			// 1. Files were actually processed (final_files > 0), OR
 			// 2. Git optimization was used (git_changed_files.is_some()) - even if no files were processed due to unchanged content, OR
 			// 3. This is a legitimate empty repository (total_files_found == 0 and no git optimization was used)
-			let should_store_metadata =
-				final_files > 0 || git_changed_files.is_some() || (total_files_found == 0 && git_changed_files.is_none());
+			let should_store_metadata = final_files > 0
+				|| git_changed_files.is_some()
+				|| (total_files_found == 0 && git_changed_files.is_none());
 
 			if should_store_metadata {
 				if let Err(e) = store.store_git_metadata(&current_commit).await {

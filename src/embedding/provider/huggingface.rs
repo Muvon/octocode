@@ -95,47 +95,47 @@ impl HuggingFaceModel {
 		} else {
 			// Try to build tokenizer from components (for models like microsoft/codebert-base)
 			// Check for RoBERTa-style tokenizer (vocab.json + merges.txt)
-			if let (Ok(vocab_path), Ok(merges_path)) = (
-				repo.get("vocab.json").await,
-				repo.get("merges.txt").await,
-			) {
+			if let (Ok(vocab_path), Ok(merges_path)) =
+				(repo.get("vocab.json").await, repo.get("merges.txt").await)
+			{
 				// Build RoBERTa/GPT2-style BPE tokenizer using BPE::from_file
 				use tokenizers::{
-					models::bpe::BPE,
-					pre_tokenizers::byte_level::ByteLevel,
+					models::bpe::BPE, normalizers, pre_tokenizers::byte_level::ByteLevel,
 					processors::roberta::RobertaProcessing,
-					normalizers,
 				};
-				
+
 				// Use BPE::from_file which handles the vocab and merges loading
 				let bpe = BPE::from_file(
-					vocab_path.to_str().ok_or_else(|| anyhow::anyhow!("Invalid vocab path"))?,
-					merges_path.to_str().ok_or_else(|| anyhow::anyhow!("Invalid merges path"))?
+					vocab_path
+						.to_str()
+						.ok_or_else(|| anyhow::anyhow!("Invalid vocab path"))?,
+					merges_path
+						.to_str()
+						.ok_or_else(|| anyhow::anyhow!("Invalid merges path"))?,
 				)
-					.unk_token("<unk>".to_string())
-					.build()
-					.map_err(|e| anyhow::anyhow!("Failed to build BPE tokenizer: {:?}", e))?;
-				
+				.unk_token("<unk>".to_string())
+				.build()
+				.map_err(|e| anyhow::anyhow!("Failed to build BPE tokenizer: {:?}", e))?;
+
 				let mut tokenizer = Tokenizer::new(bpe);
-				
+
 				// Add ByteLevel pre-tokenizer (for RoBERTa)
 				tokenizer.with_pre_tokenizer(Some(ByteLevel::default()));
-				
+
 				// Add RoBERTa post-processing
 				let post_processor = RobertaProcessing::new(
-					("</s>".to_string(), 2),  // SEP token
-					("<s>".to_string(), 0),    // CLS token
+					("</s>".to_string(), 2), // SEP token
+					("<s>".to_string(), 0),  // CLS token
 				)
 				.trim_offsets(false)
 				.add_prefix_space(true);
 				tokenizer.with_post_processor(Some(post_processor));
-				
+
 				// Add normalizer
-				let normalizer = normalizers::Sequence::new(vec![
-					normalizers::Strip::new(true, true).into(),
-				]);
+				let normalizer =
+					normalizers::Sequence::new(vec![normalizers::Strip::new(true, true).into()]);
 				tokenizer.with_normalizer(Some(normalizer));
-				
+
 				tokenizer
 			} else {
 				return Err(anyhow::anyhow!(
@@ -522,39 +522,31 @@ impl EmbeddingProvider for HuggingFaceProviderImpl {
 
 #[cfg(all(test, feature = "huggingface"))]
 mod tests {
-	use super::*;
-
 	#[test]
 	fn test_roberta_tokenizer_building() {
 		// Test that we can build a RoBERTa-style tokenizer using BPE::from_file approach
 		use tokenizers::{
-			models::bpe::BPE,
-			pre_tokenizers::byte_level::ByteLevel,
-			processors::roberta::RobertaProcessing,
-			Tokenizer,
+			models::bpe::BPE, pre_tokenizers::byte_level::ByteLevel,
+			processors::roberta::RobertaProcessing, Tokenizer,
 		};
-		
+
 		// Create temporary files for testing
-		use std::io::Write;
 		let vocab_file = std::env::temp_dir().join("test_vocab.json");
 		let merges_file = std::env::temp_dir().join("test_merges.txt");
-		
+
 		// Write test vocab - must include all tokens used in merges
 		let vocab_content = r#"{"<s>":0,"<pad>":1,"</s>":2,"<unk>":3,"h":4,"e":5,"l":6,"o":7,"r":8,"he":9,"ll":10,"or":11,"hello":12,"world":13}"#;
 		std::fs::write(&vocab_file, vocab_content).expect("Failed to write vocab");
-		
+
 		// Write test merges
 		let merges_content = "#version: 0.2\nh e\nl l\no r";
 		std::fs::write(&merges_file, merges_content).expect("Failed to write merges");
-		
+
 		// Build BPE model using from_file
-		let bpe = BPE::from_file(
-			vocab_file.to_str().unwrap(),
-			merges_file.to_str().unwrap()
-		)
-		.unk_token("<unk>".to_string())
-		.build()
-		.expect("Failed to build BPE tokenizer");
+		let bpe = BPE::from_file(vocab_file.to_str().unwrap(), merges_file.to_str().unwrap())
+			.unk_token("<unk>".to_string())
+			.build()
+			.expect("Failed to build BPE tokenizer");
 
 		let mut tokenizer = Tokenizer::new(bpe);
 
@@ -563,8 +555,8 @@ mod tests {
 
 		// Add RoBERTa post-processing
 		let post_processor = RobertaProcessing::new(
-			("</s>".to_string(), 2),  // SEP token
-			("<s>".to_string(), 0),    // CLS token
+			("</s>".to_string(), 2), // SEP token
+			("<s>".to_string(), 0),  // CLS token
 		)
 		.trim_offsets(false)
 		.add_prefix_space(true);
@@ -572,11 +564,16 @@ mod tests {
 
 		// Test that tokenizer works
 		let test_text = "hello world";
-		let encoding = tokenizer.encode(test_text, false).expect("Failed to encode");
-		
-		assert!(!encoding.get_ids().is_empty(), "Encoding should produce tokens");
+		let encoding = tokenizer
+			.encode(test_text, false)
+			.expect("Failed to encode");
+
+		assert!(
+			!encoding.get_ids().is_empty(),
+			"Encoding should produce tokens"
+		);
 		println!("✓ RoBERTa-style tokenizer built successfully using BPE::from_file");
-		
+
 		// Clean up
 		let _ = std::fs::remove_file(vocab_file);
 		let _ = std::fs::remove_file(merges_file);
