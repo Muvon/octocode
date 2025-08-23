@@ -1157,9 +1157,10 @@ pub async fn index_files_with_quiet(
 		if let Ok(current_commit) = git::get_current_commit_hash(git_root) {
 			// Only store git metadata if:
 			// 1. Files were actually processed (final_files > 0), OR
-			// 2. This is a legitimate empty repository (total_files_found == 0 and no git optimization was used)
+			// 2. Git optimization was used (git_changed_files.is_some()) - even if no files were processed due to unchanged content, OR
+			// 3. This is a legitimate empty repository (total_files_found == 0 and no git optimization was used)
 			let should_store_metadata =
-				final_files > 0 || (total_files_found == 0 && git_changed_files.is_none());
+				final_files > 0 || git_changed_files.is_some() || (total_files_found == 0 && git_changed_files.is_none());
 
 			if should_store_metadata {
 				if let Err(e) = store.store_git_metadata(&current_commit).await {
@@ -1169,7 +1170,7 @@ pub async fn index_files_with_quiet(
 				}
 			} else if !quiet {
 				println!(
-					"⚠️  No files processed - git metadata not stored to allow proper reindexing"
+					"⚠️  Git metadata not stored - no files processed and no git optimization used"
 				);
 			}
 		}
