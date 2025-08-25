@@ -44,7 +44,7 @@ impl SemanticCodeProvider {
 	pub fn get_tool_definition() -> McpTool {
 		McpTool {
 			name: "semantic_search".to_string(),
-			description: "Search codebase using semantic search to find relevant code snippets, functions, classes, documentation, or text content. Multiple related queries in one call like ['user authentication flow', 'login validation', 'jwt token handling'] finds comprehensive results across all related concepts. 3x more efficient than separate searches with better context and relationships. Use descriptive phrases, NOT code syntax. Examples: ['user authentication flow', 'password validation logic'], ['database connection pooling', 'query result caching']. This is SEMANTIC search - use concepts and descriptions, NOT exact symbol names. Returns 3 most relevant results by default with file paths, 1-indexed line ranges, relevance scores, and code blocks with 1-indexed line numbers prefixed to each line.".to_string(),
+			description: "Search codebase using semantic search to find relevant code snippets, functions, classes, documentation, or text content. This tool finds code by understanding what it does, not by exact symbol names. Use descriptive phrases about functionality and behavior, not function names or single words. Multiple related queries in one call like ['user authentication flow', 'login validation', 'jwt token handling'] finds comprehensive results across all related concepts. Examples: ['user authentication flow', 'password validation logic'], ['database connection pooling', 'query result caching']. Returns 3 most relevant results by default with file paths, 1-indexed line ranges, relevance scores, and code blocks with 1-indexed line numbers prefixed to each line.".to_string(),
 			input_schema: json!({
 				"type": "object",
 				"properties": {
@@ -52,23 +52,23 @@ impl SemanticCodeProvider {
 						"oneOf": [
 							{
 								"type": "string",
-								"description": "Single search query - use ONLY for very specific searches. Express in human terms for semantic search, NOT exact code symbols",
-								"minLength": 3,
+								"description": "Single search query - use for specific conceptual searches. Describe what the code does or how it works, not symbol names or single words",
+								"minLength": 10,
 								"maxLength": 500
 							},
 							{
 								"type": "array",
 								"items": {
 									"type": "string",
-									"minLength": 3,
+									"minLength": 10,
 									"maxLength": 500
 								},
 								"minItems": 1,
 								"maxItems": 5,
-								"description": "RECOMMENDED: Array of related search terms for comprehensive results. Example: ['user authentication flow', 'login middleware logic', 'jwt token validation'] finds all auth-related code in one search"
+								"description": "Recommended: Array of related conceptual search terms for comprehensive results. Example: ['user authentication workflow', 'login session handling', 'password validation rules'] finds all auth-related code in one search"
 							}
 						],
-						"description": "PREFER ARRAY OF RELATED TERMS: ['user authentication flow', 'login session management', 'password validation'] for comprehensive search. Single string only for very specific searches. Use multi-term for: Feature exploration: ['database connection handling', 'query result processing', 'data persistence layer'], Related concepts: ['error handling patterns', 'exception recovery logic', 'failure notification'], System understanding: ['chat message routing', 'session state management', 'user interaction flow']. Use descriptive phrases, NOT code syntax. Examples: ['user authentication flow', 'password validation logic'], ['database connection pooling', 'query result caching']. This is SEMANTIC search - use concepts and descriptions, NOT exact symbol names."
+						"description": "Prefer array of related terms for comprehensive search: ['user authentication flow', 'login session management', 'password validation'] finds all related functionality. Single string only for very specific searches. Use descriptive phrases about what the code does, not exact symbol names. Examples: ['user authentication flow', 'password validation logic'], ['database connection pooling', 'query result caching']. This is semantic search - describe functionality and behavior, not code symbols."
 					},
 					"mode": {
 						"type": "string",
