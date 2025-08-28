@@ -433,6 +433,8 @@ octocode memory memorize \
 3. **Optimize queries**: Use more specific search terms
 4. **Check embedding performance**: Ensure embedding generation is fast
 
+**Note**: The memory system uses the same intelligent vector index optimization as the main codebase search, automatically optimizing performance based on the number of stored memories.
+
 For more information, see:
 - [Getting Started](GETTING_STARTED.md) - Basic memory usage
 - [MCP Integration](MCP_INTEGRATION.md) - Using memory with AI assistants

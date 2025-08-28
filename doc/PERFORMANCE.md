@@ -22,6 +22,36 @@
 
 ## Recent Performance Improvements
 
+### Intelligent Vector Index Optimization (v0.9.1+)
+**New Feature**: Automatic vector index optimization based on dataset characteristics.
+
+**How it works**:
+- **Smart Index Creation**: Skips indexing for small datasets (< 1K rows) where brute force is faster
+- **Optimal Parameters**: Automatically calculates partitions, sub-vectors, and search parameters
+- **Growth-Aware**: Recreates indexes with better parameters as datasets grow
+- **Consistent Distance**: Always uses Cosine distance for semantic similarity
+
+**Performance Impact**:
+- **Small datasets (< 1K rows)**: Brute force search (fastest)
+- **Medium datasets (1K-100K rows)**: Optimized IVF_PQ index with intelligent parameters
+- **Large datasets (> 100K rows)**: Growth-aware optimization with enhanced recall
+- **Search queries**: Automatic nprobes (5-15% of partitions) + refine_factor for better accuracy
+
+**Technical Details**:
+```rust
+// Automatic optimization - no configuration required
+let params = VectorOptimizer::calculate_index_params(row_count, vector_dimension);
+if params.should_create_index {
+    // Creates optimized index with calculated parameters
+    table.create_index(&["embedding"], Index::IvfPq(IvfPqIndexBuilder::default()
+        .num_partitions(params.num_partitions)
+        .num_sub_vectors(params.num_sub_vectors)
+        .num_bits(params.num_bits)
+        .distance_type(DistanceType::Cosine)
+    )).await?;
+}
+```
+
 ### File Discovery Optimization (v0.8.1+)
 **Issue Fixed**: The indexing process was extremely slow during the "Found X files..." counting phase, especially for large codebases.
 
@@ -107,7 +137,33 @@ max_results = 50                 # More comprehensive results
 similarity_threshold = 0.1       # Lower threshold = more results
 ```
 
-### 3. Hardware Optimization
+### 3. Vector Database Optimization
+
+#### Automatic Optimization (Default)
+Octocode automatically optimizes vector indexes based on your dataset size and characteristics. **No configuration required.**
+
+**What happens automatically**:
+- Small datasets (< 1K rows): Uses brute force search (fastest)
+- Medium datasets (1K-100K rows): Creates optimized IVF_PQ indexes
+- Large datasets (> 100K rows): Recreates indexes at growth milestones
+- Search parameters: Automatically calculated for best recall/latency balance
+
+#### Manual Tuning (Advanced)
+For specific use cases, you can influence performance through configuration:
+
+```toml
+[search]
+max_results = 20                 # Limit results for faster response
+similarity_threshold = 0.65      # Higher threshold = fewer, more relevant results
+
+[index]
+embeddings_batch_size = 16       # Batch size for embedding generation
+flush_frequency = 2              # How often to flush to disk
+```
+
+**Note**: Vector index parameters (partitions, sub-vectors, etc.) are automatically calculated and cannot be manually configured.
+
+### 4. Hardware Optimization
 
 #### CPU Optimization
 - **Multi-core**: Embedding generation uses multiple cores

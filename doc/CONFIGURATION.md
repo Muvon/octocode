@@ -11,7 +11,7 @@ octocode config --show
 ### Local Embedding Models (No API Keys Required)
 
 ```bash
-# Use SentenceTransformer (recommended for quality)
+# Use HuggingFace models (recommended for quality)
 octocode config \
   --code-embedding-model "huggingface:microsoft/codebert-base" \
   --text-embedding-model "huggingface:sentence-transformers/all-mpnet-base-v2"
@@ -30,60 +30,73 @@ octocode config \
 ### Cloud Embedding Models (API Keys Required)
 
 ```bash
-# Use cloud providers for highest quality
+# Use cloud providers for highest quality (current defaults)
+octocode config \
+  --code-embedding-model "voyage:voyage-code-3" \
+  --text-embedding-model "voyage:voyage-3.5-lite"
+
+# Jina AI models (specialized for code)
 octocode config \
   --code-embedding-model "jina:jina-embeddings-v2-base-code" \
-  --text-embedding-model "voyage:voyage-3.5-lite"
+  --text-embedding-model "jina:jina-embeddings-v4"
+
+# Google models
+octocode config \
+  --code-embedding-model "google:text-embedding-005" \
+  --text-embedding-model "google:gemini-embedding-001"
 
 # OpenAI models (high quality)
 octocode config \
   --code-embedding-model "openai:text-embedding-3-small" \
   --text-embedding-model "openai:text-embedding-3-small"
-
-# Google models
-octocode config \
-  --code-embedding-model "google:text-embedding-004" \
-  --text-embedding-model "google:text-embedding-004"
 ```
 
 ## Configuration File Structure
 
 ```toml
+version = 1
+
 [openrouter]
-model = "openai/gpt-4o-mini"
-api_key = "your-openrouter-key"  # Or set OPENROUTER_API_KEY env var
+model = "openai/gpt-4.1-mini"
+base_url = "https://openrouter.ai/api/v1"
+timeout = 120
+# api_key = "" # Set via environment variable OPENROUTER_API_KEY
 
 [embedding]
-# Direct model configuration - provider auto-detected from prefix
-code_model = "huggingface:microsoft/codebert-base"
-text_model = "huggingface:sentence-transformers/all-mpnet-base-v2"
-
-# Provider-specific sections only for API keys
-[embedding.jina]
-api_key = "your-jina-key"  # Or set JINA_API_KEY env var
-
-[embedding.voyage]
-api_key = "your-voyage-key"  # Or set VOYAGE_API_KEY env var
-
-[embedding.google]
-api_key = "your-google-key"  # Or set GOOGLE_API_KEY env var
+# Current defaults - provider auto-detected from prefix
+code_model = "voyage:voyage-code-3"
+text_model = "voyage:voyage-3.5-lite"
 
 [graphrag]
-enabled = true
-description_model = "openai/gpt-4o-mini"
-relationship_model = "openai/gpt-4o-mini"
+enabled = false
+use_llm = false
+
+[graphrag.llm]
+description_model = "openai/gpt-4.1-mini"
+relationship_model = "openai/gpt-4.1-mini"
+ai_batch_size = 8
+max_batch_tokens = 16384
+batch_timeout_seconds = 60
+fallback_to_individual = true
+max_sample_tokens = 1500
+confidence_threshold = 0.6
+architectural_weight = 0.9
 
 [search]
-max_results = 50
-similarity_threshold = 0.1
+max_results = 20
+similarity_threshold = 0.65
+output_format = "markdown"
+max_files = 10
+context_lines = 3
+search_block_max_characters = 400
 
 [index]
 chunk_size = 2000
-graphrag_enabled = true
-
-[memory]
-enabled = true
-max_memories = 10000
+chunk_overlap = 100
+embeddings_batch_size = 16
+embeddings_max_tokens_per_batch = 100000
+flush_frequency = 2
+require_git = true
 ```
 
 ## Embedding Providers
@@ -92,11 +105,12 @@ max_memories = 10000
 
 | Provider | Format | API Key Required | Local/Cloud | Quality | Speed |
 |----------|--------|------------------|-------------|---------|-------|
-| **SentenceTransformer** | `huggingface:model-name` | ❌ No | 🖥️ Local | ⭐⭐⭐⭐⭐ | ⭐⭐⭐ |
+| **HuggingFace** | `huggingface:model-name` | ❌ No | 🖥️ Local | ⭐⭐⭐⭐⭐ | ⭐⭐⭐ |
 | **FastEmbed** | `fastembed:model-name` | ❌ No | 🖥️ Local | ⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ |
 | **Jina AI** | `jina:model-name` | ✅ Yes | ☁️ Cloud | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐ |
 | **Voyage AI** | `voyage:model-name` | ✅ Yes | ☁️ Cloud | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐ |
 | **Google** | `google:model-name` | ✅ Yes | ☁️ Cloud | ⭐⭐⭐⭐ | ⭐⭐⭐⭐ |
+| **OpenAI** | `openai:model-name` | ✅ Yes | ☁️ Cloud | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐ |
 
 ### Model Recommendations
 
@@ -107,7 +121,7 @@ max_memories = 10000
 huggingface:microsoft/codebert-base                    # 768 dim, BERT, excellent for code
 huggingface:jinaai/jina-embeddings-v2-base-code       # 768 dim, JinaBERT, code-optimized
 jina:jina-embeddings-v2-base-code                     # 768 dim, specialized for code
-voyage:voyage-code-3                                  # 1024 dim, latest code model
+voyage:voyage-code-3                                  # Dynamic dim, latest code model
 openai:text-embedding-3-small                         # 1536 dim, versatile for code
 ```
 
@@ -123,8 +137,8 @@ fastembed:Xenova/bge-small-en-v1.5                    # 384 dim, good balance
 ```bash
 huggingface:sentence-transformers/all-mpnet-base-v2   # 768 dim, BERT, excellent quality
 huggingface:BAAI/bge-base-en-v1.5                     # 768 dim, BERT, high performance
-jina:jina-embeddings-v3                               # 1024 dim, latest Jina model
-voyage:voyage-3.5-lite                                # 1024 dim, excellent for text
+jina:jina-embeddings-v4                               # 2048 dim, latest Jina model
+voyage:voyage-3.5-lite                                # Dynamic dim, excellent for text
 openai:text-embedding-3-large                         # 3072 dim, highest quality
 openai:text-embedding-3-small                         # 1536 dim, cost-effective
 ```
@@ -151,7 +165,7 @@ export GOOGLE_API_KEY="your-google-key"
 export OPENAI_API_KEY="your-openai-key"
 ```
 
-**Note**: Environment variables always take priority over config file settings.
+**Note**: Environment variables always take priority over config file settings. API keys are sourced from environment variables only - they are not stored in the configuration file for security.
 
 ## Configuration Sections
 

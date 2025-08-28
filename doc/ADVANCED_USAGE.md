@@ -634,16 +634,26 @@ octocode mcp --debug --path /path/to/project
 
 ## Performance Optimization
 
+### Automatic Optimizations
+
+Octocode automatically optimizes performance based on your dataset:
+
+- **Vector indexes**: Automatically created and optimized based on dataset size
+- **Search parameters**: Dynamically calculated for best recall/latency balance
+- **Memory management**: Intelligent caching and cleanup
+- **Batch processing**: Optimized batch sizes for embedding generation
+
 ### For Large Codebases
 
 ```toml
 [index]
 chunk_size = 1000        # Smaller chunks for faster processing
-embeddings_batch_size = 64  # Larger batches for better throughput
+embeddings_batch_size = 32  # Adjust based on API limits
+flush_frequency = 2      # How often to flush to disk
 
 [search]
 max_results = 20         # Limit results for faster response
-similarity_threshold = 0.2  # Higher threshold for more relevant results
+similarity_threshold = 0.65  # Higher threshold for more relevant results
 
 [memory]
 max_memories = 50000     # Increase for large projects
@@ -655,9 +665,12 @@ max_memories = 50000     # Increase for large projects
 # Clear old data periodically
 octocode clear
 
-# Use local embedding models to reduce API calls
+# Use local embedding models to reduce API calls (requires features)
 octocode config --code-embedding-model "fastembed:all-MiniLM-L6-v2"
 
 # Limit search results
 octocode config --max-results 20
+
+# Check current performance
+octocode models list
 ```

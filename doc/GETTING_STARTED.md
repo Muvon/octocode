@@ -105,16 +105,21 @@ octocode config --show
 ### Essential Configuration
 
 ```bash
-# Use faster local models (macOS only)
+# Use faster local models (requires fastembed feature)
 octocode config \
   --code-embedding-model "fastembed:Xenova/all-MiniLM-L6-v2" \
   --text-embedding-model "fastembed:intfloat/multilingual-e5-small"
+
+# Or use current cloud defaults (recommended)
+octocode config \
+  --code-embedding-model "voyage:voyage-code-3" \
+  --text-embedding-model "voyage:voyage-3.5-lite"
 
 # Enable GraphRAG for relationship analysis
 octocode config --graphrag-enabled true
 
 # Set search preferences
-octocode config --max-results 20 --similarity-threshold 0.3
+octocode config --max-results 20 --similarity-threshold 0.65
 ```
 
 ## MCP Server for AI Assistants
@@ -204,18 +209,24 @@ octocode config --graphrag-enabled false
 
 ```bash
 # Adjust similarity threshold
-octocode config --similarity-threshold 0.1  # More results
-octocode config --similarity-threshold 0.5  # Fewer, more relevant results
+octocode config --similarity-threshold 0.4  # More results
+octocode config --similarity-threshold 0.7  # Fewer, more relevant results
 
 # Try different search modes
 octocode search "your query" --mode code     # Only code
 octocode search "your query" --mode docs     # Only documentation
+
+# Use multi-query search
+octocode search "authentication" "login" "security"
+
+# Check available models
+octocode models list
 ```
 
 ### API Rate Limits
 
 ```bash
-# Switch to local models (macOS only)
+# Switch to local models (requires fastembed feature)
 octocode config \
   --code-embedding-model "fastembed:Xenova/all-MiniLM-L6-v2" \
   --text-embedding-model "fastembed:intfloat/multilingual-e5-small"

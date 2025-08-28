@@ -434,6 +434,35 @@ octocode logs --lines 50
 octocode logs --all
 ```
 
+### `octocode models`
+
+Model management and discovery commands.
+
+```bash
+# List all available models from all providers
+octocode models list
+
+# List models from specific provider
+octocode models list jina
+octocode models list voyage
+octocode models list google
+octocode models list fastembed
+octocode models list huggingface
+
+# Get detailed information about a specific model
+octocode models info voyage:voyage-code-3
+octocode models info jina:jina-embeddings-v4
+octocode models info google:gemini-embedding-001
+octocode models info fastembed:all-MiniLM-L6-v2
+octocode models info huggingface:microsoft/codebert-base
+```
+
+**Features:**
+- **Dynamic model discovery** - No hardcoded model lists
+- **Provider validation** - Checks if providers are available
+- **Model dimensions** - Shows embedding dimensions for each model
+- **Feature detection** - Indicates which providers are compiled in
+
 ### `octocode watch`
 
 Auto-index files when they change.

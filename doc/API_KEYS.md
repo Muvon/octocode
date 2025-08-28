@@ -34,7 +34,7 @@ export JINA_API_KEY="your-jina-api-key"
 # Configure models
 octocode config \
   --code-embedding-model "jina:jina-embeddings-v2-base-code" \
-  --text-embedding-model "jina:jina-embeddings-v3"
+  --text-embedding-model "jina:jina-embeddings-v4"
 ```
 
 **Get API key**: [jina.ai](https://jina.ai/)
@@ -49,8 +49,8 @@ export GOOGLE_API_KEY="your-google-api-key"
 
 # Configure models
 octocode config \
-  --code-embedding-model "google:text-embedding-004" \
-  --text-embedding-model "google:text-embedding-004"
+  --code-embedding-model "google:text-embedding-005" \
+  --text-embedding-model "google:gemini-embedding-001"
 ```
 
 **Get API key**: [Google AI Studio](https://makersuite.google.com/app/apikey)
@@ -81,17 +81,17 @@ octocode config \
 - `text-embedding-3-large` - 3072 dimensions, highest quality
 - `text-embedding-ada-002` - 1536 dimensions, legacy model
 
-### Local Models (macOS Only)
+### Local Models (Feature-Gated)
 
 **Best for**: Privacy, no API costs, offline usage
 
 ```bash
-# FastEmbed (fastest)
+# FastEmbed (fastest, requires fastembed feature)
 octocode config \
   --code-embedding-model "fastembed:all-MiniLM-L6-v2" \
   --text-embedding-model "fastembed:multilingual-e5-small"
 
-# SentenceTransformer (highest quality)
+# HuggingFace (highest quality, requires huggingface feature)
 octocode config \
   --code-embedding-model "huggingface:microsoft/codebert-base" \
   --text-embedding-model "huggingface:sentence-transformers/all-mpnet-base-v2"
@@ -100,6 +100,7 @@ octocode config \
 **Supported Architectures:**
 - **BERT**: Standard BERT models (e.g., `sentence-transformers/all-MiniLM-L6-v2`)
 - **JinaBERT**: Jina's BERT variants (e.g., `jinaai/jina-embeddings-v2-base-code`)
+- **RoBERTa**: RoBERTa-style models with BPE tokenization
 
 **Popular Models:**
 - `sentence-transformers/all-MiniLM-L6-v2` - 384 dimensions, fast and efficient
@@ -107,7 +108,7 @@ octocode config \
 - `microsoft/codebert-base` - 768 dimensions, code-specialized
 - `jinaai/jina-embeddings-v2-base-code` - 768 dimensions, code-optimized
 
-**Note**: Local models require building from source on macOS. Prebuilt binaries use cloud embeddings only.
+**Note**: Local models require building with `--features fastembed,huggingface`. Default builds use cloud embeddings only.
 
 ## Optional: LLM Provider
 
@@ -122,7 +123,7 @@ For AI-powered features like commit messages, code review, and GraphRAG descript
 export OPENROUTER_API_KEY="your-openrouter-api-key"
 
 # Configure default model
-octocode config --model "openai/gpt-4o-mini"
+octocode config --model "openai/gpt-4.1-mini"
 
 # Or use Claude for better code understanding
 octocode config --model "anthropic/claude-3.5-sonnet"
@@ -131,22 +132,23 @@ octocode config --model "anthropic/claude-3.5-sonnet"
 **Get API key**: [openrouter.ai](https://openrouter.ai/)
 
 **Popular models:**
-- `openai/gpt-4o-mini` - Fast and cost-effective
+- `openai/gpt-4.1-mini` - Fast and cost-effective (current default)
 - `openai/gpt-4o` - High quality
 - `anthropic/claude-3.5-sonnet` - Excellent for code
 - `google/gemini-pro` - Good balance
 
 ## Platform Limitations
 
-### Windows/Linux
-- **Must use cloud embeddings** (Voyage AI, Jina AI, Google)
-- **Cannot use local models** (FastEmbed, SentenceTransformer)
-- **Reason**: ONNX Runtime compatibility issues
+### Feature-Gated Providers
+- **FastEmbed**: Requires `fastembed` feature flag during compilation
+- **HuggingFace**: Requires `huggingface` feature flag during compilation
+- **Default builds**: Include only cloud providers (Jina, Voyage, Google, OpenAI)
+- **Full builds**: Use `cargo build --features fastembed,huggingface` for all providers
 
-### macOS
-- **Can use all providers** (cloud + local)
-- **Local models available** when building from source
-- **Prebuilt binaries** use cloud embeddings only
+### Cross-Platform Support
+- **All platforms**: Cloud embeddings work everywhere
+- **Local models**: Available when built with appropriate features
+- **Default binaries**: Cloud-only for maximum compatibility
 
 ## Configuration Methods
 
@@ -211,7 +213,7 @@ octocode config --model "anthropic/claude-3.5-sonnet"
 
 **Best Quality:**
 - `huggingface:sentence-transformers/all-mpnet-base-v2` (768 dim, local)
-- `jina:jina-embeddings-v3` (1024 dim, cloud)
+- `jina:jina-embeddings-v4` (2048 dim, cloud)
 - `voyage:voyage-3.5-lite` (1024 dim, cloud)
 - `openai:text-embedding-3-large` (3072 dim, cloud)
 
@@ -233,7 +235,7 @@ octocode config \
 
 # Optional: Add OpenRouter for AI features
 export OPENROUTER_API_KEY="your-openrouter-api-key"
-octocode config --model "openai/gpt-4o-mini"
+octocode config --model "openai/gpt-4.1-mini"
 ```
 
 ### Local-Only Setup (macOS)
@@ -256,7 +258,7 @@ export OPENROUTER_API_KEY="your-openrouter-api-key"
 
 octocode config \
   --code-embedding-model "jina:jina-embeddings-v2-base-code" \
-  --text-embedding-model "jina:jina-embeddings-v3" \
+  --text-embedding-model "jina:jina-embeddings-v4" \
   --model "anthropic/claude-3.5-sonnet"
 ```
 
@@ -358,8 +360,8 @@ echo "config.toml" >> .gitignore
 
 ### Local Models Not Available
 
-1. **Check platform**: Local models only work on macOS
-2. **Build from source**: Prebuilt binaries don't include local models
-3. **Install dependencies**: Ensure ONNX Runtime is available
+1. **Check features**: Local models require `fastembed` or `huggingface` features
+2. **Build with features**: Use `cargo build --features fastembed,huggingface`
+3. **Check availability**: Use `octocode models list` to see available providers
 
 For more help, see [Configuration Guide](CONFIGURATION.md) or [Getting Started](GETTING_STARTED.md).

@@ -126,6 +126,38 @@ Semantic search across your codebase with multi-query support.
 }
 ```
 
+### view_signatures
+
+Extract and view function signatures, class definitions, and other meaningful code structures from files.
+
+**Parameters:**
+- `files` (array) - Array of file paths or glob patterns to analyze
+- `max_tokens` (integer, optional) - Maximum tokens in output before truncation (default: 2000)
+
+**Examples:**
+
+**View signatures for specific files:**
+```json
+{
+  "files": ["src/main.rs", "src/lib.rs"]
+}
+```
+
+**View signatures using glob patterns:**
+```json
+{
+  "files": ["src/**/*.rs", "tests/**/*.rs"],
+  "max_tokens": 4000
+}
+```
+
+**Multi-language analysis:**
+```json
+{
+  "files": ["**/*.{rs,py,js,ts,css,svelte,md}"]
+}
+```
+
 ### graphrag
 
 Advanced relationship-aware GraphRAG operations for code analysis. Supports multiple operations for exploring the knowledge graph.
