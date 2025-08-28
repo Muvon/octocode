@@ -100,6 +100,8 @@ impl FileUtils {
 			"ts" | "tsx" => Some("typescript"),
 			// Go
 			"go" => Some("go"),
+			// Java
+			"java" => Some("java"),
 			// C++
 			"cpp" | "cc" | "cxx" | "c" | "h" | "hpp" => Some("cpp"),
 			// PHP
