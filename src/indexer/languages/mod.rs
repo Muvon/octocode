@@ -22,6 +22,7 @@ mod bash;
 mod cpp;
 mod css;
 mod go;
+mod java;
 mod javascript;
 mod json;
 mod lua;
@@ -41,6 +42,7 @@ pub use bash::Bash;
 pub use cpp::Cpp;
 pub use css::Css;
 pub use go::Go;
+pub use java::Java;
 pub use javascript::JavaScript;
 pub use json::Json;
 pub use lua::Lua;
@@ -127,6 +129,7 @@ pub fn get_language(name: &str) -> Option<Box<dyn Language>> {
 		"typescript" => Some(Box::new(TypeScript {})),
 		"python" => Some(Box::new(Python {})),
 		"go" => Some(Box::new(Go {})),
+		"java" => Some(Box::new(Java {})),
 		"cpp" => Some(Box::new(Cpp {})),
 		"php" => Some(Box::new(Php {})),
 		"bash" => Some(Box::new(Bash {})),
