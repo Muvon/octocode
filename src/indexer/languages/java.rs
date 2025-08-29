@@ -30,16 +30,19 @@ impl Language for Java {
 
 	fn get_meaningful_kinds(&self) -> Vec<&'static str> {
 		vec![
-			"class_declaration",
-			"interface_declaration",
-			"enum_declaration",
+			// Individual method-level constructs (following pattern from other languages)
 			"method_declaration",
 			"constructor_declaration",
-			"field_declaration",
-			"annotation_type_declaration",
-			"record_declaration", // Java 14+
+			// Removed: "class_declaration" - too large, not semantic
+			// Removed: "interface_declaration" - too large, not semantic
+			// Removed: "enum_declaration" - too large, not semantic
+			// Individual methods inside classes/interfaces/enums will be captured separately
+			"annotation_type_declaration", // Keep for small annotation definitions
+			"record_declaration",          // Java 14+ - usually small and semantic
+			// Single-line statements that will be merged by smart merging
 			"import_declaration",
 			"package_declaration",
+			"field_declaration",
 			// Lambda expressions and method references for modern Java
 			"lambda_expression",
 			"method_reference",
@@ -76,60 +79,8 @@ impl Language for Java {
 					}
 				}
 			}
-			"field_declaration" => {
-				// Extract field names (can be multiple in one declaration)
-				let mut cursor = node.walk();
-				if cursor.goto_first_child() {
-					loop {
-						let child = cursor.node();
-						if child.kind() == "variable_declarator" {
-							// Look for identifier in variable_declarator
-							for var_child in child.children(&mut child.walk()) {
-								if var_child.kind() == "identifier" {
-									if let Ok(name) = var_child.utf8_text(contents.as_bytes()) {
-										symbols.push(name.to_string());
-									}
-									break;
-								}
-							}
-						}
-						if !cursor.goto_next_sibling() {
-							break;
-						}
-					}
-				}
-			}
-			"import_declaration" => {
-				// Extract import path
-				if let Ok(import_text) = node.utf8_text(contents.as_bytes()) {
-					// Clean up import statement to extract the actual import path
-					let import_path = import_text
-						.trim()
-						.strip_prefix("import")
-						.unwrap_or(import_text)
-						.strip_prefix("static")
-						.unwrap_or(import_text.strip_prefix("import").unwrap_or(import_text))
-						.trim()
-						.trim_end_matches(';')
-						.trim();
-					if !import_path.is_empty() {
-						symbols.push(import_path.to_string());
-					}
-				}
-			}
-			"package_declaration" => {
-				// Extract package name
-				for child in node.children(&mut node.walk()) {
-					if child.kind() == "scoped_identifier" || child.kind() == "identifier" {
-						if let Ok(package_name) = child.utf8_text(contents.as_bytes()) {
-							symbols.push(package_name.to_string());
-							break;
-						}
-					}
-				}
-			}
 			"lambda_expression" => {
-				// For lambda expressions, we might want to extract parameter names or mark as lambda
+				// For lambda expressions, mark as lambda
 				symbols.push("<lambda>".to_string());
 			}
 			"method_reference" => {
@@ -138,8 +89,20 @@ impl Language for Java {
 					symbols.push(method_ref.to_string());
 				}
 			}
-			_ => {}
+			_ => {
+				// For other nodes, don't recurse to avoid infinite loops
+				// Just try to extract direct identifiers if this is an identifier node
+				if node.kind() == "identifier" {
+					if let Ok(name) = node.utf8_text(contents.as_bytes()) {
+						symbols.push(name.to_string());
+					}
+				}
+			}
 		}
+
+		// Deduplicate symbols before returning
+		symbols.sort();
+		symbols.dedup();
 
 		symbols
 	}
@@ -242,23 +205,23 @@ impl Language for Java {
 	}
 
 	fn are_node_types_equivalent(&self, type1: &str, type2: &str) -> bool {
-		// Java-specific equivalences
+		// Java-specific equivalences for better merging
+		// Keep this simple to avoid infinite recursion
 		match (type1, type2) {
-			// Methods and constructors are similar in structure
-			("method_declaration", "constructor_declaration")
-			| ("constructor_declaration", "method_declaration") => true,
-			// All type declarations are similar
-			("class_declaration", "interface_declaration")
-			| ("interface_declaration", "class_declaration") => true,
-			("class_declaration", "enum_declaration")
-			| ("enum_declaration", "class_declaration") => true,
-			("interface_declaration", "enum_declaration")
-			| ("enum_declaration", "interface_declaration") => true,
-			("annotation_type_declaration", "class_declaration")
-			| ("class_declaration", "annotation_type_declaration") => true,
-			("record_declaration", "class_declaration")
-			| ("class_declaration", "record_declaration") => true,
-			// Default: exact match
+			// Single-line statements that should be merged together
+			("import_declaration", "package_declaration")
+			| ("package_declaration", "import_declaration") => true,
+			("field_declaration", "import_declaration")
+			| ("import_declaration", "field_declaration") => true,
+			("field_declaration", "package_declaration")
+			| ("package_declaration", "field_declaration") => true,
+			// Same types are equivalent
+			("field_declaration", "field_declaration") => true,
+			("import_declaration", "import_declaration") => true,
+			("package_declaration", "package_declaration") => true,
+			// Methods and constructors should NOT be merged - keep them separate
+			// annotation_type_declaration and record_declaration should NOT be merged
+			// Default: exact match only
 			_ => type1 == type2,
 		}
 	}
@@ -281,11 +244,29 @@ impl Language for Java {
 		}
 	}
 
-	fn extract_identifiers(&self, node: Node, contents: &str, rust_files: &mut Vec<String>) {
-		// For Java, identifiers are class names, method names, field names, etc.
-		// This method populates the rust_files vector with discovered identifiers
-		let symbols = self.extract_symbols(node, contents);
-		rust_files.extend(symbols);
+	fn extract_identifiers(&self, node: Node, contents: &str, java_files: &mut Vec<String>) {
+		let kind = node.kind();
+
+		// Check if this is a valid identifier
+		if kind == "identifier" {
+			if let Ok(text) = node.utf8_text(contents.as_bytes()) {
+				let t = text.trim();
+				if !t.is_empty() && t.len() > 1 {
+					java_files.push(t.to_string());
+				}
+			}
+		}
+
+		// Recursively process child nodes
+		let mut cursor = node.walk();
+		if cursor.goto_first_child() {
+			loop {
+				self.extract_identifiers(cursor.node(), contents, java_files);
+				if !cursor.goto_next_sibling() {
+					break;
+				}
+			}
+		}
 	}
 
 	fn resolve_import(
