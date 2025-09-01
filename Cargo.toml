@@ -42,20 +42,20 @@ overflow-checks = false # Disable overflow checks in release mode
 tokio = { version = "1.47.1", features = ["rt-multi-thread", "macros", "time", "sync", "io-util", "io-std", "process"] }
 ignore = "0.4.23"
 parking_lot = "0.12.4"
-lance-table = { version = "0.33.0", default-features = false, features = [] }
-lance = { version = "0.33.0", default-features = false, features = [] }
+lance-table = { version = "0.34.0", default-features = false, features = [] }
+lance = { version = "0.34.0", default-features = false, features = [] }
 lancedb = { version = "0.21.3", default-features = false }
 arrow = { version = "55.2.0", default-features = false, features = ["prettyprint"] }
 serde = { version = "1.0.219", features = ["derive"] }
 chrono = { version = "0.4", default-features = false, features = ["serde", "clock"] }
 async-trait = "0.1"
 tree-sitter = "0.25.8"
-tree-sitter-php = "0.23.11"
-tree-sitter-rust = "0.23.3"
+tree-sitter-php = "0.24.2"
+tree-sitter-rust = "0.24.0"
 tree-sitter-python = "0.23.6"
-tree-sitter-javascript = "0.23.1"
+tree-sitter-javascript = "0.25.0"
 tree-sitter-json = "0.24.8"
-tree-sitter-go = "0.23.4"
+tree-sitter-go = "0.25.0"
 tree-sitter-cpp = "0.23.4"
 tree-sitter-java = "0.23.5"
 tree-sitter-bash = "0.25.0"
@@ -68,34 +68,34 @@ tree-sitter-ruby = "0.23.1"
 tree-sitter-svelte-ng = "1.0.2"
 reqwest = { version = "0.12.23", features = ["json", "rustls-tls"], default-features = false }
 anyhow = "1.0.99"
-serde_json = "1.0.142"
+serde_json = "1.0.143"
 sha2 = "0.10.9"
-clap = { version = "4.5.45", features = ["derive"] }
+clap = { version = "4.5.46", features = ["derive"] }
 clap_complete = "4.5.57"
 notify = { version = "8.2.0", default-features = false, features = ["crossbeam-channel", "macos_fsevent"] }
 notify-debouncer-mini = "0.7.0"
-fastembed = { version = "5.0.2", optional = true }
+fastembed = { version = "5.1.0", optional = true }
 toml = "0.9.5"
 lazy_static = "1.5.0"
 futures = { version = "0.3.31", default-features = false, features = ["std"] }
 globset = { version = "0.4.16", default-features = false }
-regex = { version = "1.11.1", default-features = false, features = ["std"] }
+regex = { version = "1.11.2", default-features = false, features = ["std"] }
 dirs = "6.0.0"
 # Candle dependencies for HuggingFace support (optional)
 candle-core = { version = "0.9.1", optional = true }
 candle-nn = { version = "0.9.1", optional = true }
 candle-transformers = { version = "0.9.1", optional = true }
-tokenizers = { version = "0.21.4", optional = true }
+tokenizers = { version = "0.22.0", optional = true }
 hf-hub = { version = "0.4.3", features = ["tokio"], optional = true }
 # EditorConfig parsing and formatting
 ec4rs = "1.2.0"
 tracing = "0.1.41"
-tracing-subscriber = { version = "0.3.19", features = ["env-filter", "json"] }
+tracing-subscriber = { version = "0.3.20", features = ["env-filter", "json"] }
 tracing-appender = "0.2.3"
 tiktoken-rs = "0.7.0"
 # LSP integration dependencies
 lsp-types = "0.97.0"
-url = "2.5.4"
+url = "2.5.7"
 dotenvy = "0.15"
 
 [profile.dev]
