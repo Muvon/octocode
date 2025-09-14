@@ -1,5 +1,48 @@
 # Changelog
 
+## [0.10.0] - 2025-09-14
+
+### 📋 Release Summary
+
+This release adds Java language support and enhances tokenization for improved semantic search (eae4107f, 4f463f07). Several bug fixes improve system stability, including better metadata handling, dependency updates, and LSP initialization (1574ac91, 48978d2a, 76e1410e, 11fb216b). Documentation and configuration guidance have also been updated for clearer usage and setup.
+
+
+### ✨ New Features & Enhancements
+
+- **indexer**: add Java language support `eae4107f`
+- **huggingface**: add BPE tokenizer support for RoBERTa-style models `4f463f07`
+
+### 🔧 Improvements & Optimizations
+
+- **java**: merge single-line nodes and deduplicate symbols `94d9e139`
+- **embedding, indexer**: fix code formatting and whitespace issues `a7823895`
+
+### 🐛 Bug Fixes & Stability
+
+- **indexer**: clarify git metadata storage condition message `1574ac91`
+- **lancedb**: update dependency to resolve aws_credential error `48978d2a`
+- **lsp**: resolve initialization and update issues with --with-lsp `76e1410e`
+- **embedding**: update fastembed to 5.0.2 and ensure thread safety `11fb216b`
+
+### 📚 Documentation & Examples
+
+- **config**: update embedding models and vector index guidance `7a6264d6`
+- **mcp**: clarify semantic search tool description for queries `2078ef8a`
+
+### 🔄 Other Changes
+
+- **deps**: upgrade dependencies to latest versions `deb779a7`
+
+### 📊 Release Summary
+
+**Total commits**: 11 across 5 categories
+
+✨ **2** new features - *Enhanced functionality*
+🔧 **2** improvements - *Better performance & code quality*
+🐛 **4** bug fixes - *Improved stability*
+📚 **2** documentation updates - *Better developer experience*
+🔄 **1** other change - *Maintenance & tooling*
+
 ## [0.9.1] - 2025-08-14
 
 ### 📋 Release Summary
