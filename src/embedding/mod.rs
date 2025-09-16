@@ -23,6 +23,19 @@ pub use octolib::embedding::{
 	truncate_output, EmbeddingProvider, InputType,
 };
 
+// Re-export types for backward compatibility
+pub use octolib::embedding::types::{parse_provider_model, EmbeddingProviderType};
+
+// Create a types module for backward compatibility
+pub mod types {
+    pub use octolib::embedding::types::*;
+}
+
+// Create a provider module for backward compatibility  
+pub mod provider {
+    pub use octolib::embedding::provider::*;
+}
+
 /// Configuration for embedding generation (octocode-specific)
 #[derive(Debug, Clone)]
 pub struct EmbeddingGenerationConfig {

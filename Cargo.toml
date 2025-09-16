@@ -24,6 +24,8 @@ exclude = [
 
 [features]
 default = []
+fastembed = ["octolib/fastembed"]
+huggingface = ["octolib/huggingface"]
 
 # Optimized release profile for static linking
 [profile.release]
