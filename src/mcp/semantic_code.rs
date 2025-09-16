@@ -17,13 +17,13 @@ use serde_json::{json, Value};
 use tracing::debug;
 
 use crate::config::Config;
-use crate::constants::MAX_QUERIES;
 use crate::embedding::truncate_output;
 use crate::indexer::search::{
 	search_codebase_with_details_multi_query_text, search_codebase_with_details_text,
 };
 use crate::indexer::{extract_file_signatures, render_signatures_text, NoindexWalker, PathUtils};
 use crate::mcp::types::{McpError, McpTool};
+use octolib::embedding::constants::MAX_QUERIES;
 
 /// Semantic code search tool provider
 #[derive(Clone)]
