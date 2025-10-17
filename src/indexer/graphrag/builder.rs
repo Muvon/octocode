@@ -71,7 +71,11 @@ impl GraphBuilder {
 		let graph = Arc::new(RwLock::new(db_ops.load_graph(&project_root, quiet).await?));
 
 		// Initialize AI enhancements if enabled
-		let client = Client::new();
+		let client = Client::builder()
+			.timeout(std::time::Duration::from_secs(
+				config.graphrag.llm.batch_timeout_seconds,
+			))
+			.build()?;
 		let ai_enhancements = if config.graphrag.use_llm {
 			Some(AIEnhancements::new(config.clone(), client.clone(), quiet))
 		} else {

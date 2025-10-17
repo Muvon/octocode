@@ -456,8 +456,10 @@ impl HuggingFaceProviderImpl {
 
 		tracing::debug!("Downloading config from: {}", config_url);
 
-		// Use reqwest for direct HTTP download
-		let client = reqwest::Client::new();
+		// Use reqwest for direct HTTP download with 30-second timeout
+		let client = reqwest::Client::builder()
+			.timeout(std::time::Duration::from_secs(30))
+			.build()?;
 		let response = client
 			.get(&config_url)
 			.header("User-Agent", "octocode/0.7.1")
