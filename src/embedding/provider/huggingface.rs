@@ -457,9 +457,12 @@ impl HuggingFaceProviderImpl {
 		tracing::debug!("Downloading config from: {}", config_url);
 
 		// Use reqwest for direct HTTP download with 30-second timeout
+		// IMPORTANT: Must use builder pattern with timeout to prevent infinite hangs
+		// when downloading model files. Client::new() does not apply timeouts.
 		let client = reqwest::Client::builder()
 			.timeout(std::time::Duration::from_secs(30))
-			.build()?;
+			.build()
+			.context("Failed to create HTTP client for HuggingFace downloads")?;
 		let response = client
 			.get(&config_url)
 			.header("User-Agent", "octocode/0.7.1")
