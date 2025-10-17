@@ -71,7 +71,14 @@ impl GraphBuilder {
 		let graph = Arc::new(RwLock::new(db_ops.load_graph(&project_root, quiet).await?));
 
 		// Initialize AI enhancements if enabled
-		let client = Client::new();
+		// IMPORTANT: Must use builder pattern with timeout to prevent infinite hangs
+		// when LLM API calls take too long. Client::new() does not apply timeouts.
+		let client = Client::builder()
+			.timeout(std::time::Duration::from_secs(
+				config.graphrag.llm.batch_timeout_seconds,
+			))
+			.build()
+		.context("Failed to create HTTP client for LLM API calls")?;
 		let ai_enhancements = if config.graphrag.use_llm {
 			Some(AIEnhancements::new(config.clone(), client.clone(), quiet))
 		} else {
