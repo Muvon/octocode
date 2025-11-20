@@ -71,7 +71,7 @@ cp octocode.exe /c/Windows/System32/  # (requires admin)
 ## Install from Source
 
 ### Prerequisites
-- Rust 1.87.0 or later
+- Rust 1.91.1 or later
 - Protocol Buffers compiler (`protoc`)
 
 ### Install protoc

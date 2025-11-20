@@ -468,14 +468,14 @@ impl<'a> DatabaseOperations<'a> {
 			if a_contains && !b_contains {
 				std::cmp::Ordering::Less
 			} else if !a_contains && b_contains {
-				return std::cmp::Ordering::Greater;
+				std::cmp::Ordering::Greater
 			} else {
 				// Both contain or both don't contain, sort by similarity
 				let a_sim = cosine_similarity(query_embedding, &a.embedding);
 				let b_sim = cosine_similarity(query_embedding, &b.embedding);
-				return b_sim
+				b_sim
 					.partial_cmp(&a_sim)
-					.unwrap_or(std::cmp::Ordering::Equal);
+					.unwrap_or(std::cmp::Ordering::Equal)
 			}
 		});
 

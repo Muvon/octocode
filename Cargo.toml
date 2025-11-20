@@ -23,9 +23,9 @@ exclude = [
 ]
 
 [features]
-default = ["fastembed", "huggingface"]
-fastembed = ["dep:fastembed"]
-huggingface = ["dep:candle-core", "dep:candle-nn", "dep:candle-transformers", "dep:tokenizers", "dep:hf-hub"]
+default = []
+fastembed = ["octolib/fastembed"]
+huggingface = ["octolib/huggingface"]
 
 # Optimized release profile for static linking
 [profile.release]
@@ -74,29 +74,25 @@ clap = { version = "4.5.45", features = ["derive"] }
 clap_complete = "4.5.57"
 notify = { version = "8.2.0", default-features = false, features = ["crossbeam-channel", "macos_fsevent"] }
 notify-debouncer-mini = "0.7.0"
-fastembed = { version = "5.0.2", optional = true }
 toml = "0.9.5"
 lazy_static = "1.5.0"
 futures = { version = "0.3.31", default-features = false, features = ["std"] }
 globset = { version = "0.4.16", default-features = false }
 regex = { version = "1.11.1", default-features = false, features = ["std"] }
 dirs = "6.0.0"
-# Candle dependencies for HuggingFace support (optional)
-candle-core = { version = "0.9.1", optional = true }
-candle-nn = { version = "0.9.1", optional = true }
-candle-transformers = { version = "0.9.1", optional = true }
-tokenizers = { version = "0.21.4", optional = true }
-hf-hub = { version = "0.4.3", features = ["tokio"], optional = true }
 # EditorConfig parsing and formatting
 ec4rs = "1.2.0"
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.20", features = ["env-filter", "json"] }
 tracing-appender = "0.2.3"
-tiktoken-rs = "0.7.0"
 # LSP integration dependencies
 lsp-types = "0.97.0"
 url = "2.5.4"
 dotenvy = "0.15"
+
+# Local dependency on octolib with embedding features
+# octolib = { path = "../octolib", features = ["fastembed", "huggingface"] }
+octolib = { git = "https://github.com/muvon/octolib.git", rev = "5c84ab4797b4768ed024afb59bfee0f185512f47" }
 
 [profile.dev]
 opt-level = 1          # Basic optimizations without slowing compilation too much
