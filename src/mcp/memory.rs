@@ -21,11 +21,11 @@ use tokio::sync::Mutex;
 use tracing::{debug, warn};
 
 use crate::config::Config;
-use crate::constants::MAX_QUERIES;
 use crate::embedding::truncate_output;
 use crate::mcp::logging::log_critical_anyhow_error;
 use crate::mcp::types::{McpError, McpTool};
 use crate::memory::{MemoryManager, MemoryQuery, MemoryType};
+use octolib::embedding::constants::MAX_QUERIES;
 
 /// Memory tools provider
 #[derive(Clone)]

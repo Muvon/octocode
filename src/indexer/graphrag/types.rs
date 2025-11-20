@@ -67,6 +67,7 @@ pub struct CodeGraph {
 }
 
 // Helper struct for batch relationship analysis request
+#[allow(dead_code)]
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct BatchRelationshipResult {
 	pub source_id: String,
