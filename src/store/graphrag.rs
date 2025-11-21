@@ -13,7 +13,9 @@
 // limitations under the License.
 
 use anyhow::Result;
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::str::FromStr;
+use std::sync::{Arc, RwLock};
 
 // Arrow imports
 use arrow::array::{Array, StringArray};
@@ -28,11 +30,40 @@ use lancedb::{
 	Connection, DistanceType,
 };
 
+// GraphRAG types
+use crate::indexer::graphrag::types::RelationType;
+
+/// Cache statistics for monitoring performance
+#[derive(Debug, Clone, Default)]
+pub struct CacheStats {
+	pub hits: usize,
+	pub misses: usize,
+}
+
+impl CacheStats {
+	pub fn hit_rate(&self) -> f64 {
+		let total = self.hits + self.misses;
+		if total == 0 {
+			0.0
+		} else {
+			self.hits as f64 / total as f64
+		}
+	}
+}
+
+/// Adjacency cache for fast graph traversals
+/// Maps: node_id -> relation_type -> [target_node_ids]
+type AdjacencyCache = HashMap<String, HashMap<RelationType, Vec<String>>>;
+
 /// Handles GraphRAG-specific database operations
 pub struct GraphRagOperations<'a> {
 	pub db: &'a Connection,
 	pub table_ops: TableOperations<'a>,
 	pub code_vector_dim: usize,
+	/// Adjacency cache for outgoing relationships
+	adjacency_cache: Arc<RwLock<AdjacencyCache>>,
+	/// Cache statistics
+	cache_stats: Arc<RwLock<CacheStats>>,
 }
 
 impl<'a> GraphRagOperations<'a> {
@@ -41,7 +72,317 @@ impl<'a> GraphRagOperations<'a> {
 			db,
 			table_ops: TableOperations::new(db),
 			code_vector_dim,
+			adjacency_cache: Arc::new(RwLock::new(HashMap::new())),
+			cache_stats: Arc::new(RwLock::new(CacheStats::default())),
 		}
+	}
+
+	// ============================================================================
+	// Adjacency Cache Management
+	// ============================================================================
+
+	/// Clear the entire adjacency cache
+	pub fn clear_cache(&self) {
+		if let Ok(mut cache) = self.adjacency_cache.write() {
+			cache.clear();
+		}
+		if let Ok(mut stats) = self.cache_stats.write() {
+			*stats = CacheStats::default();
+		}
+	}
+
+	/// Invalidate cache entries for a specific node
+	pub fn invalidate_cache_for_node(&self, node_id: &str) {
+		if let Ok(mut cache) = self.adjacency_cache.write() {
+			cache.remove(node_id);
+		}
+	}
+
+	/// Get cache statistics
+	pub fn get_cache_stats(&self) -> CacheStats {
+		self.cache_stats
+			.read()
+			.map(|stats| stats.clone())
+			.unwrap_or_default()
+	}
+
+	/// Get adjacent nodes from cache (outgoing relationships only)
+	/// Returns None if not in cache, Some(Vec) if cached (may be empty)
+	fn get_adjacent_nodes_cached(
+		&self,
+		node_id: &str,
+		relation_type: &RelationType,
+	) -> Option<Vec<String>> {
+		let cache = self.adjacency_cache.read().ok()?;
+		let result = cache
+			.get(node_id)
+			.and_then(|relations| relations.get(relation_type))
+			.cloned();
+
+		// Update stats
+		if let Ok(mut stats) = self.cache_stats.write() {
+			if result.is_some() {
+				stats.hits += 1;
+			} else {
+				stats.misses += 1;
+			}
+		}
+
+		result
+	}
+
+	/// Update cache with relationship data
+	fn update_cache(&self, source_id: &str, relation_type: RelationType, target_id: String) {
+		if let Ok(mut cache) = self.adjacency_cache.write() {
+			cache
+				.entry(source_id.to_string())
+				.or_default()
+				.entry(relation_type)
+				.or_default()
+				.push(target_id);
+		}
+	}
+
+	/// Build adjacency cache from all relationships in the database
+	pub async fn build_adjacency_cache(&self) -> Result<()> {
+		// Clear existing cache
+		self.clear_cache();
+
+		// Check if relationships table exists
+		if !self
+			.table_ops
+			.table_exists("graphrag_relationships")
+			.await?
+		{
+			return Ok(());
+		}
+
+		let table = self
+			.db
+			.open_table("graphrag_relationships")
+			.execute()
+			.await?;
+
+		// Stream all relationships
+		let mut results = table.query().execute().await?;
+
+		let mut total_relationships = 0;
+		while let Some(batch) = results.try_next().await? {
+			if batch.num_rows() == 0 {
+				continue;
+			}
+
+			// Extract columns
+			let source_ids = batch
+				.column_by_name("source_id")
+				.and_then(|col| col.as_any().downcast_ref::<StringArray>())
+				.ok_or_else(|| anyhow::anyhow!("Missing or invalid source_id column"))?;
+
+			let target_ids = batch
+				.column_by_name("target_id")
+				.and_then(|col| col.as_any().downcast_ref::<StringArray>())
+				.ok_or_else(|| anyhow::anyhow!("Missing or invalid target_id column"))?;
+
+			let relation_types = batch
+				.column_by_name("relation_type")
+				.and_then(|col| col.as_any().downcast_ref::<StringArray>())
+				.ok_or_else(|| anyhow::anyhow!("Missing or invalid relation_type column"))?;
+
+			// Build cache entries
+			for i in 0..batch.num_rows() {
+				if let (Some(source), Some(target), Some(rel_type_str)) = (
+					source_ids.value(i).to_string().into(),
+					target_ids.value(i).to_string().into(),
+					relation_types.value(i).to_string().into(),
+				) {
+					// Parse relation type
+					if let Ok(rel_type) = RelationType::from_str(&rel_type_str) {
+						self.update_cache(&source, rel_type, target);
+						total_relationships += 1;
+					}
+				}
+			}
+		}
+
+		tracing::info!(
+			"Built adjacency cache with {} relationships",
+			total_relationships
+		);
+
+		Ok(())
+	}
+
+	// ============================================================================
+	// Cache-Aware Traversal Methods
+	// ============================================================================
+
+	/// Get neighbors of a node using cache (outgoing relationships only)
+	/// Falls back to database query if not in cache
+	pub async fn get_neighbors_cached(
+		&self,
+		node_id: &str,
+		relation_type: &RelationType,
+	) -> Result<Vec<String>> {
+		// Try cache first
+		if let Some(neighbors) = self.get_adjacent_nodes_cached(node_id, relation_type) {
+			return Ok(neighbors);
+		}
+
+		// Cache miss - query database
+		let relationships = self
+			.get_node_relationships(
+				node_id,
+				crate::indexer::graphrag::types::RelationshipDirection::Outgoing,
+			)
+			.await?;
+
+		// Filter by relation type and extract target IDs
+		let neighbors: Vec<String> = relationships
+			.iter()
+			.filter(|rel| &rel.relation_type == relation_type)
+			.map(|rel| rel.target.clone())
+			.collect();
+
+		// Update cache with results
+		for target in &neighbors {
+			self.update_cache(node_id, relation_type.clone(), target.clone());
+		}
+
+		Ok(neighbors)
+	}
+
+	/// Traverse a path from a starting node following specific relation types
+	/// Returns all nodes reachable within max_depth hops
+	pub async fn traverse_path_cached(
+		&self,
+		start_node: &str,
+		relation_types: &[RelationType],
+		max_depth: usize,
+	) -> Result<Vec<String>> {
+		use std::collections::{HashSet, VecDeque};
+
+		let mut visited = HashSet::new();
+		let mut queue = VecDeque::new();
+		let mut result = Vec::new();
+
+		// Start with the initial node
+		queue.push_back((start_node.to_string(), 0));
+		visited.insert(start_node.to_string());
+
+		while let Some((current_node, depth)) = queue.pop_front() {
+			result.push(current_node.clone());
+
+			// Stop if we've reached max depth
+			if depth >= max_depth {
+				continue;
+			}
+
+			// Explore neighbors for each relation type
+			for rel_type in relation_types {
+				let neighbors = self.get_neighbors_cached(&current_node, rel_type).await?;
+
+				for neighbor in neighbors {
+					if !visited.contains(&neighbor) {
+						visited.insert(neighbor.clone());
+						queue.push_back((neighbor, depth + 1));
+					}
+				}
+			}
+		}
+
+		tracing::debug!(
+			"Traversed from {} with depth {}: found {} nodes (cache hit rate: {:.2}%)",
+			start_node,
+			max_depth,
+			result.len(),
+			self.get_cache_stats().hit_rate() * 100.0
+		);
+
+		Ok(result)
+	}
+
+	/// Find connected components using cache
+	/// Returns groups of nodes that are connected through the specified relation types
+	pub async fn find_connected_components_cached(
+		&self,
+		relation_types: &[RelationType],
+	) -> Result<Vec<Vec<String>>> {
+		use std::collections::{HashSet, VecDeque};
+
+		// Get all node IDs
+		let all_nodes = self.get_all_node_ids().await?;
+		let mut visited = HashSet::new();
+		let mut components = Vec::new();
+
+		for start_node in &all_nodes {
+			if visited.contains(start_node) {
+				continue;
+			}
+
+			// BFS to find all nodes in this component
+			let mut component = Vec::new();
+			let mut queue = VecDeque::new();
+			queue.push_back(start_node.clone());
+			visited.insert(start_node.clone());
+
+			while let Some(current_node) = queue.pop_front() {
+				component.push(current_node.clone());
+
+				// Explore neighbors for each relation type
+				for rel_type in relation_types {
+					let neighbors = self.get_neighbors_cached(&current_node, rel_type).await?;
+
+					for neighbor in neighbors {
+						if !visited.contains(&neighbor) {
+							visited.insert(neighbor.clone());
+							queue.push_back(neighbor);
+						}
+					}
+				}
+			}
+
+			if !component.is_empty() {
+				components.push(component);
+			}
+		}
+
+		tracing::info!(
+			"Found {} connected components (cache hit rate: {:.2}%)",
+			components.len(),
+			self.get_cache_stats().hit_rate() * 100.0
+		);
+
+		Ok(components)
+	}
+
+	/// Get all node IDs from the database
+	async fn get_all_node_ids(&self) -> Result<Vec<String>> {
+		if !self.table_ops.table_exists("graphrag_nodes").await? {
+			return Ok(Vec::new());
+		}
+
+		let table = self.db.open_table("graphrag_nodes").execute().await?;
+		let mut results = table.query().execute().await?;
+
+		let mut node_ids = Vec::new();
+		while let Some(batch) = results.try_next().await? {
+			if batch.num_rows() == 0 {
+				continue;
+			}
+
+			let id_array = batch
+				.column_by_name("id")
+				.and_then(|col| col.as_any().downcast_ref::<StringArray>())
+				.ok_or_else(|| anyhow::anyhow!("Missing or invalid id column"))?;
+
+			for i in 0..batch.num_rows() {
+				if let Some(id) = id_array.value(i).to_string().into() {
+					node_ids.push(id);
+				}
+			}
+		}
+
+		Ok(node_ids)
 	}
 
 	/// Returns true if GraphRAG should be indexed (enabled but not yet indexed or empty)
@@ -169,30 +510,88 @@ impl<'a> GraphRagOperations<'a> {
 
 	/// Store graph relationships in the database
 	pub async fn store_graph_relationships(&self, rel_batch: RecordBatch) -> Result<()> {
-		// Open or create the table
+		// Store in database first
 		self.table_ops
-			.store_batch("graphrag_relationships", rel_batch)
-			.await
+			.store_batch("graphrag_relationships", rel_batch.clone())
+			.await?;
+
+		// Update adjacency cache with new relationships
+		self.update_cache_from_batch(&rel_batch)?;
+
+		Ok(())
+	}
+
+	/// Update adjacency cache from a relationship batch
+	fn update_cache_from_batch(&self, rel_batch: &RecordBatch) -> Result<()> {
+		if rel_batch.num_rows() == 0 {
+			return Ok(());
+		}
+
+		// Extract columns
+		let source_ids = rel_batch
+			.column_by_name("source_id")
+			.and_then(|col| col.as_any().downcast_ref::<StringArray>())
+			.ok_or_else(|| anyhow::anyhow!("Missing or invalid source_id column"))?;
+
+		let target_ids = rel_batch
+			.column_by_name("target_id")
+			.and_then(|col| col.as_any().downcast_ref::<StringArray>())
+			.ok_or_else(|| anyhow::anyhow!("Missing or invalid target_id column"))?;
+
+		let relation_types = rel_batch
+			.column_by_name("relation_type")
+			.and_then(|col| col.as_any().downcast_ref::<StringArray>())
+			.ok_or_else(|| anyhow::anyhow!("Missing or invalid relation_type column"))?;
+
+		// Update cache entries
+		for i in 0..rel_batch.num_rows() {
+			if let (Some(source), Some(target), Some(rel_type_str)) = (
+				source_ids.value(i).to_string().into(),
+				target_ids.value(i).to_string().into(),
+				relation_types.value(i).to_string().into(),
+			) {
+				// Parse relation type
+				if let Ok(rel_type) = RelationType::from_str(&rel_type_str) {
+					self.update_cache(&source, rel_type, target);
+				}
+			}
+		}
+
+		Ok(())
 	}
 
 	/// Clear all graph nodes from the database
 	pub async fn clear_graph_nodes(&self) -> Result<()> {
-		self.table_ops.clear_table("graphrag_nodes").await
+		self.table_ops.clear_table("graphrag_nodes").await?;
+		// Clear cache when clearing nodes
+		self.clear_cache();
+		Ok(())
 	}
 
 	/// Clear all graph relationships from the database
 	pub async fn clear_graph_relationships(&self) -> Result<()> {
-		self.table_ops.clear_table("graphrag_relationships").await
+		self.table_ops.clear_table("graphrag_relationships").await?;
+		// Clear cache when clearing relationships
+		self.clear_cache();
+		Ok(())
 	}
 
 	/// Remove GraphRAG nodes associated with a specific file path
 	pub async fn remove_graph_nodes_by_path(&self, file_path: &str) -> Result<usize> {
+		// Get node IDs before removal for cache invalidation
+		let node_ids = self.get_node_ids_for_file_path(file_path).await?;
+
 		// CRITICAL FIX: Also remove relationships when removing nodes
 		let relationships_removed = self.remove_graph_relationships_by_path(file_path).await?;
 		let nodes_removed = self
 			.table_ops
 			.remove_blocks_by_path(file_path, "graphrag_nodes")
 			.await?;
+
+		// Invalidate cache for removed nodes
+		for node_id in node_ids {
+			self.invalidate_cache_for_node(&node_id);
+		}
 
 		if nodes_removed > 0 || relationships_removed > 0 {
 			eprintln!(
@@ -245,6 +644,11 @@ impl<'a> GraphRagOperations<'a> {
 			table.delete(&filter).await.map_err(|e| {
 				anyhow::anyhow!("Failed to delete from graphrag_relationships: {}", e)
 			})?;
+		}
+
+		// Invalidate cache for affected nodes
+		for node_id in &node_ids {
+			self.invalidate_cache_for_node(node_id);
 		}
 
 		// Count rows after deletion
@@ -897,7 +1301,7 @@ impl<'a> GraphRagOperations<'a> {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::indexer::graphrag::types::{RelationType, RelationshipDirection};
+	use crate::indexer::graphrag::types::RelationType;
 
 	// Note: These are unit tests for the query logic.
 	// Integration tests with actual LanceDB would require a test database setup.
@@ -956,5 +1360,300 @@ mod tests {
 		let _offset = 10000;
 		let limit = 1000;
 		assert!(limit <= 10000, "Limit should be reasonable");
+	}
+
+	// ============================================================================
+	// Adjacency Cache Tests (Phase 1.3)
+	// ============================================================================
+
+	#[test]
+	fn test_cache_stats_default() {
+		let stats = CacheStats::default();
+		assert_eq!(stats.hits, 0);
+		assert_eq!(stats.misses, 0);
+		assert_eq!(stats.hit_rate(), 0.0);
+	}
+
+	#[test]
+	fn test_cache_stats_hit_rate() {
+		let stats = CacheStats {
+			hits: 7,
+			misses: 3,
+		};
+		assert_eq!(stats.hit_rate(), 0.7);
+
+		let stats = CacheStats {
+			hits: 0,
+			misses: 10,
+		};
+		assert_eq!(stats.hit_rate(), 0.0);
+
+		let stats = CacheStats {
+			hits: 10,
+			misses: 0,
+		};
+		assert_eq!(stats.hit_rate(), 1.0);
+	}
+
+	#[test]
+	fn test_cache_update_and_get() {
+		use std::sync::{Arc, RwLock};
+
+		// Create a minimal cache structure for testing
+		let cache: Arc<RwLock<AdjacencyCache>> = Arc::new(RwLock::new(HashMap::new()));
+		let _stats: Arc<RwLock<CacheStats>> = Arc::new(RwLock::new(CacheStats::default()));
+
+		// Simulate cache update
+		{
+			let mut cache_lock = cache.write().unwrap();
+			cache_lock
+				.entry("node1".to_string())
+				.or_default()
+				.entry(RelationType::Imports)
+				.or_default()
+				.push("node2".to_string());
+		}
+
+		// Verify cache content
+		{
+			let cache_lock = cache.read().unwrap();
+			let neighbors = cache_lock
+				.get("node1")
+				.and_then(|rels| rels.get(&RelationType::Imports))
+				.cloned();
+			assert_eq!(neighbors, Some(vec!["node2".to_string()]));
+		}
+
+		// Test cache miss
+		{
+			let cache_lock = cache.read().unwrap();
+			let neighbors = cache_lock
+				.get("nonexistent")
+				.and_then(|rels| rels.get(&RelationType::Imports))
+				.cloned();
+			assert_eq!(neighbors, None);
+		}
+	}
+
+	#[test]
+	fn test_cache_invalidation() {
+		use std::sync::{Arc, RwLock};
+
+		let cache: Arc<RwLock<AdjacencyCache>> = Arc::new(RwLock::new(HashMap::new()));
+
+		// Add some data
+		{
+			let mut cache_lock = cache.write().unwrap();
+			cache_lock
+				.entry("node1".to_string())
+				.or_default()
+				.entry(RelationType::Imports)
+				.or_default()
+				.push("node2".to_string());
+			cache_lock
+				.entry("node1".to_string())
+				.or_default()
+				.entry(RelationType::Extends)
+				.or_default()
+				.push("node3".to_string());
+		}
+
+		// Verify data exists
+		{
+			let cache_lock = cache.read().unwrap();
+			assert!(cache_lock.contains_key("node1"));
+		}
+
+		// Invalidate node1
+		{
+			let mut cache_lock = cache.write().unwrap();
+			cache_lock.remove("node1");
+		}
+
+		// Verify data is gone
+		{
+			let cache_lock = cache.read().unwrap();
+			assert!(!cache_lock.contains_key("node1"));
+		}
+	}
+
+	#[test]
+	fn test_cache_clear() {
+		use std::sync::{Arc, RwLock};
+
+		let cache: Arc<RwLock<AdjacencyCache>> = Arc::new(RwLock::new(HashMap::new()));
+		let stats: Arc<RwLock<CacheStats>> = Arc::new(RwLock::new(CacheStats::default()));
+
+		// Add multiple entries
+		{
+			let mut cache_lock = cache.write().unwrap();
+			for i in 0..5 {
+				cache_lock
+					.entry(format!("node{}", i))
+					.or_default()
+					.entry(RelationType::Imports)
+					.or_default()
+					.push(format!("target{}", i));
+			}
+		}
+
+		// Add some stats
+		{
+			let mut stats_lock = stats.write().unwrap();
+			stats_lock.hits = 10;
+			stats_lock.misses = 5;
+		}
+
+		// Verify cache has data
+		{
+			let cache_lock = cache.read().unwrap();
+			assert_eq!(cache_lock.len(), 5);
+		}
+
+		// Clear cache
+		{
+			let mut cache_lock = cache.write().unwrap();
+			cache_lock.clear();
+		}
+
+		// Clear stats
+		{
+			let mut stats_lock = stats.write().unwrap();
+			*stats_lock = CacheStats::default();
+		}
+
+		// Verify everything is cleared
+		{
+			let cache_lock = cache.read().unwrap();
+			assert_eq!(cache_lock.len(), 0);
+		}
+		{
+			let stats_lock = stats.read().unwrap();
+			assert_eq!(stats_lock.hits, 0);
+			assert_eq!(stats_lock.misses, 0);
+		}
+	}
+
+	#[test]
+	fn test_cache_multiple_relation_types() {
+		use std::sync::{Arc, RwLock};
+
+		let cache: Arc<RwLock<AdjacencyCache>> = Arc::new(RwLock::new(HashMap::new()));
+
+		// Add multiple relation types for same node
+		{
+			let mut cache_lock = cache.write().unwrap();
+			let node_entry = cache_lock.entry("node1".to_string()).or_default();
+
+			node_entry
+				.entry(RelationType::Imports)
+				.or_default()
+				.push("dep1".to_string());
+			node_entry
+				.entry(RelationType::Extends)
+				.or_default()
+				.push("base1".to_string());
+			node_entry
+				.entry(RelationType::Implements)
+				.or_default()
+				.push("interface1".to_string());
+		}
+
+		// Verify all relation types are stored
+		{
+			let cache_lock = cache.read().unwrap();
+			let node_rels = cache_lock.get("node1").unwrap();
+			assert_eq!(node_rels.len(), 3);
+			assert!(node_rels.contains_key(&RelationType::Imports));
+			assert!(node_rels.contains_key(&RelationType::Extends));
+			assert!(node_rels.contains_key(&RelationType::Implements));
+		}
+	}
+
+	#[test]
+	fn test_cache_multiple_targets_per_relation() {
+		use std::sync::{Arc, RwLock};
+
+		let cache: Arc<RwLock<AdjacencyCache>> = Arc::new(RwLock::new(HashMap::new()));
+
+		// Add multiple targets for same relation type
+		{
+			let mut cache_lock = cache.write().unwrap();
+			let targets = cache_lock
+				.entry("node1".to_string())
+				.or_default()
+				.entry(RelationType::Imports)
+				.or_default();
+
+			targets.push("dep1".to_string());
+			targets.push("dep2".to_string());
+			targets.push("dep3".to_string());
+		}
+
+		// Verify all targets are stored
+		{
+			let cache_lock = cache.read().unwrap();
+			let targets = cache_lock
+				.get("node1")
+				.and_then(|rels| rels.get(&RelationType::Imports))
+				.unwrap();
+			assert_eq!(targets.len(), 3);
+			assert!(targets.contains(&"dep1".to_string()));
+			assert!(targets.contains(&"dep2".to_string()));
+			assert!(targets.contains(&"dep3".to_string()));
+		}
+	}
+
+	#[test]
+	fn test_cache_concurrent_access() {
+		use std::sync::{Arc, RwLock};
+		use std::thread;
+
+		let cache: Arc<RwLock<AdjacencyCache>> = Arc::new(RwLock::new(HashMap::new()));
+
+		// Spawn multiple threads to write to cache
+		let mut handles = vec![];
+		for i in 0..10 {
+			let cache_clone = Arc::clone(&cache);
+			let handle = thread::spawn(move || {
+				let mut cache_lock = cache_clone.write().unwrap();
+				cache_lock
+					.entry(format!("node{}", i))
+					.or_default()
+					.entry(RelationType::Imports)
+					.or_default()
+					.push(format!("target{}", i));
+			});
+			handles.push(handle);
+		}
+
+		// Wait for all threads
+		for handle in handles {
+			handle.join().unwrap();
+		}
+
+		// Verify all entries were added
+		{
+			let cache_lock = cache.read().unwrap();
+			assert_eq!(cache_lock.len(), 10);
+		}
+	}
+
+	#[test]
+	fn test_relation_type_parsing_for_cache() {
+		// Test that all relation types can be parsed correctly for cache operations
+		let test_cases = vec![
+			("implements", RelationType::Implements),
+			("extends", RelationType::Extends),
+			("imports", RelationType::Imports),
+			("calls", RelationType::Calls),
+			("uses", RelationType::Uses),
+		];
+
+		for (str_val, expected) in test_cases {
+			let parsed: RelationType = str_val.parse().unwrap();
+			assert_eq!(parsed, expected);
+			assert_eq!(parsed.as_str(), str_val);
+		}
 	}
 }
