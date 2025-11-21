@@ -22,6 +22,9 @@ exclude = [
     "install.sh"
 ]
 
+[lib]
+doctest = false  # Disable doctests to avoid feature conflicts on Windows
+
 [features]
 default = []
 fastembed = ["octolib/fastembed"]
