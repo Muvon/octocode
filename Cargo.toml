@@ -26,7 +26,7 @@ exclude = [
 doctest = false  # Disable doctests to avoid feature conflicts on Windows
 
 [features]
-default = []
+default = ["fastembed", "huggingface"]
 fastembed = ["octolib/fastembed"]
 huggingface = ["octolib/huggingface"]
 
@@ -95,7 +95,7 @@ dotenvy = "0.15"
 
 # Local dependency on octolib with embedding features
 # octolib = { path = "../octolib", features = ["fastembed", "huggingface"] }
-octolib = { git = "https://github.com/muvon/octolib.git", rev = "5c84ab4797b4768ed024afb59bfee0f185512f47" }
+octolib = { git = "https://github.com/muvon/octolib.git", rev = "5c84ab4797b4768ed024afb59bfee0f185512f47", default-features = false }
 
 [profile.dev]
 opt-level = 1          # Basic optimizations without slowing compilation too much
