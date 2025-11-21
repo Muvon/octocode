@@ -1376,10 +1376,7 @@ mod tests {
 
 	#[test]
 	fn test_cache_stats_hit_rate() {
-		let stats = CacheStats {
-			hits: 7,
-			misses: 3,
-		};
+		let stats = CacheStats { hits: 7, misses: 3 };
 		assert_eq!(stats.hit_rate(), 0.7);
 
 		let stats = CacheStats {
