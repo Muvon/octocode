@@ -810,6 +810,45 @@ impl Store {
 		graphrag_ops.get_graph_relationships().await
 	}
 
+	/// Get relationships for a specific node with direction filtering (NEW - Phase 1.2)
+	pub async fn get_node_relationships(
+		&self,
+		node_id: &str,
+		direction: crate::indexer::graphrag::types::RelationshipDirection,
+	) -> Result<Vec<crate::indexer::graphrag::types::CodeRelationship>> {
+		let graphrag_ops = GraphRagOperations::new(&self.db, self.code_vector_dim);
+		graphrag_ops
+			.get_node_relationships(node_id, direction)
+			.await
+	}
+
+	/// Get relationships filtered by type (NEW - Phase 1.2)
+	pub async fn get_relationships_by_type(
+		&self,
+		relation_type: &crate::indexer::graphrag::types::RelationType,
+	) -> Result<Vec<crate::indexer::graphrag::types::CodeRelationship>> {
+		let graphrag_ops = GraphRagOperations::new(&self.db, self.code_vector_dim);
+		graphrag_ops.get_relationships_by_type(relation_type).await
+	}
+
+	/// Get all nodes with pagination (NEW - Phase 1.2)
+	pub async fn get_all_nodes_paginated(
+		&self,
+		offset: usize,
+		limit: usize,
+	) -> Result<Vec<crate::indexer::graphrag::types::CodeNode>> {
+		let graphrag_ops = GraphRagOperations::new(&self.db, self.code_vector_dim);
+		graphrag_ops.get_all_nodes_paginated(offset, limit).await
+	}
+
+	/// Get all relationships efficiently with streaming (NEW - Phase 1.2)
+	pub async fn get_all_relationships_efficient(
+		&self,
+	) -> Result<Vec<crate::indexer::graphrag::types::CodeRelationship>> {
+		let graphrag_ops = GraphRagOperations::new(&self.db, self.code_vector_dim);
+		graphrag_ops.get_all_relationships_efficient().await
+	}
+
 	// Debug operations
 	pub async fn list_indexed_files(&self) -> Result<()> {
 		let debug_ops = DebugOperations::new(&self.db, self.code_vector_dim);

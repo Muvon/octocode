@@ -161,7 +161,7 @@ impl TaskFocusedSubgraph {
 
 			for rel in &self.relationships {
 				rels_by_type
-					.entry(rel.relation_type.clone())
+					.entry(rel.relation_type.to_string())
 					.or_default()
 					.push(rel);
 			}

@@ -274,7 +274,10 @@ impl AIEnhancements {
 				.map(|ai_rel| CodeRelationship {
 					source: ai_rel.source_path,
 					target: ai_rel.target_path,
-					relation_type: ai_rel.relation_type,
+					relation_type: ai_rel
+						.relation_type
+						.parse()
+						.unwrap_or(crate::indexer::graphrag::types::RelationType::Imports),
 					description: ai_rel.description,
 					confidence: ai_rel.confidence,
 					weight: 0.9, // High weight for AI-discovered architectural patterns

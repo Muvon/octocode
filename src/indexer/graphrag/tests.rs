@@ -743,7 +743,7 @@ def _private_function():
 		let main_to_utils = relationships.iter().find(|r| {
 			r.source == "src/main.rs"
 				&& r.target == "src/utils.rs"
-				&& r.relation_type == "imports_direct"
+				&& r.relation_type == crate::indexer::graphrag::types::RelationType::Imports
 		});
 		assert!(
 			main_to_utils.is_some(),
@@ -753,7 +753,7 @@ def _private_function():
 		let main_to_config = relationships.iter().find(|r| {
 			r.source == "src/main.rs"
 				&& r.target == "src/config.rs"
-				&& r.relation_type == "imports_direct"
+				&& r.relation_type == crate::indexer::graphrag::types::RelationType::Imports
 		});
 		assert!(
 			main_to_config.is_some(),

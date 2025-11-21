@@ -244,7 +244,10 @@ impl<'a> DatabaseOperations<'a> {
 				let relationship = CodeRelationship {
 					source: source_array.value(i).to_string(),
 					target: target_array.value(i).to_string(),
-					relation_type: type_array.value(i).to_string(),
+					relation_type: type_array
+						.value(i)
+						.parse()
+						.unwrap_or(crate::indexer::graphrag::types::RelationType::Imports),
 					description: desc_array.value(i).to_string(),
 					confidence: conf_array.value(i),
 					weight: 1.0, // Default weight for legacy relationships

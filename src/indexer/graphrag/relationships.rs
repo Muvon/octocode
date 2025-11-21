@@ -51,7 +51,7 @@ impl RelationshipDiscovery {
 						relationships.push(CodeRelationship {
 							source: source_file.id.clone(),
 							target: target_file.id.clone(),
-							relation_type: "imports".to_string(),
+							relation_type: crate::indexer::graphrag::types::RelationType::Imports,
 							description: format!("Imports {} from {}", import, target_file.name),
 							confidence: 0.9,
 							weight: 1.0,
@@ -81,7 +81,7 @@ impl RelationshipDiscovery {
 					relationships.push(CodeRelationship {
 						source: source_file.id.clone(),
 						target: other_file.id.clone(),
-						relation_type: "sibling_module".to_string(),
+						relation_type: crate::indexer::graphrag::types::RelationType::SiblingModule,
 						description: format!("Same directory: {}", source_dir),
 						confidence: 0.6,
 						weight: 0.5,
@@ -106,7 +106,7 @@ impl RelationshipDiscovery {
 					relationships.push(CodeRelationship {
 						source: parent.clone(),
 						target: child.clone(),
-						relation_type: "contains".to_string(),
+						relation_type: crate::indexer::graphrag::types::RelationType::ParentModule,
 						description: "Hierarchical module relationship".to_string(),
 						confidence: 0.8,
 						weight: 0.7,
@@ -197,7 +197,7 @@ impl RelationshipDiscovery {
 						relationships.push(CodeRelationship {
 							source: source_file.id.clone(),
 							target: target_node.id.clone(),
-							relation_type: "imports_direct".to_string(),
+							relation_type: crate::indexer::graphrag::types::RelationType::Imports,
 							description: format!(
 								"Direct import: {} -> {}",
 								import_path, resolved_path
@@ -212,7 +212,8 @@ impl RelationshipDiscovery {
 								relationships.push(CodeRelationship {
 									source: target_node.id.clone(),
 									target: source_file.id.clone(),
-									relation_type: "exports_to".to_string(),
+									relation_type:
+										crate::indexer::graphrag::types::RelationType::Imports,
 									description: format!(
 										"Exports {} to {}",
 										export_item, source_file.path
@@ -248,7 +249,7 @@ impl RelationshipDiscovery {
 				relationships.push(CodeRelationship {
 					source: source_file.id.clone(),
 					target: other_file.id.clone(),
-					relation_type: "mod_declaration".to_string(),
+					relation_type: crate::indexer::graphrag::types::RelationType::ParentModule,
 					description: "Rust module declaration".to_string(),
 					confidence: 0.8,
 					weight: 0.8,
@@ -265,7 +266,7 @@ impl RelationshipDiscovery {
 					relationships.push(CodeRelationship {
 						source: source_file.id.clone(),
 						target: other_file.id.clone(),
-						relation_type: "crate_root".to_string(),
+						relation_type: crate::indexer::graphrag::types::RelationType::ParentModule,
 						description: "Rust crate root relationship".to_string(),
 						confidence: 0.7,
 						weight: 0.6,
@@ -298,7 +299,7 @@ impl RelationshipDiscovery {
 					relationships.push(CodeRelationship {
 						source: source_file.id.clone(),
 						target: other_file.id.clone(),
-						relation_type: "index_module".to_string(),
+						relation_type: crate::indexer::graphrag::types::RelationType::ParentModule,
 						description: "JavaScript index module relationship".to_string(),
 						confidence: 0.7,
 						weight: 0.6,
@@ -329,7 +330,7 @@ impl RelationshipDiscovery {
 					relationships.push(CodeRelationship {
 						source: source_file.id.clone(),
 						target: other_file.id.clone(),
-						relation_type: "package_init".to_string(),
+						relation_type: crate::indexer::graphrag::types::RelationType::ParentModule,
 						description: "Python package initialization".to_string(),
 						confidence: 0.8,
 						weight: 0.7,
@@ -357,7 +358,7 @@ impl RelationshipDiscovery {
 				relationships.push(CodeRelationship {
 					source: source_file.id.clone(),
 					target: other_file.id.clone(),
-					relation_type: "same_package".to_string(),
+					relation_type: crate::indexer::graphrag::types::RelationType::SiblingModule,
 					description: format!("Go package relationship: {}", source_package),
 					confidence: 0.8,
 					weight: 0.7,
@@ -385,7 +386,7 @@ impl RelationshipDiscovery {
 				relationships.push(CodeRelationship {
 					source: source_file.id.clone(),
 					target: other_file.id.clone(),
-					relation_type: "same_namespace".to_string(),
+					relation_type: crate::indexer::graphrag::types::RelationType::SiblingModule,
 					description: format!("PHP namespace relationship: {}", source_namespace),
 					confidence: 0.8,
 					weight: 0.7,
