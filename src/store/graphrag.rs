@@ -172,16 +172,16 @@ impl<'a> GraphRagOperations<'a> {
 				continue;
 			}
 
-			// Extract columns
-			let source_ids = batch
-				.column_by_name("source_id")
-				.and_then(|col| col.as_any().downcast_ref::<StringArray>())
-				.ok_or_else(|| anyhow::anyhow!("Missing or invalid source_id column"))?;
+		// Extract columns (match schema from relationships_to_batch: "source", "target")
+		let source_ids = batch
+			.column_by_name("source")
+			.and_then(|col| col.as_any().downcast_ref::<StringArray>())
+			.ok_or_else(|| anyhow::anyhow!("Missing or invalid source column"))?;
 
-			let target_ids = batch
-				.column_by_name("target_id")
-				.and_then(|col| col.as_any().downcast_ref::<StringArray>())
-				.ok_or_else(|| anyhow::anyhow!("Missing or invalid target_id column"))?;
+		let target_ids = batch
+			.column_by_name("target")
+			.and_then(|col| col.as_any().downcast_ref::<StringArray>())
+			.ok_or_else(|| anyhow::anyhow!("Missing or invalid target column"))?;
 
 			let relation_types = batch
 				.column_by_name("relation_type")
@@ -527,16 +527,16 @@ impl<'a> GraphRagOperations<'a> {
 			return Ok(());
 		}
 
-		// Extract columns
-		let source_ids = rel_batch
-			.column_by_name("source_id")
-			.and_then(|col| col.as_any().downcast_ref::<StringArray>())
-			.ok_or_else(|| anyhow::anyhow!("Missing or invalid source_id column"))?;
+	// Extract columns (match schema from relationships_to_batch: "source", "target")
+	let source_ids = rel_batch
+		.column_by_name("source")
+		.and_then(|col| col.as_any().downcast_ref::<StringArray>())
+		.ok_or_else(|| anyhow::anyhow!("Missing or invalid source column"))?;
 
-		let target_ids = rel_batch
-			.column_by_name("target_id")
-			.and_then(|col| col.as_any().downcast_ref::<StringArray>())
-			.ok_or_else(|| anyhow::anyhow!("Missing or invalid target_id column"))?;
+	let target_ids = rel_batch
+		.column_by_name("target")
+		.and_then(|col| col.as_any().downcast_ref::<StringArray>())
+		.ok_or_else(|| anyhow::anyhow!("Missing or invalid target column"))?;
 
 		let relation_types = rel_batch
 			.column_by_name("relation_type")
@@ -829,16 +829,16 @@ impl<'a> GraphRagOperations<'a> {
 
 		// Concatenate all batches if we have multiple
 		if all_batches.is_empty() {
-			// Return empty batch with expected schema
-			let schema = Arc::new(Schema::new(vec![
-				Field::new("id", DataType::Utf8, false),
-				Field::new("source_id", DataType::Utf8, false),
-				Field::new("target_id", DataType::Utf8, false),
-				Field::new("relationship_type", DataType::Utf8, false),
-				Field::new("source_path", DataType::Utf8, false),
-				Field::new("target_path", DataType::Utf8, false),
-				Field::new("description", DataType::Utf8, true),
-			]));
+		// Return empty batch with expected schema (match relationships_to_batch)
+		let schema = Arc::new(Schema::new(vec![
+			Field::new("id", DataType::Utf8, false),
+			Field::new("source", DataType::Utf8, false),
+			Field::new("target", DataType::Utf8, false),
+			Field::new("relation_type", DataType::Utf8, false),
+			Field::new("description", DataType::Utf8, false),
+			Field::new("confidence", DataType::Float32, false),
+			Field::new("weight", DataType::Float32, false),
+		]));
 			Ok(RecordBatch::new_empty(schema))
 		} else if all_batches.len() == 1 {
 			Ok(all_batches.into_iter().next().unwrap())
