@@ -169,11 +169,31 @@ export OPENAI_API_KEY="your-openai-key"
 
 ## Configuration Sections
 
-### [openrouter]
-Controls AI model usage for GraphRAG and Git features.
+### LLM Configuration
 
-- `model`: OpenRouter model identifier (default: "openai/gpt-4o-mini")
-- `api_key`: API key (prefer environment variable)
+```toml
+[llm]
+# Model in provider:model format
+model = "openrouter:openai/gpt-4o-mini"
+timeout = 120
+temperature = 0.7
+max_tokens = 4000
+```
+
+**Fields:**
+- `model`: LLM model in `provider:model` format (e.g., "openai:gpt-4o-mini", "anthropic:claude-3-5-haiku-20241022")
+- `timeout`: Request timeout in seconds (default: 120)
+- `temperature`: Sampling temperature 0.0-1.0 (default: 0.7)
+- `max_tokens`: Maximum tokens in response (default: 4000)
+
+**Supported Providers:**
+- `openrouter:` - Access multiple providers through OpenRouter
+- `openai:` - Direct OpenAI API
+- `anthropic:` - Anthropic Claude models
+- `google:` - Google Gemini models
+- `deepseek:` - DeepSeek models
+
+**API Keys:** Set via environment variables (OPENAI_API_KEY, ANTHROPIC_API_KEY, OPENROUTER_API_KEY, etc.)
 
 ### [embedding]
 Core embedding configuration.
@@ -214,8 +234,9 @@ Search behavior configuration.
 
 ### [index]
 Indexing behavior settings.
+# Set LLM model
+octocode config --model "openrouter:openai/gpt-4o-mini"
 
-- `chunk_size`: Size of text chunks for embedding
 - `graphrag_enabled`: Enable GraphRAG during indexing
 
 ### [memory]

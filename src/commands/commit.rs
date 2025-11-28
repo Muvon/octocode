@@ -546,63 +546,20 @@ async fn process_commit_chunks_parallel(
 }
 
 async fn call_llm_for_commit_message(prompt: &str, config: &Config) -> Result<String> {
-	use reqwest::Client;
-	use serde_json::{json, Value};
+	use octocode::llm::{LlmClient, Message};
 
-	let client = Client::new();
+	// Create LLM client from config
+	let client = LlmClient::from_config(config)?;
 
-	// Get API key
-	let api_key = if let Some(key) = &config.openrouter.api_key {
-		key.clone()
-	} else if let Ok(key) = std::env::var("OPENROUTER_API_KEY") {
-		key
-	} else {
-		return Err(anyhow::anyhow!("No OpenRouter API key found"));
-	};
+	// Build messages
+	let messages = vec![Message::user(prompt)];
 
-	// Prepare the request
-	let payload = json!({
-		"model": config.openrouter.model,
-		"messages": [
-			{
-				"role": "user",
-				"content": prompt
-			}
-		],
-		"temperature": 0.1,
-		"max_tokens": 300
-	});
-
+	// Call LLM with low temperature for consistent commit messages
 	let response = client
-		.post(format!(
-			"{}/chat/completions",
-			config.openrouter.base_url.trim_end_matches('/')
-		))
-		.header("Authorization", format!("Bearer {}", api_key))
-		.header("HTTP-Referer", "https://github.com/muvon/octocode")
-		.header("X-Title", "Octocode")
-		.header("Content-Type", "application/json")
-		.json(&payload)
-		.timeout(std::time::Duration::from_secs(config.openrouter.timeout))
-		.send()
+		.chat_completion_with_temperature(messages, 0.1)
 		.await?;
 
-	if !response.status().is_success() {
-		let error_text = response.text().await?;
-		return Err(anyhow::anyhow!("LLM API error: {}", error_text));
-	}
-
-	let response_json: Value = response.json().await?;
-
-	let message = response_json
-		.get("choices")
-		.and_then(|choices| choices.get(0))
-		.and_then(|choice| choice.get("message"))
-		.and_then(|message| message.get("content"))
-		.and_then(|content| content.as_str())
-		.ok_or_else(|| anyhow::anyhow!("Invalid response format from LLM"))?;
-
-	Ok(message.to_string())
+	Ok(response)
 }
 
 /// Refine a verbose commit message using AI to create a concise, deduplicated version

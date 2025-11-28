@@ -514,105 +514,18 @@ fn should_show_issue(issue_severity: &str, filter: &str) -> bool {
 }
 
 async fn call_llm_for_review(prompt: &str, config: &Config) -> Result<String> {
-	use reqwest::Client;
-	use serde_json::{json, Value};
+	use octocode::llm::{LlmClient, Message};
 
-	let client = Client::new();
+	// Create LLM client from config
+	let client = LlmClient::from_config(config)?;
 
-	// Get API key
-	let api_key = if let Some(key) = &config.openrouter.api_key {
-		key.clone()
-	} else if let Ok(key) = std::env::var("OPENROUTER_API_KEY") {
-		key
-	} else {
-		return Err(anyhow::anyhow!("No OpenRouter API key found"));
-	};
+	// Build messages - the prompt already includes JSON schema instructions
+	let messages = vec![Message::user(prompt)];
 
-	// Prepare the request with structured output
-	let payload = json!({
-		"model": config.openrouter.model,
-		"messages": [
-			{
-				"role": "user",
-				"content": prompt
-			}
-		],
-		"temperature": 0.2,
-		"max_tokens": 4000,
-		"response_format": {
-			"type": "json_schema",
-			"json_schema": {
-				"name": "code_review_result",
-				"strict": true,
-				"schema": {
-					"type": "object",
-					"properties": {
-						"summary": {
-							"type": "object",
-							"properties": {
-								"total_files": {"type": "integer"},
-								"total_issues": {"type": "integer"},
-								"overall_score": {"type": "integer"}
-							},
-							"required": ["total_files", "total_issues", "overall_score"],
-							"additionalProperties": false
-						},
-						"issues": {
-							"type": "array",
-							"items": {
-								"type": "object",
-				"properties": {
-					"severity": {"type": "string"},
-					"category": {"type": "string"},
-					"title": {"type": "string"},
-					"description": {"type": "string"},
-					"file_path": {"type": ["string", "null"]},
-					"line_number": {"type": ["integer", "null"]}
-				},
-				"required": ["severity", "category", "title", "description", "file_path", "line_number"],
-								"additionalProperties": false
-							}
-						},
-						"recommendations": {
-							"type": "array",
-							"items": {"type": "string"}
-						}
-					},
-					"required": ["summary", "issues", "recommendations"],
-					"additionalProperties": false
-				}
-			}
-		}
-	});
-
+	// Call LLM with slightly higher temperature for creative review
 	let response = client
-		.post(format!(
-			"{}/chat/completions",
-			config.openrouter.base_url.trim_end_matches('/')
-		))
-		.header("Authorization", format!("Bearer {}", api_key))
-		.header("HTTP-Referer", "https://github.com/muvon/octocode")
-		.header("X-Title", "Octocode")
-		.header("Content-Type", "application/json")
-		.json(&payload)
-		.timeout(std::time::Duration::from_secs(config.openrouter.timeout))
-		.send()
+		.chat_completion_with_temperature(messages, 0.2)
 		.await?;
 
-	if !response.status().is_success() {
-		let error_text = response.text().await?;
-		return Err(anyhow::anyhow!("LLM API error: {}", error_text));
-	}
-
-	let response_json: Value = response.json().await?;
-
-	let message = response_json
-		.get("choices")
-		.and_then(|choices| choices.get(0))
-		.and_then(|choice| choice.get("message"))
-		.and_then(|message| message.get("content"))
-		.and_then(|content| content.as_str())
-		.ok_or_else(|| anyhow::anyhow!("Invalid response format from LLM"))?;
-
-	Ok(message.to_string())
+	Ok(response)
 }

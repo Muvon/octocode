@@ -16,15 +16,15 @@
 
 use crate::config::Config;
 use crate::indexer::graphrag::types::{CodeNode, CodeRelationship};
+use crate::llm::{LlmClient, Message};
 use anyhow::Result;
-use reqwest::Client;
 use serde::Deserialize;
 use serde_json::json;
 use std::collections::HashMap;
 
 pub struct AIEnhancements {
 	config: Config,
-	client: Client,
+	llm_client: Option<LlmClient>,
 	quiet: bool,
 }
 
@@ -53,17 +53,24 @@ struct FileDescription {
 }
 
 impl AIEnhancements {
-	pub fn new(config: Config, client: Client, quiet: bool) -> Self {
+	pub fn new(config: Config, quiet: bool) -> Self {
+		// Try to create LLM client if LLM is enabled
+		let llm_client = if config.graphrag.use_llm {
+			LlmClient::from_config(&config).ok()
+		} else {
+			None
+		};
+
 		Self {
 			config,
-			client,
+			llm_client,
 			quiet,
 		}
 	}
 
 	// Check if LLM enhancements are enabled
 	pub fn llm_enabled(&self) -> bool {
-		self.config.graphrag.use_llm
+		self.config.graphrag.use_llm && self.llm_client.is_some()
 	}
 
 	// Enhanced relationship discovery with optional AI for complex cases
@@ -556,79 +563,34 @@ impl AIEnhancements {
 		Ok(results)
 	}
 
-	// Call LLM API
+	// Call LLM API using octolib
 	async fn call_llm(
 		&self,
 		model_name: &str,
 		system: String,
 		prompt: String,
-		json_schema: Option<serde_json::Value>,
+		_json_schema: Option<serde_json::Value>,
 	) -> Result<String> {
-		// Check if we have an API key configured
-		let api_key = match &self.config.openrouter.api_key {
-			Some(key) => key.clone(),
-			None => return Err(anyhow::anyhow!("OpenRouter API key not configured")),
+		// Get LLM client or create one with custom model
+		let client = if let Some(ref client) = self.llm_client {
+			// Check if we need to use a different model
+			if client.model() != model_name {
+				LlmClient::with_model(&self.config, model_name)?
+			} else {
+				// Clone is not available, so we'll create a new client
+				LlmClient::with_model(&self.config, model_name)?
+			}
+		} else {
+			return Err(anyhow::anyhow!("LLM client not initialized"));
 		};
 
-		// Prepare request body
-		let mut request_body = json!({
-			"model": model_name,
-		"messages": [{
-			"role": "system",
-			"content": system
-		}, {
-			"role": "user",
-			"content": prompt
-		}],
-			// "max_tokens": 200
-		});
+		// Build messages
+		let messages = vec![Message::system(&system), Message::user(&prompt)];
 
-		// Only add response_format if schema is provided
-		if let Some(schema_value) = json_schema {
-			request_body["response_format"] = json!({
-				"type": "json_schema",
-				"json_schema": {
-					"name": "relationship",
-					"strict": true,
-					"schema": schema_value
-				}
-			});
-		}
+		// Call LLM
+		let response = client.chat_completion(messages).await?;
 
-		// Call OpenRouter API
-		let response = self
-			.client
-			.post("https://openrouter.ai/api/v1/chat/completions")
-			.header("Authorization", format!("Bearer {}", api_key))
-			.header("HTTP-Referer", "https://github.com/muvon/octocode")
-			.header("X-Title", "Octocode")
-			.json(&request_body)
-			.send()
-			.await?;
-
-		// Check if the API call was successful
-		if !response.status().is_success() {
-			let status = response.status();
-			let error_text = response
-				.text()
-				.await
-				.unwrap_or_else(|_| "Unable to read error response".to_string());
-			return Err(anyhow::anyhow!("API error: {} - {}", status, error_text));
-		}
-
-		// Parse the response
-		let response_json = response.json::<serde_json::Value>().await?;
-
-		// Extract the response text
-		if let Some(content) = response_json["choices"][0]["message"]["content"].as_str() {
-			Ok(content.to_string())
-		} else {
-			// Provide more detailed error information
-			Err(anyhow::anyhow!(
-				"Failed to get response content: {:?}",
-				response_json
-			))
-		}
+		Ok(response)
 	}
 
 	// Extract AI-powered description for complex files (legacy single-file method)

@@ -85,18 +85,10 @@ pub fn execute(args: &ConfigArgs, mut config: Config) -> Result<()> {
 
 		// LLM Configuration
 		println!("🤖 LLM Configuration:");
-		println!("   Model: {}", config.openrouter.model);
-		println!("   Base URL: {}", config.openrouter.base_url);
-		println!("   Timeout: {}s", config.openrouter.timeout);
-		println!(
-			"   API Key: {}",
-			if config.openrouter.api_key.is_some() {
-				"✅ Set"
-			} else {
-				"❌ Not set"
-			}
-		);
-		println!();
+		println!("   Model: {}", config.llm.model);
+		println!("   Temperature: {}", config.llm.temperature);
+		println!("   Max Tokens: {}", config.llm.max_tokens);
+		println!("   Timeout: {}s", config.llm.timeout);
 
 		// Embedding Configuration
 		println!("🔍 Embedding Configuration:");
@@ -224,7 +216,7 @@ pub fn execute(args: &ConfigArgs, mut config: Config) -> Result<()> {
 	let mut updated = false;
 
 	if let Some(model) = &args.model {
-		config.openrouter.model = model.clone();
+		config.llm.model = model.clone();
 		println!("Model set to: {}", model);
 		updated = true;
 	}

@@ -3,11 +3,14 @@
 # Version: 1 (for future migration support)
 version = 1
 
-[openrouter]
-model = "openai/gpt-4.1-mini"
-base_url = "https://openrouter.ai/api/v1"
+[llm]
+# Model in provider:model format (e.g., "openai:gpt-4o-mini", "anthropic:claude-3-5-haiku-20241022")
+# Recommended: Fast, cost-effective models for tooling
+model = "openrouter:openai/gpt-4o-mini"
 timeout = 120
-# api_key = "" # Set via environment variable OPENROUTER_API_KEY
+temperature = 0.7
+max_tokens = 4000
+# API keys set via environment variables: OPENAI_API_KEY, ANTHROPIC_API_KEY, OPENROUTER_API_KEY, etc.
 
 [index]
 chunk_size = 2000
@@ -37,8 +40,9 @@ enabled = false
 use_llm = false
 
 [graphrag.llm]
-description_model = "openai/gpt-4.1-mini"
-relationship_model = "openai/gpt-4.1-mini"
+# Models for GraphRAG AI enhancements in provider:model format
+description_model = "openrouter:openai/gpt-4o-mini"
+relationship_model = "openrouter:openai/gpt-4o-mini"
 
 # AI processing batch size - how many files to analyze per AI call
 # Smaller values reduce API costs and token usage, larger values improve efficiency

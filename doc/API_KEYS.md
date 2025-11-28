@@ -114,6 +114,8 @@ octocode config \
 
 For AI-powered features like commit messages, code review, and GraphRAG descriptions.
 
+Octocode supports multiple LLM providers through a unified interface. Configure using `provider:model` format.
+
 ### OpenRouter (Recommended)
 
 **Best for**: Access to multiple LLM providers through one API
@@ -122,20 +124,95 @@ For AI-powered features like commit messages, code review, and GraphRAG descript
 # Set environment variable
 export OPENROUTER_API_KEY="your-openrouter-api-key"
 
-# Configure default model
-octocode config --model "openai/gpt-4.1-mini"
+# Configure default model (provider:model format)
+octocode config --model "openrouter:openai/gpt-4o-mini"
 
 # Or use Claude for better code understanding
-octocode config --model "anthropic/claude-3.5-sonnet"
+octocode config --model "openrouter:anthropic/claude-3.5-sonnet"
 ```
 
 **Get API key**: [openrouter.ai](https://openrouter.ai/)
 
 **Popular models:**
-- `openai/gpt-4.1-mini` - Fast and cost-effective (current default)
-- `openai/gpt-4o` - High quality
-- `anthropic/claude-3.5-sonnet` - Excellent for code
-- `google/gemini-pro` - Good balance
+- `openrouter:openai/gpt-4o-mini` - Fast and cost-effective (current default)
+- `openrouter:openai/gpt-4o` - High quality
+- `openrouter:anthropic/claude-3.5-sonnet` - Excellent for code
+- `openrouter:google/gemini-2.0-flash-exp` - Good balance
+
+### OpenAI
+
+**Best for**: Direct OpenAI API access
+
+```bash
+# Set environment variable
+export OPENAI_API_KEY="your-openai-api-key"
+
+# Configure model
+octocode config --model "openai:gpt-4o-mini"
+```
+
+**Get API key**: [platform.openai.com](https://platform.openai.com/)
+
+**Popular models:**
+- `openai:gpt-4o-mini` - Fast and cost-effective
+- `openai:gpt-4o` - High quality
+- `openai:gpt-4-turbo` - Balanced performance
+
+### Anthropic
+
+**Best for**: Code understanding and analysis
+
+```bash
+# Set environment variable
+export ANTHROPIC_API_KEY="your-anthropic-api-key"
+
+# Configure model
+octocode config --model "anthropic:claude-3-5-haiku-20241022"
+```
+
+**Get API key**: [console.anthropic.com](https://console.anthropic.com/)
+
+**Popular models:**
+- `anthropic:claude-3-5-haiku-20241022` - Fast and cost-effective
+- `anthropic:claude-3-5-sonnet-20241022` - Excellent for code
+- `anthropic:claude-3-opus-20240229` - Highest quality
+
+### Google AI
+
+**Best for**: Integration with Google ecosystem
+
+```bash
+# Set environment variable
+export GOOGLE_API_KEY="your-google-api-key"
+
+# Configure model
+octocode config --model "google:gemini-2.0-flash-exp"
+```
+
+**Get API key**: [aistudio.google.com](https://aistudio.google.com/)
+
+**Popular models:**
+- `google:gemini-2.0-flash-exp` - Fast and experimental
+- `google:gemini-1.5-pro` - High quality
+- `google:gemini-1.5-flash` - Balanced performance
+
+### DeepSeek
+
+**Best for**: Cost-effective code generation
+
+```bash
+# Set environment variable
+export DEEPSEEK_API_KEY="your-deepseek-api-key"
+
+# Configure model
+octocode config --model "deepseek:deepseek-chat"
+```
+
+**Get API key**: [platform.deepseek.com](https://platform.deepseek.com/)
+
+**Popular models:**
+- `deepseek:deepseek-chat` - General purpose
+- `deepseek:deepseek-coder` - Code-specialized
 
 ## Platform Limitations
 
@@ -157,7 +234,14 @@ octocode config --model "anthropic/claude-3.5-sonnet"
 ```bash
 # Add to your shell profile (.bashrc, .zshrc, etc.)
 export VOYAGE_API_KEY="your-voyage-api-key"
-export OPENROUTER_API_KEY="your-openrouter-api-key"
+
+# Optional: Add LLM provider for AI features
+export OPENROUTER_API_KEY="sk-or-..."
+# Or use other providers
+export OPENAI_API_KEY="sk-..."
+export ANTHROPIC_API_KEY="sk-ant-..."
+export GOOGLE_API_KEY="..."
+export DEEPSEEK_API_KEY="..."
 
 # Reload your shell
 source ~/.bashrc  # or ~/.zshrc
@@ -177,9 +261,8 @@ api_key = "your-jina-api-key"
 [embedding.google]
 api_key = "your-google-api-key"
 
-[openrouter]
-api_key = "your-openrouter-api-key"
-model = "openai/gpt-4o-mini"
+[llm]
+model = "openrouter:openai/gpt-4o-mini"
 ```
 
 ### Command Line Configuration
@@ -246,7 +329,7 @@ octocode config \
   --code-embedding-model "fastembed:all-MiniLM-L6-v2" \
   --text-embedding-model "fastembed:multilingual-e5-small"
 
-# AI features disabled without OpenRouter key
+# AI features disabled without LLM provider API key
 ```
 
 ### High-Quality Setup
@@ -282,7 +365,7 @@ git add .
 octocode commit --dry-run
 
 # If successful, LLM is working
-# If errors, check OpenRouter API key
+# If errors, check LLM provider API key (OPENAI_API_KEY, ANTHROPIC_API_KEY, etc.)
 ```
 
 ### Debug Configuration Issues
@@ -300,7 +383,7 @@ RUST_LOG=debug octocode index
 ### Free Tiers
 
 - **Voyage AI**: 200M tokens/month (very generous)
-- **OpenRouter**: Varies by model, some have free tiers
+- **LLM Providers**: Varies by provider and model, some have free tiers
 - **Google AI**: 15 requests/minute free tier
 
 ### Cost Optimization

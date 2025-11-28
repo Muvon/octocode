@@ -27,7 +27,6 @@ use crate::indexer::graphrag::utils::{cosine_similarity, detect_project_root, to
 use crate::state::SharedState;
 use crate::store::{CodeBlock, Store};
 use anyhow::{Context, Result};
-use reqwest::Client;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -71,9 +70,8 @@ impl GraphBuilder {
 		let graph = Arc::new(RwLock::new(db_ops.load_graph(&project_root, quiet).await?));
 
 		// Initialize AI enhancements if enabled
-		let client = Client::new();
 		let ai_enhancements = if config.graphrag.use_llm {
-			Some(AIEnhancements::new(config.clone(), client.clone(), quiet))
+			Some(AIEnhancements::new(config.clone(), quiet))
 		} else {
 			None
 		};

@@ -61,20 +61,20 @@ impl Default for GraphRAGConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct OpenRouterConfig {
+pub struct LlmConfig {
 	pub model: String,
-	pub base_url: String,
 	pub timeout: u64,
-	pub api_key: Option<String>,
+	pub temperature: f32,
+	pub max_tokens: usize,
 }
 
-impl Default for OpenRouterConfig {
+impl Default for LlmConfig {
 	fn default() -> Self {
 		Self {
-			model: "openai/gpt-4.1-mini".to_string(),
-			base_url: "https://openrouter.ai/api/v1".to_string(),
+			model: "openrouter:openai/gpt-4o-mini".to_string(),
 			timeout: 120,
-			api_key: None,
+			temperature: 0.7,
+			max_tokens: 4000,
 		}
 	}
 }
@@ -146,7 +146,7 @@ pub struct Config {
 	pub version: u32,
 
 	#[serde(default)]
-	pub openrouter: OpenRouterConfig,
+	pub llm: LlmConfig,
 
 	#[serde(default)]
 	pub index: IndexConfig,
@@ -169,7 +169,7 @@ impl Default for Config {
 	fn default() -> Self {
 		Self {
 			version: default_version(),
-			openrouter: OpenRouterConfig::default(),
+			llm: LlmConfig::default(),
 			index: IndexConfig::default(),
 			search: SearchConfig::default(),
 			embedding: EmbeddingConfig::default(),
@@ -183,7 +183,7 @@ impl Config {
 	pub fn load() -> Result<Self> {
 		let config_path = Self::get_system_config_path()?;
 
-		let mut config = if config_path.exists() {
+		let config = if config_path.exists() {
 			let content = fs::read_to_string(&config_path)?;
 			toml::from_str(&content)?
 		} else {
@@ -203,10 +203,8 @@ impl Config {
 			template_config
 		};
 
-		// Environment variables take precedence over config file values
-		if let Ok(api_key) = std::env::var("OPENROUTER_API_KEY") {
-			config.openrouter.api_key = Some(api_key);
-		}
+		// Environment variables are handled by octolib providers automatically
+		// No need to set API keys in config
 
 		Ok(config)
 	}
@@ -254,15 +252,19 @@ impl Config {
 	}
 
 	pub fn get_model(&self) -> &str {
-		&self.openrouter.model
-	}
-
-	pub fn get_base_url(&self) -> &str {
-		&self.openrouter.base_url
+		&self.llm.model
 	}
 
 	pub fn get_timeout(&self) -> u64 {
-		self.openrouter.timeout
+		self.llm.timeout
+	}
+
+	pub fn get_temperature(&self) -> f32 {
+		self.llm.temperature
+	}
+
+	pub fn get_max_tokens(&self) -> usize {
+		self.llm.max_tokens
 	}
 }
 
@@ -275,7 +277,7 @@ mod tests {
 		// Use template loading instead of Config::default() to avoid GraphRAG panic
 		let config = Config::load_from_template().expect("Failed to load template config");
 		assert_eq!(config.version, 1);
-		assert_eq!(config.openrouter.model, "openai/gpt-4.1-mini");
+		assert_eq!(config.llm.model, "openrouter:openai/gpt-4o-mini");
 		assert_eq!(config.index.chunk_size, 2000);
 		assert_eq!(config.search.max_results, 20);
 
@@ -286,10 +288,13 @@ mod tests {
 		// Test new GraphRAG configuration structure
 		assert!(!config.graphrag.enabled);
 		assert!(!config.graphrag.use_llm);
-		assert_eq!(config.graphrag.llm.description_model, "openai/gpt-4.1-mini");
+		assert_eq!(
+			config.graphrag.llm.description_model,
+			"openrouter:openai/gpt-4o-mini"
+		);
 		assert_eq!(
 			config.graphrag.llm.relationship_model,
-			"openai/gpt-4.1-mini"
+			"openrouter:openai/gpt-4o-mini"
 		);
 		assert_eq!(config.graphrag.llm.ai_batch_size, 8);
 		assert_eq!(config.graphrag.llm.max_batch_tokens, 16384);
@@ -317,7 +322,7 @@ mod tests {
 
 		let config = result.unwrap();
 		assert_eq!(config.version, 1);
-		assert_eq!(config.openrouter.model, "openai/gpt-4.1-mini");
+		assert_eq!(config.llm.model, "openrouter:openai/gpt-4o-mini");
 		assert_eq!(config.index.chunk_size, 2000);
 		assert_eq!(config.search.max_results, 20);
 		assert_eq!(config.embedding.code_model, "voyage:voyage-code-3");
@@ -325,10 +330,13 @@ mod tests {
 		// Test new GraphRAG configuration structure from template
 		assert!(!config.graphrag.enabled);
 		assert!(!config.graphrag.use_llm);
-		assert_eq!(config.graphrag.llm.description_model, "openai/gpt-4.1-mini");
+		assert_eq!(
+			config.graphrag.llm.description_model,
+			"openrouter:openai/gpt-4o-mini"
+		);
 		assert_eq!(
 			config.graphrag.llm.relationship_model,
-			"openai/gpt-4.1-mini"
+			"openrouter:openai/gpt-4o-mini"
 		);
 		assert_eq!(config.graphrag.llm.ai_batch_size, 8);
 		assert_eq!(config.graphrag.llm.max_batch_tokens, 16384);
