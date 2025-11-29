@@ -414,6 +414,8 @@ fn create_commit_prompt(
 		- Look for function signature changes, API modifications, removed public methods\\n\\\
 		- Check for interface/trait changes, configuration schema changes\\n\\\
 		- Identify database migrations, dependency version bumps with breaking changes\\n\\\
+		 - Library code breaking change policy: Mark any public interface changes as breaking changes (API signatures, behavior of exported functions)\\n\\\
+		 - Application code breaking change policy: Internal changes don't need breaking change markers unless they affect configuration formats or user-facing features\\n\\\
 		- If breaking changes detected, use type! format and add BREAKING CHANGE footer\\n\\n\\\
 		BODY RULES (add body with bullet points if ANY of these apply):\\n\\\
 		- 4+ files changed OR 25+ lines changed\\n\\\
