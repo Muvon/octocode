@@ -451,8 +451,93 @@ fn fast_count_indexable_files(
 	count
 }
 
-/// Render signatures and search results as markdown output (more efficient for AI tools)
+// Render signatures and search results as markdown output (more efficient for AI tools)
 // Rendering functions have been moved to src/indexer/render_utils.rs
+
+/// Centralized helper function to persist data and store git metadata atomically
+/// This ensures metadata is only stored when data is safely persisted
+async fn persist_and_store_metadata(
+	store: &Store,
+	git_repo_root: Option<&Path>,
+	config: &Config,
+	quiet: bool,
+	context: &str,
+) -> Result<()> {
+	// CRITICAL: Flush first with explicit error handling
+	// If flush fails, we must NOT store metadata as data is not persisted
+	if let Err(e) = store.flush().await {
+		tracing::error!(
+			context = context,
+			error = %e,
+			"Failed to flush store - metadata will NOT be stored"
+		);
+		return Err(e);
+	}
+
+	tracing::debug!(context = context, "Successfully flushed store");
+
+	// Only store metadata if we have a git repository
+	let Some(git_root) = git_repo_root else {
+		return Ok(());
+	};
+
+	// Get current commit hash
+	let current_commit = match git::get_current_commit_hash(git_root) {
+		Ok(hash) => hash,
+		Err(e) => {
+			tracing::warn!(
+				context = context,
+				error = %e,
+				"Could not get current commit hash, skipping metadata storage"
+			);
+			return Ok(()); // Not a fatal error, just skip metadata
+		}
+	};
+
+	// Store git metadata
+	if let Err(e) = store.store_git_metadata(&current_commit).await {
+		tracing::error!(
+			context = context,
+			commit = %current_commit,
+			error = %e,
+			"Failed to store git metadata"
+		);
+		if !quiet {
+			eprintln!("Warning: Could not store git metadata: {}", e);
+		}
+		// Continue to try GraphRAG metadata even if git metadata fails
+	} else {
+		tracing::debug!(
+			context = context,
+			commit = %current_commit,
+			"Successfully stored git metadata"
+		);
+	}
+
+	// Store GraphRAG commit hash if GraphRAG is enabled
+	if config.graphrag.enabled {
+		if let Err(e) = store.store_graphrag_commit_hash(&current_commit).await {
+			tracing::error!(
+				context = context,
+				commit = %current_commit,
+				error = %e,
+				"Failed to store GraphRAG git metadata"
+			);
+			if !quiet {
+				eprintln!("Warning: Could not store GraphRAG git metadata: {}", e);
+			}
+		} else {
+			tracing::debug!(
+				context = context,
+				commit = %current_commit,
+				"Successfully stored GraphRAG metadata"
+			);
+		}
+	}
+
+	Ok(())
+}
+
 // Main function to index files with optional git optimization
 pub async fn index_files(
 	store: &Store,
@@ -531,6 +616,18 @@ pub async fn index_files_with_quiet(
 									}
 								}
 
+								// CRITICAL: Flush immediately after cleanup to persist removals
+								// This prevents data loss if process is interrupted before new data is written
+								// Cannot be deferred because git metadata is not yet updated - if we crash here,
+								// next run will correctly detect files need reindexing
+								if !changed_files.is_empty() {
+									store.flush().await?;
+									tracing::debug!(
+										files_cleaned = changed_files.len(),
+										"Flushed after cleanup of changed files"
+									);
+								}
+
 								Some(
 									changed_files
 										.into_iter()
@@ -556,7 +653,16 @@ pub async fn index_files_with_quiet(
 						// Check if GraphRAG needs to be built from existing database even when no files changed
 						if config.graphrag.enabled {
 							let needs_graphrag_from_existing =
-								store.graphrag_needs_indexing().await.unwrap_or(false);
+								match store.graphrag_needs_indexing().await {
+									Ok(v) => v,
+									Err(e) => {
+										tracing::warn!(
+											error = %e,
+											"Failed to check if GraphRAG needs indexing, assuming false"
+										);
+										false
+									}
+								};
 							if needs_graphrag_from_existing {
 								if !quiet {
 									println!("🔗 Building GraphRAG from existing database...");
@@ -568,6 +674,17 @@ pub async fn index_files_with_quiet(
 								graph_builder
 									.build_from_existing_database(Some(state.clone()))
 									.await?;
+
+								// CRITICAL: Persist data and store git metadata after GraphRAG build
+								// This prevents infinite rebuilding on subsequent runs
+								persist_and_store_metadata(
+									store,
+									Some(git_root),
+									config,
+									quiet,
+									"graphrag_from_existing",
+								)
+								.await?;
 							}
 						}
 
@@ -1074,7 +1191,17 @@ pub async fn index_files_with_quiet(
 				.get_all_code_blocks_for_graphrag()
 				.await
 				.unwrap_or_default();
-			!existing_blocks.is_empty() && store.graphrag_needs_indexing().await.unwrap_or(false)
+			let needs_indexing = match store.graphrag_needs_indexing().await {
+				Ok(v) => v,
+				Err(e) => {
+					tracing::warn!(
+						error = %e,
+						"Failed to check if GraphRAG needs indexing, assuming false"
+					);
+					false
+				}
+			};
+			!existing_blocks.is_empty() && needs_indexing
 		} else {
 			false // We have new blocks, process them normally
 		};
@@ -1121,16 +1248,7 @@ pub async fn index_files_with_quiet(
 				state_guard.status_message = "".to_string();
 			}
 
-			// Store GraphRAG commit hash after successful processing
-			if let Some(git_root) = git_repo_root {
-				if let Ok(current_commit) = git::get_current_commit_hash(git_root) {
-					if let Err(e) = store.store_graphrag_commit_hash(&current_commit).await {
-						if !quiet {
-							eprintln!("Warning: Could not store GraphRAG git metadata: {}", e);
-						}
-					}
-				}
-			}
+			// NOTE: GraphRAG commit hash will be stored AFTER final flush for data integrity
 		}
 	}
 
@@ -1151,34 +1269,19 @@ pub async fn index_files_with_quiet(
 		embedding_calls,
 	);
 
-	// Store current git commit hash for future optimization
-	// Only store git metadata if files were actually processed OR if this is a legitimate empty repository
-	if let Some(git_root) = git_repo_root {
-		if let Ok(current_commit) = git::get_current_commit_hash(git_root) {
-			// Only store git metadata if:
-			// 1. Files were actually processed (final_files > 0), OR
-			// 2. Git optimization was used (git_changed_files.is_some()) - even if no files were processed due to unchanged content, OR
-			// 3. This is a legitimate empty repository (total_files_found == 0 and no git optimization was used)
-			let should_store_metadata = final_files > 0
-				|| git_changed_files.is_some()
-				|| (total_files_found == 0 && git_changed_files.is_none());
+	// CRITICAL: Persist data and store git metadata atomically
+	// Only mark commit as "indexed" when all data is safely persisted
+	// Check if we should store metadata based on what was processed
+	let should_store_metadata = final_files > 0
+		|| git_changed_files.is_some()
+		|| (total_files_found == 0 && git_changed_files.is_none());
 
-			if should_store_metadata {
-				if let Err(e) = store.store_git_metadata(&current_commit).await {
-					if !quiet {
-						eprintln!("Warning: Could not store git metadata: {}", e);
-					}
-				}
-			} else if !quiet {
-				println!(
-					"⚠️  Git metadata not stored - no files processed and no git optimization used"
-				);
-			}
-		}
+	if should_store_metadata {
+		persist_and_store_metadata(store, git_repo_root, config, quiet, "indexing_complete")
+			.await?;
+	} else if !quiet {
+		println!("⚠️  Git metadata not stored - no files processed and no git optimization used");
 	}
-
-	// Flush the store to ensure all data is persisted
-	store.flush().await?;
 
 	Ok(())
 }
