@@ -15,7 +15,7 @@
 use anyhow::Result;
 
 // Arrow imports
-use arrow::array::{Array, StringArray};
+use arrow_array::{Array, StringArray};
 
 // LanceDB imports
 use futures::TryStreamExt;

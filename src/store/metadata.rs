@@ -16,9 +16,8 @@ use anyhow::Result;
 use std::sync::Arc;
 
 // Arrow imports
-use arrow::array::{Array, Int64Array, StringArray};
-use arrow::datatypes::{DataType, Field, Schema};
-use arrow::record_batch::RecordBatch;
+use arrow_array::{Array, Int64Array, RecordBatch, StringArray};
+use arrow_schema::{DataType, Field, Schema};
 
 // LanceDB imports
 use futures::TryStreamExt;

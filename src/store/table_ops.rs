@@ -16,9 +16,8 @@ use anyhow::Result;
 use std::sync::Arc;
 
 // Arrow imports
-use arrow::array::Array;
-use arrow::datatypes::Schema;
-use arrow::record_batch::RecordBatch;
+use arrow_array::{Array, RecordBatch};
+use arrow_schema::Schema;
 
 // LanceDB imports
 use futures::TryStreamExt;
@@ -59,7 +58,7 @@ impl<'a> TableOperations<'a> {
 		let table_names = self.db.table_names().execute().await?;
 
 		if table_names.contains(&table_name.to_string()) {
-			if let Err(e) = self.db.drop_table(table_name).await {
+			if let Err(e) = self.db.drop_table(table_name, &[]).await {
 				// Log error to structured logging instead of stderr
 				tracing::warn!("Failed to drop {} table: {}", table_name, e);
 			} else {
@@ -89,7 +88,7 @@ impl<'a> TableOperations<'a> {
 
 		// Drop each table completely (this removes both data and schema)
 		for table_name in table_names {
-			if let Err(e) = self.db.drop_table(&table_name).await {
+			if let Err(e) = self.db.drop_table(&table_name, &[]).await {
 				// Log error to structured logging instead of stderr
 				tracing::warn!("Failed to drop table {}: {}", table_name, e);
 			} else {
@@ -116,7 +115,7 @@ impl<'a> TableOperations<'a> {
 				continue;
 			}
 
-			if let Err(e) = self.db.drop_table(&table_name).await {
+			if let Err(e) = self.db.drop_table(&table_name, &[]).await {
 				// Log error to structured logging instead of stderr
 				tracing::warn!("Failed to drop table {}: {}", table_name, e);
 			} else {

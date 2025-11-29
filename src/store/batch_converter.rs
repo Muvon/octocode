@@ -18,9 +18,10 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 // Arrow imports
-use arrow::array::{Array, FixedSizeListArray, Float32Array, ListArray, StringArray, UInt32Array};
-use arrow::datatypes::{DataType, Field, Schema};
-use arrow::record_batch::RecordBatch;
+use arrow_array::{
+	Array, FixedSizeListArray, Float32Array, ListArray, RecordBatch, StringArray, UInt32Array,
+};
+use arrow_schema::{DataType, Field, Schema};
 
 use crate::store::{CodeBlock, DocumentBlock, TextBlock};
 

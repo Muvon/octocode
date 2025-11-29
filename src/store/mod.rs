@@ -17,8 +17,8 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
 // Arrow imports
-use arrow::datatypes::{DataType, Field, Schema};
-use arrow::record_batch::RecordBatch;
+use arrow_array::RecordBatch;
+use arrow_schema::{DataType, Field, Schema};
 
 // LanceDB imports
 use futures::TryStreamExt;
@@ -166,7 +166,7 @@ impl Store {
 									tracing::warn!("Schema mismatch detected for table '{}': expected dimension {}, found {}. Dropping table for recreation.",
 										table_name, expected_dim, size);
 									drop(table); // Release table handle before dropping
-									if let Err(e) = db.drop_table(table_name).await {
+									if let Err(e) = db.drop_table(table_name, &[]).await {
 										tracing::warn!(
 											"Failed to drop table {}: {}",
 											table_name,

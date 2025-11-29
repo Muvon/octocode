@@ -18,9 +18,8 @@ use std::str::FromStr;
 use std::sync::{Arc, RwLock};
 
 // Arrow imports
-use arrow::array::{Array, StringArray};
-use arrow::datatypes::{DataType, Field, Schema};
-use arrow::record_batch::RecordBatch;
+use arrow_array::{Array, RecordBatch, StringArray};
+use arrow_schema::{DataType, Field, Schema};
 
 // LanceDB imports
 use crate::store::{table_ops::TableOperations, CodeBlock};

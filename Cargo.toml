@@ -45,24 +45,26 @@ overflow-checks = false # Disable overflow checks in release mode
 tokio = { version = "1.48.0", features = ["rt-multi-thread", "macros", "time", "sync", "io-util", "io-std", "process"] }
 ignore = "0.4.25"
 parking_lot = "0.12.5"
-lance-table = { version = "0.33.0", default-features = false, features = [] }
-lance = { version = "0.33.0", default-features = false, features = [] }
-lancedb = { version = "0.21.3", default-features = false }
-arrow = { version = "55.2.0", default-features = false, features = ["prettyprint"] }
+lance-table = { version = "0.39.0", default-features = false, features = [] }
+lance = { version = "0.39.0", default-features = false, features = [] }
+lancedb = { version = "0.22.3", default-features = false }
+arrow = { version = "56.2.0", default-features = false, features = ["prettyprint"] }
+arrow-array = { version = "56.2.0", default-features = false }
+arrow-schema = { version = "56.2.0", default-features = false }
 serde = { version = "1.0.228", features = ["derive"] }
-chrono = { version = "0.4", default-features = false, features = ["serde", "clock"] }
+chrono = { version = "0.4.42", default-features = false, features = ["serde", "clock"] }
 async-trait = "0.1"
 tree-sitter = "0.25.10"
-tree-sitter-php = "0.23.11"
-tree-sitter-rust = "0.23.3"
-tree-sitter-python = "0.23.6"
-tree-sitter-javascript = "0.23.1"
+tree-sitter-php = "0.24.2"
+tree-sitter-rust = "0.24.0"
+tree-sitter-python = "0.25.0"
+tree-sitter-javascript = "0.25.0"
 tree-sitter-json = "0.24.8"
-tree-sitter-go = "0.23.4"
+tree-sitter-go = "0.25.0"
 tree-sitter-cpp = "0.23.4"
 tree-sitter-java = "0.23.5"
 tree-sitter-bash = "0.25.0"
-tree-sitter-css = "0.23.2"
+tree-sitter-css = "0.25.0"
 tree-sitter-lua = "0.2.0"
 
 uuid = { version = "1.18.1", default-features = false, features = ["v4"] }
@@ -95,7 +97,7 @@ dotenvy = "0.15"
 
 # Local dependency on octolib with embedding features
 # octolib = { path = "../octolib", features = ["fastembed", "huggingface"] }
-octolib = { version = "0.1.0", default-features = false }
+octolib = { version = "0.2.0", default-features = false }
 
 [profile.dev]
 opt-level = 1          # Basic optimizations without slowing compilation too much

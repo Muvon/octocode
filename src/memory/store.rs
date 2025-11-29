@@ -17,9 +17,8 @@ use chrono::Utc;
 use std::sync::Arc;
 
 // Arrow imports
-use arrow::array::{Array, FixedSizeListArray, Float32Array, StringArray};
-use arrow::datatypes::{DataType, Field, Schema};
-use arrow::record_batch::RecordBatch;
+use arrow_array::{Array, FixedSizeListArray, Float32Array, RecordBatch, StringArray};
+use arrow_schema::{DataType, Field, Schema};
 
 // LanceDB imports
 use futures::TryStreamExt;
@@ -945,7 +944,7 @@ impl MemoryStore {
 			.await?
 			.contains(&"memories".to_string())
 		{
-			self.db.drop_table("memories").await?;
+			self.db.drop_table("memories", &[]).await?;
 		}
 
 		// Drop and recreate relationships table
@@ -956,7 +955,7 @@ impl MemoryStore {
 			.await?
 			.contains(&"memory_relationships".to_string())
 		{
-			self.db.drop_table("memory_relationships").await?;
+			self.db.drop_table("memory_relationships", &[]).await?;
 		}
 
 		// Recreate tables
