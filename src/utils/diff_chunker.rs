@@ -273,7 +273,8 @@ pub fn combine_commit_messages(responses: Vec<String>) -> String {
 		let mut found_empty = false;
 		let mut body_lines = Vec::new();
 
-		for line in &lines[1..] {
+		// Safe iteration: only slice if we have more than 1 line
+		for line in if lines.len() > 1 { &lines[1..] } else { &[] } {
 			if line.trim().is_empty() {
 				found_empty = true;
 				continue;
@@ -554,7 +555,7 @@ mod tests {
 		let empty: Vec<String> = vec![];
 		assert_eq!(combine_commit_messages(empty), "chore: update files");
 
-		// Single response
+		// Single response (single line - this was the panic case!)
 		let single = vec!["feat: add new feature".to_string()];
 		assert_eq!(combine_commit_messages(single), "feat: add new feature");
 
@@ -567,6 +568,21 @@ mod tests {
 		assert!(combined.contains("feat: add feature A")); // Should use longer subject
 		assert!(combined.contains("Added component A"));
 		assert!(combined.contains("Fixed validation"));
+	}
+
+	#[test]
+	fn test_combine_commit_messages_single_line_edge_case() {
+		// This specifically tests the edge case that caused panic at line 276
+		// when response is single-line (lines[1..] panics with empty slice)
+		let single_line_responses = vec!["fix: one line fix".to_string()];
+		let result = combine_commit_messages(single_line_responses);
+		assert_eq!(result, "fix: one line fix");
+
+		// Multiple single-line responses
+		let multi_single_line = vec!["fix: bug one".to_string(), "feat: add thing".to_string()];
+		let result2 = combine_commit_messages(multi_single_line);
+		// Should pick the longer one
+		assert!(result2.contains("fix: bug one") || result2.contains("feat: add thing"));
 	}
 
 	#[test]
