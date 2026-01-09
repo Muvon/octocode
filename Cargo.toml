@@ -54,7 +54,7 @@ arrow-schema = { version = "56.2.0", default-features = false }
 serde = { version = "1.0.228", features = ["derive"] }
 chrono = { version = "0.4.42", default-features = false, features = ["serde", "clock"] }
 async-trait = "0.1"
-tree-sitter = "0.25.10"
+tree-sitter = "0.26.3"
 tree-sitter-php = "0.24.2"
 tree-sitter-rust = "0.24.0"
 tree-sitter-python = "0.25.0"
@@ -65,13 +65,13 @@ tree-sitter-cpp = "0.23.4"
 tree-sitter-java = "0.23.5"
 tree-sitter-bash = "0.25.0"
 tree-sitter-css = "0.25.0"
-tree-sitter-lua = "0.2.0"
+tree-sitter-lua = "0.4.1"
 
 uuid = { version = "1.18.1", default-features = false, features = ["v4"] }
 tree-sitter-typescript = "0.23.2"
 tree-sitter-ruby = "0.23.1"
 tree-sitter-svelte-ng = "1.0.2"
-reqwest = { version = "0.12.24", features = ["json", "rustls-tls"], default-features = false }
+reqwest = { version = "0.13.1", features = ["json", "rustls"], default-features = false }
 anyhow = "1.0.100"
 serde_json = "1.0.145"
 sha2 = "0.10.9"
