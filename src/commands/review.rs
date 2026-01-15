@@ -246,7 +246,7 @@ async fn perform_code_review_chunked(
 		file_stats: &str,
 		focus_context: &str,
 		config: &Config,
-	) -> Vec<String> {
+	) -> Vec<serde_json::Value> {
 		// Limit parallel processing to prevent resource exhaustion
 		let chunk_limit = std::cmp::min(chunks.len(), diff_chunker::MAX_PARALLEL_CHUNKS);
 		let mut join_set = JoinSet::new();
@@ -294,9 +294,9 @@ async fn perform_code_review_chunked(
 
 	/// Collect review responses from parallel tasks maintaining original order
 	async fn collect_review_responses(
-		mut join_set: JoinSet<Result<(usize, String)>>,
+		mut join_set: JoinSet<Result<(usize, serde_json::Value)>>,
 		expected_count: usize,
-	) -> Vec<String> {
+	) -> Vec<serde_json::Value> {
 		let mut ordered_responses = vec![None; expected_count];
 
 		while let Some(result) = join_set.join_next().await {
@@ -318,7 +318,11 @@ async fn perform_code_review_chunked(
 	}
 
 	if responses.is_empty() {
-		return create_fallback_review(file_count, &changed_files, "All chunks failed");
+		return create_fallback_review(
+			file_count,
+			&changed_files,
+			&serde_json::json!({"error": "All chunks failed"}),
+		);
 	}
 
 	// Combine responses into final review result
@@ -336,35 +340,58 @@ fn create_review_prompt(
 	focus_context: &str,
 ) -> String {
 	format!(
-		"You are an expert code reviewer. Analyze the following git diff and provide a comprehensive code review focusing on best practices, potential issues, and maintainability.\n\n\
-		ANALYSIS SCOPE:\n\
-		- Files changed: {}\n\
-		- Lines added: {}\n\
-		- Lines deleted: {}\n\
-		- File types: {}\n\n\
-		REVIEW CRITERIA:\n\
-		1. **Security Issues**: SQL injection, XSS, hardcoded secrets, insecure patterns\n\
-		2. **Performance**: Inefficient algorithms, memory leaks, unnecessary computations\n\
-		3. **Code Quality**: Complexity, readability, maintainability, DRY principle\n\
-		4. **Best Practices**: Language-specific conventions, design patterns, error handling\n\
-		5. **Testing**: Missing tests, test coverage, test quality\n\
-		6. **Documentation**: Missing comments, unclear naming, API documentation\n\
-		7. **Architecture**: Coupling, separation of concerns, SOLID principles\n\n\
-		SEVERITY LEVELS:\n\
-		- CRITICAL: Security vulnerabilities, data corruption risks, breaking changes\n\
-		- HIGH: Performance issues, major bugs, significant technical debt\n\
-		- MEDIUM: Code quality issues, minor bugs, style violations\n\
-		- LOW: Suggestions, optimizations, documentation improvements\\n\\n\\\
-		LOCATION INFORMATION:\\n\\\
-		For each issue, provide the specific file path and line number where the issue occurs.\\n\\\
-		- file_path: The relative path to the file (e.g., 'src/main.rs', 'lib/utils.js')\\n\\\
-		- line_number: The specific line number where the issue is found\\n\\\
-		Extract this information from the git diff context. If you cannot determine the exact location, omit these fields.\\n\\n\\\
-		File Statistics:\\n\\
-		{}\n\n\
-		Git Diff:\n\
-		```\n{}\n```{}\n\n\
-		Provide a structured analysis. Focus on actionable feedback and be specific about issues. Provide clear suggestions for improvements. Be thorough but concise.",
+		concat!(
+			"You are an expert code reviewer. Analyze the following git diff and provide a comprehensive code review focusing on best practices, potential issues, and maintainability.\n\n",
+			"CRITICAL: You must respond with RAW JSON ONLY - no markdown formatting, no code blocks, no explanations. Start your response with '{{' and output only valid JSON.\n\n",
+			"ANALYSIS SCOPE:\n",
+			"- Files changed: {}\n",
+			"- Lines added: {}\n",
+			"- Lines deleted: {}\n",
+			"- File types: {}\n\n",
+			"OUTPUT FORMAT (Respond with ONLY this JSON structure, no markdown):\n",
+			"{{\n",
+			"  \"summary\": {{\n",
+			"    \"total_files\": <number>,\n",
+			"    \"total_issues\": <number>,\n",
+			"    \"overall_score\": <0-100>\n",
+			"  }},\n",
+			"  \"issues\": [\n",
+			"    {{\n",
+			"      \"severity\": \"CRITICAL|HIGH|MEDIUM|LOW\",\n",
+			"      \"category\": \"Security|Performance|Quality|Testing|Documentation|Architecture|System\",\n",
+			"      \"title\": \"Brief issue title\",\n",
+			"      \"description\": \"Detailed description of the issue\",\n",
+			"      \"file_path\": \"optional/path.rs\",\n",
+			"      \"line_number\": <optional line number>\n",
+			"    }}\n",
+			"  ],\n",
+			"  \"recommendations\": [\"List of recommendations\"]\n",
+			"}}\n\n",
+			"REVIEW CRITERIA:\n",
+			"1. **Security Issues**: SQL injection, XSS, hardcoded secrets, insecure patterns\n",
+			"2. **Performance**: Inefficient algorithms, memory leaks, unnecessary computations\n",
+			"3. **Code Quality**: Complexity, readability, maintainability, DRY principle\n",
+			"4. **Best Practices**: Language-specific conventions, design patterns, error handling\n",
+			"5. **Testing**: Missing tests, test coverage, test quality\n",
+			"6. **Documentation**: Missing comments, unclear naming, API documentation\n",
+			"7. **Architecture**: Coupling, separation of concerns, SOLID principles\n\n",
+			"SEVERITY LEVELS:\n",
+			"- CRITICAL: Security vulnerabilities, data corruption risks, breaking changes\n",
+			"- HIGH: Performance issues, major bugs, significant technical debt\n",
+			"- MEDIUM: Code quality issues, minor bugs, style violations\n",
+			"- LOW: Suggestions, optimizations, documentation improvements\n\n",
+			"LOCATION INFORMATION:\n",
+			"For each issue, provide the specific file path and line number where the issue occurs.\n",
+			"- file_path: The relative path to the file (e.g., 'src/main.rs', 'lib/utils.js')\n",
+			"- line_number: The specific line number where the issue is found\n",
+			"Extract this information from the git diff context. If you cannot determine the exact location, omit these fields.\n\n",
+			"File Statistics:\n",
+			"{}\n\n",
+			"Git Diff:\n",
+			"{}\n\n",
+			"{}\n\n",
+			"Provide ONLY raw JSON output - no markdown, no code blocks, no explanations. Start with '{{' and end with '}}'."
+		),
 		file_count,
 		additions,
 		deletions,
@@ -376,19 +403,36 @@ fn create_review_prompt(
 }
 
 fn parse_review_response(
-	response: &str,
+	response: &serde_json::Value,
 	file_count: usize,
 	files: &[String],
 ) -> Result<ReviewResult> {
-	// Try to parse as JSON first
-	match serde_json::from_str::<ReviewResult>(response) {
+	// First validate that response has required fields
+	let has_summary = response.get("summary").is_some_and(|s| s.is_object());
+	let has_issues = response.get("issues").is_some_and(|i| i.is_array());
+	let has_recommendations = response
+		.get("recommendations")
+		.is_some_and(|r| r.is_array());
+
+	if !has_summary || !has_issues || !has_recommendations {
+		eprintln!(
+			"Warning: LLM response missing required fields (summary: {}, issues: {}, recommendations: {})",
+			has_summary, has_issues, has_recommendations
+		);
+		eprintln!("Raw response: {}", response);
+		return create_fallback_review(file_count, files, response);
+	}
+
+	// Try to parse as ReviewResult from JSON Value
+	match serde_json::from_value(response.clone()) {
 		Ok(review_result) => Ok(review_result),
 		Err(e) => {
 			eprintln!(
-				"Warning: Failed to parse LLM response as JSON ({}), creating fallback",
+				"Warning: Failed to parse LLM response as ReviewResult ({}), creating fallback",
 				e
 			);
 			eprintln!("Raw response: {}", response);
+			// response is still available here since we cloned above
 			create_fallback_review(file_count, files, response)
 		}
 	}
@@ -415,7 +459,7 @@ fn analyze_file_types(files: &[String]) -> String {
 fn create_fallback_review(
 	file_count: usize,
 	_files: &[String],
-	_llm_response: &str,
+	_llm_response: &serde_json::Value,
 ) -> Result<ReviewResult> {
 	Ok(ReviewResult {
 		summary: ReviewSummary {
@@ -513,7 +557,7 @@ fn should_show_issue(issue_severity: &str, filter: &str) -> bool {
 	}
 }
 
-async fn call_llm_for_review(prompt: &str, config: &Config) -> Result<String> {
+async fn call_llm_for_review(prompt: &str, config: &Config) -> Result<serde_json::Value> {
 	use octocode::llm::{LlmClient, Message};
 
 	// Create LLM client from config
@@ -522,10 +566,9 @@ async fn call_llm_for_review(prompt: &str, config: &Config) -> Result<String> {
 	// Build messages - the prompt already includes JSON schema instructions
 	let messages = vec![Message::user(prompt)];
 
-	// Call LLM with slightly higher temperature for creative review
-	let response = client
-		.chat_completion_with_temperature(messages, 0.2)
-		.await?;
+	// Call LLM using chat_completion_json which tries structured output first
+	// and falls back to markdown stripping if needed
+	let response = client.chat_completion_json(messages).await?;
 
 	Ok(response)
 }

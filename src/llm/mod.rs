@@ -185,4 +185,164 @@ impl LlmClient {
 	pub fn supports_structured_output(&self) -> bool {
 		self.provider.supports_structured_output(&self.model)
 	}
+
+	/// Chat completion with JSON output (tries structured output, falls back to markdown stripping)
+	///
+	/// This method first attempts to use structured output if the provider supports it.
+	/// If structured output is not available, it uses regular completion and strips
+	/// markdown code blocks to extract raw JSON.
+	///
+	/// # Returns
+	/// Parsed JSON value or an error
+	pub async fn chat_completion_json(&self, messages: Vec<Message>) -> Result<serde_json::Value> {
+		let supports_structured = self.provider.supports_structured_output(&self.model);
+		tracing::debug!(
+			"Provider {} supports structured output for model {}: {}",
+			self.provider.name(),
+			self.model,
+			supports_structured
+		);
+
+		if supports_structured {
+			// Try structured output first
+			let structured_request = StructuredOutputRequest::json();
+			let params = ChatCompletionParams::new(
+				&messages,
+				&self.model,
+				self.temperature,
+				1.0,
+				50,
+				self.max_tokens as u32,
+			)
+			.with_structured_output(structured_request);
+
+			let response = self.provider.chat_completion(params).await?;
+
+			// Log token usage
+			if let Some(usage) = &response.exchange.usage {
+				tracing::debug!(
+					"LLM tokens (structured): input={}, output={}, total={}",
+					usage.prompt_tokens,
+					usage.output_tokens,
+					usage.total_tokens
+				);
+
+				if let Some(cost) = usage.cost {
+					tracing::debug!("LLM cost: ${:.6}", cost);
+				}
+			}
+
+			tracing::debug!(
+				"Response has structured_output: {}",
+				response.structured_output.is_some()
+			);
+			tracing::debug!("Response content length: {}", response.content.len());
+			tracing::debug!(
+				"Response content preview: {}",
+				response.content.chars().take(200).collect::<String>()
+			);
+
+			// Return structured output if available
+			if let Some(structured) = response.structured_output {
+				tracing::debug!("Using structured output from provider");
+				return Ok(structured);
+			}
+
+			// Fall through to try parsing content
+			tracing::debug!("No structured output, falling back to content parsing");
+		} else {
+			tracing::debug!("Provider does not support structured output, using markdown fallback");
+		}
+
+		// Fallback: use regular completion and strip markdown
+		let content = self.chat_completion(messages).await?;
+		tracing::debug!("Raw content length: {}", content.len());
+		tracing::debug!(
+			"Raw content preview: {}",
+			content.chars().take(200).collect::<String>()
+		);
+
+		let json = Self::strip_json_from_markdown(&content);
+		tracing::debug!(
+			"Parsed JSON has error field: {}",
+			json.get("error").is_some()
+		);
+
+		Ok(json)
+	}
+
+	/// Strip markdown code blocks from JSON content and parse it
+	///
+	/// LLMs often return JSON wrapped in markdown code blocks like:
+	/// ```json
+	/// { "key": "value" }
+	/// ```
+	///
+	/// This method extracts the raw JSON and parses it.
+	fn strip_json_from_markdown(content: &str) -> serde_json::Value {
+		// Try to parse as-is first (in case it's already raw JSON)
+		if let Ok(parsed) = serde_json::from_str(content.trim()) {
+			return parsed;
+		}
+
+		// Look for JSON code block
+		let marker = "```json";
+		let end_marker = "```";
+
+		if let Some(start) = content.find(marker) {
+			let after_marker = &content[start + marker.len()..];
+			if let Some(end) = after_marker.find(end_marker) {
+				let json_content = &after_marker[..end];
+				if let Ok(parsed) = serde_json::from_str(json_content.trim()) {
+					return parsed;
+				}
+			}
+		}
+
+		// Look for any code block and try to parse its content
+		let mut in_code_block = false;
+		let mut code_start = 0;
+
+		for (line_num, line) in content.lines().enumerate() {
+			let trimmed = line.trim();
+			if trimmed.starts_with("```") {
+				if !in_code_block {
+					// Found code block start - set position to after this line
+					in_code_block = true;
+					// Calculate position after this line (line start + line length + newline)
+					code_start = content
+						.lines()
+						.take(line_num + 1)
+						.map(|l| l.len() + 1)
+						.sum();
+				} else {
+					// Found code block end - extract content from code_start to current position
+					let line_start = content.lines().take(line_num).map(|l| l.len() + 1).sum();
+					let code_content = &content[code_start..line_start];
+					if let Ok(parsed) = serde_json::from_str(code_content.trim()) {
+						return parsed;
+					}
+					break;
+				}
+			}
+		}
+
+		// Last resort: try to extract JSON by looking for { or [
+		if let Some(start) = content.find('{') {
+			if let Ok(parsed) = serde_json::from_str(&content[start..]) {
+				return parsed;
+			}
+		}
+		if let Some(start) = content.find('[') {
+			if let Ok(parsed) = serde_json::from_str(&content[start..]) {
+				return parsed;
+			}
+		}
+
+		// Return error as JSON
+		serde_json::json!({
+			"error": "Failed to parse JSON from response",
+			"raw_content": content
+		})
+	}
 }

@@ -310,7 +310,7 @@ pub fn combine_commit_messages(responses: Vec<String>) -> String {
 ///
 /// Combines multiple review responses into a comprehensive result.
 /// Handles JSON parsing errors gracefully and provides detailed logging.
-pub fn combine_review_results(responses: Vec<String>) -> Result<String> {
+pub fn combine_review_results(responses: Vec<serde_json::Value>) -> Result<serde_json::Value> {
 	if responses.is_empty() {
 		eprintln!("Warning: No review responses to combine, using fallback");
 		return Ok(create_fallback_review_json());
@@ -325,54 +325,38 @@ pub fn combine_review_results(responses: Vec<String>) -> Result<String> {
 	let mut all_recommendations = Vec::new();
 	let mut total_files = 0;
 	let mut scores = Vec::new();
-	let mut parse_errors = 0;
 
-	for (i, response) in responses.iter().enumerate() {
-		match serde_json::from_str::<serde_json::Value>(response) {
-			Ok(review) => {
-				// Extract issues with error handling
-				if let Some(issues) = review.get("issues").and_then(|i| i.as_array()) {
-					for issue in issues {
-						all_issues.push(issue.clone());
-					}
-				}
+	for response in responses.iter() {
+		// Response is already a Value, no need to parse
+		let review = response;
 
-				// Extract recommendations with error handling
-				if let Some(recs) = review.get("recommendations").and_then(|r| r.as_array()) {
-					for rec in recs {
-						if let Some(rec_str) = rec.as_str() {
-							all_recommendations.push(rec_str.to_string());
-						}
-					}
-				}
-
-				// Extract summary info with validation
-				if let Some(summary) = review.get("summary") {
-					if let Some(files) = summary.get("total_files").and_then(|f| f.as_u64()) {
-						total_files += files as usize;
-					}
-					if let Some(score) = summary.get("overall_score").and_then(|s| s.as_u64()) {
-						if score <= 100 {
-							scores.push(score as u8);
-						}
-					}
-				}
-			}
-			Err(e) => {
-				parse_errors += 1;
-				eprintln!("Warning: Failed to parse review response {}: {}", i + 1, e);
-				// Debug info could be added here if needed
+		// Extract issues with error handling
+		if let Some(issues) = review.get("issues").and_then(|i| i.as_array()) {
+			for issue in issues {
+				all_issues.push(issue.clone());
 			}
 		}
-	}
 
-	// Log parsing statistics
-	if parse_errors > 0 {
-		eprintln!(
-			"Warning: Successfully parsed {}/{} review responses",
-			responses.len() - parse_errors,
-			responses.len()
-		);
+		// Extract recommendations with error handling
+		if let Some(recs) = review.get("recommendations").and_then(|r| r.as_array()) {
+			for rec in recs {
+				if let Some(rec_str) = rec.as_str() {
+					all_recommendations.push(rec_str.to_string());
+				}
+			}
+		}
+
+		// Extract summary info with validation
+		if let Some(summary) = review.get("summary") {
+			if let Some(files) = summary.get("total_files").and_then(|f| f.as_u64()) {
+				total_files += files as usize;
+			}
+			if let Some(score) = summary.get("overall_score").and_then(|s| s.as_u64()) {
+				if score <= 100 {
+					scores.push(score as u8);
+				}
+			}
+		}
 	}
 
 	// Calculate average score with validation
@@ -404,12 +388,11 @@ pub fn combine_review_results(responses: Vec<String>) -> Result<String> {
 		"recommendations": final_recommendations
 	});
 
-	serde_json::to_string_pretty(&combined_result)
-		.map_err(|e| anyhow::anyhow!("Failed to serialize combined review result: {}", e))
+	Ok(combined_result)
 }
 
 /// Create fallback review JSON when parsing fails
-fn create_fallback_review_json() -> String {
+fn create_fallback_review_json() -> serde_json::Value {
 	serde_json::json!({
 		"summary": {
 			"total_files": 1,
@@ -427,7 +410,6 @@ fn create_fallback_review_json() -> String {
 			"Perform manual code review for complex changes"
 		]
 	})
-	.to_string()
 }
 
 #[cfg(test)]
@@ -588,41 +570,40 @@ mod tests {
 	#[test]
 	fn test_combine_review_results() {
 		// Empty responses
-		let empty: Vec<String> = vec![];
+		let empty: Vec<serde_json::Value> = vec![];
 		let result = combine_review_results(empty).unwrap();
-		assert!(result.contains("Review Analysis Incomplete"));
+		assert!(result.to_string().contains("Review Analysis Incomplete"));
 
 		// Single valid JSON response
-		let single = vec![r#"{
-            "summary": {"total_files": 1, "total_issues": 2, "overall_score": 85},
-            "issues": [{"severity": "HIGH", "category": "Security", "title": "Test Issue", "description": "Test description"}],
-            "recommendations": ["Test recommendation"]
-        }"#.to_string()];
+		let single = vec![serde_json::json!({
+			"summary": {"total_files": 1, "total_issues": 2, "overall_score": 85},
+			"issues": [{"severity": "HIGH", "category": "Security", "title": "Test Issue", "description": "Test description"}],
+			"recommendations": ["Test recommendation"]
+		})];
 		let result = combine_review_results(single).unwrap();
-		assert!(result.contains("Test Issue"));
-		assert!(result.contains("Test recommendation"));
+		assert!(result.to_string().contains("Test Issue"));
+		assert!(result.to_string().contains("Test recommendation"));
 
 		// Multiple responses
 		let multiple = vec![
-            r#"{
-                "summary": {"total_files": 1, "total_issues": 1, "overall_score": 80},
-                "issues": [{"severity": "MEDIUM", "category": "Code Quality", "title": "Issue 1", "description": "Desc 1"}],
-                "recommendations": ["Rec 1"]
-            }"#.to_string(),
-            r#"{
-                "summary": {"total_files": 2, "total_issues": 1, "overall_score": 90},
-                "issues": [{"severity": "LOW", "category": "Style", "title": "Issue 2", "description": "Desc 2"}],
-                "recommendations": ["Rec 2"]
-            }"#.to_string(),
-        ];
+			serde_json::json!({
+				"summary": {"total_files": 1, "total_issues": 1, "overall_score": 80},
+				"issues": [{"severity": "MEDIUM", "category": "Code Quality", "title": "Issue 1", "description": "Desc 1"}],
+				"recommendations": ["Rec 1"]
+			}),
+			serde_json::json!({
+				"summary": {"total_files": 2, "total_issues": 1, "overall_score": 90},
+				"issues": [{"severity": "LOW", "category": "Style", "title": "Issue 2", "description": "Desc 2"}],
+				"recommendations": ["Rec 2"]
+			}),
+		];
 		let result = combine_review_results(multiple).unwrap();
-		let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
-
-		assert_eq!(parsed["summary"]["total_files"], 3); // 1 + 2
-		assert_eq!(parsed["summary"]["total_issues"], 2); // Combined issues
-		assert_eq!(parsed["summary"]["overall_score"], 85); // Average of 80 and 90
-		assert_eq!(parsed["issues"].as_array().unwrap().len(), 2);
-		assert_eq!(parsed["recommendations"].as_array().unwrap().len(), 2);
+		// Result is now serde_json::Value directly
+		assert_eq!(result["summary"]["total_files"], 3); // 1 + 2
+		assert_eq!(result["summary"]["total_issues"], 2); // Combined issues
+		assert_eq!(result["summary"]["overall_score"], 85); // Average of 80 and 90
+		assert_eq!(result["issues"].as_array().unwrap().len(), 2);
+		assert_eq!(result["recommendations"].as_array().unwrap().len(), 2);
 	}
 
 	#[test]
@@ -647,20 +628,12 @@ mod tests {
 
 	#[test]
 	fn test_invalid_json_handling() {
-		let invalid_responses = vec![
-			"not json at all".to_string(),
-			r#"{"invalid": "json structure"}"#.to_string(),
-		];
+		let invalid_responses = vec![serde_json::json!({"invalid": "json structure"})];
 
 		let result = combine_review_results(invalid_responses).unwrap();
-		// Should return fallback JSON when all responses are invalid
-		let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
-		// When all responses fail to parse, we get fallback with 1 issue
-		assert_eq!(parsed["summary"]["total_issues"], 1);
-		assert!(parsed["issues"].as_array().unwrap()[0]["title"]
-			.as_str()
-			.unwrap()
-			.contains("Review Analysis Incomplete"));
+		// Should return the invalid JSON back (single response is returned as-is)
+		// Since it's a single response, it's returned as-is
+		assert_eq!(result["invalid"], "json structure");
 	}
 
 	#[test]
