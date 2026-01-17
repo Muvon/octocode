@@ -383,57 +383,54 @@ fn create_commit_prompt(
 	docs_restriction: &str,
 ) -> String {
 	format!(
-		"Analyze this Git diff and create an appropriate commit message. Be specific and concise.\\n\\n\\\
-		STRICT FORMATTING RULES:\\n\\\
-		- Format: type(scope): description (under 50 chars)\\n\\\
-		- Types: feat, fix, docs, style, refactor, test, chore, perf, ci, build\\n\\\
-		- Add '!' after type for breaking changes: feat!: or fix!:\\n\\\
-		- Be specific, avoid generic words like \\\"update\\\", \\\"change\\\", \\\"modify\\\", \\\"various\\\", \\\"several\\\"\\n\\\
-		- Use imperative mood: \\\"add\\\" not \\\"added\\\", \\\"fix\\\" not \\\"fixed\\\"\\n\\\
-		- Focus on WHAT functionality changed, not implementation details\\n\\\
-		- If user guidance provided, use it to understand the INTENT but create your own message{}\\n\\n\\\
-		COMMIT TYPE SELECTION (READ CAREFULLY):\\n\\\
-		- feat: NEW functionality being added (new features, capabilities, commands)\\n\\\
-		- fix: CORRECTING bugs, errors, or broken functionality (including fixes to existing features)\\n\\\
-		- refactor: IMPROVING existing code without changing functionality (code restructuring)\\n\\\
-		- perf: OPTIMIZING performance without adding features\\n\\\
-		- docs: DOCUMENTATION changes ONLY (.md, .markdown, .rst files)\\n\\\
-		- test: ADDING or fixing tests\\n\\\
-		- style: CODE formatting, whitespace, missing semicolons (no logic changes)\\n\\\
-		- chore: MAINTENANCE tasks (dependencies, build, tooling, config)\\n\\\
-		- ci: CONTINUOUS integration changes (workflows, pipelines)\\n\\\
-		- build: BUILD system changes (Cargo.toml, package.json, Makefile){}\\n\\n\\\
-		FEATURE vs FIX DECISION GUIDE:\\n\\\
-		- If code was working but had bugs/errors → use 'fix' (even for new features with bugs)\\n\\\
-		- If adding completely new functionality that didn't exist → use 'feat'\\n\\\
-		- If improving existing working code structure → use 'refactor' or 'perf'\\n\\\
-		- Examples: 'fix(auth): resolve token validation error', 'feat(auth): add OAuth2 support'\\n\\\
-		- When fixing issues in recently added features → use 'fix(scope): correct feature-name issue'\\n\\\
-		- When in doubt between feat/fix: choose 'fix' if addressing problems, 'feat' if adding completely new\\n\\n\\\
-		BREAKING CHANGE DETECTION:\\n\\\
-		- Look for function signature changes, API modifications, removed public methods\\n\\\
-		- Check for interface/trait changes, configuration schema changes\\n\\\
-		- Identify database migrations, dependency version bumps with breaking changes\\n\\\
-		 - Library code breaking change policy: Mark any public interface changes as breaking changes (API signatures, behavior of exported functions)\\n\\\
-		 - Application code breaking change policy: Internal changes don't need breaking change markers unless they affect configuration formats or user-facing features\\n\\\
-		- If breaking changes detected, use type! format and add BREAKING CHANGE footer\\n\\n\\\
-		BODY RULES (add body with bullet points if ANY of these apply):\\n\\\
-		- 4+ files changed OR 25+ lines changed\\n\\\
-		- Multiple different types of changes (feat+fix, refactor+feat, etc.)\\n\\\
-		- Complex refactoring or architectural changes\\n\\\
-		- Breaking changes or major feature additions\\n\\\
-		- Changes affect multiple modules/components\\n\\n\\\
-		Body format when needed:\\n\\\
-		- Blank line after subject\\n\\\
-		- Start each point with \\\"- \\\"\\n\\\
-		- Focus on key changes and their purpose\\n\\\
-		- Explain WHY if not obvious from subject\\n\\\
-		- Keep each bullet concise (1 line max)\\n\\\
-		- For breaking changes, add footer: \\\"BREAKING CHANGE: description\\\"\\n\\n\\\
-		Changes: {} files (+{} -{} lines)\\n\\n\\\
-		Git diff:\\n\\\
-		```\\n{}\\n```\\n\\n\\\
-		Generate commit message:",
+		"STRICT FORMAT: Plain text commit message, NO markdown, NO backticks, NO code blocks.
+type(scope): description under 50 chars
+Types: feat, fix, docs, style, refactor, test, chore, perf, ci, build
+Use imperative mood (add not added, fix not fixed)
+Avoid generic words: update, change, modify, various, several
+Focus on WHAT functionality changed, not implementation details{}
+---
+COMMIT TYPE GUIDE:
+feat: NEW functionality being added
+fix: CORRECTING bugs/errors/broken functionality
+refactor: IMPROVING code without changing functionality
+perf: OPTIMIZING performance
+docs: .md/.markdown/.rst files ONLY
+test: ADDING or fixing tests
+style: formatting/whitespace (no logic changes)
+chore: maintenance (dependencies, build, tooling)
+ci: workflows/pipelines
+build: Cargo.toml, package.json, Makefile{}
+---
+FEATURE vs FIX: Working code with bugs = fix, completely new = feat
+Examples: fix(auth): resolve token validation error, feat(auth): add OAuth2 support
+When in doubt: choose fix if addressing problems, feat if adding new
+---
+BREAKING CHANGES: Function/API signature changes, removed public methods, interface/trait changes
+Library code: mark any public interface changes as breaking
+Application code: internal changes dont need marker unless affects config/user-facing
+Use type! format and add BREAKING CHANGE footer if detected
+---
+BODY NEEDED if: 4+ files OR 25+ lines OR multiple change types OR complex refactoring OR breaking changes
+Body format (plain text):
+- Blank line after subject
+- Each point starts with dash space: -
+- Focus on key changes and purpose
+- Keep bullets concise (1 line max)
+- For breaking: add BREAKING CHANGE: description
+---
+OUTPUT FORMAT: Plain text only
+Subject: type(scope): description
+If body: blank line then dash bullets
+If breaking: BREAKING CHANGE: line
+NO code blocks, NO backticks, NO markdown
+---
+Changes: {} files (+{} -{} lines)
+
+Git diff:
+{}
+
+Generate commit message:",
 		guidance_section,
 		docs_restriction,
 		file_count,
@@ -442,19 +439,6 @@ fn create_commit_prompt(
 		diff_content
 	)
 }
-
-/// Collect responses from parallel tasks maintaining original order
-///
-/// Waits for all parallel tasks to complete and collects successful responses.
-/// Maintains the original chunk order for coherent result combination.
-/// Handles task failures gracefully with appropriate logging.
-///
-/// # Arguments
-/// * `join_set` - Set of spawned async tasks
-/// * `expected_count` - Number of responses expected
-///
-/// # Returns
-/// Vector of successful responses in original order
 async fn collect_ordered_responses(
 	mut join_set: JoinSet<Result<(usize, String)>>,
 	expected_count: usize,
@@ -580,25 +564,23 @@ async fn call_llm_for_commit_message(prompt: &str, config: &Config) -> Result<St
 /// A refined, concise commit message
 async fn refine_commit_message_with_ai(verbose_message: &str, config: &Config) -> Result<String> {
 	let refinement_prompt = format!(
-		r#"You are an expert at creating concise, professional commit messages.
+		"REFINE COMMIT MESSAGE - CRITICAL: Output must be PLAIN TEXT ONLY, NO MARKDOWN, NO backticks, NO code blocks.
 
-I have a verbose commit message that was generated by combining multiple chunks of a large diff. Your task is to refine it into a clean, concise commit message that follows conventional commit format.
-
-ORIGINAL VERBOSE MESSAGE:
+ORIGINAL MESSAGE:
 {}
 
 REFINEMENT REQUIREMENTS:
-1. Keep the conventional commit format: type(scope): description
-2. Choose the MOST APPROPRIATE single type (feat, fix, refactor, chore, docs, etc.)
+1. Keep conventional format: type(scope): description
+2. Choose single best type (feat, fix, refactor, chore, docs, etc.)
 3. Remove ALL duplication and redundancy
-4. Create concise bullet points for the body (if needed)
+4. Create concise bullet points for body (plain text, use dash space)
 5. Focus on WHAT changed, not implementation details
-6. Maximum 50 characters for subject line
-7. Maximum 72 characters per body line
+6. Max 50 chars for subject line
+7. Max 72 chars per body line
 8. Group related changes together
-9. Remove verbose explanations - keep it factual and brief
+9. Remove verbose explanations, keep factual and brief
 
-EXAMPLE OUTPUT FORMAT:
+OUTPUT FORMAT (PLAIN TEXT ONLY):
 refactor(diff_chunker): improve chunking with limits and robustness
 
 - Add resource limits to prevent exhaustion
@@ -606,7 +588,7 @@ refactor(diff_chunker): improve chunking with limits and robustness
 - Improve error handling and logging
 - Add comprehensive test coverage
 
-Return ONLY the refined commit message, nothing else."#,
+Return ONLY refined commit message as plain text, nothing else.",
 		verbose_message
 	);
 
