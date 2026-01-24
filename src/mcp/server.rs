@@ -32,7 +32,6 @@ use crate::mcp::logging::{
 	init_mcp_logging, log_critical_anyhow_error, log_critical_error, log_indexing_operation,
 	log_mcp_request, log_mcp_response, log_watcher_event,
 };
-use crate::mcp::memory::MemoryProvider;
 use crate::mcp::semantic_code::SemanticCodeProvider;
 use crate::mcp::types::{parse_mcp_error, JsonRpcError, JsonRpcRequest, JsonRpcResponse, McpError};
 use crate::state;
@@ -62,7 +61,6 @@ const MCP_IO_TIMEOUT_MS: u64 = 30_000; // 30 seconds for individual I/O operatio
 pub struct McpServer {
 	semantic_code: SemanticCodeProvider,
 	graphrag: Option<GraphRagProvider>,
-	memory: Option<MemoryProvider>,
 	lsp: Option<Arc<Mutex<crate::mcp::lsp::LspProvider>>>,
 	debug: bool,
 	working_directory: std::path::PathBuf,
@@ -103,7 +101,6 @@ impl McpServer {
 
 		let semantic_code = SemanticCodeProvider::new(config.clone(), working_directory.clone());
 		let graphrag = GraphRagProvider::new(config.clone(), working_directory.clone());
-		let memory = MemoryProvider::new(&config, working_directory.clone()).await;
 
 		// Initialize LSP provider if command is provided (lazy initialization)
 		let lsp = if let Some(command) = lsp_command {
@@ -133,7 +130,6 @@ impl McpServer {
 		Ok(Self {
 			semantic_code,
 			graphrag,
-			memory,
 			lsp,
 			debug,
 			working_directory,
@@ -351,7 +347,6 @@ impl McpServer {
 		let server_state = Arc::new(Mutex::new(HttpServerState {
 			semantic_code: self.semantic_code.clone(),
 			graphrag: self.graphrag.clone(),
-			memory: self.memory.clone(),
 			lsp: self.lsp.clone(),
 		}));
 
@@ -812,9 +807,9 @@ impl McpServer {
 				"serverInfo": {
 					"name": "octocode-mcp",
 					"version": "0.1.0",
-					"description": "Semantic code search server with vector embeddings, memory system, and optional GraphRAG support"
+			"description": "Semantic code search server with vector embeddings and optional GraphRAG support"
 				},
-				"instructions": "This server provides modular AI tools: semantic code search, memory management, and GraphRAG. Use 'semantic_search' for code/documentation searches, memory tools for storing/retrieving context, and 'graphrag' (if available) for relationship queries."
+			"instructions": "This server provides modular AI tools: semantic code search and GraphRAG (if available). Use 'semantic_search' for code/documentation searches and 'graphrag' (if enabled) for relationship queries."
 			})),
 			error: None,
 		}
@@ -825,11 +820,6 @@ impl McpServer {
 			SemanticCodeProvider::get_tool_definition(),
 			SemanticCodeProvider::get_view_signatures_tool_definition(),
 		];
-
-		// Add memory tools if available
-		if self.memory.is_some() {
-			tools.extend(MemoryProvider::get_tool_definitions());
-		}
 
 		// Add GraphRAG tools if available
 		if self.graphrag.is_some() {
@@ -917,18 +907,6 @@ impl McpServer {
 				Some(provider) => provider.execute(arguments).await,
 				None => Err(McpError::method_not_found("GraphRAG is not enabled in the current configuration. Please enable GraphRAG in octocode.toml to use relationship-aware search.", "graphrag")),
 			},
-			"memorize" => match &self.memory {
-				Some(provider) => provider.execute_memorize(arguments).await,
-				None => Err(McpError::method_not_found("Memory system is not available", "memorize")),
-			},
-			"remember" => match &self.memory {
-				Some(provider) => provider.execute_remember(arguments).await,
-				None => Err(McpError::method_not_found("Memory system is not available", "remember")),
-			},
-			"forget" => match &self.memory {
-				Some(provider) => provider.execute_forget(arguments).await,
-				None => Err(McpError::method_not_found("Memory system is not available", "forget")),
-			},
 			// LSP tools
 			"lsp_goto_definition" => match &self.lsp {
 				Some(provider) => {
@@ -973,11 +951,10 @@ impl McpServer {
 				None => Err(McpError::method_not_found("LSP server is not available. Start MCP server with --with-lsp=\"<command>\" to enable LSP features.", "lsp_completion")),
 			},
 			_ => {
-				let available_tools = format!("semantic_search, view_signatures{}{}{}",
+			let available_tools = format!("semantic_search, view_signatures{}{}",
 				if self.graphrag.is_some() { ", graphrag" } else { "" },
-					if self.memory.is_some() { ", memorize, remember, forget" } else { "" },
-					if self.lsp.is_some() { ", lsp_goto_definition, lsp_hover, lsp_find_references, lsp_document_symbols, lsp_workspace_symbols, lsp_completion" } else { "" }
-				);
+				if self.lsp.is_some() { ", lsp_goto_definition, lsp_hover, lsp_find_references, lsp_document_symbols, lsp_workspace_symbols, lsp_completion" } else { "" }
+			);
 				Err(McpError::method_not_found(format!("Unknown tool '{}'. Available tools: {}", tool_name, available_tools), tool_name))
 			}
 		};
@@ -1257,7 +1234,6 @@ async fn run_watcher(
 struct HttpServerState {
 	semantic_code: SemanticCodeProvider,
 	graphrag: Option<GraphRagProvider>,
-	memory: Option<MemoryProvider>,
 	lsp: Option<Arc<Mutex<crate::mcp::lsp::LspProvider>>>,
 }
 
@@ -1414,9 +1390,9 @@ fn handle_initialize_http(request: &JsonRpcRequest) -> JsonRpcResponse {
 			"serverInfo": {
 				"name": "octocode-mcp",
 				"version": "0.1.0",
-				"description": "Semantic code search server with vector embeddings, memory system, and optional GraphRAG support"
+		"description": "Semantic code search server with vector embeddings and optional GraphRAG support"
 			},
-			"instructions": "This server provides modular AI tools: semantic code search, memory management, and GraphRAG. Use 'semantic_search' for code/documentation searches, memory tools for storing/retrieving context, and 'graphrag' (if available) for relationship queries."
+		"instructions": "This server provides modular AI tools: semantic code search and GraphRAG (if available). Use 'semantic_search' for code/documentation searches and 'graphrag' (if enabled) for relationship queries."
 		})),
 		error: None,
 	}
@@ -1427,11 +1403,6 @@ fn handle_tools_list_http(request: &JsonRpcRequest, state: &HttpServerState) -> 
 		SemanticCodeProvider::get_tool_definition(),
 		SemanticCodeProvider::get_view_signatures_tool_definition(),
 	];
-
-	// Add memory tools if available
-	if state.memory.is_some() {
-		tools.extend(MemoryProvider::get_tool_definitions());
-	}
 
 	// Add GraphRAG tools if available
 	if state.graphrag.is_some() {
@@ -1522,18 +1493,6 @@ async fn handle_tools_call_http(
 			Some(provider) => provider.execute(arguments).await,
 			None => Err(McpError::method_not_found("GraphRAG is not enabled in the current configuration. Please enable GraphRAG in octocode.toml to use relationship-aware search.", "graphrag")),
 		},
-		"memorize" => match &state.memory {
-			Some(provider) => provider.execute_memorize(arguments).await,
-			None => Err(McpError::method_not_found("Memory system is not available", "memorize")),
-		},
-		"remember" => match &state.memory {
-			Some(provider) => provider.execute_remember(arguments).await,
-			None => Err(McpError::method_not_found("Memory system is not available", "remember")),
-		},
-		"forget" => match &state.memory {
-			Some(provider) => provider.execute_forget(arguments).await,
-			None => Err(McpError::method_not_found("Memory system is not available", "forget")),
-		},
 		// LSP tools
 		"lsp_goto_definition" => match &state.lsp {
 			Some(provider) => {
@@ -1578,11 +1537,10 @@ async fn handle_tools_call_http(
 			None => Err(McpError::method_not_found("LSP server is not available. Start MCP server with --with-lsp=\"<command>\" to enable LSP features.", "lsp_completion")),
 		},
 		_ => {
-			let available_tools = format!("semantic_search, view_signatures{}{}{}",
+		let available_tools = format!("semantic_search, view_signatures{}{}",
 			if state.graphrag.is_some() { ", graphrag" } else { "" },
-				if state.memory.is_some() { ", memorize, remember, forget" } else { "" },
-				if state.lsp.is_some() { ", lsp_goto_definition, lsp_hover, lsp_find_references, lsp_document_symbols, lsp_workspace_symbols, lsp_completion" } else { "" }
-			);
+			if state.lsp.is_some() { ", lsp_goto_definition, lsp_hover, lsp_find_references, lsp_document_symbols, lsp_workspace_symbols, lsp_completion" } else { "" }
+		);
 			Err(McpError::method_not_found(format!("Unknown tool '{}'. Available tools: {}", tool_name, available_tools), tool_name))
 		}
 	};

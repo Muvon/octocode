@@ -60,9 +60,6 @@ enum Commands {
 	#[command(name = "mcp-proxy")]
 	McpProxy(commands::McpProxyArgs),
 
-	/// Memory management for storing and retrieving information
-	Memory(commands::MemoryArgs),
-
 	/// Clear database tables (useful for debugging)
 	Clear(commands::ClearArgs),
 
@@ -138,11 +135,6 @@ async fn main() -> Result<(), anyhow::Error> {
 		return commands::format::execute(format_args).await;
 	}
 
-	// Handle the Memory command separately (doesn't need store)
-	if let Commands::Memory(memory_args) = &args.command {
-		return commands::memory::execute(&config, memory_args).await;
-	}
-
 	// Handle the Logs command separately (doesn't need store)
 	if let Commands::Logs(logs_args) = &args.command {
 		return commands::logs::execute(logs_args).await;
@@ -190,9 +182,8 @@ async fn main() -> Result<(), anyhow::Error> {
 		Commands::Format(_) => unreachable!(), // Already handled above
 		Commands::Logs(_) => unreachable!(),   // Already handled above
 		Commands::Models { .. } => unreachable!(), // Already handled above
-		Commands::Memory(_) => unreachable!(), // Already handled above
 		Commands::Completion { .. } => unreachable!(), // Already handled above
-	}
+	};
 
 	Ok(())
 }
