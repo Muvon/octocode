@@ -47,7 +47,7 @@ ignore = "0.4.25"
 parking_lot = "0.12.5"
 lance-table = { version = "0.39.0", default-features = false, features = [] }
 lance = { version = "0.39.0", default-features = false, features = [] }
-lancedb = { version = "0.22.3", default-features = false }
+lancedb = { version = "0.23.1", default-features = false }
 arrow = { version = "56.2.0", default-features = false, features = ["prettyprint"] }
 arrow-array = { version = "56.2.0", default-features = false }
 arrow-schema = { version = "56.2.0", default-features = false }
