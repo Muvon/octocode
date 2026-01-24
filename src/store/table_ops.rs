@@ -100,33 +100,6 @@ impl<'a> TableOperations<'a> {
 		Ok(())
 	}
 
-	/// Clear all tables except memory-related tables (preserves memories and memory_relationships)
-	pub async fn clear_non_memory_tables(&self) -> Result<()> {
-		// Get table names
-		let table_names = self.db.table_names().execute().await?;
-
-		// Memory-related tables to preserve
-		let memory_tables = ["memories", "memory_relationships"];
-
-		// Drop each table except memory-related ones
-		for table_name in table_names {
-			if memory_tables.contains(&table_name.as_str()) {
-				tracing::info!("Preserving memory table: {}", table_name);
-				continue;
-			}
-
-			if let Err(e) = self.db.drop_table(&table_name, &[]).await {
-				// Log error to structured logging instead of stderr
-				tracing::warn!("Failed to drop table {}: {}", table_name, e);
-			} else {
-				// Log success to structured logging instead of stdout
-				tracing::debug!("Dropped table: {}", table_name);
-			}
-		}
-
-		Ok(())
-	}
-
 	/// Flush all tables to ensure data is persisted
 	pub async fn flush_all_tables(&self) -> Result<()> {
 		// Get all tables

@@ -29,7 +29,6 @@ use crate::mcp::graphrag::GraphRagProvider;
 use crate::mcp::logging::{
 	init_mcp_logging, log_critical_anyhow_error, log_mcp_request, log_mcp_response,
 };
-use crate::mcp::memory::MemoryProvider;
 use crate::mcp::semantic_code::SemanticCodeProvider;
 use crate::mcp::types::{JsonRpcError, JsonRpcRequest, JsonRpcResponse, McpError};
 
@@ -44,7 +43,6 @@ const INSTANCE_IDLE_TIMEOUT_MS: u64 = 1_800_000; // 30 minutes
 struct ProxyMcpInstance {
 	semantic_code: SemanticCodeProvider,
 	graphrag: Option<GraphRagProvider>,
-	memory: Option<MemoryProvider>,
 	last_accessed: Arc<Mutex<Instant>>,
 }
 
@@ -57,16 +55,13 @@ impl ProxyMcpInstance {
 		// Reuse exact same provider initialization as McpServer::new
 		let semantic_code = SemanticCodeProvider::new(config.clone(), working_directory.clone());
 		let graphrag = GraphRagProvider::new(config.clone(), working_directory.clone());
-		let memory = MemoryProvider::new(&config, working_directory.clone()).await;
 
 		Ok(Self {
 			semantic_code,
 			graphrag,
-			memory,
 			last_accessed: Arc::new(Mutex::new(Instant::now())),
 		})
 	}
-
 	async fn handle_request(&self, request: &JsonRpcRequest) -> JsonRpcResponse {
 		// Update last accessed time
 		*self.last_accessed.lock().await = Instant::now();
@@ -105,7 +100,7 @@ impl ProxyMcpInstance {
 				"serverInfo": {
 					"name": "octocode-mcp-proxy",
 					"version": "0.1.0",
-					"description": "Multi-repository MCP proxy server with semantic search, memory, and GraphRAG"
+					"description": "Multi-repository MCP proxy server with semantic search and GraphRAG"
 				},
 				"instructions": "This proxy provides MCP tools for multiple repositories. Access via URL path: /org/repo for repository at {root}/org/repo."
 			})),
@@ -118,11 +113,6 @@ impl ProxyMcpInstance {
 			SemanticCodeProvider::get_tool_definition(),
 			SemanticCodeProvider::get_view_signatures_tool_definition(),
 		];
-
-		// Add memory tools if available
-		if self.memory.is_some() {
-			tools.extend(MemoryProvider::get_tool_definitions());
-		}
 
 		// Add GraphRAG tools if available
 		if self.graphrag.is_some() {
@@ -206,27 +196,14 @@ impl ProxyMcpInstance {
 				Some(provider) => provider.execute(arguments).await,
 				None => Err(McpError::method_not_found("GraphRAG is not enabled in the current configuration. Please enable GraphRAG in octocode.toml to use relationship-aware search.", "graphrag")),
 			},
-			"memorize" => match &self.memory {
-				Some(provider) => provider.execute_memorize(arguments).await,
-				None => Err(McpError::method_not_found("Memory system is not available", "memorize")),
-			},
-			"remember" => match &self.memory {
-				Some(provider) => provider.execute_remember(arguments).await,
-				None => Err(McpError::method_not_found("Memory system is not available", "remember")),
-			},
-			"forget" => match &self.memory {
-				Some(provider) => provider.execute_forget(arguments).await,
-				None => Err(McpError::method_not_found("Memory system is not available", "forget")),
-			},
 			_ => {
-				let available_tools = format!("semantic_search, view_signatures{}{}",
-				if self.graphrag.is_some() { ", graphrag" } else { "" },
-					if self.memory.is_some() { ", memorize, remember, forget" } else { "" }
+				let available_tools = format!(
+					"semantic_search, view_signatures{}",
+					if self.graphrag.is_some() { ", graphrag" } else { "" }
 				);
 				Err(McpError::method_not_found(format!("Unknown tool '{}'. Available tools: {}", tool_name, available_tools), "proxy_call"))
 			}
 		};
-
 		match result {
 			Ok(content) => JsonRpcResponse {
 				jsonrpc: "2.0".to_string(),

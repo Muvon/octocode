@@ -26,9 +26,9 @@ pub struct ClearArgs {
 pub async fn execute(store: &Store, args: &ClearArgs) -> Result<(), anyhow::Error> {
 	match args.mode.as_str() {
 		"all" => {
-			println!("Clearing all database tables except memory data...");
-			store.clear_non_memory_tables().await?;
-			println!("Successfully dropped all tables and schemas (memory data preserved).");
+			println!("Clearing all database tables...");
+			store.clear_all_tables().await?;
+			println!("Successfully dropped all tables and schemas.");
 			println!(
 				"Note: Tables will be recreated with current schema on next indexing operation."
 			);

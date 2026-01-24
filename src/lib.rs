@@ -20,7 +20,6 @@ pub mod indexer;
 pub mod llm;
 pub mod lock;
 pub mod mcp;
-pub mod memory;
 pub mod reranker;
 pub mod state;
 pub mod storage;

@@ -692,11 +692,6 @@ impl Store {
 		table_ops.clear_all_tables().await
 	}
 
-	pub async fn clear_non_memory_tables(&self) -> Result<()> {
-		let table_ops = TableOperations::new(&self.db);
-		table_ops.clear_non_memory_tables().await
-	}
-
 	pub async fn clear_code_table(&self) -> Result<()> {
 		let table_ops = TableOperations::new(&self.db);
 		table_ops.clear_table("code_blocks").await
