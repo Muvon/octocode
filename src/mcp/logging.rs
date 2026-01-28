@@ -8,60 +8,78 @@ static MCP_LOG_DIR: OnceLock<PathBuf> = OnceLock::new();
 
 /// Initialize logging for MCP server with file rotation
 pub fn init_mcp_logging(base_dir: PathBuf, debug_mode: bool) -> Result<(), anyhow::Error> {
-	// Use the system-wide storage directory for logs
-	let project_storage = crate::storage::get_project_storage_path(&base_dir)?;
-	let log_dir = project_storage.join("logs");
-	std::fs::create_dir_all(&log_dir)?;
+	// Never fail MCP startup due to logging issues.
+	let init_result = (|| -> Result<(), anyhow::Error> {
+		// Use the system-wide storage directory for logs
+		let project_storage = crate::storage::get_project_storage_path(&base_dir)?;
+		let log_dir = project_storage.join("logs");
+		std::fs::create_dir_all(&log_dir)?;
 
-	// Store log directory for potential future use
-	MCP_LOG_DIR
-		.set(log_dir.clone())
-		.map_err(|_| anyhow::anyhow!("Failed to set log directory"))?;
+		// Store log directory for potential future use
+		MCP_LOG_DIR
+			.set(log_dir.clone())
+			.map_err(|_| anyhow::anyhow!("Failed to set log directory"))?;
 
-	// Cross-platform way to create a "latest" indicator
-	let latest_file = project_storage.join("latest_log.txt");
-	// Silently ignore errors creating latest log indicator to maintain MCP protocol compliance
-	// The error is not critical and logging setup should continue
-	let _ = std::fs::write(&latest_file, log_dir.to_string_lossy().as_bytes());
+		// Cross-platform way to create a "latest" indicator
+		let latest_file = project_storage.join("latest_log.txt");
+		// Silently ignore errors creating latest log indicator to maintain MCP protocol compliance
+		// The error is not critical and logging setup should continue
+		let _ = std::fs::write(&latest_file, log_dir.to_string_lossy().as_bytes());
 
-	// Create rotating file appender
-	let file_appender = RollingFileAppender::new(Rotation::DAILY, &log_dir, "mcp_server.log");
+		// Create rotating file appender
+		let file_appender = match std::panic::catch_unwind(|| {
+			RollingFileAppender::new(Rotation::DAILY, &log_dir, "mcp_server.log")
+		}) {
+			Ok(appender) => appender,
+			Err(_) => {
+				// If logging cannot be initialized, continue without file logging.
+				return Ok(());
+			}
+		};
 
-	// Set up environment filter with sensible defaults
-	let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| {
-		if debug_mode {
-			// In debug mode, show debug level for our crate, but info for others
-			EnvFilter::new("info,octocode=debug")
-		} else {
-			// In production mode, only show info and above, with warnings for file processing
-			EnvFilter::new("info,octocode::mcp::logging=info")
-		}
-	});
+		// Set up environment filter with sensible defaults
+		let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+			if debug_mode {
+				// In debug mode, show debug level for our crate, but info for others
+				EnvFilter::new("info,octocode=debug")
+			} else {
+				// In production mode, only show info and above, with warnings for file processing
+				EnvFilter::new("info,octocode::mcp::logging=info")
+			}
+		});
 
-	// File layer with JSON formatting for structured logs
-	let file_layer = Layer::new()
-		.with_writer(file_appender)
-		.with_ansi(false)
-		.with_target(true)
-		.with_file(true)
-		.with_line_number(true)
-		.with_thread_ids(true)
-		.with_thread_names(true)
-		.json();
+		// File layer with JSON formatting for structured logs
+		let file_layer = Layer::new()
+			.with_writer(file_appender)
+			.with_ansi(false)
+			.with_target(true)
+			.with_file(true)
+			.with_line_number(true)
+			.with_thread_ids(true)
+			.with_thread_names(true)
+			.json();
 
-	// MCP protocol requires clean stdout/stderr - no console output allowed
-	// All logging must go to files only to maintain protocol compliance
+		// MCP protocol requires clean stdout/stderr - no console output allowed
+		// All logging must go to files only to maintain protocol compliance
 
-	// Create registry with file layer only (no console output)
-	let registry = Registry::default().with(file_layer).with(env_filter);
-	registry.init();
+		// Create registry with file layer only (no console output)
+		let registry = Registry::default().with(file_layer).with(env_filter);
+		let _ = registry.try_init();
 
-	info!(
-		project_path = %base_dir.display(),
-		log_directory = %log_dir.display(),
-		debug_mode = debug_mode,
-		"MCP Server logging initialized"
-	);
+		info!(
+			project_path = %base_dir.display(),
+			log_directory = %log_dir.display(),
+			debug_mode = debug_mode,
+			"MCP Server logging initialized"
+		);
+
+		Ok(())
+	})();
+
+	// Swallow any logging init errors to keep MCP stdio clean and avoid startup failure.
+	if init_result.is_err() {
+		return Ok(());
+	}
 
 	Ok(())
 }

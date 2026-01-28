@@ -593,9 +593,11 @@ impl<'a> GraphRagOperations<'a> {
 		}
 
 		if nodes_removed > 0 || relationships_removed > 0 {
-			eprintln!(
-				"🗑️  Cleaned up GraphRAG data for {}: {} nodes, {} relationships",
-				file_path, nodes_removed, relationships_removed
+			tracing::info!(
+				file = %file_path,
+				nodes_removed = nodes_removed,
+				relationships_removed = relationships_removed,
+				"Cleaned up GraphRAG data for file"
 			);
 		}
 

@@ -304,9 +304,16 @@ async fn cleanup_deleted_files_optimized(
 		if files_to_remove.len() >= CHUNK_SIZE {
 			for file_to_remove in &files_to_remove {
 				if let Err(e) = store.remove_blocks_by_path(file_to_remove).await {
-					eprintln!(
-						"Warning: Failed to remove blocks for {}: {}",
-						file_to_remove, e
+					if !quiet {
+						eprintln!(
+							"Warning: Failed to remove blocks for {}: {}",
+							file_to_remove, e
+						);
+					}
+					tracing::warn!(
+						file = %file_to_remove,
+						error = %e,
+						"Failed to remove blocks during cleanup"
 					);
 				}
 			}

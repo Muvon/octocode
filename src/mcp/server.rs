@@ -704,6 +704,11 @@ impl McpServer {
 			Some(duration_ms),
 		);
 
+		// Notifications (no id) must not receive a response per JSON-RPC/MCP behavior
+		if request_id.is_none() {
+			return Ok(None);
+		}
+
 		Ok(Some(response))
 	}
 
@@ -1340,6 +1345,11 @@ async fn handle_http_connection(
 		Some(duration_ms),
 	);
 
+	// Notifications (no id) must not receive a JSON-RPC response.
+	if request_id.is_none() {
+		return send_http_no_content(&mut stream).await;
+	}
+
 	// Send HTTP response
 	send_http_response(&mut stream, &response).await
 }
@@ -1372,6 +1382,13 @@ async fn send_http_response(stream: &mut TcpStream, response: &JsonRpcResponse) 
 		json_response
 	);
 
+	stream.write_all(http_response.as_bytes()).await?;
+	Ok(())
+}
+
+/// Send HTTP 204 for JSON-RPC notifications
+async fn send_http_no_content(stream: &mut TcpStream) -> Result<()> {
+	let http_response = "HTTP/1.1 204 No Content\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: POST, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type\r\n\r\n";
 	stream.write_all(http_response.as_bytes()).await?;
 	Ok(())
 }

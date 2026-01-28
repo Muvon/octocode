@@ -628,10 +628,12 @@ impl GraphBuilder {
 			// CRITICAL FIX: Update the graphrag_blocks counter
 			state_guard.graphrag_blocks += processed_count;
 		} else {
-			println!(
-				"GraphRAG: Processed {} files ({} skipped)",
-				processed_count, skipped_count
-			);
+			if !self.quiet {
+				println!(
+					"GraphRAG: Processed {} files ({} skipped)",
+					processed_count, skipped_count
+				);
+			}
 		}
 
 		Ok(())
@@ -714,12 +716,24 @@ impl GraphBuilder {
 
 		// Clear existing GraphRAG data to avoid duplicates
 		if let Err(e) = self.store.clear_graph_nodes().await {
-			eprintln!("Warning: Failed to clear existing graph nodes: {}", e);
+			if !self.quiet {
+				eprintln!("Warning: Failed to clear existing graph nodes: {}", e);
+			}
+			tracing::warn!(
+				error = %e,
+				"Failed to clear existing GraphRAG nodes"
+			);
 		}
 		if let Err(e) = self.store.clear_graph_relationships().await {
-			eprintln!(
-				"Warning: Failed to clear existing graph relationships: {}",
-				e
+			if !self.quiet {
+				eprintln!(
+					"Warning: Failed to clear existing graph relationships: {}",
+					e
+				);
+			}
+			tracing::warn!(
+				error = %e,
+				"Failed to clear existing GraphRAG relationships"
 			);
 		}
 
@@ -768,10 +782,12 @@ impl GraphBuilder {
 			// CRITICAL FIX: Update the graphrag_blocks counter
 			state_guard.graphrag_blocks += all_code_blocks.len();
 		} else {
-			println!(
-				"GraphRAG: Built from existing database with {} code blocks",
-				all_code_blocks.len()
-			);
+			if !self.quiet {
+				println!(
+					"GraphRAG: Built from existing database with {} code blocks",
+					all_code_blocks.len()
+				);
+			}
 		}
 
 		Ok(())
