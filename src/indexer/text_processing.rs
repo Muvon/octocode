@@ -74,11 +74,17 @@ impl TextProcessor {
 				break;
 			}
 
-			let next_start = if overlap > 0 && end_idx > overlap {
+			let mut next_start = if overlap > 0 && end_idx > overlap {
 				end_idx - overlap
 			} else {
 				end_idx
 			};
+
+			// Critical: ensure forward progress. If overlap would keep us at the same start,
+			// fall back to non-overlapped advancing.
+			if next_start <= start_idx {
+				next_start = end_idx;
+			}
 
 			current_line += end_idx - start_idx;
 			start_idx = next_start;
