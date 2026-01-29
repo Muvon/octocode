@@ -44,9 +44,9 @@ impl TextProcessor {
 			// Build chunk content and track character count
 			for (idx, line) in lines
 				.iter()
-				.enumerate()
 				.skip(start_idx)
 				.take(end_idx - start_idx)
+				.enumerate()
 			{
 				if char_count + line.len() + 1 > chunk_size && !current_content.is_empty() {
 					end_idx = start_idx + idx;
