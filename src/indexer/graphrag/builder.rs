@@ -627,13 +627,11 @@ impl GraphBuilder {
 			);
 			// CRITICAL FIX: Update the graphrag_blocks counter
 			state_guard.graphrag_blocks += processed_count;
-		} else {
-			if !self.quiet {
-				println!(
-					"GraphRAG: Processed {} files ({} skipped)",
-					processed_count, skipped_count
-				);
-			}
+		} else if !self.quiet {
+			println!(
+				"GraphRAG: Processed {} files ({} skipped)",
+				processed_count, skipped_count
+			);
 		}
 
 		Ok(())
@@ -781,13 +779,11 @@ impl GraphBuilder {
 			);
 			// CRITICAL FIX: Update the graphrag_blocks counter
 			state_guard.graphrag_blocks += all_code_blocks.len();
-		} else {
-			if !self.quiet {
-				println!(
-					"GraphRAG: Built from existing database with {} code blocks",
-					all_code_blocks.len()
-				);
-			}
+		} else if !self.quiet {
+			println!(
+				"GraphRAG: Built from existing database with {} code blocks",
+				all_code_blocks.len()
+			);
 		}
 
 		Ok(())
