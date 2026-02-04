@@ -97,7 +97,7 @@ dotenvy = "0.15"
 
 # Local dependency on octolib with embedding features
 # octolib = { path = "../octolib", features = ["fastembed", "huggingface"] }
-octolib = { version = "0.5.1", default-features = false }
+octolib = { version = "0.7.0", default-features = false }
 
 [profile.dev]
 opt-level = 1          # Basic optimizations without slowing compilation too much
