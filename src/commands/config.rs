@@ -99,24 +99,36 @@ pub fn execute(args: &ConfigArgs, mut config: Config) -> Result<()> {
 
 		// Show API key status for providers that need them
 		match active_provider {
-			EmbeddingProviderType::Jina => {
-				let api_key_status = if config.embedding.get_api_key(&active_provider).is_some() {
+			Ok(EmbeddingProviderType::Jina) => {
+				let api_key_status = if config
+					.embedding
+					.get_api_key(&EmbeddingProviderType::Jina)
+					.is_some()
+				{
 					"✅ Set"
 				} else {
 					"❌ Not set"
 				};
 				println!("   Jina API key: {}", api_key_status);
 			}
-			EmbeddingProviderType::Voyage => {
-				let api_key_status = if config.embedding.get_api_key(&active_provider).is_some() {
+			Ok(EmbeddingProviderType::Voyage) => {
+				let api_key_status = if config
+					.embedding
+					.get_api_key(&EmbeddingProviderType::Voyage)
+					.is_some()
+				{
 					"✅ Set"
 				} else {
 					"❌ Not set"
 				};
 				println!("   Voyage API key: {}", api_key_status);
 			}
-			EmbeddingProviderType::Google => {
-				let api_key_status = if config.embedding.get_api_key(&active_provider).is_some() {
+			Ok(EmbeddingProviderType::Google) => {
+				let api_key_status = if config
+					.embedding
+					.get_api_key(&EmbeddingProviderType::Google)
+					.is_some()
+				{
 					"✅ Set"
 				} else {
 					"❌ Not set"
@@ -223,7 +235,7 @@ pub fn execute(args: &ConfigArgs, mut config: Config) -> Result<()> {
 
 	if let Some(code_model) = &args.code_embedding_model {
 		// Parse provider from the model string and set the code model
-		let (provider, _) = parse_provider_model(code_model);
+		let (provider, _) = parse_provider_model(code_model)?;
 		config.embedding.code_model = code_model.clone();
 		println!(
 			"Code embedding model set to: {} (provider: {:?})",
@@ -234,7 +246,7 @@ pub fn execute(args: &ConfigArgs, mut config: Config) -> Result<()> {
 
 	if let Some(text_model) = &args.text_embedding_model {
 		// Parse provider from the model string and set the text model
-		let (provider, _) = parse_provider_model(text_model);
+		let (provider, _) = parse_provider_model(text_model)?;
 		config.embedding.text_model = text_model.clone();
 		println!(
 			"Text embedding model set to: {} (provider: {:?})",

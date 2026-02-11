@@ -55,7 +55,12 @@ impl GraphBuilder {
 		// Initialize embedding provider from config (using text model for graph descriptions)
 		// GraphRAG uses text embeddings for file descriptions and relationships, not code embeddings
 		let model_string = &config.embedding.text_model;
-		let (provider_type, model) = parse_provider_model(model_string);
+		let Ok((provider_type, model)) = parse_provider_model(model_string) else {
+			return Err(anyhow::anyhow!(
+				"Failed to parse provider model: {}",
+				model_string
+			));
+		};
 		let embedding_provider = Arc::new(
 			create_embedding_provider_from_parts(&provider_type, &model)
 				.await

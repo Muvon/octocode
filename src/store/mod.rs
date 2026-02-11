@@ -124,18 +124,20 @@ impl Store {
 
 		// Get vector dimensions from both code and text model configurations
 		let (code_provider, code_model) =
-			crate::embedding::parse_provider_model(&config.embedding.code_model);
+			crate::embedding::parse_provider_model(&config.embedding.code_model)
+				.map_err(|e| anyhow::anyhow!("Failed to parse code model: {}", e))?;
 		let code_vector_dim = config
 			.embedding
 			.get_vector_dimension(&code_provider, &code_model)
-			.await;
+			.await?;
 
 		let (text_provider, text_model) =
-			crate::embedding::parse_provider_model(&config.embedding.text_model);
+			crate::embedding::parse_provider_model(&config.embedding.text_model)
+				.map_err(|e| anyhow::anyhow!("Failed to parse text model: {}", e))?;
 		let text_vector_dim = config
 			.embedding
 			.get_vector_dimension(&text_provider, &text_model)
-			.await;
+			.await?;
 
 		// Connect to LanceDB
 		let db = connect(storage_path).execute().await?;
