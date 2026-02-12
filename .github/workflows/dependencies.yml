@@ -20,7 +20,7 @@ jobs:
         token: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Install Rust
-      uses: dtolnay/rust-toolchain@1.91.1
+      uses: dtolnay/rust-toolchain@1.92.0
 
     - name: Install protobuf compiler
       run: |
