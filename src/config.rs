@@ -282,7 +282,7 @@ mod tests {
 		assert_eq!(config.search.max_results, 20);
 
 		assert_eq!(
-			config.embedding.get_active_provider(),
+			config.embedding.get_active_provider().unwrap(),
 			crate::embedding::types::EmbeddingProviderType::Voyage
 		);
 		// Test new GraphRAG configuration structure
