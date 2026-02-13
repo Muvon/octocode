@@ -1,5 +1,70 @@
 # Changelog
 
+## [0.11.0] - 2026-02-13
+
+### 📋 Release Summary
+
+This release adds new AI providers for enhanced code analysis capabilities and delivers significant performance improvements through optimized graph traversal and query processing. Multiple bug fixes enhance system stability, improve text chunking accuracy, and ensure reliable metadata handling across the codebase.
+
+
+### ✨ New Features & Enhancements
+
+- **octolib**: add zai and minmax providers `fbe220a9`
+
+### 🔧 Improvements & Optimizations
+
+- **graphrag**: simplify nested if-else conditionals `d339b663`
+- **commands/commit**: enforce plain text format in AI prompts `af0e3ffd`
+- **review**: process JSON values directly `62992723`
+- **llm**: unify config and integrate octolib LlmClient `06aef91d`
+- **indexer**: simplify code embedding and unify logic `ba35f2d7`
+- **store**: simplify CacheStats struct initialization in test `f35032cd`
+- **graphrag**: add adjacency cache for graph traversal optimization `06480d97`
+- **graphrag**: improve queries with typed relations and pagination `52f2dab7`
+- **embedding**: replace providers with octolib integration `3db03b98`
+
+### 🐛 Bug Fixes & Stability
+
+- **config**: handle missing embedding provider in test `77704c9a`
+- **embedding**: handle parse_provider_model errors properly `8ef62370`
+- **indexer**: guarantee forward progress in text chunking loop `72c70303`
+- **indexer**: correct end_idx calculation in text chunking `9f75b3be`
+- **mcp**: handle JSON-RPC notifications without response `8251b243`
+- **zai**: resolve provider issue `a09718f6`
+- **utils**: handle single-line commit messages safely `979188b0`
+- **indexer**: flush store before saving metadata `2a135443`
+- **graphrag**: align batch schema field names for source_id handling `e653ee5b`
+- **docker**: update Rust base image to 1.91-slim `6d550f0c`
+- **octolib**: disable default features and enable embed by default `5d176da7`
+- **ci**: update cc crate and disable doctests on Windows `d46af3b8`
+
+### 🔄 Other Changes
+
+- upgrade Rust toolchain to 1.92.0 `0974150e`
+- **deps**: bump octolib to 0.8.1 `6b0d7648`
+- **deps**: upgrade octolib to 0.7.0 `63ae7cc0`
+- **deps**: update lance with geospatial support `c583b1a5`
+- **memory**: extract memory to separate binary `113f9753`
+- **deps**: bump octolib to v0.5.1 `a8fd0156`
+- **deps**: update octolib and zune-core `eee88b0c`
+- **release**: update macOS runner to 14 `5c6d7a22`
+- **deps**: upgrade reqwest and tree-sitter crates `6e58781c`
+- **deps**: bump dependency versions in Cargo.lock `afeaba6b`
+- **cargo**: bump deps and adapt to upstream API `9295417a`
+- **commands**: clarify breaking change policy in prompt `4626e1d8`
+- **deps**: update syn, http, and other dependencies `4b062e75`
+- **deps**: lock octolib to crates.io release version `78a9e7e6`
+- **deps**: update tracing-subscriber and core dependencies `eb6db5f5`
+
+### 📊 Release Summary
+
+**Total commits**: 37 across 4 categories
+
+✨ **1** new feature - *Enhanced functionality*
+🔧 **9** improvements - *Better performance & code quality*
+🐛 **12** bug fixes - *Improved stability*
+🔄 **15** other changes - *Maintenance & tooling*
+
 ## [0.10.0] - 2025-09-14
 
 ### 📋 Release Summary
