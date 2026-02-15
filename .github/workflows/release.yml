@@ -201,9 +201,14 @@ jobs:
         elif [ "${{ runner.os }}" = "Windows" ]; then
           # Windows: disable default features to avoid ONNX Runtime issues
           cargo build --release --target ${{ matrix.target }} --no-default-features
-        else
-          # Native build for other platforms (macOS)
-          cargo build --release --target ${{ matrix.target }}
+        elif [ "${{ runner.os }}" = "macOS" ]; then
+          # macOS: only use --no-default-features for x86_64 (Intel) due to ONNX Runtime
+          # not providing prebuilt binaries for this target. aarch64 (Apple Silicon) works.
+          if [ "${{ matrix.target }}" = "x86_64-apple-darwin" ]; then
+            cargo build --release --target ${{ matrix.target }} --no-default-features
+          else
+            cargo build --release --target ${{ matrix.target }}
+          fi
         fi
 
     - name: Create archive directory
