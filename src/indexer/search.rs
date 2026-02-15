@@ -2403,3 +2403,67 @@ pub fn deduplicate_and_merge_results(
 
 	(final_code_blocks, final_doc_blocks, final_text_blocks)
 }
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn test_format_symbols_for_display_empty() {
+		let symbols: Vec<String> = vec![];
+		let result = format_symbols_for_display(&symbols);
+		assert_eq!(result, "");
+	}
+
+	#[test]
+	fn test_format_symbols_for_display_filters_types() {
+		let symbols = vec![
+			"function_definition".to_string(), // contains _, filtered out
+			"my_function".to_string(),         // contains _, filtered out
+			"class_declaration".to_string(),   // contains _, filtered out
+			"MyClass".to_string(),             // no _, kept
+		];
+		let result = format_symbols_for_display(&symbols);
+		// Should filter out symbols containing underscores
+		assert_eq!(result, "MyClass");
+	}
+
+	#[test]
+	fn test_format_symbols_for_display_deduplicates() {
+		let symbols = vec![
+			"foo".to_string(),
+			"bar".to_string(),
+			"foo".to_string(),
+			"baz".to_string(),
+		];
+		let result = format_symbols_for_display(&symbols);
+		// Should deduplicate and sort
+		assert_eq!(result, "bar, baz, foo");
+	}
+
+	#[test]
+	fn test_format_symbols_for_display_sorts() {
+		let symbols = vec![
+			"zebra".to_string(),
+			"apple".to_string(),
+			"mango".to_string(),
+		];
+		let result = format_symbols_for_display(&symbols);
+		assert_eq!(result, "apple, mango, zebra");
+	}
+
+	#[test]
+	fn test_format_symbols_for_display_mixed() {
+		let symbols = vec![
+			"my_func".to_string(),       // contains _, filtered out
+			"type_alias".to_string(),    // contains _, filtered out
+			"AnotherFunc".to_string(),   // no _, kept
+			"my_func".to_string(),       // duplicate, filtered out
+			"interface_def".to_string(), // contains _, filtered out
+			"SimpleFunc".to_string(),    // no _, kept
+		];
+		let result = format_symbols_for_display(&symbols);
+		// Should filter types with underscores and sort
+		assert_eq!(result, "AnotherFunc, SimpleFunc");
+	}
+}
