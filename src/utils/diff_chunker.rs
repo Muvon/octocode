@@ -571,7 +571,8 @@ mod tests {
 	fn test_combine_review_results() {
 		// Empty responses
 		let empty: Vec<serde_json::Value> = vec![];
-		let result = combine_review_results(empty).unwrap();
+		let result =
+			combine_review_results(empty).expect("Empty responses should produce valid result");
 		assert!(result.to_string().contains("Review Analysis Incomplete"));
 
 		// Single valid JSON response
@@ -580,7 +581,8 @@ mod tests {
 			"issues": [{"severity": "HIGH", "category": "Security", "title": "Test Issue", "description": "Test description"}],
 			"recommendations": ["Test recommendation"]
 		})];
-		let result = combine_review_results(single).unwrap();
+		let result = combine_review_results(single)
+			.expect("Single valid response should produce valid result");
 		assert!(result.to_string().contains("Test Issue"));
 		assert!(result.to_string().contains("Test recommendation"));
 
@@ -597,13 +599,26 @@ mod tests {
 				"recommendations": ["Rec 2"]
 			}),
 		];
-		let result = combine_review_results(multiple).unwrap();
+		let result = combine_review_results(multiple)
+			.expect("Multiple valid responses should produce valid result");
 		// Result is now serde_json::Value directly
 		assert_eq!(result["summary"]["total_files"], 3); // 1 + 2
 		assert_eq!(result["summary"]["total_issues"], 2); // Combined issues
 		assert_eq!(result["summary"]["overall_score"], 85); // Average of 80 and 90
-		assert_eq!(result["issues"].as_array().unwrap().len(), 2);
-		assert_eq!(result["recommendations"].as_array().unwrap().len(), 2);
+		assert_eq!(
+			result["issues"]
+				.as_array()
+				.expect("issues should be an array")
+				.len(),
+			2
+		);
+		assert_eq!(
+			result["recommendations"]
+				.as_array()
+				.expect("recommendations should be an array")
+				.len(),
+			2
+		);
 	}
 
 	#[test]
@@ -630,7 +645,8 @@ mod tests {
 	fn test_invalid_json_handling() {
 		let invalid_responses = vec![serde_json::json!({"invalid": "json structure"})];
 
-		let result = combine_review_results(invalid_responses).unwrap();
+		let result = combine_review_results(invalid_responses)
+			.expect("Invalid JSON should still produce a result");
 		// Should return the invalid JSON back (single response is returned as-is)
 		// Since it's a single response, it's returned as-is
 		assert_eq!(result["invalid"], "json structure");

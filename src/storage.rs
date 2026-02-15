@@ -236,8 +236,9 @@ mod tests {
 		let _ = fs::create_dir_all(&temp_dir);
 
 		// Should not panic and should return a consistent hash
-		let id1 = get_project_identifier(&temp_dir).unwrap();
-		let id2 = get_project_identifier(&temp_dir).unwrap();
+		let id1 = get_project_identifier(&temp_dir).expect("Should get project identifier");
+		let id2 =
+			get_project_identifier(&temp_dir).expect("Should get consistent project identifier");
 
 		assert_eq!(id1, id2);
 		assert_eq!(id1.len(), 16); // Should be 16 characters
@@ -247,7 +248,7 @@ mod tests {
 
 	#[test]
 	fn test_system_storage_dir() {
-		let storage_dir = get_system_storage_dir().unwrap();
+		let storage_dir = get_system_storage_dir().expect("Should get system storage directory");
 
 		// Should contain "octocode" in the path
 		assert!(storage_dir.to_string_lossy().contains("octocode"));
@@ -258,7 +259,8 @@ mod tests {
 
 	#[test]
 	fn test_fastembed_cache_dir() {
-		let fastembed_cache = get_fastembed_cache_dir().unwrap();
+		let fastembed_cache =
+			get_fastembed_cache_dir().expect("Should get fastembed cache directory");
 
 		// Should contain "octocode" and "fastembed" in the path
 		assert!(fastembed_cache.to_string_lossy().contains("octocode"));
@@ -268,14 +270,14 @@ mod tests {
 		assert!(fastembed_cache.is_absolute());
 
 		// Should be a direct subdirectory of system storage directory
-		let storage_dir = get_system_storage_dir().unwrap();
+		let storage_dir = get_system_storage_dir().expect("Should get system storage directory");
 		assert!(fastembed_cache.starts_with(&storage_dir));
 		assert_eq!(fastembed_cache, storage_dir.join("fastembed"));
 	}
 
 	#[test]
 	fn test_sentencetransformer_cache_dir() {
-		let st_cache = get_huggingface_cache_dir().unwrap();
+		let st_cache = get_huggingface_cache_dir().expect("Should get huggingface cache directory");
 
 		// Should contain "octocode" and "sentencetransformer" in the path
 		assert!(st_cache.to_string_lossy().contains("octocode"));
@@ -285,7 +287,7 @@ mod tests {
 		assert!(st_cache.is_absolute());
 
 		// Should be a direct subdirectory of system storage directory
-		let storage_dir = get_system_storage_dir().unwrap();
+		let storage_dir = get_system_storage_dir().expect("Should get system storage directory");
 		assert!(st_cache.starts_with(&storage_dir));
 		assert_eq!(st_cache, storage_dir.join("sentencetransformer"));
 	}
