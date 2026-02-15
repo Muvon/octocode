@@ -30,10 +30,9 @@ use crate::mcp::logging::{
 	init_mcp_logging, log_critical_anyhow_error, log_mcp_request, log_mcp_response,
 };
 use crate::mcp::semantic_code::SemanticCodeProvider;
-use crate::mcp::types::{JsonRpcError, JsonRpcRequest, JsonRpcResponse, McpError};
+use crate::mcp::types::{JsonRpcError, JsonRpcRequest, JsonRpcResponse};
 
 // Reuse constants from server.rs for consistency
-const MCP_MAX_REQUEST_SIZE: usize = 10_485_760; // 10MB maximum request size
 const INSTANCE_CLEANUP_INTERVAL_MS: u64 = 300_000; // 5 minutes
 const INSTANCE_IDLE_TIMEOUT_MS: u64 = 1_800_000; // 30 minutes
 
@@ -66,12 +65,16 @@ impl ProxyMcpInstance {
 		// Update last accessed time
 		*self.last_accessed.lock().await = Instant::now();
 
-		// Reuse exact same request handling logic from McpServer
+		// Use shared handlers from handlers module
 		match request.method.as_str() {
-			"initialize" => self.handle_initialize(request),
-			"tools/list" => self.handle_tools_list(request),
-			"tools/call" => self.handle_tools_call(request).await,
-			"ping" => self.handle_ping(request),
+			"initialize" => super::handlers::handle_initialize(
+				request,
+				"octocode-mcp-proxy",
+				"This proxy provides MCP tools for multiple repositories. Access via URL path: /org/repo for repository at {root}/org/repo."
+			),
+			"tools/list" => super::handlers::handle_tools_list(request, &self.semantic_code, &self.graphrag),
+			"tools/call" => super::handlers::handle_tools_call(request, &self.semantic_code, &self.graphrag).await,
+			"ping" => super::handlers::handle_ping(request),
 			_ => JsonRpcResponse {
 				jsonrpc: "2.0".to_string(),
 				id: request.id.clone(),
@@ -82,180 +85,6 @@ impl ProxyMcpInstance {
 					data: None,
 				}),
 			},
-		}
-	}
-
-	// Reuse exact same handlers from McpServer - copy the logic to avoid complex refactoring
-	fn handle_initialize(&self, request: &JsonRpcRequest) -> JsonRpcResponse {
-		JsonRpcResponse {
-			jsonrpc: "2.0".to_string(),
-			id: request.id.clone(),
-			result: Some(serde_json::json!({
-				"protocolVersion": "2024-11-05",
-				"capabilities": {
-					"tools": {
-						"listChanged": false
-					}
-				},
-				"serverInfo": {
-					"name": "octocode-mcp-proxy",
-					"version": "0.1.0",
-					"description": "Multi-repository MCP proxy server with semantic search and GraphRAG"
-				},
-				"instructions": "This proxy provides MCP tools for multiple repositories. Access via URL path: /org/repo for repository at {root}/org/repo."
-			})),
-			error: None,
-		}
-	}
-
-	fn handle_tools_list(&self, request: &JsonRpcRequest) -> JsonRpcResponse {
-		let mut tools = vec![
-			SemanticCodeProvider::get_tool_definition(),
-			SemanticCodeProvider::get_view_signatures_tool_definition(),
-		];
-
-		// Add GraphRAG tools if available
-		if self.graphrag.is_some() {
-			tools.push(GraphRagProvider::get_tool_definition());
-		}
-
-		JsonRpcResponse {
-			jsonrpc: "2.0".to_string(),
-			id: request.id.clone(),
-			result: Some(serde_json::json!({
-				"tools": tools
-			})),
-			error: None,
-		}
-	}
-
-	async fn handle_tools_call(&self, request: &JsonRpcRequest) -> JsonRpcResponse {
-		let params = match &request.params {
-			Some(params) => params,
-			None => {
-				return JsonRpcResponse {
-					jsonrpc: "2.0".to_string(),
-					id: request.id.clone(),
-					result: None,
-					error: Some(JsonRpcError {
-						code: -32602,
-						message: "Invalid params: missing parameters object".to_string(),
-						data: Some(serde_json::json!({
-							"details": "Tool calls require a 'params' object with 'name' and 'arguments' fields"
-						})),
-					}),
-				};
-			}
-		};
-
-		let tool_name = match params.get("name").and_then(|v| v.as_str()) {
-			Some(name) => name,
-			None => {
-				return JsonRpcResponse {
-					jsonrpc: "2.0".to_string(),
-					id: request.id.clone(),
-					result: None,
-					error: Some(JsonRpcError {
-						code: -32602,
-						message: "Invalid params: missing tool name".to_string(),
-						data: Some(serde_json::json!({
-							"details": "Required field 'name' must be provided with the tool name to call"
-						})),
-					}),
-				};
-			}
-		};
-
-		let default_args = serde_json::json!({});
-		let arguments = params.get("arguments").unwrap_or(&default_args);
-
-		// Validate arguments size to prevent memory exhaustion
-		if let Ok(args_str) = serde_json::to_string(arguments) {
-			if args_str.len() > MCP_MAX_REQUEST_SIZE {
-				return JsonRpcResponse {
-					jsonrpc: "2.0".to_string(),
-					id: request.id.clone(),
-					result: None,
-					error: Some(JsonRpcError {
-						code: -32602,
-						message: "Tool arguments too large".to_string(),
-						data: Some(serde_json::json!({
-							"max_size": MCP_MAX_REQUEST_SIZE,
-							"actual_size": args_str.len()
-						})),
-					}),
-				};
-			}
-		}
-
-		// Execute tools - reuse exact same logic as McpServer
-		let result = match tool_name {
-			"semantic_search" => self.semantic_code.execute_search(arguments).await,
-			"view_signatures" => self.semantic_code.execute_view_signatures(arguments).await,
-			"graphrag" => match &self.graphrag {
-				Some(provider) => provider.execute(arguments).await,
-				None => Err(McpError::method_not_found("GraphRAG is not enabled in the current configuration. Please enable GraphRAG in octocode.toml to use relationship-aware search.", "graphrag")),
-			},
-			_ => {
-				let available_tools = format!(
-					"semantic_search, view_signatures{}",
-					if self.graphrag.is_some() { ", graphrag" } else { "" }
-				);
-				Err(McpError::method_not_found(format!("Unknown tool '{}'. Available tools: {}", tool_name, available_tools), "proxy_call"))
-			}
-		};
-		match result {
-			Ok(content) => JsonRpcResponse {
-				jsonrpc: "2.0".to_string(),
-				id: request.id.clone(),
-				result: Some(serde_json::json!({
-					"content": [{
-						"type": "text",
-						"text": content
-					}]
-				})),
-				error: None,
-			},
-			Err(e) => {
-				let error_message = e.to_string();
-				let error_code =
-					if error_message.contains("Missing") || error_message.contains("Invalid") {
-						-32602 // Invalid params
-					} else if error_message.contains("not enabled")
-						|| error_message.contains("not available")
-					{
-						-32601 // Method not found (feature not available)
-					} else {
-						-32603 // Internal error
-					};
-
-				JsonRpcResponse {
-					jsonrpc: "2.0".to_string(),
-					id: request.id.clone(),
-					result: None,
-					error: Some(JsonRpcError {
-						code: error_code,
-						message: format!("Tool execution failed: {}", error_message),
-						data: Some(serde_json::json!({
-							"tool": tool_name,
-							"error_type": match error_code {
-								-32602 => "invalid_params",
-								-32601 => "feature_unavailable",
-								_ => "execution_error"
-							}
-						})),
-					}),
-				}
-			}
-		}
-	}
-
-	fn handle_ping(&self, request: &JsonRpcRequest) -> JsonRpcResponse {
-		JsonRpcResponse {
-			jsonrpc: "2.0".to_string(),
-			id: request.id.clone(),
-			result: Some(serde_json::json!({})),
-			error: None,
 		}
 	}
 
