@@ -14,7 +14,6 @@
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::sync::Arc;
 
 // Arrow imports
@@ -26,17 +25,18 @@ use futures::TryStreamExt;
 use lancedb::{
 	connect,
 	query::{ExecutableQuery, QueryBase},
-	Connection, DistanceType, Table,
+	Connection, DistanceType,
 };
-use tokio::sync::RwLock;
 
 // Import modular components
 use self::{
-	batch_converter::BatchConverter, debug::DebugOperations, graphrag::GraphRagOperations,
-	metadata::MetadataOperations, table_ops::TableOperations, vector_optimizer::VectorOptimizer,
+	batch_converter::BatchConverter, block_trait::BlockType, debug::DebugOperations,
+	graphrag::GraphRagOperations, metadata::MetadataOperations, table_ops::TableOperations,
+	vector_optimizer::VectorOptimizer,
 };
 
 pub mod batch_converter;
+pub mod block_trait;
 pub mod debug;
 pub mod graphrag;
 pub mod metadata;
@@ -89,8 +89,6 @@ pub struct Store {
 	db: Connection,
 	code_vector_dim: usize, // Size of code embedding vectors
 	text_vector_dim: usize, // Size of text embedding vectors
-	// Cache for table instances to avoid repeated opening overhead
-	table_cache: Arc<RwLock<HashMap<String, Arc<Table>>>>,
 }
 
 // Implementing Drop for the Store
@@ -191,35 +189,7 @@ impl Store {
 			db,
 			code_vector_dim,
 			text_vector_dim,
-			table_cache: Arc::new(RwLock::new(HashMap::new())),
 		})
-	}
-
-	/// Get or open a table with caching to avoid repeated open overhead
-	/// This is critical for performance when running multiple queries
-	async fn get_table(&self, table_name: &str) -> Result<Arc<Table>> {
-		// Check cache first (read lock)
-		{
-			let cache = self.table_cache.read().await;
-			if let Some(table) = cache.get(table_name) {
-				return Ok(Arc::clone(table));
-			}
-		}
-
-		// Not in cache, open it (write lock)
-		let mut cache = self.table_cache.write().await;
-
-		// Double-check after acquiring write lock (another task may have opened it)
-		if let Some(table) = cache.get(table_name) {
-			return Ok(Arc::clone(table));
-		}
-
-		// Open table and cache it
-		let table = self.db.open_table(table_name).execute().await?;
-		let table = Arc::new(table);
-		cache.insert(table_name.to_string(), Arc::clone(&table));
-
-		Ok(table)
 	}
 
 	pub async fn initialize_collections(&self) -> Result<()> {
@@ -328,49 +298,8 @@ impl Store {
 		blocks: &[CodeBlock],
 		embeddings: &[Vec<f32>],
 	) -> Result<()> {
-		let converter = BatchConverter::new(self.code_vector_dim);
-		let batch = converter.code_block_to_batch(blocks, embeddings)?;
-
-		let table_ops = TableOperations::new(&self.db);
-		table_ops.store_batch("code_blocks", batch).await?;
-
-		// Create or optimize vector index based on dataset growth
-		if let Ok(table) = self.db.open_table("code_blocks").execute().await {
-			let row_count = table.count_rows(None).await?;
-			let indices = table.list_indices().await?;
-			let has_index = indices.iter().any(|idx| idx.columns == vec!["embedding"]);
-
-			if !has_index {
-				// Create initial index
-				if let Err(e) = table_ops
-					.create_vector_index_optimized("code_blocks", "embedding", self.code_vector_dim)
-					.await
-				{
-					tracing::warn!("Failed to create optimized vector index: {}", e);
-				}
-			} else {
-				// Check if we should optimize existing index due to growth
-				if VectorOptimizer::should_optimize_for_growth(
-					row_count,
-					self.code_vector_dim,
-					true,
-				) {
-					tracing::info!("Dataset growth detected, optimizing code_blocks index");
-					if let Err(e) = table_ops
-						.recreate_vector_index_optimized(
-							"code_blocks",
-							"embedding",
-							self.code_vector_dim,
-						)
-						.await
-					{
-						tracing::warn!("Failed to recreate optimized vector index: {}", e);
-					}
-				}
-			}
-		}
-
-		Ok(())
+		self.store_blocks(blocks, embeddings, self.code_vector_dim)
+			.await
 	}
 
 	pub async fn store_text_blocks(
@@ -378,49 +307,8 @@ impl Store {
 		blocks: &[TextBlock],
 		embeddings: &[Vec<f32>],
 	) -> Result<()> {
-		let converter = BatchConverter::new(self.text_vector_dim);
-		let batch = converter.text_block_to_batch(blocks, embeddings)?;
-
-		let table_ops = TableOperations::new(&self.db);
-		table_ops.store_batch("text_blocks", batch).await?;
-
-		// Create or optimize vector index based on dataset growth
-		if let Ok(table) = self.db.open_table("text_blocks").execute().await {
-			let row_count = table.count_rows(None).await?;
-			let indices = table.list_indices().await?;
-			let has_index = indices.iter().any(|idx| idx.columns == vec!["embedding"]);
-
-			if !has_index {
-				// Create initial index
-				if let Err(e) = table_ops
-					.create_vector_index_optimized("text_blocks", "embedding", self.text_vector_dim)
-					.await
-				{
-					tracing::warn!("Failed to create optimized vector index: {}", e);
-				}
-			} else {
-				// Check if we should optimize existing index due to growth
-				if VectorOptimizer::should_optimize_for_growth(
-					row_count,
-					self.text_vector_dim,
-					true,
-				) {
-					tracing::info!("Dataset growth detected, optimizing text_blocks index");
-					if let Err(e) = table_ops
-						.recreate_vector_index_optimized(
-							"text_blocks",
-							"embedding",
-							self.text_vector_dim,
-						)
-						.await
-					{
-						tracing::warn!("Failed to recreate optimized vector index: {}", e);
-					}
-				}
-			}
-		}
-
-		Ok(())
+		self.store_blocks(blocks, embeddings, self.text_vector_dim)
+			.await
 	}
 
 	pub async fn store_document_blocks(
@@ -428,53 +316,8 @@ impl Store {
 		blocks: &[DocumentBlock],
 		embeddings: &[Vec<f32>],
 	) -> Result<()> {
-		let converter = BatchConverter::new(self.text_vector_dim);
-		let batch = converter.document_block_to_batch(blocks, embeddings)?;
-
-		let table_ops = TableOperations::new(&self.db);
-		table_ops.store_batch("document_blocks", batch).await?;
-
-		// Create or optimize vector index based on dataset growth
-		if let Ok(table) = self.db.open_table("document_blocks").execute().await {
-			let row_count = table.count_rows(None).await?;
-			let indices = table.list_indices().await?;
-			let has_index = indices.iter().any(|idx| idx.columns == vec!["embedding"]);
-
-			if !has_index {
-				// Create initial index
-				if let Err(e) = table_ops
-					.create_vector_index_optimized(
-						"document_blocks",
-						"embedding",
-						self.text_vector_dim,
-					)
-					.await
-				{
-					tracing::warn!("Failed to create optimized vector index: {}", e);
-				}
-			} else {
-				// Check if we should optimize existing index due to growth
-				if VectorOptimizer::should_optimize_for_growth(
-					row_count,
-					self.text_vector_dim,
-					true,
-				) {
-					tracing::info!("Dataset growth detected, optimizing document_blocks index");
-					if let Err(e) = table_ops
-						.recreate_vector_index_optimized(
-							"document_blocks",
-							"embedding",
-							self.text_vector_dim,
-						)
-						.await
-					{
-						tracing::warn!("Failed to recreate optimized vector index: {}", e);
-					}
-				}
-			}
-		}
-
-		Ok(())
+		self.store_blocks(blocks, embeddings, self.text_vector_dim)
+			.await
 	}
 
 	// Search operations with distance conversion
@@ -500,59 +343,14 @@ impl Store {
 		distance_threshold: Option<f32>,
 		language_filter: Option<&str>,
 	) -> Result<Vec<CodeBlock>> {
-		let table_ops = TableOperations::new(&self.db);
-		if !table_ops.table_exists("code_blocks").await? {
-			return Ok(Vec::new());
-		}
-
-		let table = self.get_table("code_blocks").await?;
-
-		let mut query = table
-			.vector_search(embedding)?
-			.distance_type(DistanceType::Cosine) // Always use Cosine for consistency
-			.limit(limit.unwrap_or(10));
-		// Apply language filter if specified
-		if let Some(language) = language_filter {
-			query = query.only_if(format!("language = '{}'", language));
-		}
-
-		// Apply intelligent search optimization
-		query = VectorOptimizer::optimize_query(query, &table, "code_blocks")
-			.await
-			.map_err(|e| anyhow::anyhow!("Failed to optimize query: {}", e))?;
-
-		let mut results = query.execute().await?;
-		let mut all_code_blocks = Vec::new();
-		let converter = BatchConverter::new(self.code_vector_dim);
-
-		while let Some(batch) = results.try_next().await? {
-			if batch.num_rows() > 0 {
-				let mut code_blocks = converter.batch_to_code_blocks(&batch, None)?;
-
-				// Apply distance threshold if specified
-				if let Some(distance_threshold_value) = distance_threshold {
-					code_blocks.retain(|block| {
-						block.distance.is_none_or(|d| d <= distance_threshold_value)
-					});
-				}
-
-				all_code_blocks.append(&mut code_blocks);
-			}
-		}
-
-		// Sort results by distance (ascending - lower distance = higher similarity)
-		all_code_blocks.sort_by(|a, b| {
-			match (a.distance, b.distance) {
-				(Some(dist_a), Some(dist_b)) => dist_a
-					.partial_cmp(&dist_b)
-					.unwrap_or(std::cmp::Ordering::Equal),
-				(Some(_), None) => std::cmp::Ordering::Less, // Results with distance come first
-				(None, Some(_)) => std::cmp::Ordering::Greater,
-				(None, None) => std::cmp::Ordering::Equal,
-			}
-		});
-
-		Ok(all_code_blocks)
+		self.get_blocks_with_config(
+			embedding,
+			limit,
+			distance_threshold,
+			language_filter,
+			self.code_vector_dim,
+		)
+		.await
 	}
 
 	// Similar implementations for text and document blocks...
@@ -567,55 +365,14 @@ impl Store {
 		limit: Option<usize>,
 		distance_threshold: Option<f32>,
 	) -> Result<Vec<TextBlock>> {
-		let table_ops = TableOperations::new(&self.db);
-		if !table_ops.table_exists("text_blocks").await? {
-			return Ok(Vec::new());
-		}
-
-		let table = self.get_table("text_blocks").await?;
-
-		let mut query = table
-			.vector_search(embedding)?
-			.distance_type(DistanceType::Cosine) // Always use Cosine for consistency
-			.limit(limit.unwrap_or(10));
-
-		// Apply intelligent search optimization
-		query = VectorOptimizer::optimize_query(query, &table, "text_blocks")
-			.await
-			.map_err(|e| anyhow::anyhow!("Failed to optimize query: {}", e))?;
-
-		let mut results = query.execute().await?;
-		let mut all_text_blocks = Vec::new();
-		let converter = BatchConverter::new(self.text_vector_dim);
-
-		while let Some(batch) = results.try_next().await? {
-			if batch.num_rows() > 0 {
-				let mut text_blocks = converter.batch_to_text_blocks(&batch, None)?;
-
-				// Apply distance threshold if specified
-				if let Some(distance_threshold_value) = distance_threshold {
-					text_blocks.retain(|block| {
-						block.distance.is_none_or(|d| d <= distance_threshold_value)
-					});
-				}
-
-				all_text_blocks.append(&mut text_blocks);
-			}
-		}
-
-		// Sort results by distance (ascending - lower distance = higher similarity)
-		all_text_blocks.sort_by(|a, b| {
-			match (a.distance, b.distance) {
-				(Some(dist_a), Some(dist_b)) => dist_a
-					.partial_cmp(&dist_b)
-					.unwrap_or(std::cmp::Ordering::Equal),
-				(Some(_), None) => std::cmp::Ordering::Less, // Results with distance come first
-				(None, Some(_)) => std::cmp::Ordering::Greater,
-				(None, None) => std::cmp::Ordering::Equal,
-			}
-		});
-
-		Ok(all_text_blocks)
+		self.get_blocks_with_config(
+			embedding,
+			limit,
+			distance_threshold,
+			None,
+			self.text_vector_dim,
+		)
+		.await
 	}
 
 	pub async fn get_document_blocks(&self, embedding: Vec<f32>) -> Result<Vec<DocumentBlock>> {
@@ -629,55 +386,14 @@ impl Store {
 		limit: Option<usize>,
 		distance_threshold: Option<f32>,
 	) -> Result<Vec<DocumentBlock>> {
-		let table_ops = TableOperations::new(&self.db);
-		if !table_ops.table_exists("document_blocks").await? {
-			return Ok(Vec::new());
-		}
-
-		let table = self.get_table("document_blocks").await?;
-
-		let mut query = table
-			.vector_search(embedding)?
-			.distance_type(DistanceType::Cosine) // Always use Cosine for consistency
-			.limit(limit.unwrap_or(10));
-
-		// Apply intelligent search optimization
-		query = VectorOptimizer::optimize_query(query, &table, "document_blocks")
-			.await
-			.map_err(|e| anyhow::anyhow!("Failed to optimize query: {}", e))?;
-
-		let mut results = query.execute().await?;
-		let mut all_document_blocks = Vec::new();
-		let converter = BatchConverter::new(self.text_vector_dim);
-
-		while let Some(batch) = results.try_next().await? {
-			if batch.num_rows() > 0 {
-				let mut document_blocks = converter.batch_to_document_blocks(&batch, None)?;
-
-				// Apply distance threshold if specified
-				if let Some(distance_threshold_value) = distance_threshold {
-					document_blocks.retain(|block| {
-						block.distance.is_none_or(|d| d <= distance_threshold_value)
-					});
-				}
-
-				all_document_blocks.append(&mut document_blocks);
-			}
-		}
-
-		// Sort results by distance (ascending - lower distance = higher similarity)
-		all_document_blocks.sort_by(|a, b| {
-			match (a.distance, b.distance) {
-				(Some(dist_a), Some(dist_b)) => dist_a
-					.partial_cmp(&dist_b)
-					.unwrap_or(std::cmp::Ordering::Equal),
-				(Some(_), None) => std::cmp::Ordering::Less, // Results with distance come first
-				(None, Some(_)) => std::cmp::Ordering::Greater,
-				(None, None) => std::cmp::Ordering::Equal,
-			}
-		});
-
-		Ok(all_document_blocks)
+		self.get_blocks_with_config(
+			embedding,
+			limit,
+			distance_threshold,
+			None,
+			self.text_vector_dim,
+		)
+		.await
 	}
 
 	// Delegate other operations to modular components
@@ -697,11 +413,7 @@ impl Store {
 			.remove_blocks_by_path(file_path, "graphrag_nodes")
 			.await?;
 		// Use specific GraphRAG operation for relationships (they don't have a 'path' field)
-		let graphrag_ops = GraphRagOperations::new(
-			&self.db,
-			self.code_vector_dim,
-			Arc::clone(&self.table_cache),
-		);
+		let graphrag_ops = GraphRagOperations::new(&self.db, self.code_vector_dim);
 		graphrag_ops
 			.remove_graph_relationships_by_path(file_path)
 			.await?;
@@ -733,6 +445,121 @@ impl Store {
 	pub async fn clear_code_table(&self) -> Result<()> {
 		let table_ops = TableOperations::new(&self.db);
 		table_ops.clear_table("code_blocks").await
+	}
+
+	// ============================================================================
+	// GENERIC BLOCK OPERATIONS - Eliminates duplication across block types
+	// ============================================================================
+
+	/// Generic method to store blocks with embeddings
+	/// This replaces the duplicated store_code_blocks, store_text_blocks, store_document_blocks
+	pub async fn store_blocks<B: BlockType>(
+		&self,
+		blocks: &[B],
+		embeddings: &[Vec<f32>],
+		vector_dim: usize,
+	) -> Result<()> {
+		let batch = B::to_batch(blocks, embeddings, vector_dim)?;
+		let table_ops = TableOperations::new(&self.db);
+		table_ops.store_batch(B::TABLE_NAME, batch).await?;
+
+		// Create or optimize vector index based on dataset growth
+		if let Ok(table) = self.db.open_table(B::TABLE_NAME).execute().await {
+			let row_count = table.count_rows(None).await?;
+			let indices = table.list_indices().await?;
+			let has_index = indices.iter().any(|idx| idx.columns == vec!["embedding"]);
+
+			if !has_index {
+				// Create initial index
+				if let Err(e) = table_ops
+					.create_vector_index_optimized(B::TABLE_NAME, "embedding", vector_dim)
+					.await
+				{
+					tracing::warn!("Failed to create optimized vector index: {}", e);
+				}
+			} else {
+				// Check if we should optimize existing index due to growth
+				if VectorOptimizer::should_optimize_for_growth(row_count, vector_dim, true) {
+					tracing::info!(
+						"Dataset growth detected, optimizing {} index",
+						B::TABLE_NAME
+					);
+					if let Err(e) = table_ops
+						.recreate_vector_index_optimized(B::TABLE_NAME, "embedding", vector_dim)
+						.await
+					{
+						tracing::warn!("Failed to recreate optimized vector index: {}", e);
+					}
+				}
+			}
+		}
+
+		Ok(())
+	}
+
+	/// Generic method to retrieve blocks with optional filtering
+	/// This replaces the duplicated get_*_blocks_with_config methods
+	pub async fn get_blocks_with_config<B: BlockType>(
+		&self,
+		embedding: Vec<f32>,
+		limit: Option<usize>,
+		distance_threshold: Option<f32>,
+		language_filter: Option<&str>,
+		_vector_dim: usize,
+	) -> Result<Vec<B>> {
+		let table_ops = TableOperations::new(&self.db);
+		if !table_ops.table_exists(B::TABLE_NAME).await? {
+			return Ok(Vec::new());
+		}
+
+		let table = self.db.open_table(B::TABLE_NAME).execute().await?;
+
+		let mut query = table
+			.vector_search(embedding)?
+			.distance_type(DistanceType::Cosine) // Always use Cosine for consistency
+			.limit(limit.unwrap_or(10));
+
+		// Apply language filter if specified (only for code/text blocks)
+		if let Some(language) = language_filter {
+			query = query.only_if(format!("language = '{}'", language));
+		}
+
+		// Apply intelligent search optimization
+		query = VectorOptimizer::optimize_query(query, &table, B::TABLE_NAME)
+			.await
+			.map_err(|e| anyhow::anyhow!("Failed to optimize query: {}", e))?;
+
+		let mut results = query.execute().await?;
+		let mut all_blocks = Vec::new();
+
+		while let Some(batch) = results.try_next().await? {
+			if batch.num_rows() > 0 {
+				let mut blocks = B::from_batch(&batch)?;
+
+				// Apply distance threshold if specified
+				if let Some(distance_threshold_value) = distance_threshold {
+					blocks.retain(|block| {
+						block
+							.distance()
+							.is_none_or(|d| d <= distance_threshold_value)
+					});
+				}
+
+				all_blocks.append(&mut blocks);
+			}
+		}
+
+		// Sort results by distance (ascending - lower distance = higher similarity)
+		all_blocks.sort_by(|a, b| match (a.distance(), b.distance()) {
+			(Some(dist_a), Some(dist_b)) => dist_a
+				.partial_cmp(&dist_b)
+				.unwrap_or(std::cmp::Ordering::Equal),
+			(Some(_), None) => std::cmp::Ordering::Less, // Results with distance come first
+			(None, Some(_)) => std::cmp::Ordering::Greater,
+			(None, None) => std::cmp::Ordering::Equal,
+		});
+
+		Ok(all_blocks)
 	}
 
 	pub async fn clear_docs_table(&self) -> Result<()> {
@@ -792,94 +619,54 @@ impl Store {
 
 	// GraphRAG operations
 	pub async fn graphrag_needs_indexing(&self) -> Result<bool> {
-		let graphrag_ops = GraphRagOperations::new(
-			&self.db,
-			self.code_vector_dim,
-			Arc::clone(&self.table_cache),
-		);
+		let graphrag_ops = GraphRagOperations::new(&self.db, self.code_vector_dim);
 		graphrag_ops.graphrag_needs_indexing().await
 	}
 
 	pub async fn get_all_code_blocks_for_graphrag(&self) -> Result<Vec<CodeBlock>> {
-		let graphrag_ops = GraphRagOperations::new(
-			&self.db,
-			self.code_vector_dim,
-			Arc::clone(&self.table_cache),
-		);
+		let graphrag_ops = GraphRagOperations::new(&self.db, self.code_vector_dim);
 		graphrag_ops.get_all_code_blocks_for_graphrag().await
 	}
 
 	pub async fn store_graph_nodes(&self, node_batch: RecordBatch) -> Result<()> {
-		let graphrag_ops = GraphRagOperations::new(
-			&self.db,
-			self.code_vector_dim,
-			Arc::clone(&self.table_cache),
-		);
+		let graphrag_ops = GraphRagOperations::new(&self.db, self.code_vector_dim);
 		graphrag_ops.store_graph_nodes(node_batch).await
 	}
 
 	pub async fn store_graph_relationships(&self, rel_batch: RecordBatch) -> Result<()> {
-		let graphrag_ops = GraphRagOperations::new(
-			&self.db,
-			self.code_vector_dim,
-			Arc::clone(&self.table_cache),
-		);
+		let graphrag_ops = GraphRagOperations::new(&self.db, self.code_vector_dim);
 		graphrag_ops.store_graph_relationships(rel_batch).await
 	}
 
 	pub async fn clear_graph_nodes(&self) -> Result<()> {
-		let graphrag_ops = GraphRagOperations::new(
-			&self.db,
-			self.code_vector_dim,
-			Arc::clone(&self.table_cache),
-		);
+		let graphrag_ops = GraphRagOperations::new(&self.db, self.code_vector_dim);
 		graphrag_ops.clear_graph_nodes().await
 	}
 
 	pub async fn clear_graph_relationships(&self) -> Result<()> {
-		let graphrag_ops = GraphRagOperations::new(
-			&self.db,
-			self.code_vector_dim,
-			Arc::clone(&self.table_cache),
-		);
+		let graphrag_ops = GraphRagOperations::new(&self.db, self.code_vector_dim);
 		graphrag_ops.clear_graph_relationships().await
 	}
 
 	pub async fn remove_graph_nodes_by_path(&self, file_path: &str) -> Result<usize> {
-		let graphrag_ops = GraphRagOperations::new(
-			&self.db,
-			self.code_vector_dim,
-			Arc::clone(&self.table_cache),
-		);
+		let graphrag_ops = GraphRagOperations::new(&self.db, self.code_vector_dim);
 		graphrag_ops.remove_graph_nodes_by_path(file_path).await
 	}
 
 	pub async fn remove_graph_relationships_by_path(&self, file_path: &str) -> Result<usize> {
-		let graphrag_ops = GraphRagOperations::new(
-			&self.db,
-			self.code_vector_dim,
-			Arc::clone(&self.table_cache),
-		);
+		let graphrag_ops = GraphRagOperations::new(&self.db, self.code_vector_dim);
 		graphrag_ops
 			.remove_graph_relationships_by_path(file_path)
 			.await
 	}
 
 	pub async fn search_graph_nodes(&self, embedding: &[f32], limit: usize) -> Result<RecordBatch> {
-		let graphrag_ops = GraphRagOperations::new(
-			&self.db,
-			self.code_vector_dim,
-			Arc::clone(&self.table_cache),
-		);
+		let graphrag_ops = GraphRagOperations::new(&self.db, self.code_vector_dim);
 		graphrag_ops.search_graph_nodes(embedding, limit).await
 	}
 
 	pub async fn get_graph_relationships(&self) -> Result<RecordBatch> {
-		let graphrag_ops = GraphRagOperations::new(
-			&self.db,
-			self.code_vector_dim,
-			Arc::clone(&self.table_cache),
-		);
+		let graphrag_ops = GraphRagOperations::new(&self.db, self.code_vector_dim);
 		graphrag_ops.get_graph_relationships().await
 	}
 
@@ -889,11 +676,7 @@ impl Store {
 		node_id: &str,
 		direction: crate::indexer::graphrag::types::RelationshipDirection,
 	) -> Result<Vec<crate::indexer::graphrag::types::CodeRelationship>> {
-		let graphrag_ops = GraphRagOperations::new(
-			&self.db,
-			self.code_vector_dim,
-			Arc::clone(&self.table_cache),
-		);
+		let graphrag_ops = GraphRagOperations::new(&self.db, self.code_vector_dim);
 		graphrag_ops
 			.get_node_relationships(node_id, direction)
 			.await
@@ -904,11 +687,7 @@ impl Store {
 		&self,
 		relation_type: &crate::indexer::graphrag::types::RelationType,
 	) -> Result<Vec<crate::indexer::graphrag::types::CodeRelationship>> {
-		let graphrag_ops = GraphRagOperations::new(
-			&self.db,
-			self.code_vector_dim,
-			Arc::clone(&self.table_cache),
-		);
+		let graphrag_ops = GraphRagOperations::new(&self.db, self.code_vector_dim);
 		graphrag_ops.get_relationships_by_type(relation_type).await
 	}
 
@@ -918,11 +697,7 @@ impl Store {
 		offset: usize,
 		limit: usize,
 	) -> Result<Vec<crate::indexer::graphrag::types::CodeNode>> {
-		let graphrag_ops = GraphRagOperations::new(
-			&self.db,
-			self.code_vector_dim,
-			Arc::clone(&self.table_cache),
-		);
+		let graphrag_ops = GraphRagOperations::new(&self.db, self.code_vector_dim);
 		graphrag_ops.get_all_nodes_paginated(offset, limit).await
 	}
 
@@ -930,11 +705,7 @@ impl Store {
 	pub async fn get_all_relationships_efficient(
 		&self,
 	) -> Result<Vec<crate::indexer::graphrag::types::CodeRelationship>> {
-		let graphrag_ops = GraphRagOperations::new(
-			&self.db,
-			self.code_vector_dim,
-			Arc::clone(&self.table_cache),
-		);
+		let graphrag_ops = GraphRagOperations::new(&self.db, self.code_vector_dim);
 		graphrag_ops.get_all_relationships_efficient().await
 	}
 
@@ -956,7 +727,7 @@ impl Store {
 			return Ok(None);
 		}
 
-		let table = self.get_table("code_blocks").await?;
+		let table = self.db.open_table("code_blocks").execute().await?;
 		let mut results = table
 			.query()
 			.only_if(format!("symbols LIKE '%{}%'", symbol))
@@ -981,7 +752,7 @@ impl Store {
 			return Err(anyhow::anyhow!("Code blocks table does not exist"));
 		}
 
-		let table = self.get_table("code_blocks").await?;
+		let table = self.db.open_table("code_blocks").execute().await?;
 		let mut results = table
 			.query()
 			.only_if(format!("hash = '{}'", hash))
