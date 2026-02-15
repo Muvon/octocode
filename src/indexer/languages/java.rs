@@ -59,24 +59,14 @@ impl Language for Java {
 			| "annotation_type_declaration"
 			| "record_declaration" => {
 				// Extract class/interface/enum/annotation/record name
-				for child in node.children(&mut node.walk()) {
-					if child.kind() == "identifier" {
-						if let Ok(name) = child.utf8_text(contents.as_bytes()) {
-							symbols.push(name.to_string());
-							break;
-						}
-					}
+				if let Some(name) = super::extract_symbol_by_kind(node, contents, "identifier") {
+					symbols.push(name);
 				}
 			}
 			"method_declaration" | "constructor_declaration" => {
 				// Extract method or constructor name
-				for child in node.children(&mut node.walk()) {
-					if child.kind() == "identifier" {
-						if let Ok(name) = child.utf8_text(contents.as_bytes()) {
-							symbols.push(name.to_string());
-							break;
-						}
-					}
+				if let Some(name) = super::extract_symbol_by_kind(node, contents, "identifier") {
+					symbols.push(name);
 				}
 			}
 			"lambda_expression" => {
@@ -100,10 +90,7 @@ impl Language for Java {
 			}
 		}
 
-		// Deduplicate symbols before returning
-		symbols.sort();
-		symbols.dedup();
-
+		super::deduplicate_symbols(&mut symbols);
 		symbols
 	}
 
@@ -245,28 +232,10 @@ impl Language for Java {
 	}
 
 	fn extract_identifiers(&self, node: Node, contents: &str, java_files: &mut Vec<String>) {
-		let kind = node.kind();
-
-		// Check if this is a valid identifier
-		if kind == "identifier" {
-			if let Ok(text) = node.utf8_text(contents.as_bytes()) {
-				let t = text.trim();
-				if !t.is_empty() && t.len() > 1 {
-					java_files.push(t.to_string());
-				}
-			}
-		}
-
-		// Recursively process child nodes
-		let mut cursor = node.walk();
-		if cursor.goto_first_child() {
-			loop {
-				self.extract_identifiers(cursor.node(), contents, java_files);
-				if !cursor.goto_next_sibling() {
-					break;
-				}
-			}
-		}
+		super::extract_identifiers_default(node, contents, java_files, |kind, text| {
+			// Include identifiers with length > 1 (avoid single-char variables)
+			kind == "identifier" && text.len() > 1
+		});
 	}
 
 	fn resolve_import(

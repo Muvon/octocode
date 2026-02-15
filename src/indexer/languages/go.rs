@@ -45,13 +45,12 @@ impl Language for Go {
 		match node.kind() {
 			"function_declaration" | "method_declaration" => {
 				// Extract function or method name
-				for child in node.children(&mut node.walk()) {
-					if child.kind() == "identifier" || child.kind() == "field_identifier" {
-						if let Ok(name) = child.utf8_text(contents.as_bytes()) {
-							symbols.push(name.to_string());
-						}
-						break;
-					}
+				if let Some(name) = super::extract_symbol_by_kinds(
+					node,
+					contents,
+					&["identifier", "field_identifier"],
+				) {
+					symbols.push(name);
 				}
 
 				// Extract variables declared in function body
@@ -66,14 +65,12 @@ impl Language for Go {
 				// Extract type name
 				for child in node.children(&mut node.walk()) {
 					if child.kind() == "type_spec" {
-						for type_child in child.children(&mut child.walk()) {
-							if type_child.kind() == "identifier" {
-								if let Ok(name) = type_child.utf8_text(contents.as_bytes()) {
-									symbols.push(name.to_string());
-								}
-								break;
-							}
+						if let Some(name) =
+							super::extract_symbol_by_kind(child, contents, "identifier")
+						{
+							symbols.push(name);
 						}
+						break;
 					}
 				}
 			}
@@ -84,43 +81,18 @@ impl Language for Go {
 			_ => self.extract_identifiers(node, contents, &mut symbols),
 		}
 
-		// Deduplicate symbols before returning
-		symbols.sort();
-		symbols.dedup();
-
+		super::deduplicate_symbols(&mut symbols);
 		symbols
 	}
 
 	fn extract_identifiers(&self, node: Node, contents: &str, symbols: &mut Vec<String>) {
-		let kind = node.kind();
-		// Check if this is a valid identifier
-		if kind == "identifier" || kind == "field_identifier" {
-			if let Ok(text) = node.utf8_text(contents.as_bytes()) {
-				let t = text.trim();
-				if !t.is_empty() && !symbols.contains(&t.to_string()) {
-					symbols.push(t.to_string());
-				}
-			}
-		}
-
-		// Continue with recursive traversal
-		let mut cursor = node.walk();
-		if cursor.goto_first_child() {
-			loop {
-				self.extract_identifiers(cursor.node(), contents, symbols);
-				if !cursor.goto_next_sibling() {
-					break;
-				}
-			}
-		}
+		super::extract_identifiers_default(node, contents, symbols, |kind, _text| {
+			// Include identifiers and field identifiers
+			kind == "identifier" || kind == "field_identifier"
+		});
 	}
 
 	fn are_node_types_equivalent(&self, type1: &str, type2: &str) -> bool {
-		// Direct match
-		if type1 == type2 {
-			return true;
-		}
-
 		// Go-specific semantic groups
 		let semantic_groups = [
 			// Functions and methods
@@ -137,17 +109,7 @@ impl Language for Go {
 			&["import_declaration"],
 		];
 
-		// Check if both types belong to the same semantic group
-		for group in &semantic_groups {
-			let contains_type1 = group.contains(&type1);
-			let contains_type2 = group.contains(&type2);
-
-			if contains_type1 && contains_type2 {
-				return true;
-			}
-		}
-
-		false
+		super::check_semantic_groups(type1, type2, &semantic_groups)
 	}
 
 	fn get_node_type_description(&self, node_type: &str) -> &'static str {
