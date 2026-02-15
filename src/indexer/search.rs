@@ -19,6 +19,19 @@ use crate::store::{CodeBlock, Store};
 use anyhow::Result;
 use std::collections::HashSet;
 
+/// Helper function to format symbols for display without cloning
+/// Returns a formatted string with deduplicated, sorted, and filtered symbols
+fn format_symbols_for_display(symbols: &[String]) -> String {
+	let mut unique_symbols: Vec<&str> = symbols
+		.iter()
+		.map(|s| s.as_str())
+		.filter(|s| !s.contains('_'))
+		.collect();
+	unique_symbols.sort();
+	unique_symbols.dedup();
+	unique_symbols.join(", ")
+}
+
 // Render code blocks in a user-friendly format
 pub fn render_code_blocks(blocks: &[CodeBlock]) {
 	render_code_blocks_with_config(blocks, &Config::default(), "partial");
@@ -51,14 +64,9 @@ pub fn render_code_blocks_with_config(blocks: &[CodeBlock], config: &Config, det
 
 		if !block.symbols.is_empty() {
 			println!("║ Symbols:");
-			// Deduplicate symbols in display
-			let mut display_symbols = block.symbols.clone();
-			display_symbols.sort();
-			display_symbols.dedup();
-
-			for symbol in display_symbols {
-				// Only show non-type symbols to users
-				if !symbol.contains("_") {
+			let formatted = format_symbols_for_display(&block.symbols);
+			if !formatted.is_empty() {
+				for symbol in formatted.split(", ") {
 					println!("║   • {}", symbol);
 				}
 			}
@@ -501,20 +509,10 @@ fn format_code_search_results_with_detail(blocks: &[CodeBlock], detail_level: &s
 			}
 
 			if !block.symbols.is_empty() {
-				output.push_str("- **Symbols**: ");
-				// Deduplicate symbols in display
-				let mut display_symbols = block.symbols.clone();
-				display_symbols.sort();
-				display_symbols.dedup();
-
-				let relevant_symbols: Vec<String> = display_symbols
-					.iter()
-					.filter(|symbol| !symbol.contains("_"))
-					.cloned()
-					.collect();
-
-				if !relevant_symbols.is_empty() {
-					output.push_str(&relevant_symbols.join(", "));
+				let formatted = format_symbols_for_display(&block.symbols);
+				if !formatted.is_empty() {
+					output.push_str("- **Symbols**: ");
+					output.push_str(&formatted);
 				}
 				output.push('\n');
 			}
@@ -600,20 +598,10 @@ fn format_code_search_results_as_markdown(blocks: &[CodeBlock]) -> String {
 			}
 
 			if !block.symbols.is_empty() {
-				output.push_str("- **Symbols**: ");
-				// Deduplicate symbols in display
-				let mut display_symbols = block.symbols.clone();
-				display_symbols.sort();
-				display_symbols.dedup();
-
-				let relevant_symbols: Vec<String> = display_symbols
-					.iter()
-					.filter(|symbol| !symbol.contains("_"))
-					.cloned()
-					.collect();
-
-				if !relevant_symbols.is_empty() {
-					output.push_str(&relevant_symbols.join(", "));
+				let formatted = format_symbols_for_display(&block.symbols);
+				if !formatted.is_empty() {
+					output.push_str("- **Symbols**: ");
+					output.push_str(&formatted);
 				}
 				output.push('\n');
 			}
@@ -759,20 +747,11 @@ pub fn format_code_search_results_as_text(blocks: &[CodeBlock], detail_level: &s
 			output.push_str(&format!(" | Similarity {:.3}", 1.0 - distance));
 		}
 		output.push('\n');
-
 		// Add symbols if available
 		if !block.symbols.is_empty() {
-			let mut display_symbols = block.symbols.clone();
-			display_symbols.sort();
-			display_symbols.dedup();
-			let relevant_symbols: Vec<String> = display_symbols
-				.iter()
-				.filter(|symbol| !symbol.contains("_"))
-				.cloned()
-				.collect();
-
-			if !relevant_symbols.is_empty() {
-				output.push_str(&format!("Symbols: {}\n", relevant_symbols.join(", ")));
+			let formatted = format_symbols_for_display(&block.symbols);
+			if !formatted.is_empty() {
+				output.push_str(&format!("Symbols: {}\n", formatted));
 			}
 		}
 
