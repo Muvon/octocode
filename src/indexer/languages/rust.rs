@@ -47,67 +47,35 @@ impl Language for Rust {
 
 		match node.kind() {
 			"function_item" => {
-				for child in node.children(&mut node.walk()) {
-					if child.kind() == "identifier" {
-						if let Ok(n) = child.utf8_text(contents.as_bytes()) {
-							symbols.push(n.to_string());
-						}
-						break;
-					}
+				// Extract function name
+				if let Some(name) = super::extract_symbol_by_kind(node, contents, "identifier") {
+					symbols.push(name);
 				}
 			}
 			"struct_item" | "enum_item" | "trait_item" | "mod_item" | "const_item"
 			| "macro_definition" => {
-				for child in node.children(&mut node.walk()) {
-					if child.kind() == "identifier" || child.kind().contains("name") {
-						if let Ok(n) = child.utf8_text(contents.as_bytes()) {
-							symbols.push(n.to_string());
-						}
-						break;
-					}
+				// Extract type/module/const name - can be "identifier" or contain "name"
+				if let Some(name) =
+					super::extract_symbol_by_kinds(node, contents, &["identifier", "name"])
+				{
+					symbols.push(name);
 				}
 			}
-
 			_ => self.extract_identifiers(node, contents, &mut symbols),
 		}
 
-		// Deduplicate symbols before returning
-		symbols.sort();
-		symbols.dedup();
-
+		super::deduplicate_symbols(&mut symbols);
 		symbols
 	}
 
 	fn extract_identifiers(&self, node: Node, contents: &str, symbols: &mut Vec<String>) {
-		let kind = node.kind();
-		// Check if this is a valid identifier and not a property identifier
-		if kind.contains("identifier") || kind.contains("name") {
-			if let Ok(text) = node.utf8_text(contents.as_bytes()) {
-				let t = text.trim();
-				if !t.is_empty() && !symbols.contains(&t.to_string()) {
-					symbols.push(t.to_string());
-				}
-			}
-		}
-
-		// Continue with recursive traversal
-		let mut cursor = node.walk();
-		if cursor.goto_first_child() {
-			loop {
-				self.extract_identifiers(cursor.node(), contents, symbols);
-				if !cursor.goto_next_sibling() {
-					break;
-				}
-			}
-		}
+		super::extract_identifiers_default(node, contents, symbols, |kind, _text| {
+			// Include identifiers and names, but not property identifiers
+			kind.contains("identifier") || kind.contains("name")
+		});
 	}
 
 	fn are_node_types_equivalent(&self, type1: &str, type2: &str) -> bool {
-		// Direct match
-		if type1 == type2 {
-			return true;
-		}
-
 		// Rust-specific semantic groups
 		let semantic_groups = [
 			// Module related
@@ -124,17 +92,7 @@ impl Language for Rust {
 			&["macro_definition", "macro_rules"],
 		];
 
-		// Check if both types belong to the same semantic group
-		for group in &semantic_groups {
-			let contains_type1 = group.contains(&type1);
-			let contains_type2 = group.contains(&type2);
-
-			if contains_type1 && contains_type2 {
-				return true;
-			}
-		}
-
-		false
+		super::check_semantic_groups(type1, type2, &semantic_groups)
 	}
 
 	fn get_node_type_description(&self, node_type: &str) -> &'static str {

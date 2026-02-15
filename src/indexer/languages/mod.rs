@@ -142,3 +142,143 @@ pub fn get_language(name: &str) -> Option<Box<dyn Language>> {
 		_ => None,
 	}
 }
+
+// ============================================================================
+// SHARED HELPER FUNCTIONS FOR LANGUAGE IMPLEMENTATIONS
+// ============================================================================
+
+/// Helper function to deduplicate and sort symbols
+/// Used by all language implementations of extract_symbols
+pub fn deduplicate_symbols(symbols: &mut Vec<String>) {
+	symbols.sort();
+	symbols.dedup();
+}
+
+/// Default implementation for extracting identifiers recursively
+/// Languages can call this with custom filtering logic
+///
+/// # Arguments
+/// * `node` - The tree-sitter node to extract from
+/// * `contents` - The source code contents
+/// * `symbols` - Mutable vector to collect symbols into
+/// * `should_include` - Optional filter function returning true if identifier should be included
+///
+/// # Example
+/// ```ignore
+/// extract_identifiers_default(node, contents, symbols, |kind, text| {
+///     kind.contains("identifier") && !text.starts_with("_")
+/// });
+/// ```
+pub fn extract_identifiers_default<F>(
+	node: Node,
+	contents: &str,
+	symbols: &mut Vec<String>,
+	should_include: F,
+) where
+	F: Fn(&str, &str) -> bool + Copy,
+{
+	let kind = node.kind();
+	if let Ok(text) = node.utf8_text(contents.as_bytes()) {
+		let trimmed = text.trim();
+		if !trimmed.is_empty()
+			&& should_include(kind, trimmed)
+			&& !symbols.contains(&trimmed.to_string())
+		{
+			symbols.push(trimmed.to_string());
+		}
+	}
+
+	// Recursively traverse children
+	let mut cursor = node.walk();
+	if cursor.goto_first_child() {
+		loop {
+			extract_identifiers_default(cursor.node(), contents, symbols, should_include);
+			if !cursor.goto_next_sibling() {
+				break;
+			}
+		}
+	}
+}
+
+/// Check if two node types belong to the same semantic group
+/// Used by are_node_types_equivalent implementations
+///
+/// # Arguments
+/// * `type1` - First node type
+/// * `type2` - Second node type
+/// * `semantic_groups` - Array of node type groups that should be considered equivalent
+///
+/// # Example
+/// ```ignore
+/// let groups = [
+///     &["function_item", "function_declaration"] as &[&str],
+///     &["struct_item", "class_declaration"],
+/// ];
+/// check_semantic_groups("function_item", "function_declaration", &groups) // returns true
+/// ```
+pub fn check_semantic_groups(type1: &str, type2: &str, semantic_groups: &[&[&str]]) -> bool {
+	// Direct match
+	if type1 == type2 {
+		return true;
+	}
+
+	// Check if both types belong to the same semantic group
+	for group in semantic_groups {
+		let contains_type1 = group.contains(&type1);
+		let contains_type2 = group.contains(&type2);
+
+		if contains_type1 && contains_type2 {
+			return true;
+		}
+	}
+
+	false
+}
+
+/// Extract a symbol from a node by finding a child with a specific kind
+/// Common pattern used across multiple languages
+///
+/// # Arguments
+/// * `node` - Parent node to search
+/// * `contents` - Source code contents
+/// * `target_kind` - The kind of child node to find (e.g., "identifier", "name")
+///
+/// # Returns
+/// The extracted symbol text, or None if not found
+pub fn extract_symbol_by_kind(node: Node, contents: &str, target_kind: &str) -> Option<String> {
+	for child in node.children(&mut node.walk()) {
+		if child.kind() == target_kind {
+			if let Ok(text) = child.utf8_text(contents.as_bytes()) {
+				return Some(text.to_string());
+			}
+		}
+	}
+	None
+}
+
+/// Extract a symbol from a node by finding a child matching any of multiple kinds
+/// Useful when multiple node kinds can represent names (e.g., "identifier" or "name")
+///
+/// # Arguments
+/// * `node` - Parent node to search
+/// * `contents` - Source code contents
+/// * `target_kinds` - Array of acceptable child node kinds
+///
+/// # Returns
+/// The first matching symbol text, or None if not found
+pub fn extract_symbol_by_kinds(
+	node: Node,
+	contents: &str,
+	target_kinds: &[&str],
+) -> Option<String> {
+	for child in node.children(&mut node.walk()) {
+		if target_kinds.contains(&child.kind())
+			|| target_kinds.iter().any(|k| child.kind().contains(k))
+		{
+			if let Ok(text) = child.utf8_text(contents.as_bytes()) {
+				return Some(text.to_string());
+			}
+		}
+	}
+	None
+}

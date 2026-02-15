@@ -44,14 +44,9 @@ impl Language for Python {
 
 		match node.kind() {
 			"function_definition" => {
-				// Find the identifier (name) node for the function
-				for child in node.children(&mut node.walk()) {
-					if child.kind() == "identifier" {
-						if let Ok(name) = child.utf8_text(contents.as_bytes()) {
-							symbols.push(name.to_string());
-						}
-						break;
-					}
+				// Extract function name
+				if let Some(name) = super::extract_symbol_by_kind(node, contents, "identifier") {
+					symbols.push(name);
 				}
 
 				// Extract variable assignments within the function
@@ -65,43 +60,18 @@ impl Language for Python {
 			_ => self.extract_identifiers(node, contents, &mut symbols),
 		}
 
-		// Deduplicate symbols before returning
-		symbols.sort();
-		symbols.dedup();
-
+		super::deduplicate_symbols(&mut symbols);
 		symbols
 	}
 
 	fn extract_identifiers(&self, node: Node, contents: &str, symbols: &mut Vec<String>) {
-		let kind = node.kind();
-		// Check if this is a valid identifier
-		if kind == "identifier" {
-			if let Ok(text) = node.utf8_text(contents.as_bytes()) {
-				let t = text.trim();
-				if !t.is_empty() && !symbols.contains(&t.to_string()) && !t.starts_with("_") {
-					symbols.push(t.to_string());
-				}
-			}
-		}
-
-		// Continue with normal recursion for other nodes
-		let mut cursor = node.walk();
-		if cursor.goto_first_child() {
-			loop {
-				self.extract_identifiers(cursor.node(), contents, symbols);
-				if !cursor.goto_next_sibling() {
-					break;
-				}
-			}
-		}
+		super::extract_identifiers_default(node, contents, symbols, |kind, text| {
+			// Include identifiers but exclude private ones (starting with _)
+			kind == "identifier" && !text.starts_with('_')
+		});
 	}
 
 	fn are_node_types_equivalent(&self, type1: &str, type2: &str) -> bool {
-		// Direct match
-		if type1 == type2 {
-			return true;
-		}
-
 		// Python-specific semantic groups
 		let semantic_groups = [
 			// Functions and methods
@@ -112,17 +82,7 @@ impl Language for Python {
 			&["import_statement", "import_from_statement"],
 		];
 
-		// Check if both types belong to the same semantic group
-		for group in &semantic_groups {
-			let contains_type1 = group.contains(&type1);
-			let contains_type2 = group.contains(&type2);
-
-			if contains_type1 && contains_type2 {
-				return true;
-			}
-		}
-
-		false
+		super::check_semantic_groups(type1, type2, &semantic_groups)
 	}
 
 	fn get_node_type_description(&self, node_type: &str) -> &'static str {

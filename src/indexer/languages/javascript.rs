@@ -46,13 +46,10 @@ impl Language for JavaScript {
 		match node.kind() {
 			"function_declaration" | "method_definition" => {
 				// Extract name of the function or method
-				for child in node.children(&mut node.walk()) {
-					if child.kind() == "identifier" || child.kind().contains("name") {
-						if let Ok(n) = child.utf8_text(contents.as_bytes()) {
-							symbols.push(n.to_string());
-						}
-						break;
-					}
+				if let Some(name) =
+					super::extract_symbol_by_kinds(node, contents, &["identifier", "name"])
+				{
+					symbols.push(name);
 				}
 
 				// Look for variable declarations within the function/method body
@@ -67,13 +64,10 @@ impl Language for JavaScript {
 				// Extract parent variable name for arrow functions
 				if let Some(parent) = node.parent() {
 					if parent.kind() == "variable_declarator" {
-						for child in parent.children(&mut parent.walk()) {
-							if child.kind() == "identifier" {
-								if let Ok(n) = child.utf8_text(contents.as_bytes()) {
-									symbols.push(n.to_string());
-								}
-								break;
-							}
+						if let Some(name) =
+							super::extract_symbol_by_kind(parent, contents, "identifier")
+						{
+							symbols.push(name);
 						}
 					}
 				}
@@ -81,26 +75,12 @@ impl Language for JavaScript {
 			_ => self.extract_identifiers(node, contents, &mut symbols),
 		}
 
-		// Deduplicate symbols before returning
-		symbols.sort();
-		symbols.dedup();
-
+		super::deduplicate_symbols(&mut symbols);
 		symbols
 	}
 
 	fn extract_identifiers(&self, node: Node, contents: &str, symbols: &mut Vec<String>) {
-		let kind = node.kind();
-		// Check if this is a valid identifier and not a property identifier
-		if (kind.contains("identifier") || kind.contains("name")) && kind != "property_identifier" {
-			if let Ok(text) = node.utf8_text(contents.as_bytes()) {
-				let t = text.trim();
-				if !t.is_empty() && !symbols.contains(&t.to_string()) {
-					symbols.push(t.to_string());
-				}
-			}
-		}
-
-		// For JavaScript avoid excessive recursion into certain nodes
+		// For JavaScript, avoid excessive recursion into member expressions
 		// that tend to duplicate identifiers
 		if node.kind() == "member_expression" || node.kind() == "property_access_expression" {
 			// For member expressions, only take the object part (leftmost identifier)
@@ -112,24 +92,13 @@ impl Language for JavaScript {
 			}
 		}
 
-		// Continue with normal recursion for other nodes
-		let mut cursor = node.walk();
-		if cursor.goto_first_child() {
-			loop {
-				self.extract_identifiers(cursor.node(), contents, symbols);
-				if !cursor.goto_next_sibling() {
-					break;
-				}
-			}
-		}
+		super::extract_identifiers_default(node, contents, symbols, |kind, _text| {
+			// Include identifiers and names, but exclude property identifiers
+			(kind.contains("identifier") || kind.contains("name")) && kind != "property_identifier"
+		});
 	}
 
 	fn are_node_types_equivalent(&self, type1: &str, type2: &str) -> bool {
-		// Direct match
-		if type1 == type2 {
-			return true;
-		}
-
 		// JavaScript-specific semantic groups
 		let semantic_groups = [
 			// Functions and methods
@@ -146,17 +115,7 @@ impl Language for JavaScript {
 			&["variable_declaration", "lexical_declaration"],
 		];
 
-		// Check if both types belong to the same semantic group
-		for group in &semantic_groups {
-			let contains_type1 = group.contains(&type1);
-			let contains_type2 = group.contains(&type2);
-
-			if contains_type1 && contains_type2 {
-				return true;
-			}
-		}
-
-		false
+		super::check_semantic_groups(type1, type2, &semantic_groups)
 	}
 
 	fn get_node_type_description(&self, node_type: &str) -> &'static str {
