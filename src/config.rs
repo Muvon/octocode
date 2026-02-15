@@ -282,7 +282,10 @@ mod tests {
 		assert_eq!(config.search.max_results, 20);
 
 		assert_eq!(
-			config.embedding.get_active_provider().unwrap(),
+			config
+				.embedding
+				.get_active_provider()
+				.expect("embedding provider should be set"),
 			crate::embedding::types::EmbeddingProviderType::Voyage
 		);
 		// Test new GraphRAG configuration structure
@@ -320,7 +323,7 @@ mod tests {
 		let result = Config::load_from_template();
 		assert!(result.is_ok(), "Should be able to load from template");
 
-		let config = result.unwrap();
+		let config = result.expect("Template config should load successfully");
 		assert_eq!(config.version, 1);
 		assert_eq!(config.llm.model, "openrouter:openai/gpt-4o-mini");
 		assert_eq!(config.index.chunk_size, 2000);

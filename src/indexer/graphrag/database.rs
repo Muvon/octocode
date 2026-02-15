@@ -17,12 +17,46 @@
 use crate::indexer::graphrag::types::{CodeGraph, CodeNode, CodeRelationship};
 use crate::indexer::graphrag::utils::cosine_similarity;
 use crate::store::Store;
-use anyhow::Result;
-use arrow::array::Array;
+use anyhow::{Context, Result};
+use arrow::array::{Array, FixedSizeListArray, Float32Array, StringArray};
 use arrow::datatypes::{DataType, Field, Schema};
+use arrow::record_batch::RecordBatch;
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
+
+/// Helper function to safely extract a StringArray column from a RecordBatch
+fn extract_string_column<'a>(batch: &'a RecordBatch, column_name: &str) -> Result<&'a StringArray> {
+	batch
+		.column_by_name(column_name)
+		.with_context(|| format!("Column '{}' not found in batch", column_name))?
+		.as_any()
+		.downcast_ref::<StringArray>()
+		.with_context(|| format!("Column '{}' is not a StringArray", column_name))
+}
+
+/// Helper function to safely extract a Float32Array column from a RecordBatch
+fn extract_f32_column<'a>(batch: &'a RecordBatch, column_name: &str) -> Result<&'a Float32Array> {
+	batch
+		.column_by_name(column_name)
+		.with_context(|| format!("Column '{}' not found in batch", column_name))?
+		.as_any()
+		.downcast_ref::<Float32Array>()
+		.with_context(|| format!("Column '{}' is not a Float32Array", column_name))
+}
+
+/// Helper function to safely extract a FixedSizeListArray column from a RecordBatch
+fn extract_embedding_column<'a>(
+	batch: &'a RecordBatch,
+	column_name: &str,
+) -> Result<&'a FixedSizeListArray> {
+	batch
+		.column_by_name(column_name)
+		.with_context(|| format!("Column '{}' not found in batch", column_name))?
+		.as_any()
+		.downcast_ref::<FixedSizeListArray>()
+		.with_context(|| format!("Column '{}' is not a FixedSizeListArray", column_name))
+}
 
 pub struct DatabaseOperations<'a> {
 	store: &'a Store,
@@ -65,76 +99,26 @@ impl<'a> DatabaseOperations<'a> {
 			);
 		}
 
-		// Process nodes
-		let id_array = node_batch
-			.column_by_name("id")
-			.unwrap()
-			.as_any()
-			.downcast_ref::<arrow::array::StringArray>()
-			.unwrap();
-		let name_array = node_batch
-			.column_by_name("name")
-			.unwrap()
-			.as_any()
-			.downcast_ref::<arrow::array::StringArray>()
-			.unwrap();
-		let kind_array = node_batch
-			.column_by_name("kind")
-			.unwrap()
-			.as_any()
-			.downcast_ref::<arrow::array::StringArray>()
-			.unwrap();
-		let path_array = node_batch
-			.column_by_name("path")
-			.unwrap()
-			.as_any()
-			.downcast_ref::<arrow::array::StringArray>()
-			.unwrap();
-		let description_array = node_batch
-			.column_by_name("description")
-			.unwrap()
-			.as_any()
-			.downcast_ref::<arrow::array::StringArray>()
-			.unwrap();
-		let symbols_array = node_batch
-			.column_by_name("symbols")
-			.unwrap()
-			.as_any()
-			.downcast_ref::<arrow::array::StringArray>()
-			.unwrap();
-		let imports_array = node_batch
-			.column_by_name("imports")
-			.unwrap()
-			.as_any()
-			.downcast_ref::<arrow::array::StringArray>()
-			.unwrap();
-		let exports_array = node_batch
-			.column_by_name("exports")
-			.unwrap()
-			.as_any()
-			.downcast_ref::<arrow::array::StringArray>()
-			.unwrap();
-		let hash_array = node_batch
-			.column_by_name("hash")
-			.unwrap()
-			.as_any()
-			.downcast_ref::<arrow::array::StringArray>()
-			.unwrap();
+		// Process nodes - extract columns safely
+		let id_array = extract_string_column(&node_batch, "id")?;
+		let name_array = extract_string_column(&node_batch, "name")?;
+		let kind_array = extract_string_column(&node_batch, "kind")?;
+		let path_array = extract_string_column(&node_batch, "path")?;
+		let description_array = extract_string_column(&node_batch, "description")?;
+		let symbols_array = extract_string_column(&node_batch, "symbols")?;
+		let imports_array = extract_string_column(&node_batch, "imports")?;
+		let exports_array = extract_string_column(&node_batch, "exports")?;
+		let hash_array = extract_string_column(&node_batch, "hash")?;
 
 		// Get the embedding fixed size list array
-		let embedding_array = node_batch
-			.column_by_name("embedding")
-			.unwrap()
-			.as_any()
-			.downcast_ref::<arrow::array::FixedSizeListArray>()
-			.unwrap();
+		let embedding_array = extract_embedding_column(&node_batch, "embedding")?;
 
 		// Get the values of the embedding array
 		let embedding_values = embedding_array
 			.values()
 			.as_any()
-			.downcast_ref::<arrow::array::Float32Array>()
-			.unwrap();
+			.downcast_ref::<Float32Array>()
+			.context("Embedding values are not Float32Array")?;
 
 		// Process each row
 		for i in 0..node_batch.num_rows() {
@@ -207,37 +191,12 @@ impl<'a> DatabaseOperations<'a> {
 				);
 			}
 
-			// Process relationships
-			let source_array = rel_batch
-				.column_by_name("source")
-				.unwrap()
-				.as_any()
-				.downcast_ref::<arrow::array::StringArray>()
-				.unwrap();
-			let target_array = rel_batch
-				.column_by_name("target")
-				.unwrap()
-				.as_any()
-				.downcast_ref::<arrow::array::StringArray>()
-				.unwrap();
-			let type_array = rel_batch
-				.column_by_name("relation_type")
-				.unwrap()
-				.as_any()
-				.downcast_ref::<arrow::array::StringArray>()
-				.unwrap();
-			let desc_array = rel_batch
-				.column_by_name("description")
-				.unwrap()
-				.as_any()
-				.downcast_ref::<arrow::array::StringArray>()
-				.unwrap();
-			let conf_array = rel_batch
-				.column_by_name("confidence")
-				.unwrap()
-				.as_any()
-				.downcast_ref::<arrow::array::Float32Array>()
-				.unwrap();
+			// Process relationships - extract columns safely
+			let source_array = extract_string_column(&rel_batch, "source")?;
+			let target_array = extract_string_column(&rel_batch, "target")?;
+			let type_array = extract_string_column(&rel_batch, "relation_type")?;
+			let desc_array = extract_string_column(&rel_batch, "description")?;
+			let conf_array = extract_f32_column(&rel_batch, "confidence")?;
 
 			// Process each relationship
 			for i in 0..rel_batch.num_rows() {
@@ -328,64 +287,24 @@ impl<'a> DatabaseOperations<'a> {
 		let mut nodes = Vec::new();
 		let query_lower = query.to_lowercase();
 
-		// Extract columns from the batch
-		let id_array = node_batch
-			.column_by_name("id")
-			.unwrap()
-			.as_any()
-			.downcast_ref::<arrow::array::StringArray>()
-			.unwrap();
-		let name_array = node_batch
-			.column_by_name("name")
-			.unwrap()
-			.as_any()
-			.downcast_ref::<arrow::array::StringArray>()
-			.unwrap();
-		let kind_array = node_batch
-			.column_by_name("kind")
-			.unwrap()
-			.as_any()
-			.downcast_ref::<arrow::array::StringArray>()
-			.unwrap();
-		let path_array = node_batch
-			.column_by_name("path")
-			.unwrap()
-			.as_any()
-			.downcast_ref::<arrow::array::StringArray>()
-			.unwrap();
-		let description_array = node_batch
-			.column_by_name("description")
-			.unwrap()
-			.as_any()
-			.downcast_ref::<arrow::array::StringArray>()
-			.unwrap();
-		let symbols_array = node_batch
-			.column_by_name("symbols")
-			.unwrap()
-			.as_any()
-			.downcast_ref::<arrow::array::StringArray>()
-			.unwrap();
-		let hash_array = node_batch
-			.column_by_name("hash")
-			.unwrap()
-			.as_any()
-			.downcast_ref::<arrow::array::StringArray>()
-			.unwrap();
+		// Extract columns from the batch safely
+		let id_array = extract_string_column(&node_batch, "id")?;
+		let name_array = extract_string_column(&node_batch, "name")?;
+		let kind_array = extract_string_column(&node_batch, "kind")?;
+		let path_array = extract_string_column(&node_batch, "path")?;
+		let description_array = extract_string_column(&node_batch, "description")?;
+		let symbols_array = extract_string_column(&node_batch, "symbols")?;
+		let hash_array = extract_string_column(&node_batch, "hash")?;
 
 		// Get the embedding fixed size list array
-		let embedding_array = node_batch
-			.column_by_name("embedding")
-			.unwrap()
-			.as_any()
-			.downcast_ref::<arrow::array::FixedSizeListArray>()
-			.unwrap();
+		let embedding_array = extract_embedding_column(&node_batch, "embedding")?;
 
 		// Get the values of the embedding array
 		let embedding_values = embedding_array
 			.values()
 			.as_any()
-			.downcast_ref::<arrow::array::Float32Array>()
-			.unwrap();
+			.downcast_ref::<Float32Array>()
+			.context("Embedding values are not Float32Array")?;
 
 		// Process each row
 		for i in 0..node_batch.num_rows() {
