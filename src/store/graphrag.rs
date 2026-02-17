@@ -26,8 +26,9 @@ use crate::store::{table_ops::TableOperations, CodeBlock};
 use futures::TryStreamExt;
 use lancedb::{
 	query::{ExecutableQuery, QueryBase},
-	Connection, DistanceType,
+	Connection, DistanceType, Table,
 };
+use tokio::sync::RwLock as AsyncRwLock;
 
 // GraphRAG types
 use crate::indexer::graphrag::types::RelationType;
@@ -63,17 +64,50 @@ pub struct GraphRagOperations<'a> {
 	adjacency_cache: Arc<RwLock<AdjacencyCache>>,
 	/// Cache statistics
 	cache_stats: Arc<RwLock<CacheStats>>,
+	/// Table cache for avoiding repeated open operations
+	table_cache: Arc<AsyncRwLock<HashMap<String, Arc<Table>>>>,
 }
 
 impl<'a> GraphRagOperations<'a> {
-	pub fn new(db: &'a Connection, code_vector_dim: usize) -> Self {
+	pub fn new(
+		db: &'a Connection,
+		code_vector_dim: usize,
+		table_cache: Arc<AsyncRwLock<HashMap<String, Arc<Table>>>>,
+	) -> Self {
 		Self {
 			db,
 			table_ops: TableOperations::new(db),
 			code_vector_dim,
 			adjacency_cache: Arc::new(RwLock::new(HashMap::new())),
 			cache_stats: Arc::new(RwLock::new(CacheStats::default())),
+			table_cache,
 		}
+	}
+
+	/// Get or open a table with caching to avoid repeated open overhead
+	async fn get_table(&self, table_name: &str) -> Result<Arc<Table>> {
+		// Check cache first (read lock)
+		{
+			let cache = self.table_cache.read().await;
+			if let Some(table) = cache.get(table_name) {
+				return Ok(Arc::clone(table));
+			}
+		}
+
+		// Not in cache, open it (write lock)
+		let mut cache = self.table_cache.write().await;
+
+		// Double-check after acquiring write lock (another task may have opened it)
+		if let Some(table) = cache.get(table_name) {
+			return Ok(Arc::clone(table));
+		}
+
+		// Open table and cache it
+		let table = self.db.open_table(table_name).execute().await?;
+		let table = Arc::new(table);
+		cache.insert(table_name.to_string(), Arc::clone(&table));
+
+		Ok(table)
 	}
 
 	// ============================================================================
@@ -156,11 +190,7 @@ impl<'a> GraphRagOperations<'a> {
 			return Ok(());
 		}
 
-		let table = self
-			.db
-			.open_table("graphrag_relationships")
-			.execute()
-			.await?;
+		let table = self.get_table("graphrag_relationships").await?;
 
 		// Stream all relationships
 		let mut results = table.query().execute().await?;
@@ -360,7 +390,7 @@ impl<'a> GraphRagOperations<'a> {
 			return Ok(Vec::new());
 		}
 
-		let table = self.db.open_table("graphrag_nodes").execute().await?;
+		let table = self.get_table("graphrag_nodes").await?;
 		let mut results = table.query().execute().await?;
 
 		let mut node_ids = Vec::new();
@@ -396,12 +426,8 @@ impl<'a> GraphRagOperations<'a> {
 		}
 
 		// Check if tables are empty
-		let nodes_table = self.db.open_table("graphrag_nodes").execute().await?;
-		let relationships_table = self
-			.db
-			.open_table("graphrag_relationships")
-			.execute()
-			.await?;
+		let nodes_table = self.get_table("graphrag_nodes").await?;
+		let relationships_table = self.get_table("graphrag_relationships").await?;
 
 		let nodes_count = nodes_table.count_rows(None).await?;
 		let relationships_count = relationships_table.count_rows(None).await?;
@@ -422,7 +448,7 @@ impl<'a> GraphRagOperations<'a> {
 			return Ok(all_blocks);
 		}
 
-		let table = self.db.open_table("code_blocks").execute().await?;
+		let table = self.get_table("code_blocks").await?;
 
 		// Get all code blocks in batches to avoid memory issues
 		let mut results = table.query().execute().await?;
@@ -620,11 +646,7 @@ impl<'a> GraphRagOperations<'a> {
 			return Ok(0); // No nodes for this file, so no relationships to remove
 		}
 
-		let table = self
-			.db
-			.open_table("graphrag_relationships")
-			.execute()
-			.await?;
+		let table = self.get_table("graphrag_relationships").await?;
 
 		// Count rows before deletion for reporting
 		let before_count = table.count_rows(None).await?;
@@ -667,7 +689,7 @@ impl<'a> GraphRagOperations<'a> {
 			return Ok(node_ids);
 		}
 
-		let table = self.db.open_table("graphrag_nodes").execute().await?;
+		let table = self.get_table("graphrag_nodes").await?;
 
 		// Query for nodes matching the file path, only selecting id column
 		let mut results = table
@@ -725,7 +747,7 @@ impl<'a> GraphRagOperations<'a> {
 			return Ok(RecordBatch::new_empty(schema));
 		}
 
-		let table = self.db.open_table("graphrag_nodes").execute().await?;
+		let table = self.get_table("graphrag_nodes").await?;
 
 		// Perform vector similarity search with optimization
 		let query = table
@@ -811,11 +833,7 @@ impl<'a> GraphRagOperations<'a> {
 			return Ok(RecordBatch::new_empty(schema));
 		}
 
-		let table = self
-			.db
-			.open_table("graphrag_relationships")
-			.execute()
-			.await?;
+		let table = self.get_table("graphrag_relationships").await?;
 
 		// Get all relationships
 		let mut results = table.query().execute().await?;
@@ -867,11 +885,7 @@ impl<'a> GraphRagOperations<'a> {
 			return Ok(Vec::new());
 		}
 
-		let table = self
-			.db
-			.open_table("graphrag_relationships")
-			.execute()
-			.await?;
+		let table = self.get_table("graphrag_relationships").await?;
 
 		// Build filter based on direction
 		let filter = match direction {
@@ -968,11 +982,7 @@ impl<'a> GraphRagOperations<'a> {
 			return Ok(Vec::new());
 		}
 
-		let table = self
-			.db
-			.open_table("graphrag_relationships")
-			.execute()
-			.await?;
+		let table = self.get_table("graphrag_relationships").await?;
 
 		// Filter by relationship type
 		let filter = format!("relation_type = '{}'", relation_type.as_str());
@@ -1057,7 +1067,7 @@ impl<'a> GraphRagOperations<'a> {
 			return Ok(Vec::new());
 		}
 
-		let table = self.db.open_table("graphrag_nodes").execute().await?;
+		let table = self.get_table("graphrag_nodes").await?;
 
 		// Use proper pagination instead of vector search
 		let mut results = table.query().limit(limit).offset(offset).execute().await?;
@@ -1222,11 +1232,7 @@ impl<'a> GraphRagOperations<'a> {
 			return Ok(Vec::new());
 		}
 
-		let table = self
-			.db
-			.open_table("graphrag_relationships")
-			.execute()
-			.await?;
+		let table = self.get_table("graphrag_relationships").await?;
 
 		let mut results = table.query().execute().await?;
 

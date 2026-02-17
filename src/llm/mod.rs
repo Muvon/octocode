@@ -78,7 +78,7 @@ impl LlmClient {
 		if let Some(usage) = &response.exchange.usage {
 			tracing::debug!(
 				"LLM tokens: input={}, output={}, total={}",
-				usage.prompt_tokens,
+				usage.input_tokens,
 				usage.output_tokens,
 				usage.total_tokens
 			);
@@ -121,7 +121,7 @@ impl LlmClient {
 		if let Some(usage) = &response.exchange.usage {
 			tracing::debug!(
 				"LLM tokens (structured): input={}, output={}, total={}",
-				usage.prompt_tokens,
+				usage.input_tokens,
 				usage.output_tokens,
 				usage.total_tokens
 			);
@@ -163,7 +163,7 @@ impl LlmClient {
 		if let Some(usage) = &response.exchange.usage {
 			tracing::debug!(
 				"LLM tokens: input={}, output={}, total={}",
-				usage.prompt_tokens,
+				usage.input_tokens,
 				usage.output_tokens,
 				usage.total_tokens
 			);
@@ -222,7 +222,7 @@ impl LlmClient {
 			if let Some(usage) = &response.exchange.usage {
 				tracing::debug!(
 					"LLM tokens (structured): input={}, output={}, total={}",
-					usage.prompt_tokens,
+					usage.input_tokens,
 					usage.output_tokens,
 					usage.total_tokens
 				);
