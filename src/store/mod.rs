@@ -14,6 +14,7 @@
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::sync::Arc;
 
 // Arrow imports
@@ -25,8 +26,9 @@ use futures::TryStreamExt;
 use lancedb::{
 	connect,
 	query::{ExecutableQuery, QueryBase},
-	Connection, DistanceType,
+	Connection, DistanceType, Table,
 };
+use tokio::sync::RwLock;
 
 // Import modular components
 use self::{
@@ -89,6 +91,8 @@ pub struct Store {
 	db: Connection,
 	code_vector_dim: usize, // Size of code embedding vectors
 	text_vector_dim: usize, // Size of text embedding vectors
+	// Cache for table instances to avoid repeated opening overhead
+	table_cache: Arc<RwLock<HashMap<String, Arc<Table>>>>,
 }
 
 // Implementing Drop for the Store
@@ -189,7 +193,35 @@ impl Store {
 			db,
 			code_vector_dim,
 			text_vector_dim,
+			table_cache: Arc::new(RwLock::new(HashMap::new())),
 		})
+	}
+
+	/// Get or open a table with caching to avoid repeated open overhead
+	/// This is critical for performance when running multiple queries
+	async fn get_table(&self, table_name: &str) -> Result<Arc<Table>> {
+		// Check cache first (read lock)
+		{
+			let cache = self.table_cache.read().await;
+			if let Some(table) = cache.get(table_name) {
+				return Ok(Arc::clone(table));
+			}
+		}
+
+		// Not in cache, open it (write lock)
+		let mut cache = self.table_cache.write().await;
+
+		// Double-check after acquiring write lock (another task may have opened it)
+		if let Some(table) = cache.get(table_name) {
+			return Ok(Arc::clone(table));
+		}
+
+		// Open table and cache it
+		let table = self.db.open_table(table_name).execute().await?;
+		let table = Arc::new(table);
+		cache.insert(table_name.to_string(), Arc::clone(&table));
+
+		Ok(table)
 	}
 
 	pub async fn initialize_collections(&self) -> Result<()> {
@@ -413,7 +445,11 @@ impl Store {
 			.remove_blocks_by_path(file_path, "graphrag_nodes")
 			.await?;
 		// Use specific GraphRAG operation for relationships (they don't have a 'path' field)
-		let graphrag_ops = GraphRagOperations::new(&self.db, self.code_vector_dim);
+		let graphrag_ops = GraphRagOperations::new(
+			&self.db,
+			self.code_vector_dim,
+			Arc::clone(&self.table_cache),
+		);
 		graphrag_ops
 			.remove_graph_relationships_by_path(file_path)
 			.await?;
@@ -512,7 +548,7 @@ impl Store {
 			return Ok(Vec::new());
 		}
 
-		let table = self.db.open_table(B::TABLE_NAME).execute().await?;
+		let table = self.get_table(B::TABLE_NAME).await?;
 
 		let mut query = table
 			.vector_search(embedding)?
@@ -619,54 +655,94 @@ impl Store {
 
 	// GraphRAG operations
 	pub async fn graphrag_needs_indexing(&self) -> Result<bool> {
-		let graphrag_ops = GraphRagOperations::new(&self.db, self.code_vector_dim);
+		let graphrag_ops = GraphRagOperations::new(
+			&self.db,
+			self.code_vector_dim,
+			Arc::clone(&self.table_cache),
+		);
 		graphrag_ops.graphrag_needs_indexing().await
 	}
 
 	pub async fn get_all_code_blocks_for_graphrag(&self) -> Result<Vec<CodeBlock>> {
-		let graphrag_ops = GraphRagOperations::new(&self.db, self.code_vector_dim);
+		let graphrag_ops = GraphRagOperations::new(
+			&self.db,
+			self.code_vector_dim,
+			Arc::clone(&self.table_cache),
+		);
 		graphrag_ops.get_all_code_blocks_for_graphrag().await
 	}
 
 	pub async fn store_graph_nodes(&self, node_batch: RecordBatch) -> Result<()> {
-		let graphrag_ops = GraphRagOperations::new(&self.db, self.code_vector_dim);
+		let graphrag_ops = GraphRagOperations::new(
+			&self.db,
+			self.code_vector_dim,
+			Arc::clone(&self.table_cache),
+		);
 		graphrag_ops.store_graph_nodes(node_batch).await
 	}
 
 	pub async fn store_graph_relationships(&self, rel_batch: RecordBatch) -> Result<()> {
-		let graphrag_ops = GraphRagOperations::new(&self.db, self.code_vector_dim);
+		let graphrag_ops = GraphRagOperations::new(
+			&self.db,
+			self.code_vector_dim,
+			Arc::clone(&self.table_cache),
+		);
 		graphrag_ops.store_graph_relationships(rel_batch).await
 	}
 
 	pub async fn clear_graph_nodes(&self) -> Result<()> {
-		let graphrag_ops = GraphRagOperations::new(&self.db, self.code_vector_dim);
+		let graphrag_ops = GraphRagOperations::new(
+			&self.db,
+			self.code_vector_dim,
+			Arc::clone(&self.table_cache),
+		);
 		graphrag_ops.clear_graph_nodes().await
 	}
 
 	pub async fn clear_graph_relationships(&self) -> Result<()> {
-		let graphrag_ops = GraphRagOperations::new(&self.db, self.code_vector_dim);
+		let graphrag_ops = GraphRagOperations::new(
+			&self.db,
+			self.code_vector_dim,
+			Arc::clone(&self.table_cache),
+		);
 		graphrag_ops.clear_graph_relationships().await
 	}
 
 	pub async fn remove_graph_nodes_by_path(&self, file_path: &str) -> Result<usize> {
-		let graphrag_ops = GraphRagOperations::new(&self.db, self.code_vector_dim);
+		let graphrag_ops = GraphRagOperations::new(
+			&self.db,
+			self.code_vector_dim,
+			Arc::clone(&self.table_cache),
+		);
 		graphrag_ops.remove_graph_nodes_by_path(file_path).await
 	}
 
 	pub async fn remove_graph_relationships_by_path(&self, file_path: &str) -> Result<usize> {
-		let graphrag_ops = GraphRagOperations::new(&self.db, self.code_vector_dim);
+		let graphrag_ops = GraphRagOperations::new(
+			&self.db,
+			self.code_vector_dim,
+			Arc::clone(&self.table_cache),
+		);
 		graphrag_ops
 			.remove_graph_relationships_by_path(file_path)
 			.await
 	}
 
 	pub async fn search_graph_nodes(&self, embedding: &[f32], limit: usize) -> Result<RecordBatch> {
-		let graphrag_ops = GraphRagOperations::new(&self.db, self.code_vector_dim);
+		let graphrag_ops = GraphRagOperations::new(
+			&self.db,
+			self.code_vector_dim,
+			Arc::clone(&self.table_cache),
+		);
 		graphrag_ops.search_graph_nodes(embedding, limit).await
 	}
 
 	pub async fn get_graph_relationships(&self) -> Result<RecordBatch> {
-		let graphrag_ops = GraphRagOperations::new(&self.db, self.code_vector_dim);
+		let graphrag_ops = GraphRagOperations::new(
+			&self.db,
+			self.code_vector_dim,
+			Arc::clone(&self.table_cache),
+		);
 		graphrag_ops.get_graph_relationships().await
 	}
 
@@ -676,7 +752,11 @@ impl Store {
 		node_id: &str,
 		direction: crate::indexer::graphrag::types::RelationshipDirection,
 	) -> Result<Vec<crate::indexer::graphrag::types::CodeRelationship>> {
-		let graphrag_ops = GraphRagOperations::new(&self.db, self.code_vector_dim);
+		let graphrag_ops = GraphRagOperations::new(
+			&self.db,
+			self.code_vector_dim,
+			Arc::clone(&self.table_cache),
+		);
 		graphrag_ops
 			.get_node_relationships(node_id, direction)
 			.await
@@ -687,7 +767,11 @@ impl Store {
 		&self,
 		relation_type: &crate::indexer::graphrag::types::RelationType,
 	) -> Result<Vec<crate::indexer::graphrag::types::CodeRelationship>> {
-		let graphrag_ops = GraphRagOperations::new(&self.db, self.code_vector_dim);
+		let graphrag_ops = GraphRagOperations::new(
+			&self.db,
+			self.code_vector_dim,
+			Arc::clone(&self.table_cache),
+		);
 		graphrag_ops.get_relationships_by_type(relation_type).await
 	}
 
@@ -697,7 +781,11 @@ impl Store {
 		offset: usize,
 		limit: usize,
 	) -> Result<Vec<crate::indexer::graphrag::types::CodeNode>> {
-		let graphrag_ops = GraphRagOperations::new(&self.db, self.code_vector_dim);
+		let graphrag_ops = GraphRagOperations::new(
+			&self.db,
+			self.code_vector_dim,
+			Arc::clone(&self.table_cache),
+		);
 		graphrag_ops.get_all_nodes_paginated(offset, limit).await
 	}
 
@@ -705,7 +793,11 @@ impl Store {
 	pub async fn get_all_relationships_efficient(
 		&self,
 	) -> Result<Vec<crate::indexer::graphrag::types::CodeRelationship>> {
-		let graphrag_ops = GraphRagOperations::new(&self.db, self.code_vector_dim);
+		let graphrag_ops = GraphRagOperations::new(
+			&self.db,
+			self.code_vector_dim,
+			Arc::clone(&self.table_cache),
+		);
 		graphrag_ops.get_all_relationships_efficient().await
 	}
 
@@ -727,7 +819,7 @@ impl Store {
 			return Ok(None);
 		}
 
-		let table = self.db.open_table("code_blocks").execute().await?;
+		let table = self.get_table("code_blocks").await?;
 		let mut results = table
 			.query()
 			.only_if(format!("symbols LIKE '%{}%'", symbol))
@@ -752,7 +844,7 @@ impl Store {
 			return Err(anyhow::anyhow!("Code blocks table does not exist"));
 		}
 
-		let table = self.db.open_table("code_blocks").execute().await?;
+		let table = self.get_table("code_blocks").await?;
 		let mut results = table
 			.query()
 			.only_if(format!("hash = '{}'", hash))

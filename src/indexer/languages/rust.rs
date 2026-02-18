@@ -70,7 +70,7 @@ impl Language for Rust {
 
 	fn extract_identifiers(&self, node: Node, contents: &str, symbols: &mut Vec<String>) {
 		super::extract_identifiers_default(node, contents, symbols, |kind, _text| {
-			// Include identifiers and names, but not property identifiers
+			// Include identifiers and names
 			kind.contains("identifier") || kind.contains("name")
 		});
 	}
