@@ -238,8 +238,28 @@ impl McpServer {
 							}
 
 							// Process the request with panic recovery
+							// Capture method before moving line into handler
+							let request_method_for_notif = {
+								serde_json::from_str::<serde_json::Value>(line.trim())
+									.ok()
+									.and_then(|v| v.get("method").and_then(|m| m.as_str()).map(|s| s.to_string()))
+							};
 							match self.handle_request_safe(&line).await {
 								Ok(Some(response)) => {
+									// For initialize: send warning notification BEFORE the response so
+									// the client reads it while still in the initialize read loop
+									// (which correctly skips notifications). Sending after would cause
+									// it to be consumed by the notifications/initialized handshake read.
+									if request_method_for_notif.as_deref() == Some("initialize") && !self.indexer_enabled {
+										let notif_params = json!({
+											"level": "warning",
+											"message": "Octocode indexer is disabled: not in a git repository root. Run with --no-git to enable indexing outside git repos."
+										});
+										if let Err(e) = self.send_notification(&mut writer, "notifications/message", notif_params).await {
+											log_critical_anyhow_error("Failed to send indexer-disabled notification", &e);
+										}
+									}
+
 									// Send response with error handling
 									if let Err(e) = self.send_response(&mut writer, &response).await {
 										log_critical_anyhow_error("Failed to send response", &e);
@@ -642,6 +662,29 @@ impl McpServer {
 
 		// Store the indexing handle for cleanup
 		self.indexing_handle = Some(indexing_handle);
+		Ok(())
+	}
+
+	/// Send a JSON-RPC notification (no id — server-to-client push, no response expected).
+	async fn send_notification(
+		&self,
+		writer: &mut tokio::io::Stdout,
+		method: &str,
+		params: serde_json::Value,
+	) -> Result<()> {
+		let notification = json!({
+			"jsonrpc": "2.0",
+			"method": method,
+			"params": params,
+		});
+		let json = serde_json::to_string(&notification)?;
+		tokio::time::timeout(Duration::from_millis(MCP_IO_TIMEOUT_MS), async {
+			writer.write_all(json.as_bytes()).await?;
+			writer.write_all(b"\n").await?;
+			writer.flush().await
+		})
+		.await
+		.map_err(|_| anyhow::anyhow!("Notification send timeout"))??;
 		Ok(())
 	}
 
