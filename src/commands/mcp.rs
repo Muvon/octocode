@@ -59,6 +59,10 @@ pub async fn run(args: McpArgs) -> Result<()> {
 
 	// Note: No console output here - MCP protocol compliance requires clean stdout/stderr
 	// All debug information is logged to files via structured logging in the server
+	// Git validation is now handled in the server - indexer will only start if in git repo or --no-git is set
+
+	// Note: No console output here - MCP protocol compliance requires clean stdout/stderr
+	// All debug information is logged to files via structured logging in the server
 
 	let mut server = McpServer::new(
 		config,

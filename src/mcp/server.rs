@@ -65,6 +65,7 @@ pub struct McpServer {
 	debug: bool,
 	working_directory: std::path::PathBuf,
 	no_git: bool,
+	indexer_enabled: bool,
 	watcher_handle: Option<tokio::task::JoinHandle<()>>,
 	index_handle: Option<tokio::task::JoinHandle<()>>,
 	indexing_handle: Option<tokio::task::JoinHandle<()>>,
@@ -134,6 +135,7 @@ impl McpServer {
 			debug,
 			working_directory,
 			no_git,
+			indexer_enabled: false,
 			watcher_handle: None,
 			index_handle: None,
 			indexing_handle: None,
@@ -153,15 +155,33 @@ impl McpServer {
 			original_hook(panic_info);
 		}));
 
-		// Start the file watcher as a completely independent background task
-		self.start_watcher().await?;
+		// Check if we should start the indexer (only if in git repo or --no-git is set)
+		let should_start_indexer = if !self.no_git && self.config.index.require_git {
+			indexer::git::is_git_repo_root(&self.working_directory)
+		} else {
+			true
+		};
 
-		// Start background indexing task - separate from MCP request handling
-		self.start_background_indexing().await?;
+		if should_start_indexer {
+			// Start the file watcher as a completely independent background task
+			self.start_watcher().await?;
+
+			// Start background indexing task - separate from MCP request handling
+			self.start_background_indexing().await?;
+		} else {
+			// Log warning about indexer not starting
+			warn!(
+				"Indexer not started: Not in a git repository and --no-git flag not set. Use --no-git to enable indexing outside git repos."
+			);
+		}
+
+		// Store indexer enabled state for use in initialize response
+		self.indexer_enabled = should_start_indexer;
 
 		// Log server startup details using structured logging (no console output for MCP protocol compliance)
 		info!(
 			debug_mode = self.debug,
+			indexer_enabled = should_start_indexer,
 			debounce_ms = MCP_DEBOUNCE_MS,
 			timeout_ms = MCP_INDEX_TIMEOUT_MS,
 			max_events = MCP_MAX_PENDING_EVENTS,
@@ -320,8 +340,25 @@ impl McpServer {
 			original_hook(panic_info);
 		}));
 
-		// Start the file watcher as a completely independent background task
-		self.start_watcher().await?;
+		// Check if we should start the indexer (only if in git repo or --no-git is set)
+		let should_start_indexer = if !self.no_git && self.config.index.require_git {
+			indexer::git::is_git_repo_root(&self.working_directory)
+		} else {
+			true
+		};
+
+		if should_start_indexer {
+			// Start the file watcher as a completely independent background task
+			self.start_watcher().await?;
+		} else {
+			// Log warning about indexer not starting
+			warn!(
+				"Indexer not started: Not in a git repository and --no-git flag not set. Use --no-git to enable indexing outside git repos."
+			);
+		}
+
+		// Store indexer enabled state for use in initialize response
+		self.indexer_enabled = should_start_indexer;
 
 		// Parse bind address
 		let addr = bind_addr
@@ -332,6 +369,7 @@ impl McpServer {
 		info!(
 			debug_mode = self.debug,
 			bind_address = %addr,
+			indexer_enabled = should_start_indexer,
 			debounce_ms = MCP_DEBOUNCE_MS,
 			timeout_ms = MCP_INDEX_TIMEOUT_MS,
 			max_events = MCP_MAX_PENDING_EVENTS,
@@ -340,8 +378,14 @@ impl McpServer {
 			"MCP Server started in HTTP mode"
 		);
 
-		// Get the index receiver for handling indexing requests
-		let mut index_rx = self.index_rx.take().unwrap();
+		// Get the index receiver for handling indexing requests (only if indexer is enabled)
+		let mut index_rx = if should_start_indexer {
+			self.index_rx.take().unwrap()
+		} else {
+			// Create a dummy channel that will never receive messages
+			let (_, rx) = mpsc::channel(1);
+			rx
+		};
 
 		// Create shared server state for HTTP handlers
 		let server_state = Arc::new(Mutex::new(HttpServerState {
@@ -799,6 +843,13 @@ impl McpServer {
 	}
 
 	async fn handle_initialize(&self, request: &JsonRpcRequest) -> JsonRpcResponse {
+		// Build instructions with indexer warning if applicable
+		let mut instructions = "This server provides modular AI tools: semantic code search and GraphRAG (if available). Use semantic_search for code/documentation searches and graphrag (if enabled) for relationship queries.".to_string();
+
+		if !self.indexer_enabled {
+			instructions.push_str("\n\nWARNING: Indexer is disabled because you're not in a git repository and the --no-git flag was not set. Use --no-git to enable indexing outside git repos.");
+		}
+
 		JsonRpcResponse {
 			jsonrpc: "2.0".to_string(),
 			id: request.id.clone(),
@@ -812,9 +863,9 @@ impl McpServer {
 				"serverInfo": {
 					"name": "octocode-mcp",
 					"version": "0.1.0",
-			"description": "Semantic code search server with vector embeddings and optional GraphRAG support"
+					"description": "Semantic code search server with vector embeddings and optional GraphRAG support"
 				},
-			"instructions": "This server provides modular AI tools: semantic code search and GraphRAG (if available). Use 'semantic_search' for code/documentation searches and 'graphrag' (if enabled) for relationship queries."
+				"instructions": instructions
 			})),
 			error: None,
 		}
