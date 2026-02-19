@@ -1059,8 +1059,15 @@ pub async fn search_codebase_with_details_text(
 	// Convert similarity threshold to distance threshold for store operations
 	let distance_threshold = 1.0 - similarity_threshold;
 
+	// Determine candidate limit: fetch more when reranker is enabled
+	let candidate_limit = if config.search.reranker.enabled {
+		config.search.reranker.top_k_candidates
+	} else {
+		max_results
+	};
+
 	// Perform the search based on mode
-	match mode {
+	let (mut code_blocks, mut text_blocks, mut doc_blocks) = match mode {
 		"code" => {
 			let embeddings = search_embeddings.code_embeddings.ok_or_else(|| {
 				anyhow::anyhow!("No code embeddings generated for code search mode")
@@ -1068,12 +1075,12 @@ pub async fn search_codebase_with_details_text(
 			let results = store
 				.get_code_blocks_with_language_filter(
 					embeddings,
-					Some(max_results),
+					Some(candidate_limit),
 					Some(distance_threshold),
 					language_filter,
 				)
 				.await?;
-			Ok(format_code_search_results_as_text(&results, detail_level))
+			(results, vec![], vec![])
 		}
 		"text" => {
 			let embeddings = search_embeddings.text_embeddings.ok_or_else(|| {
@@ -1082,11 +1089,11 @@ pub async fn search_codebase_with_details_text(
 			let results = store
 				.get_text_blocks_with_config(
 					embeddings,
-					Some(max_results),
+					Some(candidate_limit),
 					Some(distance_threshold),
 				)
 				.await?;
-			Ok(format_text_search_results_as_text(&results, detail_level))
+			(vec![], results, vec![])
 		}
 		"docs" => {
 			let embeddings = search_embeddings.text_embeddings.ok_or_else(|| {
@@ -1095,14 +1102,13 @@ pub async fn search_codebase_with_details_text(
 			let results = store
 				.get_document_blocks_with_config(
 					embeddings,
-					Some(max_results),
+					Some(candidate_limit),
 					Some(distance_threshold),
 				)
 				.await?;
-			Ok(format_doc_search_results_as_text(&results, detail_level))
+			(vec![], vec![], results)
 		}
 		"all" => {
-			// "all" mode - search across all types with limited results per type
 			let code_embeddings = search_embeddings.code_embeddings.ok_or_else(|| {
 				anyhow::anyhow!("No code embeddings generated for all search mode")
 			})?;
@@ -1110,7 +1116,7 @@ pub async fn search_codebase_with_details_text(
 				anyhow::anyhow!("No text embeddings generated for all search mode")
 			})?;
 
-			let results_per_type = max_results.div_ceil(3); // Distribute results across types
+			let results_per_type = candidate_limit.div_ceil(3);
 			let code_results = store
 				.get_code_blocks_with_language_filter(
 					code_embeddings,
@@ -1133,15 +1139,58 @@ pub async fn search_codebase_with_details_text(
 					Some(distance_threshold),
 				)
 				.await?;
-
-			// Format combined results with detail level for code
-			Ok(format_combined_search_results_as_text(
-				&code_results,
-				&text_results,
-				&doc_results,
-				detail_level,
+			(code_results, text_results, doc_results)
+		}
+		_ => {
+			return Err(anyhow::anyhow!(
+				"Invalid search mode '{}'. Use 'all', 'code', 'docs', or 'text'.",
+				mode
 			))
 		}
+	};
+
+	// Apply reranker if enabled
+	if config.search.reranker.enabled {
+		code_blocks = crate::reranker::rerank_code_blocks_with_octolib(
+			query,
+			code_blocks,
+			&config.search.reranker,
+		)
+		.await?;
+		text_blocks = crate::reranker::rerank_text_blocks_with_octolib(
+			query,
+			text_blocks,
+			&config.search.reranker,
+		)
+		.await?;
+		doc_blocks = crate::reranker::rerank_doc_blocks_with_octolib(
+			query,
+			doc_blocks,
+			&config.search.reranker,
+		)
+		.await?;
+	} else {
+		code_blocks.truncate(max_results);
+		text_blocks.truncate(max_results);
+		doc_blocks.truncate(max_results);
+	}
+
+	match mode {
+		"code" => Ok(format_code_search_results_as_text(
+			&code_blocks,
+			detail_level,
+		)),
+		"text" => Ok(format_text_search_results_as_text(
+			&text_blocks,
+			detail_level,
+		)),
+		"docs" => Ok(format_doc_search_results_as_text(&doc_blocks, detail_level)),
+		"all" => Ok(format_combined_search_results_as_text(
+			&code_blocks,
+			&text_blocks,
+			&doc_blocks,
+			detail_level,
+		)),
 		_ => Err(anyhow::anyhow!(
 			"Invalid search mode '{}'. Use 'all', 'code', 'docs', or 'text'.",
 			mode
@@ -1202,10 +1251,33 @@ pub async fn search_codebase_with_details_multi_query_text(
 	let (mut code_blocks, mut doc_blocks, mut text_blocks) =
 		deduplicate_and_merge_results(search_results, queries, distance_threshold);
 
-	// Apply global result limits
-	code_blocks.truncate(max_results);
-	doc_blocks.truncate(max_results);
-	text_blocks.truncate(max_results);
+	// Apply reranker if enabled
+	if config.search.reranker.enabled && !queries.is_empty() {
+		let query = queries.join(" ");
+		code_blocks = crate::reranker::rerank_code_blocks_with_octolib(
+			&query,
+			code_blocks,
+			&config.search.reranker,
+		)
+		.await?;
+		doc_blocks = crate::reranker::rerank_doc_blocks_with_octolib(
+			&query,
+			doc_blocks,
+			&config.search.reranker,
+		)
+		.await?;
+		text_blocks = crate::reranker::rerank_text_blocks_with_octolib(
+			&query,
+			text_blocks,
+			&config.search.reranker,
+		)
+		.await?;
+	} else {
+		// Apply global result limits (reranker already limits via final_top_k)
+		code_blocks.truncate(max_results);
+		doc_blocks.truncate(max_results);
+		text_blocks.truncate(max_results);
+	}
 
 	// Format results based on mode with detail level control
 	match mode {
@@ -1565,10 +1637,33 @@ pub async fn search_codebase_with_details_multi_query(
 	let (mut code_blocks, mut doc_blocks, mut text_blocks) =
 		deduplicate_and_merge_results_mcp(search_results, queries, distance_threshold);
 
-	// Apply global result limits
-	code_blocks.truncate(max_results);
-	doc_blocks.truncate(max_results);
-	text_blocks.truncate(max_results);
+	// Apply reranker if enabled
+	if config.search.reranker.enabled && !queries.is_empty() {
+		let query = queries.join(" ");
+		code_blocks = crate::reranker::rerank_code_blocks_with_octolib(
+			&query,
+			code_blocks,
+			&config.search.reranker,
+		)
+		.await?;
+		doc_blocks = crate::reranker::rerank_doc_blocks_with_octolib(
+			&query,
+			doc_blocks,
+			&config.search.reranker,
+		)
+		.await?;
+		text_blocks = crate::reranker::rerank_text_blocks_with_octolib(
+			&query,
+			text_blocks,
+			&config.search.reranker,
+		)
+		.await?;
+	} else {
+		// Apply global result limits (reranker already limits via final_top_k)
+		code_blocks.truncate(max_results);
+		doc_blocks.truncate(max_results);
+		text_blocks.truncate(max_results);
+	}
 
 	// Format results based on mode with detail level control
 	match mode {
