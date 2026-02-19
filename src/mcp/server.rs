@@ -1146,11 +1146,17 @@ impl McpServer {
 
 impl Drop for McpServer {
 	fn drop(&mut self) {
-		// Ensure background tasks are cleaned up
+		// Abort all background tasks so they don't outlive the server in any exit path
+		// (panic, early return via ?, or graceful shutdown). Tokio tasks are NOT OS processes
+		// so they can't truly escape the runtime, but aborting here ensures clean cancellation
+		// and releases resources (file watchers, DB connections) immediately.
 		if let Some(handle) = self.watcher_handle.take() {
 			handle.abort();
 		}
 		if let Some(handle) = self.index_handle.take() {
+			handle.abort();
+		}
+		if let Some(handle) = self.indexing_handle.take() {
 			handle.abort();
 		}
 	}
