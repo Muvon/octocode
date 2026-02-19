@@ -114,6 +114,26 @@ impl Default for IndexConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RerankerConfig {
+	/// Enable reranking for search results
+	pub enabled: bool,
+	/// Reranker model in provider:model format (e.g., "voyage:rerank-2.5")
+	pub model: String,
+	/// Number of candidates to retrieve before reranking
+	pub top_k_candidates: usize,
+	/// Number of results to return after reranking
+	pub final_top_k: usize,
+}
+
+// NOTE: This Default implementation should NEVER be used in practice
+// All reranker values must come from the config template file
+impl Default for RerankerConfig {
+	fn default() -> Self {
+		panic!("Reranker config must be loaded from template file - defaults not allowed")
+	}
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SearchConfig {
 	pub max_results: usize,
 	pub similarity_threshold: f32,
@@ -124,18 +144,14 @@ pub struct SearchConfig {
 	/// Maximum characters to display per code/text/doc block in search results.
 	/// If 0, displays full content. Default: 1000
 	pub search_block_max_characters: usize,
+
+	/// Reranker configuration for improving search result accuracy
+	pub reranker: RerankerConfig,
 }
 
 impl Default for SearchConfig {
 	fn default() -> Self {
-		Self {
-			max_results: 50,
-			similarity_threshold: 0.6,
-			output_format: "markdown".to_string(),
-			max_files: 20,
-			context_lines: 3,
-			search_block_max_characters: 1000,
-		}
+		panic!("Search config must be loaded from template file - defaults not allowed")
 	}
 }
 

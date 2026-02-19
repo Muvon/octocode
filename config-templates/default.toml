@@ -28,6 +28,16 @@ max_files = 10
 context_lines = 3
 search_block_max_characters = 400  # Maximum characters to display per code/text/doc block
 
+[search.reranker]
+enabled = false
+# Reranker model in provider:model format
+# Supported providers: voyage (VOYAGE_API_KEY), cohere (COHERE_API_KEY), jina (JINA_API_KEY), fastembed (local)
+model = "voyage:rerank-2.5"
+# Number of candidates to fetch from vector search before reranking
+top_k_candidates = 50
+# Number of final results to return after reranking
+final_top_k = 10
+
 [embedding]
 code_model = "voyage:voyage-code-3"
 text_model = "voyage:voyage-3.5-lite"

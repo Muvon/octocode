@@ -201,10 +201,33 @@ pub async fn execute(
 			distance_threshold,
 		);
 
-	// Apply global result limits
-	code_blocks.truncate(config.search.max_results);
-	doc_blocks.truncate(config.search.max_results);
-	text_blocks.truncate(config.search.max_results);
+	// Apply reranker if enabled (uses a single representative query)
+	if config.search.reranker.enabled && !args.queries.is_empty() {
+		let query = args.queries.join(" ");
+		code_blocks = octocode::reranker::rerank_code_blocks_with_octolib(
+			&query,
+			code_blocks,
+			&config.search.reranker,
+		)
+		.await?;
+		doc_blocks = octocode::reranker::rerank_doc_blocks_with_octolib(
+			&query,
+			doc_blocks,
+			&config.search.reranker,
+		)
+		.await?;
+		text_blocks = octocode::reranker::rerank_text_blocks_with_octolib(
+			&query,
+			text_blocks,
+			&config.search.reranker,
+		)
+		.await?;
+	} else {
+		// Apply global result limits (reranker already limits via final_top_k)
+		code_blocks.truncate(config.search.max_results);
+		doc_blocks.truncate(config.search.max_results);
+		text_blocks.truncate(config.search.max_results);
+	}
 
 	// Symbol expansion if requested
 	if args.expand && !code_blocks.is_empty() {
