@@ -74,6 +74,7 @@ async fn list_models(provider_filter: Option<String>) -> Result<()> {
 			EmbeddingProviderType::Voyage,
 			EmbeddingProviderType::Google,
 			EmbeddingProviderType::OpenAI,
+			EmbeddingProviderType::OpenRouter,
 		]
 	};
 
@@ -166,6 +167,10 @@ async fn list_models(provider_filter: Option<String>) -> Result<()> {
 				}
 				println!("  Use 'info' command for real-time API validation");
 			}
+			EmbeddingProviderType::OpenRouter => {
+				println!("  OpenRouter: Dynamic discovery via API");
+				println!("  Use 'info' command with specific model names");
+			}
 		}
 	}
 
@@ -232,8 +237,9 @@ fn parse_provider(provider_str: &str) -> Result<EmbeddingProviderType> {
 		"voyage" => Ok(EmbeddingProviderType::Voyage),
 		"google" => Ok(EmbeddingProviderType::Google),
 		"openai" => Ok(EmbeddingProviderType::OpenAI),
+		"openrouter" => Ok(EmbeddingProviderType::OpenRouter),
 		_ => Err(anyhow::anyhow!(
-			"Unknown provider '{}'. Supported: fastembed, huggingface, jina, voyage, google, openai",
+			"Unknown provider '{}'. Supported: fastembed, huggingface, jina, voyage, google, openai, openrouter",
 			provider_str
 		)),
 	}
