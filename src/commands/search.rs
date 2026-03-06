@@ -185,8 +185,9 @@ pub async fn execute(
 		query_embeddings,
 		search_mode,
 		config.search.max_results,
-		threshold, // Pass similarity threshold directly - conversion to distance happens inside
+		threshold,
 		args.language.as_deref(),
+		config,
 	)
 	.await?;
 
