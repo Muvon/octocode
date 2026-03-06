@@ -5658,9 +5658,9 @@ dependencies = [
 
 [[package]]
 name = "octolib"
-version = "0.10.0"
+version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "628c31bfda8326d4eb43edf672dd3b5ebab3e9f1480d2ee7fc516e9c978f27c7"
+checksum = "1b6ef4de2821afccd6a8dc5a84ddfcf7e91bec92ba7eb8c29435acfb818c8369"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -7240,12 +7240,12 @@ checksum = "1b6b67fb9a61334225b5b790716f609cd58395f895b3fe8b328786812a40bc3b"
 
 [[package]]
 name = "socket2"
-version = "0.6.2"
+version = "0.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "86f4aa3ad99f2088c990dfa82d367e19cb29268ed67c574d10d0a4bfe71f07e0"
+checksum = "3a766e1110788c36f4fa1c2b71b387a7815aa65f88ce0229841826633d93723e"
 dependencies = [
  "libc",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
