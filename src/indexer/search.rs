@@ -279,8 +279,14 @@ pub async fn search_codebase_with_details(
 	let search_embeddings =
 		crate::embedding::generate_search_embeddings(query, mode, config).await?;
 
-	// Perform the search based on mode
-	match mode {
+	// Fetch more candidates when reranker is enabled so it has a good pool to work with
+	let candidate_limit = if config.search.reranker.enabled {
+		config.search.reranker.top_k_candidates
+	} else {
+		max_results
+	};
+
+	let (mut code_blocks, mut text_blocks, mut doc_blocks) = match mode {
 		"code" => {
 			let embeddings = search_embeddings.code_embeddings.ok_or_else(|| {
 				anyhow::anyhow!("No code embeddings generated for code search mode")
@@ -288,14 +294,11 @@ pub async fn search_codebase_with_details(
 			let results = store
 				.get_code_blocks_with_config(
 					embeddings,
-					Some(max_results),
+					Some(candidate_limit),
 					Some(config.search.similarity_threshold),
 				)
 				.await?;
-			Ok(format_code_search_results_with_detail(
-				&results,
-				detail_level,
-			))
+			(results, vec![], vec![])
 		}
 		"text" => {
 			let embeddings = search_embeddings.text_embeddings.ok_or_else(|| {
@@ -304,11 +307,11 @@ pub async fn search_codebase_with_details(
 			let results = store
 				.get_text_blocks_with_config(
 					embeddings,
-					Some(max_results),
+					Some(candidate_limit),
 					Some(config.search.similarity_threshold),
 				)
 				.await?;
-			Ok(format_text_search_results_as_markdown(&results))
+			(vec![], results, vec![])
 		}
 		"docs" => {
 			let embeddings = search_embeddings.text_embeddings.ok_or_else(|| {
@@ -317,59 +320,92 @@ pub async fn search_codebase_with_details(
 			let results = store
 				.get_document_blocks_with_config(
 					embeddings,
-					Some(max_results),
+					Some(candidate_limit),
 					Some(config.search.similarity_threshold),
 				)
 				.await?;
-			Ok(format_doc_search_results_as_markdown(&results))
+			(vec![], vec![], results)
 		}
 		"all" => {
-			// "all" mode - search across all types with limited results per type
 			let code_embeddings = search_embeddings.code_embeddings.ok_or_else(|| {
 				anyhow::anyhow!("No code embeddings generated for all search mode")
 			})?;
 			let text_embeddings = search_embeddings.text_embeddings.ok_or_else(|| {
 				anyhow::anyhow!("No text embeddings generated for all search mode")
 			})?;
-
-			let results_per_type = max_results.div_ceil(3); // Distribute results across types
-			let code_results = store
-				.get_code_blocks_with_config(
+			let results_per_type = candidate_limit.div_ceil(3);
+			let (code_results, text_results, doc_results) = tokio::try_join!(
+				store.get_code_blocks_with_config(
 					code_embeddings,
 					Some(results_per_type),
 					Some(config.search.similarity_threshold),
-				)
-				.await?;
-			let text_results = store
-				.get_text_blocks_with_config(
+				),
+				store.get_text_blocks_with_config(
 					text_embeddings.clone(),
 					Some(results_per_type),
 					Some(config.search.similarity_threshold),
-				)
-				.await?;
-			let doc_results = store
-				.get_document_blocks_with_config(
+				),
+				store.get_document_blocks_with_config(
 					text_embeddings,
 					Some(results_per_type),
 					Some(config.search.similarity_threshold),
-				)
-				.await?;
-
-			// Format combined results with detail level for code
-			Ok(format_combined_search_results_with_detail(
-				&code_results,
-				&text_results,
-				&doc_results,
-				detail_level,
+				),
+			)?;
+			(code_results, text_results, doc_results)
+		}
+		_ => {
+			return Err(anyhow::anyhow!(
+				"Invalid search mode '{}'. Use 'all', 'code', 'docs', or 'text'.",
+				mode
 			))
 		}
+	};
+
+	// Apply octolib reranker if enabled, otherwise just truncate to requested limit
+	if config.search.reranker.enabled {
+		code_blocks = crate::reranker::rerank_code_blocks_with_octolib(
+			query,
+			code_blocks,
+			&config.search.reranker,
+		)
+		.await?;
+		text_blocks = crate::reranker::rerank_text_blocks_with_octolib(
+			query,
+			text_blocks,
+			&config.search.reranker,
+		)
+		.await?;
+		doc_blocks = crate::reranker::rerank_doc_blocks_with_octolib(
+			query,
+			doc_blocks,
+			&config.search.reranker,
+		)
+		.await?;
+	} else {
+		code_blocks.truncate(max_results);
+		text_blocks.truncate(max_results);
+		doc_blocks.truncate(max_results);
+	}
+
+	match mode {
+		"code" => Ok(format_code_search_results_with_detail(
+			&code_blocks,
+			detail_level,
+		)),
+		"text" => Ok(format_text_search_results_as_markdown(&text_blocks)),
+		"docs" => Ok(format_doc_search_results_as_markdown(&doc_blocks)),
+		"all" => Ok(format_combined_search_results_with_detail(
+			&code_blocks,
+			&text_blocks,
+			&doc_blocks,
+			detail_level,
+		)),
 		_ => Err(anyhow::anyhow!(
 			"Invalid search mode '{}'. Use 'all', 'code', 'docs', or 'text'.",
 			mode
 		)),
 	}
 }
-
 // Search function for MCP server - returns formatted markdown results
 pub async fn search_codebase(query: &str, mode: &str, config: &Config) -> Result<String> {
 	// Initialize store
@@ -1242,8 +1278,9 @@ pub async fn search_codebase_with_details_multi_query_text(
 		query_embeddings,
 		mode,
 		max_results,
-		similarity_threshold, // Pass original similarity_threshold
+		similarity_threshold,
 		language_filter,
+		config,
 	)
 	.await?;
 
@@ -1626,9 +1663,9 @@ pub async fn search_codebase_with_details_multi_query(
 		.zip(embeddings.into_iter())
 		.collect();
 
-	// Execute parallel searches
+	// Execute parallel searches — fetch top_k_candidates per query when reranker is on
 	let search_results =
-		execute_parallel_searches_mcp(&store, query_embeddings, mode, max_results).await?;
+		execute_parallel_searches_mcp(&store, query_embeddings, mode, max_results, config).await?;
 
 	// Convert similarity threshold (use default from config)
 	let distance_threshold = 1.0 - config.search.similarity_threshold;
@@ -1789,8 +1826,13 @@ async fn execute_parallel_searches_mcp(
 	query_embeddings: Vec<(String, crate::embedding::SearchModeEmbeddings)>,
 	mode: &str,
 	max_results: usize,
+	config: &Config,
 ) -> Result<Vec<QuerySearchResultMcp>> {
-	let per_query_limit = (max_results * 2) / query_embeddings.len().max(1);
+	let per_query_limit = if config.search.reranker.enabled {
+		config.search.reranker.top_k_candidates
+	} else {
+		(max_results * 2) / query_embeddings.len().max(1)
+	};
 
 	let search_futures: Vec<_> = query_embeddings
 		.into_iter()
@@ -1813,7 +1855,7 @@ async fn execute_parallel_searches_mcp(
 
 async fn execute_single_search_with_embeddings_mcp(
 	store: &Store,
-	query: &str,
+	_query: &str,
 	embeddings: crate::embedding::SearchModeEmbeddings,
 	mode: &str,
 	limit: usize,
@@ -1824,31 +1866,27 @@ async fn execute_single_search_with_embeddings_mcp(
 			let code_embeddings = embeddings
 				.code_embeddings
 				.ok_or_else(|| anyhow::anyhow!("No code embeddings for code search"))?;
-			let mut blocks = store
+			let blocks = store
 				.get_code_blocks_with_config(code_embeddings, Some(limit), Some(1.01))
 				.await?;
-			blocks = crate::reranker::Reranker::rerank_code_blocks(blocks, query);
-			crate::reranker::Reranker::tf_idf_boost(&mut blocks, query);
 			(blocks, vec![], vec![])
 		}
 		"docs" => {
 			let text_embeddings = embeddings
 				.text_embeddings
 				.ok_or_else(|| anyhow::anyhow!("No text embeddings for docs search"))?;
-			let mut blocks = store
+			let blocks = store
 				.get_document_blocks_with_config(text_embeddings, Some(limit), Some(1.01))
 				.await?;
-			blocks = crate::reranker::Reranker::rerank_document_blocks(blocks, query);
 			(vec![], blocks, vec![])
 		}
 		"text" => {
 			let text_embeddings = embeddings
 				.text_embeddings
 				.ok_or_else(|| anyhow::anyhow!("No text embeddings for text search"))?;
-			let mut blocks = store
+			let blocks = store
 				.get_text_blocks_with_config(text_embeddings, Some(limit), Some(1.01))
 				.await?;
-			blocks = crate::reranker::Reranker::rerank_text_blocks(blocks, query);
 			(vec![], vec![], blocks)
 		}
 		"all" => {
@@ -1859,7 +1897,7 @@ async fn execute_single_search_with_embeddings_mcp(
 				.text_embeddings
 				.ok_or_else(|| anyhow::anyhow!("No text embeddings for all search"))?;
 
-			let (mut code_blocks, mut doc_blocks, mut text_blocks) = tokio::try_join!(
+			let (code_blocks, doc_blocks, text_blocks) = tokio::try_join!(
 				store.get_code_blocks_with_config(code_embeddings, Some(limit), Some(1.01)),
 				store.get_document_blocks_with_config(
 					text_embeddings.clone(),
@@ -1868,12 +1906,6 @@ async fn execute_single_search_with_embeddings_mcp(
 				),
 				store.get_text_blocks_with_config(text_embeddings, Some(limit), Some(1.01))
 			)?;
-
-			code_blocks = crate::reranker::Reranker::rerank_code_blocks(code_blocks, query);
-			doc_blocks = crate::reranker::Reranker::rerank_document_blocks(doc_blocks, query);
-			text_blocks = crate::reranker::Reranker::rerank_text_blocks(text_blocks, query);
-
-			crate::reranker::Reranker::tf_idf_boost(&mut code_blocks, query);
 
 			(code_blocks, doc_blocks, text_blocks)
 		}
@@ -2280,8 +2312,13 @@ pub async fn execute_parallel_searches(
 	max_results: usize,
 	similarity_threshold: f32,
 	language_filter: Option<&str>,
+	config: &Config,
 ) -> Result<Vec<QuerySearchResult>> {
-	let per_query_limit = (max_results * 2) / query_embeddings.len().max(1);
+	let per_query_limit = if config.search.reranker.enabled {
+		config.search.reranker.top_k_candidates
+	} else {
+		(max_results * 2) / query_embeddings.len().max(1)
+	};
 
 	let search_futures: Vec<_> = query_embeddings
 		.into_iter()
