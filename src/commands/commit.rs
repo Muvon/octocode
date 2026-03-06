@@ -81,6 +81,12 @@ pub struct CommitArgs {
 	/// Note: Pre-commit hooks run automatically if pre-commit binary and config are detected
 	#[arg(short, long)]
 	pub no_verify: bool,
+
+	/// Rewrite the message of an existing commit by its hash.
+	/// Uses that commit's diff to generate a new message, then replaces it in-place.
+	/// HEAD commits are amended directly; older commits are rewritten via git rebase.
+	#[arg(short, long, value_name = "HASH")]
+	pub commit: Option<String>,
 }
 
 /// Execute the commit command with intelligent pre-commit hook integration.
@@ -104,6 +110,18 @@ pub async fn execute(config: &Config, args: &CommitArgs) -> Result<()> {
 
 	// Use git root as working directory for all operations
 	let current_dir = git_root;
+
+	// -c/--commit mode: rewrite an existing commit's message
+	if let Some(ref hash) = args.commit {
+		return rewrite_commit_message(
+			&current_dir,
+			config,
+			hash,
+			args.message.as_deref(),
+			args.yes,
+		)
+		.await;
+	}
 
 	// Add all files if requested
 	if args.all {
@@ -239,6 +257,182 @@ pub async fn execute(config: &Config, args: &CommitArgs) -> Result<()> {
 	Ok(())
 }
 
+/// Rewrite the commit message of an existing commit identified by `hash`.
+///
+/// - If the hash resolves to HEAD, uses `git commit --amend` (fast, no rebase needed).
+/// - Otherwise, uses a non-interactive `git rebase -i` with a custom sequence editor
+///   that marks only the target commit as `reword`, leaving all others as `pick`.
+///   The new message is injected via `GIT_EDITOR` pointing to a temp script.
+async fn rewrite_commit_message(
+	repo_path: &std::path::Path,
+	config: &Config,
+	hash: &str,
+	extra_context: Option<&str>,
+	skip_confirm: bool,
+) -> Result<()> {
+	// Resolve the hash to a full SHA so we can compare with HEAD
+	let resolved = Command::new("git")
+		.args(["rev-parse", hash])
+		.current_dir(repo_path)
+		.output()?;
+	if !resolved.status.success() {
+		return Err(anyhow::anyhow!(
+			"❌ Cannot resolve commit '{}': {}",
+			hash,
+			String::from_utf8_lossy(&resolved.stderr).trim()
+		));
+	}
+	let full_hash = String::from_utf8(resolved.stdout)?.trim().to_string();
+
+	// Resolve HEAD for comparison
+	let head = Command::new("git")
+		.args(["rev-parse", "HEAD"])
+		.current_dir(repo_path)
+		.output()?;
+	let head_hash = if head.status.success() {
+		String::from_utf8(head.stdout)?.trim().to_string()
+	} else {
+		String::new()
+	};
+
+	let is_head = full_hash == head_hash;
+
+	// Get the diff of the target commit to generate a message from
+	println!("🔍 Analysing commit {}...", &full_hash[..8]);
+	let diff_output = Command::new("git")
+		.args(["show", &full_hash, "--format=", "-p"])
+		.current_dir(repo_path)
+		.output()?;
+	if !diff_output.status.success() {
+		return Err(anyhow::anyhow!(
+			"❌ Failed to get diff for commit '{}': {}",
+			hash,
+			String::from_utf8_lossy(&diff_output.stderr).trim()
+		));
+	}
+	let diff = String::from_utf8(diff_output.stdout)?;
+	if diff.trim().is_empty() {
+		return Err(anyhow::anyhow!(
+			"❌ Commit '{}' has no diff (merge commit or empty commit).",
+			hash
+		));
+	}
+
+	// Show files touched by this commit
+	let files_output = Command::new("git")
+		.args(["show", &full_hash, "--name-only", "--format="])
+		.current_dir(repo_path)
+		.output()?;
+	if files_output.status.success() {
+		let files = String::from_utf8_lossy(&files_output.stdout);
+		println!("📋 Files in commit:");
+		for f in files.lines().filter(|l| !l.is_empty()) {
+			println!("  • {}", f);
+		}
+	}
+
+	// Generate new commit message from the commit's own diff
+	println!("\n🤖 Generating commit message...");
+	let commit_message = generate_commit_message_from_diff(&diff, config, extra_context).await?;
+
+	println!("\n📝 Generated commit message:");
+	println!("═══════════════════════════════════");
+	println!("{}", commit_message);
+	println!("═══════════════════════════════════");
+
+	if !skip_confirm {
+		print!("\nReplace message of commit {}? [y/N] ", &full_hash[..8]);
+		io::stdout().flush()?;
+		let mut input = String::new();
+		io::stdin().read_line(&mut input)?;
+		if !input.trim().to_lowercase().starts_with('y') {
+			println!("❌ Cancelled.");
+			return Ok(());
+		}
+	}
+
+	if is_head {
+		// Fast path: just amend HEAD
+		println!("✏️  Amending HEAD commit message...");
+		let output = Command::new("git")
+			.args(["commit", "--amend", "-m", &commit_message, "--no-edit"])
+			.current_dir(repo_path)
+			.output()?;
+		if !output.status.success() {
+			return Err(anyhow::anyhow!(
+				"Failed to amend commit: {}",
+				String::from_utf8_lossy(&output.stderr).trim()
+			));
+		}
+	} else {
+		// Non-HEAD: rewrite via rebase using a temp editor script that injects the message
+		println!("✏️  Rewriting commit {} via rebase...", &full_hash[..8]);
+
+		// Write the new message to a temp file so the editor script can read it
+		let msg_file = repo_path.join(".git").join("OCTOCODE_REWORD_MSG");
+		std::fs::write(&msg_file, &commit_message)?;
+
+		// Editor script: replaces the COMMIT_EDITMSG content with our message
+		// git rebase -i calls $GIT_EDITOR with the path to the commit message file
+		let editor_script = format!("#!/bin/sh\ncp '{}' \"$1\"", msg_file.display());
+		let editor_file = repo_path.join(".git").join("octocode_reword_editor.sh");
+		std::fs::write(&editor_file, &editor_script)?;
+		#[cfg(unix)]
+		{
+			use std::os::unix::fs::PermissionsExt;
+			std::fs::set_permissions(&editor_file, std::fs::Permissions::from_mode(0o755))?;
+		}
+
+		// Sequence editor: marks only our target commit as 'reword', rest stay 'pick'
+		let seq_script = format!(
+			"#!/bin/sh\nsed -i.bak 's/^pick {}/reword {}/' \"$1\"",
+			&full_hash[..7],
+			&full_hash[..7]
+		);
+		let seq_file = repo_path.join(".git").join("octocode_seq_editor.sh");
+		std::fs::write(&seq_file, &seq_script)?;
+		#[cfg(unix)]
+		{
+			use std::os::unix::fs::PermissionsExt;
+			std::fs::set_permissions(&seq_file, std::fs::Permissions::from_mode(0o755))?;
+		}
+
+		let output = Command::new("git")
+			.args(["rebase", "-i", &format!("{}^", full_hash)])
+			.env("GIT_SEQUENCE_EDITOR", &seq_file)
+			.env("GIT_EDITOR", &editor_file)
+			.current_dir(repo_path)
+			.output()?;
+
+		// Clean up temp files regardless of outcome
+		let _ = std::fs::remove_file(&msg_file);
+		let _ = std::fs::remove_file(&editor_file);
+		let _ = std::fs::remove_file(&seq_file);
+		let _ = std::fs::remove_file(repo_path.join(".git").join("octocode_reword_editor.sh.bak"));
+		let _ = std::fs::remove_file(repo_path.join(".git").join("octocode_seq_editor.sh.bak"));
+
+		if !output.status.success() {
+			return Err(anyhow::anyhow!(
+				"Failed to rebase: {}",
+				String::from_utf8_lossy(&output.stderr).trim()
+			));
+		}
+	}
+
+	println!("✅ Commit message replaced successfully!");
+
+	// Show updated commit info (after rebase the old hash is gone, show latest)
+	let log = Command::new("git")
+		.args(["log", "--oneline", "-1"])
+		.current_dir(repo_path)
+		.output()?;
+	if log.status.success() {
+		println!("📄 Commit: {}", String::from_utf8_lossy(&log.stdout).trim());
+	}
+
+	Ok(())
+}
+
 async fn generate_commit_message_chunked(
 	repo_path: &std::path::Path,
 	config: &Config,
@@ -360,6 +554,116 @@ async fn generate_commit_message_chunked(
 	let combined = diff_chunker::combine_commit_messages(responses);
 
 	// Always apply AI refinement for chunked messages
+	println!("🎯 Refining commit message with AI...");
+	match refine_commit_message_with_ai(&combined, config).await {
+		Ok(refined) => Ok(refined),
+		Err(e) => {
+			eprintln!(
+				"Warning: AI refinement failed ({}), using combined message",
+				e
+			);
+			Ok(combined)
+		}
+	}
+}
+
+/// Generate a commit message from a pre-fetched diff string (used by -c/--commit rewrite mode).
+///
+/// Shares all prompt-building and chunking logic with `generate_commit_message_chunked`
+/// but accepts the diff directly instead of reading staged changes.
+async fn generate_commit_message_from_diff(
+	diff: &str,
+	config: &Config,
+	extra_context: Option<&str>,
+) -> Result<String> {
+	// Derive file list from the diff headers (no git staging involved)
+	let changed_files: String = diff
+		.lines()
+		.filter(|l| l.starts_with("diff --git "))
+		.filter_map(|l| l.split(" b/").nth(1))
+		.collect::<Vec<_>>()
+		.join("\n");
+
+	let has_markdown_files = changed_files
+		.lines()
+		.any(|f| f.ends_with(".md") || f.ends_with(".markdown") || f.ends_with(".rst"));
+
+	let has_non_markdown_files = changed_files.lines().any(|f| {
+		!f.ends_with(".md")
+			&& !f.ends_with(".markdown")
+			&& !f.ends_with(".rst")
+			&& !f.trim().is_empty()
+	});
+
+	let file_count = diff.matches("diff --git").count();
+	let additions = diff
+		.matches("\n+")
+		.count()
+		.saturating_sub(diff.matches("\n+++").count());
+	let deletions = diff
+		.matches("\n-")
+		.count()
+		.saturating_sub(diff.matches("\n---").count());
+
+	let guidance_section = extra_context
+		.map(|c| format!("\n\nUser guidance for commit intent:\n{}", c))
+		.unwrap_or_default();
+
+	let docs_restriction = if has_non_markdown_files && !has_markdown_files {
+		"\n\nCRITICAL - DOCS TYPE RESTRICTION:\n\
+		- NEVER use 'docs(...)' when only non-markdown files are changed\n\
+		- Current changes include ONLY non-markdown files (.rs, .js, .py, .toml, etc.)\n\
+		- Use 'fix', 'feat', 'refactor', 'chore', etc. instead of 'docs'\n\
+		- 'docs' is ONLY for .md, .markdown, .rst files or documentation-only changes"
+	} else if has_non_markdown_files && has_markdown_files {
+		"\n\nDOCS TYPE GUIDANCE:\n\
+		- Use 'docs(...)' ONLY if the primary change is documentation\n\
+		- If code changes are the main focus, use appropriate code type (fix, feat, refactor)\n\
+		- Mixed changes: prioritize the most significant change type"
+	} else {
+		""
+	};
+
+	let chunks = diff_chunker::chunk_diff(diff);
+
+	if chunks.len() == 1 {
+		let prompt = create_commit_prompt(
+			&chunks[0].content,
+			file_count,
+			additions,
+			deletions,
+			&guidance_section,
+			docs_restriction,
+		);
+		return call_llm_with_retry(
+			|| call_llm_for_commit_message(&prompt, config),
+			"Single chunk commit message",
+		)
+		.await;
+	}
+
+	println!(
+		"📝 Processing large diff in {} chunks in parallel...",
+		chunks.len()
+	);
+
+	let responses = process_commit_chunks_parallel(
+		&chunks,
+		file_count,
+		additions,
+		deletions,
+		&guidance_section,
+		docs_restriction,
+		config,
+	)
+	.await;
+
+	if responses.is_empty() {
+		return Ok("chore: update files".to_string());
+	}
+
+	let combined = diff_chunker::combine_commit_messages(responses);
+
 	println!("🎯 Refining commit message with AI...");
 	match refine_commit_message_with_ai(&combined, config).await {
 		Ok(refined) => Ok(refined),
