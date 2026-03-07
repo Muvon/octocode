@@ -467,7 +467,7 @@ impl McpServer {
 							// Update LSP with changed files if LSP is enabled
 							if let Some(ref lsp_provider) = self.lsp {
 								let mut lsp_guard = lsp_provider.lock().await;
-								if let Err(e) = Self::update_lsp_after_indexing(&mut lsp_guard, &self.working_directory, self.config.index.index_hidden).await {
+								if let Err(e) = Self::update_lsp_after_indexing(&mut lsp_guard, &self.working_directory).await {
 									debug!("LSP update after indexing failed: {}", e);
 								}
 							}
@@ -1106,14 +1106,13 @@ impl McpServer {
 	async fn update_lsp_after_indexing(
 		lsp_provider: &mut crate::mcp::lsp::LspProvider,
 		working_directory: &std::path::Path,
-		index_hidden: bool,
 	) -> Result<()> {
 		use crate::indexer::{detect_language, NoindexWalker, PathUtils};
 
 		debug!("Updating LSP server with changed files");
 
-		// Use existing file walker that respects .gitignore and .noindex
-		let walker = NoindexWalker::create_walker(working_directory, index_hidden).build();
+		// Use existing file walker that respects .gitignore, .noindex, and .octoinclude
+		let walker = NoindexWalker::create_walker(working_directory).build();
 		let mut files_updated = 0;
 
 		for result in walker {

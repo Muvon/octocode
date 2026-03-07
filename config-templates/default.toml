@@ -19,7 +19,6 @@ embeddings_batch_size = 16  # 16 files per batch - table.add() every 16 files fo
 embeddings_max_tokens_per_batch = 100000  # Keep existing token limit
 flush_frequency = 2  # Flush every 2 batches = every 32 files for coordinated persistence
 require_git = true  # Require git repository for indexing
-index_hidden = false  # Index hidden files and directories (those starting with a dot, e.g. .env, .config/)
 
 [search]
 max_results = 20

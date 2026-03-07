@@ -77,15 +77,31 @@ pub struct NoindexWalker;
 static NOINDEX_CACHE: OnceLock<parking_lot::RwLock<HashMap<std::path::PathBuf, bool>>> =
 	OnceLock::new();
 
+/// Cache for .octoinclude file detection results
+static OCTOINCLUDE_CACHE: OnceLock<parking_lot::RwLock<HashMap<std::path::PathBuf, bool>>> =
+	OnceLock::new();
+
 impl NoindexWalker {
-	/// Creates a WalkBuilder that respects .gitignore and .noindex files
-	/// PERFORMANCE: Uses caching to avoid repeated .noindex detection
-	pub fn create_walker(current_dir: &Path, index_hidden: bool) -> ignore::WalkBuilder {
+	/// Creates a WalkBuilder that respects .gitignore, .noindex, and .octoinclude files.
+	///
+	/// Hidden files and directories (dot-prefixed) are skipped by default, following
+	/// standard Linux conventions.  To include specific hidden paths, create a
+	/// `.octoinclude` file in the project root listing the patterns to allow, for example:
+	///
+	/// ```text
+	/// # .octoinclude — hidden paths to include in indexing
+	/// .env
+	/// .env.local
+	/// .config/
+	/// ```
+	///
+	/// PERFORMANCE: Uses caching to avoid repeated .noindex/.octoinclude detection
+	pub fn create_walker(current_dir: &Path) -> ignore::WalkBuilder {
 		let mut builder = ignore::WalkBuilder::new(current_dir);
 
 		// Standard git ignore settings
 		builder
-			.hidden(!index_hidden) // When index_hidden=false (default), hidden files are filtered; when true, they are included
+			.hidden(true) // Skip hidden files by default (Linux convention)
 			.git_ignore(true) // Respect .gitignore files
 			.git_global(true) // Respect global git ignore files
 			.git_exclude(true) // Respect .git/info/exclude files
@@ -95,6 +111,26 @@ impl NoindexWalker {
 		// Uses caching to avoid repeated file system checks during the same session
 		if Self::has_noindex_files_cached(current_dir) {
 			builder.add_custom_ignore_filename(".noindex");
+		}
+
+		// .octoinclude: explicitly whitelist specific hidden files/directories.
+		// Override rules take priority over the hidden filter, so patterns listed here
+		// will be included even though hidden(true) is set.
+		if Self::has_octoinclude_file_cached(current_dir) {
+			let octoinclude_path = current_dir.join(".octoinclude");
+			if let Ok(content) = fs::read_to_string(&octoinclude_path) {
+				let mut override_builder = ignore::overrides::OverrideBuilder::new(current_dir);
+				for line in content.lines() {
+					let line = line.trim();
+					if !line.is_empty() && !line.starts_with('#') {
+						// Non-negated pattern → whitelist (include despite being hidden)
+						let _ = override_builder.add(line);
+					}
+				}
+				if let Ok(overrides) = override_builder.build() {
+					builder.overrides(overrides);
+				}
+			}
 		}
 
 		builder
@@ -168,6 +204,29 @@ impl NoindexWalker {
 		// Users can still add .noindex files, they just need to be in common directories
 		// or in the root directory (which we always check above)
 		false
+	}
+
+	/// Cached check for a .octoinclude file in the project root
+	fn has_octoinclude_file_cached(current_dir: &Path) -> bool {
+		let cache =
+			OCTOINCLUDE_CACHE.get_or_init(|| parking_lot::RwLock::new(HashMap::new()));
+		let key = current_dir.to_path_buf();
+
+		{
+			let cache_read = cache.read();
+			if let Some(&cached) = cache_read.get(&key) {
+				return cached;
+			}
+		}
+
+		let result = current_dir.join(".octoinclude").exists();
+
+		{
+			let mut cache_write = cache.write();
+			cache_write.insert(key, result);
+		}
+
+		result
 	}
 
 	/// Creates a GitignoreBuilder for checking individual files against both .gitignore and .noindex
@@ -365,7 +424,6 @@ async fn flush_if_needed(
 fn fast_count_indexable_files(
 	current_dir: &Path,
 	git_changed_files: Option<&std::collections::HashSet<String>>,
-	index_hidden: bool,
 ) -> usize {
 	let mut count = 0;
 
@@ -382,7 +440,7 @@ fn fast_count_indexable_files(
 	}
 
 	// Otherwise, do a fast walk with minimal checks
-	let walker = NoindexWalker::create_walker(current_dir, index_hidden).build();
+	let walker = NoindexWalker::create_walker(current_dir).build();
 
 	for result in walker {
 		let entry = match result {
@@ -786,7 +844,7 @@ pub async fn index_files_with_quiet(
 	// PERFORMANCE FIX: Fast-path for git optimization - process only changed files
 	if let Some(ref changed_files) = git_changed_files {
 		// Use fast counting function for git optimization
-		total_files_found = fast_count_indexable_files(&current_dir, Some(changed_files), config.index.index_hidden);
+		total_files_found = fast_count_indexable_files(&current_dir, Some(changed_files));
 
 		// Update state with final count and switch to processing mode
 		{
@@ -973,7 +1031,7 @@ pub async fn index_files_with_quiet(
 		// Normal mode: First do a fast count, then process files
 
 		// PERFORMANCE FIX: Do a fast count first without expensive operations
-		total_files_found = fast_count_indexable_files(&current_dir, None, config.index.index_hidden);
+		total_files_found = fast_count_indexable_files(&current_dir, None);
 
 		// Update state with the total count immediately
 		{
@@ -984,7 +1042,7 @@ pub async fn index_files_with_quiet(
 		}
 
 		// Now do the actual processing with proper language detection
-		let walker = NoindexWalker::create_walker(&current_dir, config.index.index_hidden).build();
+		let walker = NoindexWalker::create_walker(&current_dir).build();
 
 		for result in walker {
 			let entry = match result {

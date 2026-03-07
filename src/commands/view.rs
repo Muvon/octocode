@@ -14,7 +14,6 @@
 
 use clap::Args;
 
-use octocode::config::Config;
 use octocode::indexer;
 use octocode::storage;
 
@@ -33,9 +32,6 @@ pub struct ViewArgs {
 pub async fn execute(args: &ViewArgs) -> Result<(), anyhow::Error> {
 	// Get current directory
 	let current_dir = std::env::current_dir()?;
-
-	// Load config to respect index_hidden setting
-	let config = Config::load()?;
 
 	// Note: View command doesn't require an index as it parses files directly
 	let index_path = storage::get_project_database_path(&current_dir)?;
@@ -68,7 +64,7 @@ pub async fn execute(args: &ViewArgs) -> Result<(), anyhow::Error> {
 			};
 
 			// Use NoindexWalker to respect both .gitignore and .noindex files while finding files
-			let walker = indexer::NoindexWalker::create_walker(&current_dir, config.index.index_hidden).build();
+			let walker = indexer::NoindexWalker::create_walker(&current_dir).build();
 
 			for result in walker {
 				let entry = match result {

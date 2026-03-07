@@ -499,7 +499,7 @@ impl SemanticCodeProvider {
 		}
 
 		// Walk the directory tree once and test all patterns
-		let walker = NoindexWalker::create_walker(&self.working_directory, self.config.index.index_hidden).build();
+		let walker = NoindexWalker::create_walker(&self.working_directory).build();
 
 		for result in walker {
 			let entry = match result {

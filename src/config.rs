@@ -98,10 +98,6 @@ pub struct IndexConfig {
 
 	/// Require git repository for indexing (default: true)
 	pub require_git: bool,
-
-	/// Index hidden files and directories (those starting with a dot, e.g. .env, .config/).
-	/// Disabled by default to follow standard Linux conventions.
-	pub index_hidden: bool,
 }
 
 impl Default for IndexConfig {
@@ -113,7 +109,6 @@ impl Default for IndexConfig {
 			embeddings_max_tokens_per_batch: 100000,
 			flush_frequency: 2,
 			require_git: true,
-			index_hidden: false,
 		}
 	}
 }
