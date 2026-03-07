@@ -24,9 +24,9 @@ jobs:
         components: rustfmt, clippy
 
     - name: Install protobuf compiler
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y protobuf-compiler
+      uses: arduino/setup-protoc@v3
+      with:
+        repo-token: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Cache dependencies
       uses: actions/cache@v4
@@ -70,9 +70,9 @@ jobs:
         components: clippy
 
     - name: Install protobuf compiler
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y protobuf-compiler
+      uses: arduino/setup-protoc@v3
+      with:
+        repo-token: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Cache dependencies
       uses: actions/cache@v4
@@ -111,20 +111,10 @@ jobs:
       with:
         toolchain: ${{ matrix.rust }}
 
-    - name: Install protobuf compiler (Ubuntu)
-      if: matrix.os == 'ubuntu-latest'
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y protobuf-compiler
-
-    - name: Install protobuf compiler (macOS)
-      if: matrix.os == 'macos-latest'
-      run: brew install protobuf
-
-    - name: Install protobuf compiler (Windows)
-      if: matrix.os == 'windows-latest'
-      run: |
-        choco install protoc
+    - name: Install protobuf compiler
+      uses: arduino/setup-protoc@v3
+      with:
+        repo-token: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Cache dependencies
       uses: actions/cache@v4
@@ -155,9 +145,9 @@ jobs:
       uses: dtolnay/rust-toolchain@1.92.0
 
     - name: Install protobuf compiler
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y protobuf-compiler
+      uses: arduino/setup-protoc@v3
+      with:
+        repo-token: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Install cargo-audit
       run: cargo install cargo-audit --locked
@@ -176,9 +166,9 @@ jobs:
       uses: dtolnay/rust-toolchain@1.92.0
 
     - name: Install protobuf compiler
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y protobuf-compiler
+      uses: arduino/setup-protoc@v3
+      with:
+        repo-token: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Install cargo-tarpaulin
       run: cargo install cargo-tarpaulin --locked

@@ -162,14 +162,10 @@ jobs:
       with:
         targets: ${{ matrix.target }}
 
-    - name: Install protobuf compiler (macOS)
-      if: startsWith(matrix.os, 'macos')
-      run: brew install protobuf
-
-    - name: Install protobuf compiler (Windows)
-      if: startsWith(matrix.os, 'windows')
-      run: |
-        choco install protoc
+    - name: Install protobuf compiler
+      uses: arduino/setup-protoc@v3
+      with:
+        repo-token: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Cache dependencies
       uses: actions/cache@v4
@@ -256,10 +252,10 @@ jobs:
     - name: Install Rust
       uses: dtolnay/rust-toolchain@1.92.0
 
-    - name: Install protobuf compiler
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y protobuf-compiler
+   - name: Install protobuf compiler
+     uses: arduino/setup-protoc@v3
+     with:
+       repo-token: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Cache dependencies
       uses: actions/cache@v4
