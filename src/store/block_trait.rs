@@ -74,12 +74,12 @@ impl BlockType for CodeBlock {
 
 	fn calculate_keyword_score(&self, keywords: &[String]) -> f32 {
 		use super::Store;
-		
+
 		// Score different fields with different weights
 		let path_score = Store::score_field(keywords, &self.path, 2.0);
 		let content_score = Store::score_field(keywords, &self.content, 1.0);
 		let symbols_score = Store::score_field(keywords, &self.symbols.join(" "), 2.5);
-		
+
 		path_score + content_score + symbols_score
 	}
 }
@@ -114,11 +114,11 @@ impl BlockType for TextBlock {
 
 	fn calculate_keyword_score(&self, keywords: &[String]) -> f32 {
 		use super::Store;
-		
+
 		// Score different fields with different weights
 		let path_score = Store::score_field(keywords, &self.path, 2.0);
 		let content_score = Store::score_field(keywords, &self.content, 1.0);
-		
+
 		path_score + content_score
 	}
 }
@@ -153,12 +153,12 @@ impl BlockType for DocumentBlock {
 
 	fn calculate_keyword_score(&self, keywords: &[String]) -> f32 {
 		use super::Store;
-		
+
 		// Score different fields with different weights
 		let path_score = Store::score_field(keywords, &self.path, 2.0);
 		let title_score = Store::score_field(keywords, &self.title, 3.0);
 		let content_score = Store::score_field(keywords, &self.content, 1.0);
-		
+
 		path_score + title_score + content_score
 	}
 }

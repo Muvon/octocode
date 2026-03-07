@@ -125,7 +125,6 @@ pub struct RerankerConfig {
 	pub final_top_k: usize,
 }
 
-
 /// Hybrid search configuration for combining vector and keyword search
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HybridSearchConfig {

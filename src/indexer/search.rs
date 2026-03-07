@@ -298,7 +298,7 @@ pub async fn search_codebase_with_details(
 			let embeddings = search_embeddings.code_embeddings.ok_or_else(|| {
 				anyhow::anyhow!("No code embeddings generated for code search mode")
 			})?;
-			
+
 			let results = if config.search.hybrid.enabled {
 				// Use hybrid search
 				let hybrid_query = crate::store::HybridSearchQuery {
@@ -310,14 +310,18 @@ pub async fn search_codebase_with_details(
 					min_relevance: Some(config.search.similarity_threshold),
 					language_filter: None,
 				};
-				store.hybrid_search::<crate::store::CodeBlock>(&hybrid_query, &config.search.hybrid).await?
+				store
+					.hybrid_search::<crate::store::CodeBlock>(&hybrid_query, &config.search.hybrid)
+					.await?
 			} else {
 				// Use vector-only search
+				// Convert similarity threshold to distance threshold
+				let distance_threshold = 1.0 - config.search.similarity_threshold;
 				store
 					.get_code_blocks_with_config(
 						embeddings,
 						Some(candidate_limit),
-						Some(config.search.similarity_threshold),
+						Some(distance_threshold),
 					)
 					.await?
 			};
@@ -327,7 +331,7 @@ pub async fn search_codebase_with_details(
 			let embeddings = search_embeddings.text_embeddings.ok_or_else(|| {
 				anyhow::anyhow!("No text embeddings generated for text search mode")
 			})?;
-			
+
 			let results = if config.search.hybrid.enabled {
 				// Use hybrid search
 				let hybrid_query = crate::store::HybridSearchQuery {
@@ -339,14 +343,18 @@ pub async fn search_codebase_with_details(
 					min_relevance: Some(config.search.similarity_threshold),
 					language_filter: None,
 				};
-				store.hybrid_search::<crate::store::TextBlock>(&hybrid_query, &config.search.hybrid).await?
+				store
+					.hybrid_search::<crate::store::TextBlock>(&hybrid_query, &config.search.hybrid)
+					.await?
 			} else {
 				// Use vector-only search
+				// Convert similarity threshold to distance threshold
+				let distance_threshold = 1.0 - config.search.similarity_threshold;
 				store
 					.get_text_blocks_with_config(
 						embeddings,
 						Some(candidate_limit),
-						Some(config.search.similarity_threshold),
+						Some(distance_threshold),
 					)
 					.await?
 			};
@@ -356,7 +364,7 @@ pub async fn search_codebase_with_details(
 			let embeddings = search_embeddings.text_embeddings.ok_or_else(|| {
 				anyhow::anyhow!("No text embeddings generated for docs search mode")
 			})?;
-			
+
 			let results = if config.search.hybrid.enabled {
 				// Use hybrid search
 				let hybrid_query = crate::store::HybridSearchQuery {
@@ -368,14 +376,21 @@ pub async fn search_codebase_with_details(
 					min_relevance: Some(config.search.similarity_threshold),
 					language_filter: None,
 				};
-				store.hybrid_search::<crate::store::DocumentBlock>(&hybrid_query, &config.search.hybrid).await?
+				store
+					.hybrid_search::<crate::store::DocumentBlock>(
+						&hybrid_query,
+						&config.search.hybrid,
+					)
+					.await?
 			} else {
 				// Use vector-only search
+				// Convert similarity threshold to distance threshold
+				let distance_threshold = 1.0 - config.search.similarity_threshold;
 				store
 					.get_document_blocks_with_config(
 						embeddings,
 						Some(candidate_limit),
-						Some(config.search.similarity_threshold),
+						Some(distance_threshold),
 					)
 					.await?
 			};
@@ -389,7 +404,7 @@ pub async fn search_codebase_with_details(
 				anyhow::anyhow!("No text embeddings generated for all search mode")
 			})?;
 			let results_per_type = candidate_limit.div_ceil(3);
-			
+
 			if config.search.hybrid.enabled {
 				// Use hybrid search for all block types
 				let code_query = crate::store::HybridSearchQuery {
@@ -419,30 +434,41 @@ pub async fn search_codebase_with_details(
 					min_relevance: Some(config.search.similarity_threshold),
 					language_filter: None,
 				};
-				
+
 				let (code_results, text_results, doc_results) = tokio::try_join!(
-					store.hybrid_search::<crate::store::CodeBlock>(&code_query, &config.search.hybrid),
-					store.hybrid_search::<crate::store::TextBlock>(&text_query, &config.search.hybrid),
-					store.hybrid_search::<crate::store::DocumentBlock>(&doc_query, &config.search.hybrid),
+					store.hybrid_search::<crate::store::CodeBlock>(
+						&code_query,
+						&config.search.hybrid
+					),
+					store.hybrid_search::<crate::store::TextBlock>(
+						&text_query,
+						&config.search.hybrid
+					),
+					store.hybrid_search::<crate::store::DocumentBlock>(
+						&doc_query,
+						&config.search.hybrid
+					),
 				)?;
 				(code_results, text_results, doc_results)
 			} else {
 				// Use vector-only search
+				// Convert similarity threshold to distance threshold
+				let distance_threshold = 1.0 - config.search.similarity_threshold;
 				let (code_results, text_results, doc_results) = tokio::try_join!(
 					store.get_code_blocks_with_config(
 						code_embeddings,
 						Some(results_per_type),
-						Some(config.search.similarity_threshold),
+						Some(distance_threshold),
 					),
 					store.get_text_blocks_with_config(
 						text_embeddings.clone(),
 						Some(results_per_type),
-						Some(config.search.similarity_threshold),
+						Some(distance_threshold),
 					),
 					store.get_document_blocks_with_config(
 						text_embeddings,
 						Some(results_per_type),
-						Some(config.search.similarity_threshold),
+						Some(distance_threshold),
 					),
 				)?;
 				(code_results, text_results, doc_results)
