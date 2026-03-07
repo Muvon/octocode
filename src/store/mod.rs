@@ -41,6 +41,7 @@ pub mod batch_converter;
 pub mod block_trait;
 pub mod debug;
 pub mod graphrag;
+pub mod hybrid_tests;
 pub mod metadata;
 pub mod table_ops;
 pub mod vector_optimizer;
@@ -85,6 +86,63 @@ pub struct DocumentBlock {
 	// Optional distance field for relevance sorting (higher is more relevant)
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub distance: Option<f32>,
+}
+/// Hybrid search query combining vector and keyword signals
+#[derive(Debug, Clone)]
+pub struct HybridSearchQuery {
+	/// Vector semantic search query (embedding)
+	pub vector_query: Option<Vec<f32>>,
+	/// Keywords for exact/fuzzy matching
+	pub keywords: Option<Vec<String>>,
+	/// Weight for vector similarity signal (0.0-1.0)
+	pub vector_weight: f32,
+	/// Weight for keyword matching signal (0.0-1.0)
+	pub keyword_weight: f32,
+	/// Maximum number of results to return
+	pub limit: usize,
+	/// Minimum relevance threshold
+	pub min_relevance: Option<f32>,
+	/// Language filter (for code/text blocks)
+	pub language_filter: Option<String>,
+}
+
+impl Default for HybridSearchQuery {
+	fn default() -> Self {
+		Self {
+			vector_query: None,
+			keywords: None,
+			vector_weight: 0.7,
+			keyword_weight: 0.3,
+			limit: 10,
+			min_relevance: None,
+			language_filter: None,
+		}
+	}
+}
+
+impl HybridSearchQuery {
+	/// Validate that weights are in valid ranges
+	pub fn validate(&self) -> Result<(), String> {
+		if self.vector_weight < 0.0 || self.vector_weight > 1.0 {
+			return Err(format!(
+				"vector_weight must be in [0.0, 1.0], got {}",
+				self.vector_weight
+			));
+		}
+		if self.keyword_weight < 0.0 || self.keyword_weight > 1.0 {
+			return Err(format!(
+				"keyword_weight must be in [0.0, 1.0], got {}",
+				self.keyword_weight
+			));
+		}
+
+		// Check if at least one signal is enabled
+		if self.vector_query.is_none() && self.keywords.is_none() {
+			return Err("At least one of vector_query or keywords must be provided".to_string());
+		}
+
+		Ok(())
+	}
 }
 
 pub struct Store {
@@ -886,5 +944,195 @@ impl Store {
 	pub async fn remove_blocks_by_hashes(&self, hashes: &[String], table_name: &str) -> Result<()> {
 		let table_ops = TableOperations::new(&self.db);
 		table_ops.remove_blocks_by_hashes(hashes, table_name).await
+	}
+	// ===== Keyword Search Methods =====
+
+	/// Tokenize text into lowercase words, removing punctuation
+	pub(crate) fn tokenize(text: &str) -> Vec<String> {
+		text.to_lowercase()
+			.split(|c: char| !c.is_alphanumeric() && c != '_')
+			.filter(|s| !s.is_empty())
+			.map(|s| s.to_string())
+			.collect()
+	}
+
+	/// Calculate term frequency for a keyword in text
+	pub(crate) fn calculate_tf(keyword: &str, text: &str) -> f32 {
+		let tokens = Self::tokenize(text);
+		if tokens.is_empty() {
+			return 0.0;
+		}
+
+		let keyword_lower = keyword.to_lowercase();
+		let count = tokens.iter().filter(|t| *t == &keyword_lower).count();
+		count as f32 / tokens.len() as f32
+	}
+
+	/// Score a field for keyword matches with field weight
+	pub(crate) fn score_field(keywords: &[String], text: &str, field_weight: f32) -> f32 {
+		if keywords.is_empty() || text.is_empty() {
+			return 0.0;
+		}
+
+		let mut total_score = 0.0;
+		for keyword in keywords {
+			let tf = Self::calculate_tf(keyword, text);
+			total_score += tf * field_weight;
+		}
+
+		total_score
+	}
+
+	/// Perform keyword-based search on blocks
+	/// Returns blocks with keyword match scores
+	pub async fn keyword_search<B: BlockType>(
+		&self,
+		keywords: &[String],
+		limit: usize,
+		language_filter: Option<&str>,
+	) -> Result<Vec<(B, f32)>> {
+		if keywords.is_empty() {
+			return Ok(Vec::new());
+		}
+
+		let table_ops = TableOperations::new(&self.db);
+		if !table_ops.table_exists(B::TABLE_NAME).await? {
+			return Ok(Vec::new());
+		}
+
+		let table = self.get_table(B::TABLE_NAME).await?;
+		let mut results = Vec::new();
+
+		// Get all blocks (we'll score them)
+		let mut query = table.query();
+		
+		// Apply language filter if specified
+		if let Some(language) = language_filter {
+			query = query.only_if(format!("language = '{}'", language));
+		}
+
+		let mut db_results = query.execute().await?;
+
+		while let Some(batch) = db_results.try_next().await? {
+			if batch.num_rows() == 0 {
+				continue;
+			}
+
+			let blocks = B::from_batch(&batch)?;
+
+			for block in blocks {
+				// Calculate keyword score based on block type
+				let total_score = B::calculate_keyword_score(&block, keywords);
+
+				// Only include if there's a match
+				if total_score > 0.0 {
+					results.push((block, total_score));
+				}
+			}
+		}
+
+		// Normalize scores to [0.0, 1.0]
+		if !results.is_empty() {
+			let max_score = results
+				.iter()
+				.map(|(_, score)| *score)
+				.fold(0.0f32, f32::max);
+
+			if max_score > 0.0 {
+				for (_, score) in &mut results {
+					*score /= max_score;
+				}
+			}
+		}
+
+		// Sort by score descending and apply limit
+		results.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+		results.truncate(limit);
+
+		Ok(results)
+	}
+
+	/// Perform hybrid search combining vector and keyword signals
+	pub async fn hybrid_search<B: BlockType>(
+		&self,
+		query: &HybridSearchQuery,
+		_config: &crate::config::HybridSearchConfig,
+	) -> Result<Vec<B>> {
+		// Validate query
+		query
+			.validate()
+			.map_err(|e| anyhow::anyhow!("Invalid hybrid query: {}", e))?;
+
+		// Step 1: Get candidate blocks from vector search or keyword search
+		let mut candidates: std::collections::HashMap<String, (B, f32, f32)> =
+			std::collections::HashMap::new();
+
+		// Perform vector search if query provided
+		if let Some(ref embedding) = query.vector_query {
+			let vector_results = self
+				.get_blocks_with_config::<B>(
+					embedding.clone(),
+					Some(query.limit * 2), // Get more candidates for filtering
+					query.min_relevance,
+					query.language_filter.as_deref(),
+					0, // vector_dim not used
+				)
+				.await?;
+
+			for block in vector_results {
+				let hash = B::get_hash(&block);
+				// Convert distance to similarity score (1.0 - distance for cosine)
+				let vec_score = block.distance().map(|d| 1.0 - d).unwrap_or(0.0);
+				candidates.insert(hash, (block, vec_score, 0.0));
+			}
+		}
+
+		// Perform keyword search if keywords provided
+		if let Some(ref keywords) = query.keywords {
+			let keyword_results = self
+				.keyword_search::<B>(keywords, query.limit * 2, query.language_filter.as_deref())
+				.await?;
+
+			for (block, kw_score) in keyword_results {
+				let hash = B::get_hash(&block);
+				candidates
+					.entry(hash)
+					.and_modify(|(_, _, kw)| *kw = kw_score)
+					.or_insert((block, 0.0, kw_score));
+			}
+		}
+
+		// Step 2: Combine scores with weights
+		let mut results: Vec<B> = candidates
+			.into_iter()
+			.map(|(_, (mut block, vec_score, kw_score))| {
+				// Calculate weighted final score
+				let final_score = query.vector_weight * vec_score + query.keyword_weight * kw_score;
+
+				// Set the distance to the final score (higher = more relevant)
+				// For consistency with vector search, we store as distance (1.0 - score)
+				block.set_distance(1.0 - final_score);
+				block
+			})
+			.filter(|block| {
+				// Apply minimum relevance filter
+				query
+					.min_relevance
+					.is_none_or(|threshold| block.distance().is_none_or(|d| (1.0 - d) >= threshold))
+			})
+			.collect();
+
+		// Step 3: Sort by final score descending (distance ascending)
+		results.sort_by(|a, b| match (a.distance(), b.distance()) {
+			(Some(dist_a), Some(dist_b)) => dist_a.partial_cmp(&dist_b).unwrap_or(std::cmp::Ordering::Equal),
+			(Some(_), None) => std::cmp::Ordering::Less,
+			(None, Some(_)) => std::cmp::Ordering::Greater,
+			(None, None) => std::cmp::Ordering::Equal,
+		});
+
+		// Step 4: Apply limit
+		results.truncate(query.limit);
+
+		Ok(results)
 	}
 }
