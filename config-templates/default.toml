@@ -38,6 +38,22 @@ top_k_candidates = 50
 # Number of final results to return after reranking
 final_top_k = 10
 
+[search.hybrid]
+# Enable hybrid search combining vector similarity with keyword matching
+enabled = false
+# Weight for vector similarity signal (0.0-1.0)
+default_vector_weight = 0.7
+# Weight for keyword matching signal (0.0-1.0)
+default_keyword_weight = 0.3
+# Weight for keyword matches in path/filename
+keyword_path_weight = 2.0
+# Weight for keyword matches in content
+keyword_content_weight = 1.0
+# Weight for keyword matches in symbols (code blocks only)
+keyword_symbols_weight = 2.5
+# Weight for keyword matches in title (document blocks only)
+keyword_title_weight = 3.0
+
 [embedding]
 code_model = "voyage:voyage-code-3"
 text_model = "voyage:voyage-3.5-lite"

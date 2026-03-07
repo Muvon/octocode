@@ -125,6 +125,31 @@ pub struct RerankerConfig {
 	pub final_top_k: usize,
 }
 
+
+/// Hybrid search configuration for combining vector and keyword search
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HybridSearchConfig {
+	/// Enable hybrid search (vector + keyword)
+	pub enabled: bool,
+	/// Default weight for vector similarity signal
+	pub default_vector_weight: f32,
+	/// Default weight for keyword matching signal
+	pub default_keyword_weight: f32,
+	/// Weight for keyword matches in path/filename
+	pub keyword_path_weight: f32,
+	/// Weight for keyword matches in content
+	pub keyword_content_weight: f32,
+	/// Weight for keyword matches in symbols (code blocks only)
+	pub keyword_symbols_weight: f32,
+	/// Weight for keyword matches in title (document blocks only)
+	pub keyword_title_weight: f32,
+}
+
+impl Default for HybridSearchConfig {
+	fn default() -> Self {
+		panic!("Hybrid search config must be loaded from template file - defaults not allowed")
+	}
+}
 // NOTE: This Default implementation should NEVER be used in practice
 // All reranker values must come from the config template file
 impl Default for RerankerConfig {
@@ -147,6 +172,9 @@ pub struct SearchConfig {
 
 	/// Reranker configuration for improving search result accuracy
 	pub reranker: RerankerConfig,
+
+	/// Hybrid search configuration for combining vector and keyword search
+	pub hybrid: HybridSearchConfig,
 }
 
 impl Default for SearchConfig {
