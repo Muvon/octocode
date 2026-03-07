@@ -80,12 +80,12 @@ static NOINDEX_CACHE: OnceLock<parking_lot::RwLock<HashMap<std::path::PathBuf, b
 impl NoindexWalker {
 	/// Creates a WalkBuilder that respects .gitignore and .noindex files
 	/// PERFORMANCE: Uses caching to avoid repeated .noindex detection
-	pub fn create_walker(current_dir: &Path) -> ignore::WalkBuilder {
+	pub fn create_walker(current_dir: &Path, index_hidden: bool) -> ignore::WalkBuilder {
 		let mut builder = ignore::WalkBuilder::new(current_dir);
 
 		// Standard git ignore settings
 		builder
-			.hidden(true) // Don't ignore all hidden files - let gitignore handle it
+			.hidden(!index_hidden) // When index_hidden=false (default), hidden files are filtered; when true, they are included
 			.git_ignore(true) // Respect .gitignore files
 			.git_global(true) // Respect global git ignore files
 			.git_exclude(true) // Respect .git/info/exclude files
@@ -365,6 +365,7 @@ async fn flush_if_needed(
 fn fast_count_indexable_files(
 	current_dir: &Path,
 	git_changed_files: Option<&std::collections::HashSet<String>>,
+	index_hidden: bool,
 ) -> usize {
 	let mut count = 0;
 
@@ -381,7 +382,7 @@ fn fast_count_indexable_files(
 	}
 
 	// Otherwise, do a fast walk with minimal checks
-	let walker = NoindexWalker::create_walker(current_dir).build();
+	let walker = NoindexWalker::create_walker(current_dir, index_hidden).build();
 
 	for result in walker {
 		let entry = match result {
@@ -785,7 +786,7 @@ pub async fn index_files_with_quiet(
 	// PERFORMANCE FIX: Fast-path for git optimization - process only changed files
 	if let Some(ref changed_files) = git_changed_files {
 		// Use fast counting function for git optimization
-		total_files_found = fast_count_indexable_files(&current_dir, Some(changed_files));
+		total_files_found = fast_count_indexable_files(&current_dir, Some(changed_files), config.index.index_hidden);
 
 		// Update state with final count and switch to processing mode
 		{
@@ -972,7 +973,7 @@ pub async fn index_files_with_quiet(
 		// Normal mode: First do a fast count, then process files
 
 		// PERFORMANCE FIX: Do a fast count first without expensive operations
-		total_files_found = fast_count_indexable_files(&current_dir, None);
+		total_files_found = fast_count_indexable_files(&current_dir, None, config.index.index_hidden);
 
 		// Update state with the total count immediately
 		{
@@ -983,7 +984,7 @@ pub async fn index_files_with_quiet(
 		}
 
 		// Now do the actual processing with proper language detection
-		let walker = NoindexWalker::create_walker(&current_dir).build();
+		let walker = NoindexWalker::create_walker(&current_dir, config.index.index_hidden).build();
 
 		for result in walker {
 			let entry = match result {
