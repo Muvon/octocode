@@ -14,60 +14,13 @@
 
 #[cfg(test)]
 mod tests {
-	use crate::store::{HybridSearchQuery, Store};
+	use crate::store::HybridSearchQuery;
 
 	#[test]
-	fn test_tokenize() {
-		let text = "Hello World_test example";
-		let tokens = Store::tokenize(text);
-		assert_eq!(tokens, vec!["hello", "world_test", "example"]);
-	}
-
-	#[test]
-	fn test_tokenize_with_punctuation() {
-		let text = "function_name(arg1, arg2) { return value; }";
-		let tokens = Store::tokenize(text);
-		assert_eq!(
-			tokens,
-			vec!["function_name", "arg1", "arg2", "return", "value"]
-		);
-	}
-
-	#[test]
-	fn test_calculate_tf() {
-		let text = "hello world hello test hello";
-		let tf = Store::calculate_tf("hello", text);
-		assert!((tf - 0.6).abs() < 0.01); // 3 occurrences out of 5 tokens
-	}
-
-	#[test]
-	fn test_calculate_tf_no_match() {
-		let text = "hello world test";
-		let tf = Store::calculate_tf("missing", text);
-		assert_eq!(tf, 0.0);
-	}
-
-	#[test]
-	fn test_score_field() {
-		let keywords = vec!["hello".to_string(), "world".to_string()];
-		let text = "hello world hello test";
-		let score = Store::score_field(&keywords, text, 1.0);
-		assert!(score > 0.0);
-	}
-
-	#[test]
-	fn test_score_field_with_weight() {
-		let keywords = vec!["test".to_string()];
-		let text = "test test test";
-		let score = Store::score_field(&keywords, text, 2.0);
-		assert!((score - 2.0).abs() < 0.01); // TF = 1.0, weight = 2.0
-	}
-
-	#[test]
-	fn test_hybrid_search_query_validation() {
+	fn test_hybrid_search_query_validation_vector_and_keywords() {
 		let valid_query = HybridSearchQuery {
 			vector_query: Some(vec![0.1, 0.2, 0.3]),
-			keywords: Some(vec!["test".to_string()]),
+			keywords: Some("test query".to_string()),
 			vector_weight: 0.7,
 			keyword_weight: 0.3,
 			limit: 10,
@@ -75,7 +28,38 @@ mod tests {
 			language_filter: None,
 		};
 		assert!(valid_query.validate().is_ok());
+	}
 
+	#[test]
+	fn test_hybrid_search_query_validation_vector_only() {
+		let valid_query = HybridSearchQuery {
+			vector_query: Some(vec![0.1, 0.2, 0.3]),
+			keywords: None,
+			vector_weight: 0.7,
+			keyword_weight: 0.3,
+			limit: 10,
+			min_relevance: Some(0.5),
+			language_filter: None,
+		};
+		assert!(valid_query.validate().is_ok());
+	}
+
+	#[test]
+	fn test_hybrid_search_query_validation_keywords_only() {
+		let valid_query = HybridSearchQuery {
+			vector_query: None,
+			keywords: Some("test query".to_string()),
+			vector_weight: 0.7,
+			keyword_weight: 0.3,
+			limit: 10,
+			min_relevance: Some(0.5),
+			language_filter: None,
+		};
+		assert!(valid_query.validate().is_ok());
+	}
+
+	#[test]
+	fn test_hybrid_search_query_validation_invalid_weights() {
 		let invalid_weights = HybridSearchQuery {
 			vector_query: Some(vec![0.1, 0.2, 0.3]),
 			keywords: None,
@@ -86,7 +70,10 @@ mod tests {
 			language_filter: None,
 		};
 		assert!(invalid_weights.validate().is_err());
+	}
 
+	#[test]
+	fn test_hybrid_search_query_validation_no_signals() {
 		let no_signals = HybridSearchQuery {
 			vector_query: None,
 			keywords: None,
@@ -100,12 +87,16 @@ mod tests {
 	}
 
 	#[test]
-	fn test_hybrid_search_query_default() {
-		let query = HybridSearchQuery::default();
-		assert_eq!(query.vector_weight, 0.7);
-		assert_eq!(query.keyword_weight, 0.3);
-		assert_eq!(query.limit, 10);
-		assert!(query.vector_query.is_none());
-		assert!(query.keywords.is_none());
+	fn test_hybrid_search_query_validation_negative_weights() {
+		let negative_weight = HybridSearchQuery {
+			vector_query: Some(vec![0.1, 0.2, 0.3]),
+			keywords: None,
+			vector_weight: -0.5, // Invalid: < 0.0
+			keyword_weight: 0.3,
+			limit: 10,
+			min_relevance: Some(0.5),
+			language_filter: None,
+		};
+		assert!(negative_weight.validate().is_err());
 	}
 }

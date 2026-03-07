@@ -22,6 +22,7 @@ use arrow_schema::Schema;
 // LanceDB imports
 use futures::TryStreamExt;
 use lancedb::{
+	index::{scalar::FtsIndexBuilder, Index, IndexType},
 	query::{ExecutableQuery, QueryBase, Select},
 	Connection,
 };
@@ -462,6 +463,55 @@ impl<'a> TableOperations<'a> {
 			table_name, duration.as_secs_f64(), index_params.num_partitions, index_params.num_sub_vectors
 		);
 
+		Ok(())
+	}
+
+	/// Create an FTS (full-text search / BM25) index on the `content` column.
+	/// Safe to call repeatedly — skips creation if an inverted index already exists.
+	/// The index enables native LanceDB hybrid search (vector + BM25 via RRF).
+	pub async fn create_fts_index(&self, table_name: &str) -> Result<()> {
+		if !self.table_exists(table_name).await? {
+			return Ok(());
+		}
+
+		let table = self.db.open_table(table_name).execute().await?;
+
+		// Skip if FTS index already exists
+		let indices = table.list_indices().await?;
+		if indices.iter().any(|idx| idx.index_type == IndexType::FTS) {
+			tracing::debug!("FTS index already exists for table '{}'", table_name);
+			return Ok(());
+		}
+
+		let row_count = table.count_rows(None).await?;
+		if row_count == 0 {
+			tracing::debug!(
+				"Table '{}' is empty, skipping FTS index creation",
+				table_name
+			);
+			return Ok(());
+		}
+
+		tracing::info!(
+			"Creating FTS index for table '{}' ({} rows)",
+			table_name,
+			row_count
+		);
+		let start = std::time::Instant::now();
+
+		table
+			.create_index(&["content"], Index::FTS(FtsIndexBuilder::default()))
+			.execute()
+			.await
+			.map_err(|e| {
+				anyhow::anyhow!("Failed to create FTS index on '{}': {}", table_name, e)
+			})?;
+
+		tracing::info!(
+			"FTS index created for '{}' in {:.2}s",
+			table_name,
+			start.elapsed().as_secs_f64()
+		);
 		Ok(())
 	}
 }
