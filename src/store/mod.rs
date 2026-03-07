@@ -1005,7 +1005,7 @@ impl Store {
 
 		// Get all blocks (we'll score them)
 		let mut query = table.query();
-		
+
 		// Apply language filter if specified
 		if let Some(language) = language_filter {
 			query = query.only_if(format!("language = '{}'", language));
@@ -1069,11 +1069,17 @@ impl Store {
 
 		// Perform vector search if query provided
 		if let Some(ref embedding) = query.vector_query {
+			// Convert similarity threshold to distance threshold
+			// min_relevance is similarity (higher = more similar)
+			// distance_threshold is distance (lower = more similar)
+			// For cosine: distance = 1.0 - similarity
+			let distance_threshold = query.min_relevance.map(|sim| 1.0 - sim);
+
 			let vector_results = self
 				.get_blocks_with_config::<B>(
 					embedding.clone(),
 					Some(query.limit * 2), // Get more candidates for filtering
-					query.min_relevance,
+					distance_threshold,
 					query.language_filter.as_deref(),
 					0, // vector_dim not used
 				)
@@ -1124,7 +1130,9 @@ impl Store {
 
 		// Step 3: Sort by final score descending (distance ascending)
 		results.sort_by(|a, b| match (a.distance(), b.distance()) {
-			(Some(dist_a), Some(dist_b)) => dist_a.partial_cmp(&dist_b).unwrap_or(std::cmp::Ordering::Equal),
+			(Some(dist_a), Some(dist_b)) => dist_a
+				.partial_cmp(&dist_b)
+				.unwrap_or(std::cmp::Ordering::Equal),
 			(Some(_), None) => std::cmp::Ordering::Less,
 			(None, Some(_)) => std::cmp::Ordering::Greater,
 			(None, None) => std::cmp::Ordering::Equal,
