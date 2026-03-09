@@ -317,27 +317,30 @@ impl Go {
 		}
 	}
 }
-// Helper function for parsing Go import statements
+// Helper function for parsing Go import statements.
+// Returns the full import path (e.g. "github.com/user/repo/pkg") so that
+// resolve_package_import can match it against directory path suffixes.
+// For aliased imports (e.g. `alias "pkg/path"`) we still return the full path
+// because the resolver needs the path, not the alias.
 fn parse_go_import_statement(import_text: &str) -> Option<Vec<String>> {
 	let mut imports = Vec::new();
 	let cleaned = import_text.trim();
 
 	// Handle single import: import "package" or import alias "package"
 	if cleaned.starts_with("import ") && !cleaned.contains('(') {
-		let rest = &cleaned[7..].trim(); // Skip "import "
+		let rest = cleaned[7..].trim(); // Skip "import "
 
-		// Handle: import alias "package"
 		let parts: Vec<&str> = rest.split_whitespace().collect();
-		if parts.len() == 2 {
-			// Has alias
-			let alias = parts[0];
-			imports.push(alias.to_string());
+		let raw_path = if parts.len() == 2 {
+			// import alias "path" — take the quoted path (parts[1])
+			parts[1].trim_matches('"')
 		} else if parts.len() == 1 {
-			// No alias, extract package name from path
-			let package_path = parts[0].trim_matches('"');
-			if let Some(package_name) = package_path.split('/').next_back() {
-				imports.push(package_name.to_string());
-			}
+			parts[0].trim_matches('"')
+		} else {
+			return None;
+		};
+		if !raw_path.is_empty() {
+			imports.push(raw_path.to_string());
 		}
 		return Some(imports);
 	}
@@ -355,16 +358,16 @@ fn parse_go_import_statement(import_text: &str) -> Option<Vec<String>> {
 
 					// Handle: alias "package" or "package"
 					let parts: Vec<&str> = line.split_whitespace().collect();
-					if parts.len() == 2 {
-						// Has alias
-						let alias = parts[0];
-						imports.push(alias.to_string());
+					let raw_path = if parts.len() == 2 {
+						// alias "path" — take the quoted path
+						parts[1].trim_matches('"')
 					} else if parts.len() == 1 {
-						// No alias, extract package name from path
-						let package_path = parts[0].trim_matches('"');
-						if let Some(package_name) = package_path.split('/').next_back() {
-							imports.push(package_name.to_string());
-						}
+						parts[0].trim_matches('"')
+					} else {
+						continue;
+					};
+					if !raw_path.is_empty() {
+						imports.push(raw_path.to_string());
 					}
 				}
 				return Some(imports);
@@ -400,16 +403,24 @@ impl Go {
 		None
 	}
 
-	/// Resolve package imports by name
-	fn resolve_package_import(&self, package_name: &str, go_files: &[String]) -> Option<String> {
-		// Look for package directory by name
+	/// Resolve package imports by matching the full import path against directory path suffixes.
+	/// e.g. "github.com/user/repo/pkg" matches any go file whose parent dir ends with "user/repo/pkg".
+	fn resolve_package_import(&self, import_path: &str, go_files: &[String]) -> Option<String> {
+		// Normalize separators for cross-platform comparison
+		let normalized_import = import_path.replace('\\', "/");
 		for go_file in go_files {
 			let file_path = std::path::Path::new(go_file);
 			if let Some(file_dir) = file_path.parent() {
-				if let Some(dir_name) = file_dir.file_name() {
-					if dir_name.to_string_lossy() == package_name {
-						return Some(go_file.clone());
-					}
+				let dir_str = file_dir.to_string_lossy().replace('\\', "/");
+				// Match if the directory path ends with the import path (or its last segment)
+				if dir_str.ends_with(&normalized_import)
+					|| dir_str.ends_with(
+						normalized_import
+							.split('/')
+							.next_back()
+							.unwrap_or(&normalized_import),
+					) {
+					return Some(go_file.clone());
 				}
 			}
 		}

@@ -242,15 +242,19 @@ impl Language for Java {
 		&self,
 		import_path: &str,
 		_current_file: &str,
-		_java_files: &[String],
+		java_files: &[String],
 	) -> Option<String> {
-		// Java import resolution - convert import statements to file paths
-		// For example: java.util.List -> java/util/List.java
-		if import_path.contains('.') && !import_path.ends_with('*') {
-			Some(format!("{}.java", import_path.replace('.', "/")))
-		} else {
-			None
+		// Wildcard imports (e.g. java.util.*) cannot resolve to a single file
+		if import_path.ends_with('*') {
+			return None;
 		}
+		// Convert dotted path to file path: com.example.MyClass -> com/example/MyClass.java
+		if import_path.contains('.') {
+			let candidate = format!("{}.java", import_path.replace('.', "/"));
+			// Only return if the file actually exists in the project
+			return java_files.iter().find(|f| f.ends_with(&candidate)).cloned();
+		}
+		None
 	}
 
 	fn get_file_extensions(&self) -> Vec<&'static str> {

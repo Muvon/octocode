@@ -116,15 +116,54 @@ impl Language for Rust {
 
 		match node.kind() {
 			"use_declaration" => {
-				// Extract use statement for GraphRAG import detection
+				// Extract use statement for GraphRAG import detection.
+				// expand_rust_use_paths handles grouped braces, globs, and aliases.
 				if let Ok(use_text) = node.utf8_text(contents.as_bytes()) {
-					if let Some(import_path) = parse_rust_use_statement_full_path(use_text) {
-						imports.push(import_path);
+					imports.extend(expand_rust_use_paths(use_text));
+				}
+			}
+			"mod_item" => {
+				// A mod_item with no body block is a file-level module declaration
+				// like `mod foo;` or `pub mod foo;` — it creates a direct dependency
+				// on src/foo.rs or src/foo/mod.rs. Emit as a self-relative import so
+				// resolve_import can find the actual file.
+				let has_body = node
+					.children(&mut node.walk())
+					.any(|c| c.kind() == "declaration_list");
+				if !has_body {
+					// Extract the module name identifier
+					for child in node.children(&mut node.walk()) {
+						if child.kind() == "identifier" {
+							if let Ok(name) = child.utf8_text(contents.as_bytes()) {
+								imports.push(format!("self::{}", name));
+							}
+							break;
+						}
+					}
+				}
+				// Also check if it's a public module (export)
+				let mut cursor = node.walk();
+				for child in node.children(&mut cursor) {
+					if child.kind() == "visibility_modifier" {
+						if let Ok(vis_text) = child.utf8_text(contents.as_bytes()) {
+							if vis_text.contains("pub") {
+								for name_child in node.children(&mut node.walk()) {
+									if name_child.kind() == "identifier" {
+										if let Ok(name) = name_child.utf8_text(contents.as_bytes())
+										{
+											exports.push(name.to_string());
+										}
+										break;
+									}
+								}
+							}
+						}
+						break;
 					}
 				}
 			}
-			"function_item" | "struct_item" | "enum_item" | "trait_item" | "mod_item"
-			| "const_item" | "macro_definition" => {
+			"function_item" | "struct_item" | "enum_item" | "trait_item" | "const_item"
+			| "macro_definition" => {
 				// Check if this item is public (exported)
 				let mut cursor = node.walk();
 				for child in node.children(&mut cursor) {
@@ -191,18 +230,112 @@ impl Language for Rust {
 	}
 }
 
-// Helper function to parse Rust use statements and return the full import path
-fn parse_rust_use_statement_full_path(use_text: &str) -> Option<String> {
-	// Remove "use " prefix and trailing semicolon
-	let cleaned = use_text
-		.trim()
-		.strip_prefix("use ")?
-		.trim_end_matches(';')
-		.trim();
+// Expand a Rust `use` statement into fully-qualified individual paths.
+//
+// Handles:
+//   - Simple:   `use crate::config::Config;`          → ["crate::config::Config"]
+//   - Grouped:  `use crate::a::{B, c::D};`            → ["crate::a::B", "crate::a::c::D"]
+//   - Nested:   `use crate::a::{b::{C, D}, E};`       → ["crate::a::b::C", "crate::a::b::D", "crate::a::E"]
+//   - Glob:     `use crate::utils::*;`                → ["crate::utils"]  (resolve the module itself)
+//   - Alias:    `use std::sync::Arc as StdArc;`       → ["std::sync::Arc"]
+fn expand_rust_use_paths(use_text: &str) -> Vec<String> {
+	let cleaned = match use_text.trim().strip_prefix("use ") {
+		Some(s) => s.trim_end_matches(';').trim(),
+		None => return Vec::new(),
+	};
+	let mut results = Vec::new();
+	expand_use_tree(cleaned, "", &mut results);
+	results
+}
 
-	// For GraphRAG, we want the full import path, not just the imported item
-	// This allows us to resolve the import to the correct file
-	Some(cleaned.to_string())
+// Recursively expand a use-tree fragment with the accumulated prefix.
+fn expand_use_tree(fragment: &str, prefix: &str, out: &mut Vec<String>) {
+	let fragment = fragment.trim();
+
+	// Brace group: find the matching closing brace
+	if let Some(brace_start) = fragment.find('{') {
+		// Everything before the brace is the new prefix segment
+		let new_prefix = if prefix.is_empty() {
+			fragment[..brace_start].trim_end_matches(':').to_string()
+		} else {
+			format!(
+				"{}::{}",
+				prefix,
+				fragment[..brace_start].trim_end_matches(':')
+			)
+		};
+
+		// Find the matching closing brace (handles nesting)
+		let inner = &fragment[brace_start + 1..];
+		if let Some(brace_end) = find_matching_brace(inner) {
+			let group = &inner[..brace_end];
+			// Split group by top-level commas (not inside nested braces)
+			for item in split_top_level_commas(group) {
+				expand_use_tree(item.trim(), &new_prefix, out);
+			}
+		}
+	} else {
+		// No braces — leaf path segment
+		// Strip alias: `Arc as StdArc` → `Arc`
+		let without_alias = if let Some(pos) = fragment.find(" as ") {
+			&fragment[..pos]
+		} else {
+			fragment
+		};
+
+		// Strip glob: `utils::*` → `utils`
+		let without_glob = without_alias.trim_end_matches('*').trim_end_matches("::");
+
+		if without_glob.is_empty() {
+			return;
+		}
+
+		let full = if prefix.is_empty() {
+			without_glob.to_string()
+		} else {
+			format!("{}::{}", prefix, without_glob)
+		};
+
+		out.push(full);
+	}
+}
+
+// Find the index of the closing `}` that matches the opening `{` already consumed.
+fn find_matching_brace(s: &str) -> Option<usize> {
+	let mut depth = 1usize;
+	for (i, c) in s.char_indices() {
+		match c {
+			'{' => depth += 1,
+			'}' => {
+				depth -= 1;
+				if depth == 0 {
+					return Some(i);
+				}
+			}
+			_ => {}
+		}
+	}
+	None
+}
+
+// Split a comma-separated list respecting nested brace groups.
+fn split_top_level_commas(s: &str) -> Vec<&str> {
+	let mut parts = Vec::new();
+	let mut depth = 0usize;
+	let mut start = 0;
+	for (i, c) in s.char_indices() {
+		match c {
+			'{' => depth += 1,
+			'}' => depth = depth.saturating_sub(1),
+			',' if depth == 0 => {
+				parts.push(&s[start..i]);
+				start = i + 1;
+			}
+			_ => {}
+		}
+	}
+	parts.push(&s[start..]);
+	parts
 }
 
 impl Rust {

@@ -199,32 +199,53 @@ impl Language for Php {
 	}
 }
 
-// Helper function for PHP use statement parsing
+// Helper function for PHP use statement parsing.
+// Returns full namespace paths (backslashes normalized to forward slashes) so
+// resolve_namespace_import can match them against file paths.
+// Handles: use A\B\C;  use A\B\C as Alias;  use A\B\{C, D as E};
 fn parse_php_use_statement(use_text: &str) -> Option<Vec<String>> {
 	let mut imports = Vec::new();
 	let cleaned = use_text.trim();
 
-	// Handle: use Namespace\Class;
-	// Handle: use Namespace\Class as Alias;
-	if let Some(rest) = cleaned.strip_prefix("use ") {
-		let rest = rest.trim_end_matches(';'); // Skip trailing ";"
+	let rest = cleaned.strip_prefix("use ")?.trim_end_matches(';');
 
-		// Handle: use Namespace\Class as Alias;
-		if let Some(as_pos) = rest.find(" as ") {
-			let class_path = &rest[..as_pos];
-			if let Some(class_name) = class_path.split('\\').next_back() {
-				imports.push(class_name.to_string());
+	// Handle grouped: use Prefix\{A, B as C, D}
+	if let Some(brace_start) = rest.find('{') {
+		if let Some(brace_end) = rest.rfind('}') {
+			let prefix = rest[..brace_start].trim_end_matches('\\');
+			let items = &rest[brace_start + 1..brace_end];
+			for item in items.split(',') {
+				let item = item.trim();
+				// Strip alias
+				let path = if let Some(as_pos) = item.find(" as ") {
+					&item[..as_pos]
+				} else {
+					item
+				};
+				let full = if prefix.is_empty() {
+					path.replace('\\', "/")
+				} else {
+					format!("{}/{}", prefix.replace('\\', "/"), path.replace('\\', "/"))
+				};
+				if !full.is_empty() {
+					imports.push(full);
+				}
 			}
-		} else {
-			// Handle: use Namespace\Class;
-			if let Some(class_name) = rest.split('\\').next_back() {
-				imports.push(class_name.to_string());
-			}
+			return Some(imports);
 		}
-		return Some(imports);
 	}
 
-	None
+	// Handle simple: use A\B\C  or  use A\B\C as Alias
+	let path = if let Some(as_pos) = rest.find(" as ") {
+		&rest[..as_pos]
+	} else {
+		rest
+	};
+	let normalized = path.replace('\\', "/");
+	if !normalized.is_empty() {
+		imports.push(normalized);
+	}
+	Some(imports)
 }
 
 impl Php {
