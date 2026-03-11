@@ -42,7 +42,7 @@ overflow-checks = false # Disable overflow checks in release mode
 # Cross-compilation configuration is in .cargo/config.toml
 
 [dependencies]
-tokio = { version = "1.48.0", features = ["rt-multi-thread", "macros", "time", "sync", "io-util", "io-std", "process"] }
+tokio = { version = "1.50.0", features = ["rt-multi-thread", "macros", "time", "sync", "io-util", "io-std", "process"] }
 ignore = "0.4.25"
 parking_lot = "0.12.5"
 lance-table = { version = "0.39.0", default-features = false, features = [] }
@@ -52,9 +52,9 @@ arrow = { version = "56.2.0", default-features = false, features = ["prettyprint
 arrow-array = { version = "56.2.0", default-features = false }
 arrow-schema = { version = "56.2.0", default-features = false }
 serde = { version = "1.0.228", features = ["derive"] }
-chrono = { version = "0.4.42", default-features = false, features = ["serde", "clock"] }
+chrono = { version = "0.4.44", default-features = false, features = ["serde", "clock"] }
 async-trait = "0.1"
-tree-sitter = "0.26.3"
+tree-sitter = "0.26.6"
 tree-sitter-php = "0.24.2"
 tree-sitter-rust = "0.24.0"
 tree-sitter-python = "0.25.0"
@@ -63,41 +63,41 @@ tree-sitter-json = "0.24.8"
 tree-sitter-go = "0.25.0"
 tree-sitter-cpp = "0.23.4"
 tree-sitter-java = "0.23.5"
-tree-sitter-bash = "0.25.0"
+tree-sitter-bash = "0.25.1"
 tree-sitter-css = "0.25.0"
 tree-sitter-lua = "0.4.1"
 
-uuid = { version = "1.18.1", default-features = false, features = ["v4"] }
+uuid = { version = "1.20.0", default-features = false, features = ["v4"] }
 tree-sitter-typescript = "0.23.2"
 tree-sitter-ruby = "0.23.1"
 tree-sitter-svelte-ng = "1.0.2"
-reqwest = { version = "0.13.1", features = ["json", "rustls"], default-features = false }
-anyhow = "1.0.100"
-serde_json = "1.0.145"
+reqwest = { version = "0.13.2", features = ["json", "rustls"], default-features = false }
+anyhow = "1.0.102"
+serde_json = "1.0.149"
 sha2 = "0.10.9"
-clap = { version = "4.5.53", features = ["derive"] }
-clap_complete = "4.5.61"
+clap = { version = "4.5.60", features = ["derive"] }
+clap_complete = "4.5.66"
 notify = { version = "8.2.0", default-features = false, features = ["crossbeam-channel", "macos_fsevent"] }
 notify-debouncer-mini = "0.7.0"
-toml = "0.9.8"
+toml = "0.9.12"
 lazy_static = "1.5.0"
-futures = { version = "0.3.31", default-features = false, features = ["std"] }
+futures = { version = "0.3.32", default-features = false, features = ["std"] }
 globset = { version = "0.4.18", default-features = false }
-regex = { version = "1.12.2", default-features = false, features = ["std"] }
+regex = { version = "1.12.3", default-features = false, features = ["std"] }
 dirs = "6.0.0"
 # EditorConfig parsing and formatting
 ec4rs = "1.2.0"
-tracing = "0.1.43"
+tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.22", features = ["env-filter", "json"] }
 tracing-appender = "0.2.4"
 # LSP integration dependencies
 lsp-types = "0.97.0"
-url = "2.5.7"
+url = "2.5.8"
 dotenvy = "0.15"
 
 # Local dependency on octolib with embedding features
 # octolib = { path = "../octolib", features = ["fastembed", "huggingface"] }
-octolib = { version = "0.10.1", default-features = false }
+octolib = { version = "0.10.3", default-features = false }
 
 [profile.dev]
 opt-level = 1          # Basic optimizations without slowing compilation too much
