@@ -1094,6 +1094,20 @@ async fn update_project_version(project_type: &ProjectType, new_version: &str) -
 			// No project file to update
 		}
 	}
+
+	// Update server.json if it exists (MCP publishing metadata)
+	let server_json_path = match project_type {
+		ProjectType::Rust(p) | ProjectType::Node(p) | ProjectType::Php(p) | ProjectType::Go(p) => {
+			p.parent().unwrap().join("server.json")
+		}
+		ProjectType::Unknown => std::env::current_dir()?.join("server.json"),
+	};
+	if server_json_path.exists() {
+		let content = fs::read_to_string(&server_json_path)?;
+		let updated = update_json_version(&content, new_version, "version")?;
+		fs::write(&server_json_path, updated)?;
+	}
+
 	Ok(())
 }
 
@@ -1408,6 +1422,12 @@ async fn stage_release_files(changelog_path: &str, project_type: &ProjectType) -
 			}
 		}
 		ProjectType::Unknown => {}
+	}
+
+	// Stage server.json if it exists
+	let server_json = current_dir.join("server.json");
+	if server_json.exists() {
+		files_to_stage.push(server_json.to_string_lossy().to_string());
 	}
 
 	for file in files_to_stage {
