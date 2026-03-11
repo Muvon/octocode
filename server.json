@@ -1,0 +1,93 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.Muvon/octocode",
+  "description": "AI-powered code indexer with semantic search and knowledge graphs",
+  "name_for_human": "Octocode",
+  "name_for_model": "octocode",
+  "version": "0.11.0",
+  "repositories": [
+    {
+      "type": "github",
+      "owner": "muvon",
+      "repo": "octocode"
+    }
+  ],
+  "homepage": "https://octocode.muvon.io",
+  "pricing": "free",
+  "modes": {
+    "stdio": {
+      "command": "octocode",
+      "args": ["mcp", "--path", "${workspaceFolder}"],
+      "transport": {
+        "type": "stdio"
+      }
+    }
+  },
+  "tools": [
+    {
+      "name": "semantic_search",
+      "description": "Search codebase using semantic search to find relevant code snippets, functions, classes, documentation, or text content. This tool finds code by understanding what it does, not by exact symbol names. Use descriptive phrases about functionality and behavior, not function names or single words.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "oneOf": [
+              {
+                "type": "string",
+                "description": "Single search query - use for specific conceptual searches"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Array of related search terms for comprehensive results"
+              }
+            ],
+            "description": "Search query(s) - prefer array of related terms for better results"
+          },
+          "mode": {
+            "type": "string",
+            "enum": ["code", "text", "docs", "all"],
+            "default": "all",
+            "description": "Scope of search to limit results to specific content types"
+          },
+          "detail_level": {
+            "type": "string",
+            "enum": ["signatures", "partial", "full"],
+            "default": "partial",
+            "description": "Level of detail in results"
+          },
+          "max_results": {
+            "type": "integer",
+            "default": 3,
+            "minimum": 1,
+            "maximum": 20,
+            "description": "Maximum number of results to return"
+          }
+        },
+        "required": ["query"]
+      }
+    },
+    {
+      "name": "view_signatures",
+      "description": "Extract and view function signatures, class definitions, and other meaningful code structures from files.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "type": "string",
+            "description": "Path to the file to analyze for signatures"
+          },
+          "filter": {
+            "type": "string",
+            "description": "Optional filter to narrow down results (e.g., function name, class name)"
+          }
+        },
+        "required": ["file_path"]
+      }
+    }
+  ],
+  "categories": ["code", "code-analysis", "search"],
+  "tags": ["semantic-search", "code-indexer", "graphrag", "tree-sitter", "knowledge-graph"]
+}
