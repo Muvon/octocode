@@ -74,10 +74,11 @@ pub struct VersionCalculation {
 
 #[derive(Debug, Clone)]
 pub enum ProjectType {
-	Rust(PathBuf), // Cargo.toml
-	Node(PathBuf), // package.json
-	Php(PathBuf),  // composer.json
-	Go(PathBuf),   // go.mod
+	Rust(PathBuf),   // Cargo.toml
+	Node(PathBuf),   // package.json
+	Php(PathBuf),    // composer.json
+	Go(PathBuf),     // go.mod
+	Python(PathBuf), // pyproject.toml
 	Unknown,
 }
 
@@ -238,6 +239,8 @@ fn detect_project_type(dir: &Path) -> Result<ProjectType> {
 		Ok(ProjectType::Php(dir.join("composer.json")))
 	} else if dir.join("go.mod").exists() {
 		Ok(ProjectType::Go(dir.join("go.mod")))
+	} else if dir.join("pyproject.toml").exists() {
+		Ok(ProjectType::Python(dir.join("pyproject.toml")))
 	} else {
 		Ok(ProjectType::Unknown)
 	}
@@ -249,6 +252,7 @@ fn format_project_type(project_type: &ProjectType) -> String {
 		ProjectType::Node(_) => "Node.js (package.json)".to_string(),
 		ProjectType::Php(_) => "PHP (composer.json)".to_string(),
 		ProjectType::Go(_) => "Go (go.mod)".to_string(),
+		ProjectType::Python(_) => "Python (pyproject.toml)".to_string(),
 		ProjectType::Unknown => "Unknown (no project file detected)".to_string(),
 	}
 }
@@ -288,6 +292,13 @@ async fn get_current_version(project_type: &ProjectType) -> Result<String> {
 				return Ok(content.trim().to_string());
 			}
 			// Fall back to git tags if no VERSION file
+		}
+		ProjectType::Python(pyproject_path) => {
+			let content = fs::read_to_string(pyproject_path)?;
+			// Try [project] version = "x.y.z" first, then [tool.poetry] version
+			if let Some(version) = extract_pyproject_version(&content) {
+				return Ok(version);
+			}
 		}
 		ProjectType::Unknown => {}
 	}
@@ -867,6 +878,14 @@ async fn gather_project_context(project_type: &ProjectType) -> Result<(String, S
 				("Unknown Project".to_string(), "Go project".to_string())
 			}
 		}
+		ProjectType::Python(pyproject_path) => {
+			let content = fs::read_to_string(pyproject_path).unwrap_or_default();
+			let name =
+				extract_field_from_toml(&content, "name").unwrap_or("Unknown Project".to_string());
+			let description = extract_field_from_toml(&content, "description")
+				.unwrap_or("Python project".to_string());
+			(name, description)
+		}
 		ProjectType::Unknown => (
 			"Unknown Project".to_string(),
 			"Software project".to_string(),
@@ -1090,16 +1109,24 @@ async fn update_project_version(project_type: &ProjectType, new_version: &str) -
 			let version_file = go_mod_path.parent().unwrap().join("VERSION");
 			fs::write(version_file, new_version)?;
 		}
+		ProjectType::Python(pyproject_path) => {
+			let content = fs::read_to_string(pyproject_path)?;
+			let updated_content = update_pyproject_version(&content, new_version)?;
+			fs::write(pyproject_path, updated_content)?;
+		}
 		ProjectType::Unknown => {
 			// No project file to update
 		}
 	}
 
 	// Update server.json if it exists (MCP publishing metadata)
+	// Update server.json if it exists (MCP publishing metadata)
 	let server_json_path = match project_type {
-		ProjectType::Rust(p) | ProjectType::Node(p) | ProjectType::Php(p) | ProjectType::Go(p) => {
-			p.parent().unwrap().join("server.json")
-		}
+		ProjectType::Rust(p)
+		| ProjectType::Node(p)
+		| ProjectType::Php(p)
+		| ProjectType::Go(p)
+		| ProjectType::Python(p) => p.parent().unwrap().join("server.json"),
 		ProjectType::Unknown => std::env::current_dir()?.join("server.json"),
 	};
 	if server_json_path.exists() {
@@ -1181,6 +1208,20 @@ async fn update_lock_files(project_type: &ProjectType) -> Result<()> {
 				));
 			}
 		}
+		ProjectType::Python(_) => {
+			// Update uv.lock if using uv, otherwise no lock file to update
+			println!("🔄 Updating Python lock file...");
+			let current_dir = std::env::current_dir()?;
+			if current_dir.join("uv.lock").exists() {
+				let output = Command::new("uv").args(["lock"]).output()?;
+				if !output.status.success() {
+					return Err(anyhow::anyhow!(
+						"Failed to update uv.lock: {}",
+						String::from_utf8_lossy(&output.stderr)
+					));
+				}
+			}
+		}
 		ProjectType::Unknown => {
 			// No lock file to update
 		}
@@ -1188,6 +1229,59 @@ async fn update_lock_files(project_type: &ProjectType) -> Result<()> {
 	Ok(())
 }
 
+fn extract_pyproject_version(content: &str) -> Option<String> {
+	// Look for version under [project] or [tool.poetry] sections
+	let mut in_target_section = false;
+	for line in content.lines() {
+		let trimmed = line.trim();
+		if trimmed == "[project]" || trimmed == "[tool.poetry]" {
+			in_target_section = true;
+			continue;
+		}
+		if trimmed.starts_with('[') {
+			in_target_section = false;
+			continue;
+		}
+		if in_target_section && trimmed.starts_with("version") && trimmed.contains('=') {
+			if let Some(version) = extract_version_from_line(trimmed) {
+				return Some(version);
+			}
+		}
+	}
+	None
+}
+
+fn update_pyproject_version(content: &str, new_version: &str) -> Result<String> {
+	// Replace version under [project] or [tool.poetry] section, preserving formatting
+	let mut result = String::new();
+	let mut in_target_section = false;
+	let mut replaced = false;
+	for line in content.lines() {
+		let trimmed = line.trim();
+		if trimmed == "[project]" || trimmed == "[tool.poetry]" {
+			in_target_section = true;
+		} else if trimmed.starts_with('[') {
+			in_target_section = false;
+		}
+		if in_target_section && !replaced && trimmed.starts_with("version") && trimmed.contains('=')
+		{
+			// Preserve indentation and quote style
+			if let Some(eq_pos) = line.find('=') {
+				let prefix = &line[..eq_pos + 1];
+				let after = line[eq_pos + 1..].trim_start();
+				let quote = if after.starts_with('"') { '"' } else { '\'' };
+				result.push_str(&format!("{} {}{}{}", prefix, quote, new_version, quote));
+				replaced = true;
+			} else {
+				result.push_str(line);
+			}
+		} else {
+			result.push_str(line);
+		}
+		result.push('\n');
+	}
+	Ok(result)
+}
 fn update_cargo_version(content: &str, new_version: &str) -> Result<String> {
 	// Find the version line and replace only the version value, preserving all formatting
 	let mut result = content.to_string();
@@ -1419,6 +1513,14 @@ async fn stage_release_files(changelog_path: &str, project_type: &ProjectType) -
 			}
 			if go_sum.exists() {
 				files_to_stage.push(go_sum.to_string_lossy().to_string());
+			}
+		}
+		ProjectType::Python(path) => {
+			files_to_stage.push(path.to_string_lossy().to_string());
+			// Add uv.lock if it exists
+			let uv_lock = current_dir.join("uv.lock");
+			if uv_lock.exists() {
+				files_to_stage.push(uv_lock.to_string_lossy().to_string());
 			}
 		}
 		ProjectType::Unknown => {}
