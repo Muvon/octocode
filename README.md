@@ -5,6 +5,10 @@
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Rust](https://img.shields.io/badge/rust-1.70%2B-orange.svg)](https://www.rust-lang.org)
 
+<a href="https://glama.ai/mcp/servers/Muvon/octocode">
+  <img width="380" height="200" src="https://glama.ai/mcp/servers/Muvon/octocode/badge" alt="Octocode MCP server" />
+</a>
+
 ## 🚀 Overview
 
 Octocode is a powerful code indexer and semantic search engine that builds intelligent knowledge graphs of your codebase. It combines advanced AI capabilities with local-first design to provide deep code understanding, relationship mapping, and intelligent assistance for developers.
