@@ -285,7 +285,6 @@ impl SemanticCodeProvider {
 			None
 		};
 
-
 		// Use structured logging instead of console output for MCP protocol compliance
 		debug!(
 			queries = ?queries,
@@ -433,7 +432,6 @@ impl SemanticCodeProvider {
 
 			file_patterns.push(pattern.to_string());
 		}
-
 
 		// Use structured logging instead of console output for MCP protocol compliance
 		debug!(

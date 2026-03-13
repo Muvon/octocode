@@ -725,7 +725,6 @@ impl LspProvider {
 			.and_then(|v| v.as_bool())
 			.unwrap_or(true);
 
-
 		// Clean the file path to handle formatted paths like "[Rust file: main.rs]"
 		let clean_file_path = Self::clean_file_path(file_path);
 
@@ -759,7 +758,6 @@ impl LspProvider {
 			.and_then(|v| v.as_str())
 			.ok_or_else(|| anyhow::anyhow!("Missing required parameter: file_path"))?;
 
-
 		// Clean the file path to handle formatted paths like "[Rust file: main.rs]"
 		let clean_file_path = Self::clean_file_path(file_path);
 		debug!(
@@ -790,7 +788,6 @@ impl LspProvider {
 			.and_then(|v| v.as_str())
 			.ok_or_else(|| anyhow::anyhow!("Missing required parameter: query"))?;
 
-
 		let result = self.workspace_symbols(query).await?;
 
 		Ok(result)
@@ -818,7 +815,6 @@ impl LspProvider {
 			.get("symbol")
 			.and_then(|v| v.as_str())
 			.ok_or_else(|| anyhow::anyhow!("Missing required parameter: symbol"))?;
-
 
 		// Clean the file path to handle formatted paths like "[Rust file: main.rs]"
 		let clean_file_path = Self::clean_file_path(file_path);

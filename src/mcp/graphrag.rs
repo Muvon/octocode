@@ -234,7 +234,6 @@ impl GraphRagProvider {
 			}
 		};
 
-
 		// Create GraphRAGArgs structure for reusing CLI logic
 		let args = GraphRAGArgs {
 			operation,

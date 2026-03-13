@@ -367,10 +367,13 @@ impl<'a> TableOperations<'a> {
 			return Ok(());
 		}
 
-		// Create optimized vector index
+		// Create optimized vector index using IVF_HNSW_SQ
+		// This provides better recall/latency trade-off than IVF_PQ
 		tracing::info!(
-			"Creating optimized vector index for table '{}': {} rows, {} partitions, {} sub-vectors, {} bits",
-			table_name, row_count, index_params.num_partitions, index_params.num_sub_vectors, index_params.num_bits
+			"Creating IVF_HNSW_SQ vector index for table '{}': {} rows, {} partitions",
+			table_name,
+			row_count,
+			index_params.num_partitions
 		);
 
 		let start_time = std::time::Instant::now();
@@ -378,12 +381,12 @@ impl<'a> TableOperations<'a> {
 		table
 			.create_index(
 				&[column_name],
-				lancedb::index::Index::IvfPq(
-					lancedb::index::vector::IvfPqIndexBuilder::default()
+				lancedb::index::Index::IvfHnswSq(
+					lancedb::index::vector::IvfHnswSqIndexBuilder::default()
 						.distance_type(index_params.distance_type)
 						.num_partitions(index_params.num_partitions)
-						.num_sub_vectors(index_params.num_sub_vectors)
-						.num_bits(index_params.num_bits as u32),
+						.num_edges(index_params.num_edges)
+						.ef_construction(index_params.ef_construction),
 				),
 			)
 			.execute()
@@ -391,7 +394,7 @@ impl<'a> TableOperations<'a> {
 
 		let duration = start_time.elapsed();
 		tracing::info!(
-			"Successfully created optimized vector index for table '{}' in {:.2}s",
+			"Successfully created IVF_HNSW_SQ index for table '{}' in {:.2}s",
 			table_name,
 			duration.as_secs_f64()
 		);
@@ -440,18 +443,18 @@ impl<'a> TableOperations<'a> {
 			return Ok(());
 		}
 
-		// Create new optimized index
+		// Create new optimized index using IVF_HNSW_SQ
 		let start_time = std::time::Instant::now();
 
 		table
 			.create_index(
 				&[column_name],
-				lancedb::index::Index::IvfPq(
-					lancedb::index::vector::IvfPqIndexBuilder::default()
+				lancedb::index::Index::IvfHnswSq(
+					lancedb::index::vector::IvfHnswSqIndexBuilder::default()
 						.distance_type(index_params.distance_type)
 						.num_partitions(index_params.num_partitions)
-						.num_sub_vectors(index_params.num_sub_vectors)
-						.num_bits(index_params.num_bits as u32),
+						.num_edges(index_params.num_edges)
+						.ef_construction(index_params.ef_construction),
 				),
 			)
 			.execute()
@@ -459,8 +462,10 @@ impl<'a> TableOperations<'a> {
 
 		let duration = start_time.elapsed();
 		tracing::info!(
-			"Successfully recreated optimized vector index for table '{}' in {:.2}s - {} partitions, {} sub-vectors",
-			table_name, duration.as_secs_f64(), index_params.num_partitions, index_params.num_sub_vectors
+			"Successfully recreated IVF_HNSW_SQ index for table '{}' in {:.2}s - {} partitions",
+			table_name,
+			duration.as_secs_f64(),
+			index_params.num_partitions
 		);
 
 		Ok(())
