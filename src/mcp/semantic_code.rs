@@ -17,7 +17,6 @@ use serde_json::{json, Value};
 use tracing::debug;
 
 use crate::config::Config;
-use crate::embedding::truncate_output;
 use crate::indexer::search::{
 	search_codebase_with_details_multi_query_text, search_codebase_with_details_text,
 };
@@ -44,7 +43,7 @@ impl SemanticCodeProvider {
 	pub fn get_tool_definition() -> McpTool {
 		McpTool {
 			name: "semantic_search".to_string(),
-			description: "Search codebase using semantic search to find relevant code snippets, functions, classes, documentation, or text content. This tool finds code by understanding what it does, not by exact symbol names. Use descriptive phrases about functionality and behavior, not function names or single words. Multiple related queries in one call like ['user authentication flow', 'login validation', 'jwt token handling'] finds comprehensive results across all related concepts. Examples: ['user authentication flow', 'password validation logic'], ['database connection pooling', 'query result caching']. Returns 3 most relevant results by default with file paths, 1-indexed line ranges, relevance scores, and code blocks with 1-indexed line numbers prefixed to each line.".to_string(),
+			description: "Search codebase by meaning — finds code by what it does, not exact symbol names. Prefer an array of related terms over a single query for broader coverage.".to_string(),
 			input_schema: json!({
 				"type": "object",
 				"properties": {
@@ -52,7 +51,7 @@ impl SemanticCodeProvider {
 						"oneOf": [
 							{
 								"type": "string",
-								"description": "Single search query - use for specific conceptual searches. Describe what the code does or how it works, not symbol names or single words",
+								"description": "Descriptive phrase about what the code does (not a symbol name)",
 								"minLength": 10,
 								"maxLength": 500
 							},
@@ -65,57 +64,40 @@ impl SemanticCodeProvider {
 								},
 								"minItems": 1,
 								"maxItems": 5,
-								"description": "Recommended: Array of related conceptual search terms for comprehensive results. Example: ['user authentication workflow', 'login session handling', 'password validation rules'] finds all auth-related code in one search"
+								"description": "Array of related search terms — finds all related code in one call"
 							}
 						],
-						"description": "Prefer array of related terms for comprehensive search: ['user authentication flow', 'login session management', 'password validation'] finds all related functionality. Single string only for very specific searches. Use descriptive phrases about what the code does, not exact symbol names. Examples: ['user authentication flow', 'password validation logic'], ['database connection pooling', 'query result caching']. This is semantic search - describe functionality and behavior, not code symbols."
+						"description": "String or array of strings describing functionality to find. Array preferred for comprehensive results."
 					},
 					"mode": {
 						"type": "string",
-						"description": "Scope of search to limit results to specific content types",
+						"description": "Content type filter: 'code' (functions/classes), 'text' (plain text), 'docs' (markdown/README), 'all' (default)",
 						"enum": ["code", "text", "docs", "all"],
-						"default": "all",
-						"enumDescriptions": {
-							"code": "Search only in code blocks (functions, classes, methods, etc.)",
-							"text": "Search only in plain text files and text content",
-							"docs": "Search only in documentation files (README, markdown, etc.)",
-							"all": "Search across all content types for comprehensive results"
-						}
+						"default": "all"
 					},
 					"detail_level": {
 						"type": "string",
-						"description": "Level of detail to include in code results for token efficiency",
+						"description": "Result verbosity: 'signatures' (declarations only), 'partial' (truncated, default), 'full' (complete bodies)",
 						"enum": ["signatures", "partial", "full"],
-						"default": "partial",
-						"enumDescriptions": {
-							"signatures": "Function/class signatures only (most token-efficient, good for overview)",
-							"partial": "Smart truncated content with key parts (balanced approach)",
-							"full": "Complete function/class bodies (use when full implementation needed)"
-						}
+						"default": "partial"
 					},
 					"max_results": {
 						"type": "integer",
-						"description": "Maximum number of results to return (default: 3 for efficiency)",
+						"description": "Max results to return (default: 3)",
 						"minimum": 1,
 						"maximum": 20,
 						"default": 3
 					},
 					"threshold": {
 						"type": "number",
-						"description": "Similarity threshold (0.0-1.0). Higher values = more similar results only. Defaults to config.search.similarity_threshold",
+						"description": "Similarity cutoff 0.0–1.0 (higher = stricter match)",
 						"minimum": 0.0,
 						"maximum": 1.0
 					},
 					"language": {
 						"type": "string",
-						"description": "Filter by programming language (only affects code blocks). Supported languages: rust, javascript, typescript, python, go, cpp, php, bash, ruby, json, svelte, css"
+						"description": "Filter code results by language (rust, python, typescript, go, etc.)"
 					},
-					"max_tokens": {
-						"type": "integer",
-						"description": "Maximum tokens allowed in output before truncation (default: 2000, set to 0 for unlimited)",
-						"minimum": 0,
-						"default": 2000
-					}
 				},
 				"required": ["query"],
 				"additionalProperties": false
@@ -127,26 +109,17 @@ impl SemanticCodeProvider {
 	pub fn get_view_signatures_tool_definition() -> McpTool {
 		McpTool {
 			name: "view_signatures".to_string(),
-			description: "Extract and view function signatures, class definitions, and other meaningful code structures from files. Shows method signatures, class definitions, interfaces, and other declarations without full implementation details. Perfect for getting an overview of code structure and available APIs. Output includes 1-indexed line ranges and signature code with 1-indexed line numbers prefixed to each line.\nSupported Languages:\nRust, JavaScript, TypeScript, Python, Go, C++, PHP, Ruby, Bash, JSON, CSS, Svelte, Markdown.\nSignatures are the structural definitions of code elements without their implementation details. They include function declarations, method headers, class definitions, interfaces, types, and other high-level constructs that define the API and architecture of code. Signatures provide a concise overview of what functionality exists and how it can be accessed, without showing the actual implementation logic.".to_string(),
+			description: "Extract function signatures, class definitions, and declarations from files without implementation bodies. Supports Rust, JS/TS, Python, Go, C++, PHP, Ruby, Bash, JSON, CSS, Svelte, Markdown.".to_string(),
 			input_schema: json!({
 				"type": "object",
 				"properties": {
 					"files": {
 						"type": "array",
-						"description": "Array of file paths or glob patterns to analyze for signatures. Examples: ['src/main.rs'], ['**/*.py'], ['src/**/*.ts', 'lib/**/*.js'], ['**/*.css'], ['components/**/*.svelte'], ['**/*.{rs,py,js,ts,css,svelte,md}']",
-						"items": {
-							"type": "string",
-							"description": "File path or glob pattern. Can be exact paths like 'src/main.rs' or patterns like '**/*.py' to match multiple files. Supports all programming languages: .rs, .js, .ts, .py, .go, .cpp, .php, .rb, .sh, .json, .css, .scss, .sass, .svelte, .md"
-						},
+						"description": "File paths or glob patterns (e.g. 'src/main.rs', '**/*.py', 'src/**/*.ts')",
+						"items": { "type": "string" },
 						"minItems": 1,
 						"maxItems": 100
 					},
-					"max_tokens": {
-						"type": "integer",
-						"description": "Maximum tokens allowed in output before truncation (default: 2000, set to 0 for unlimited)",
-						"minimum": 0,
-						"default": 2000
-					}
 				},
 				"required": ["files"],
 				"additionalProperties": false
@@ -312,11 +285,6 @@ impl SemanticCodeProvider {
 			None
 		};
 
-		// Parse max_tokens parameter
-		let max_tokens = arguments
-			.get("max_tokens")
-			.and_then(|v| v.as_u64())
-			.unwrap_or(2000) as usize;
 
 		// Use structured logging instead of console output for MCP protocol compliance
 		debug!(
@@ -391,9 +359,8 @@ impl SemanticCodeProvider {
 			);
 		}
 
-		// Apply token truncation if needed
 		match results {
-			Ok(output) => Ok(truncate_output(&output, max_tokens)),
+			Ok(output) => Ok(output),
 			Err(e) => Err(McpError::internal_error(
 				format!("Search operation failed: {}", e),
 				"semantic_search",
@@ -467,11 +434,6 @@ impl SemanticCodeProvider {
 			file_patterns.push(pattern.to_string());
 		}
 
-		// Parse max_tokens parameter
-		let max_tokens = arguments
-			.get("max_tokens")
-			.and_then(|v| v.as_u64())
-			.unwrap_or(2000) as usize;
 
 		// Use structured logging instead of console output for MCP protocol compliance
 		debug!(
@@ -546,7 +508,6 @@ impl SemanticCodeProvider {
 		// Return text format for token efficiency
 		let text_output = render_signatures_text(&signatures);
 
-		// Apply token truncation if needed
-		Ok(truncate_output(&text_output, max_tokens))
+		Ok(text_output)
 	}
 }

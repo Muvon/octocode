@@ -17,7 +17,6 @@ use serde_json::{json, Value};
 use tracing::debug;
 
 use crate::config::Config;
-use crate::embedding::truncate_output;
 use crate::indexer::{self, graphrag::GraphRAG};
 use crate::mcp::types::{McpError, McpTool};
 
@@ -90,36 +89,36 @@ impl GraphRagProvider {
 	pub fn get_tool_definition() -> McpTool {
 		McpTool {
 			name: "graphrag".to_string(),
-			description: "Advanced relationship-aware GraphRAG operations for code analysis. Supports multiple operations: 'search' (find nodes by semantic query - excellent for file discovery by description), 'get-node' (detailed node info), 'get-relationships' (node connections), 'find-path' (connection paths between nodes), 'overview' (graph statistics). USE THIS TOOL for complex architectural queries about component interactions, data flows, dependency relationships, cross-cutting concerns, and finding files by their purpose/description. For simple code searches use semantic_search instead.".to_string(),
+			description: "Knowledge graph operations over the indexed codebase. Use for architectural queries: component relationships, dependency chains, data flows. For simple code lookup use semantic_search instead.".to_string(),
 			input_schema: json!({
 				"type": "object",
 				"properties": {
 					"operation": {
 						"type": "string",
 						"enum": ["search", "get-node", "get-relationships", "find-path", "overview"],
-						"description": "GraphRAG operation to perform: 'search' (semantic node search), 'get-node' (detailed node information), 'get-relationships' (node connections), 'find-path' (paths between nodes), 'overview' (graph statistics)"
+						"description": "'search' (semantic node search), 'get-node' (node details), 'get-relationships' (node connections), 'find-path' (path between two nodes), 'overview' (graph stats)"
 					},
 					"query": {
 						"type": "string",
-						"description": "Search query for 'search' operation. Complex architectural queries about code relationships, dependencies, or system interactions. Examples: 'How does user authentication flow through the system?', 'What components depend on the database layer?', 'Show me the data flow for order processing'",
+						"description": "Search query for 'search' operation",
 						"minLength": 10,
 						"maxLength": 1000
 					},
 					"node_id": {
 						"type": "string",
-						"description": "Node identifier for 'get-node' and 'get-relationships' operations. Format: 'path/to/file' or 'path/to/file/symbol'"
+						"description": "Node ID for 'get-node'/'get-relationships' (format: 'path/to/file' or 'path/to/file/symbol')"
 					},
 					"source_id": {
 						"type": "string",
-						"description": "Source node identifier for 'find-path' operation. Format: 'path/to/file' or 'path/to/file/symbol'"
+						"description": "Source node ID for 'find-path'"
 					},
 					"target_id": {
 						"type": "string",
-						"description": "Target node identifier for 'find-path' operation. Format: 'path/to/file' or 'path/to/file/symbol'"
+						"description": "Target node ID for 'find-path'"
 					},
 					"max_depth": {
 						"type": "integer",
-						"description": "Maximum path depth for 'find-path' operation (default: 3)",
+						"description": "Max path depth for 'find-path' (default: 3)",
 						"minimum": 1,
 						"maximum": 10,
 						"default": 3
@@ -127,15 +126,9 @@ impl GraphRagProvider {
 					"format": {
 						"type": "string",
 						"enum": ["text", "json", "markdown"],
-						"description": "Output format (default: 'text' for token efficiency)",
+						"description": "Output format (default: 'text')",
 						"default": "text"
 					},
-					"max_tokens": {
-						"type": "integer",
-						"description": "Maximum tokens allowed in output before truncation (default: 2000, set to 0 for unlimited)",
-						"minimum": 0,
-						"default": 2000
-					}
 				},
 				"required": ["operation"],
 				"additionalProperties": false
@@ -241,10 +234,6 @@ impl GraphRagProvider {
 			}
 		};
 
-		let max_tokens = arguments
-			.get("max_tokens")
-			.and_then(|v| v.as_u64())
-			.unwrap_or(2000) as usize;
 
 		// Create GraphRAGArgs structure for reusing CLI logic
 		let args = GraphRAGArgs {
@@ -285,8 +274,7 @@ impl GraphRagProvider {
 			McpError::internal_error(format!("Failed to restore directory: {}", e), "graphrag")
 		})?;
 
-		// Apply token truncation if needed
-		Ok(truncate_output(&result, max_tokens))
+		Ok(result)
 	}
 
 	/// Execute GraphRAG operation using CLI logic with MCP-optimized output

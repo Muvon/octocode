@@ -26,7 +26,6 @@ use tracing::{debug, error, info, warn};
 
 use super::client::LspClient;
 use super::protocol::{file_path_to_uri, LspNotification, LspRequest};
-use crate::embedding::truncate_output;
 use crate::mcp::types::McpTool;
 
 /// LSP provider that manages external LSP server and exposes capabilities via MCP tools
@@ -363,163 +362,97 @@ impl LspProvider {
 	}
 	pub fn get_tool_definitions() -> Vec<McpTool> {
 		vec![
-            McpTool {
-                name: "lsp_goto_definition".to_string(),
-                description: "Navigate to symbol definition using LSP server. Automatically finds the symbol on the specified line.".to_string(),
-                input_schema: json!({
-                    "type": "object",
-                    "properties": {
-                        "file_path": {
-                            "type": "string",
-                            "description": "Relative path to the file from working directory"
-                        },
-                        "line": {
-                            "type": "integer",
-                            "minimum": 1,
-                            "description": "Line number (1-indexed) where the symbol is located"
-                        },
-                        "symbol": {
-                            "type": "string",
-                            "description": "Symbol name to find definition for (function name, variable, type, etc.)"
-                        }
-                    },
-                    "required": ["file_path", "line", "symbol"],
-                    "additionalProperties": false
-                })
-            },
-            McpTool {
-                name: "lsp_hover".to_string(),
-                description: "Get symbol information and documentation using LSP server. Automatically finds the symbol on the specified line.".to_string(),
-                input_schema: json!({
-                    "type": "object",
-                    "properties": {
-                        "file_path": {
-                            "type": "string",
-                            "description": "Relative path to the file from working directory"
-                        },
-                        "line": {
-                            "type": "integer",
-                            "minimum": 1,
-                            "description": "Line number (1-indexed) where the symbol is located"
-                        },
-                        "symbol": {
-                            "type": "string",
-                            "description": "Symbol name to get information for (function name, variable, type, etc.)"
-                        }
-                    },
-                    "required": ["file_path", "line", "symbol"],
-                    "additionalProperties": false
-                })
-            },
-            McpTool {
-                name: "lsp_find_references".to_string(),
-                description: "Find all references to a symbol using LSP server. Automatically finds the symbol on the specified line.".to_string(),
-                input_schema: json!({
-                    "type": "object",
-                    "properties": {
-                        "file_path": {
-                            "type": "string",
-                            "description": "Relative path to the file from working directory"
-                        },
-                        "line": {
-                            "type": "integer",
-                            "minimum": 1,
-                            "description": "Line number (1-indexed) where the symbol is located"
-                        },
-                        "symbol": {
-                            "type": "string",
-                            "description": "Symbol name to find references for (function name, variable, type, etc.)"
-                        },
-                        "include_declaration": {
-                            "type": "boolean",
-                            "default": true,
-                            "description": "Include the symbol declaration in results"
-                        },
-                        "max_tokens": {
-                            "type": "integer",
-                            "description": "Maximum tokens allowed in output before truncation (default: 2000, set to 0 for unlimited)",
-                            "minimum": 0,
-                            "default": 2000
-                        }
-                    },
-                    "required": ["file_path", "line", "symbol"],
-                    "additionalProperties": false
-                })
-            },
-            McpTool {
-                name: "lsp_document_symbols".to_string(),
-                description: "List all symbols in a document using LSP server. Returns structured symbol information with hierarchy.".to_string(),
-                input_schema: json!({
-                    "type": "object",
-                    "properties": {
-                        "file_path": {
-                            "type": "string",
-                            "description": "Relative path to the file from working directory"
-                        },
-                        "max_tokens": {
-                            "type": "integer",
-                            "description": "Maximum tokens allowed in output before truncation (default: 2000, set to 0 for unlimited)",
-                            "minimum": 0,
-                            "default": 2000
-                        }
-                    },
-                    "required": ["file_path"],
-                    "additionalProperties": false
-                })
-            },
-            McpTool {
-                name: "lsp_workspace_symbols".to_string(),
-                description: "Search for symbols across the entire workspace using LSP server. Provides intelligent symbol search with semantic understanding.".to_string(),
-                input_schema: json!({
-                    "type": "object",
-                    "properties": {
-                        "query": {
-                            "type": "string",
-                            "description": "Symbol search query",
-                            "minLength": 1
-                        },
-                        "max_tokens": {
-                            "type": "integer",
-                            "description": "Maximum tokens allowed in output before truncation (default: 2000, set to 0 for unlimited)",
-                            "minimum": 0,
-                            "default": 2000
-                        }
-                    },
-                    "required": ["query"],
-                    "additionalProperties": false
-                })
-            },
-            McpTool {
-                name: "lsp_completion".to_string(),
-                description: "Get code completion suggestions using LSP server. Provides completions at the end of the specified symbol.".to_string(),
-                input_schema: json!({
-                    "type": "object",
-                    "properties": {
-                        "file_path": {
-                            "type": "string",
-                            "description": "Relative path to the file from working directory"
-                        },
-                        "line": {
-                            "type": "integer",
-                            "minimum": 1,
-                            "description": "Line number (1-indexed) where completion is needed"
-                        },
-                        "symbol": {
-                            "type": "string",
-                            "description": "Partial symbol or prefix to complete (e.g., 'std::vec', 'my_func')"
-                        },
-                        "max_tokens": {
-                            "type": "integer",
-                            "description": "Maximum tokens allowed in output before truncation (default: 2000, set to 0 for unlimited)",
-                            "minimum": 0,
-                            "default": 2000
-                        }
-                    },
-                    "required": ["file_path", "line", "symbol"],
-                    "additionalProperties": false
-                })
-            }
-        ]
+			McpTool {
+				name: "lsp_goto_definition".to_string(),
+				description: "Jump to the definition of a symbol via LSP.".to_string(),
+				input_schema: json!({
+					"type": "object",
+					"properties": {
+						"file_path": { "type": "string", "description": "Relative file path" },
+						"line": { "type": "integer", "minimum": 1, "description": "1-indexed line number" },
+						"symbol": { "type": "string", "description": "Symbol name on that line" }
+					},
+					"required": ["file_path", "line", "symbol"],
+					"additionalProperties": false
+				}),
+			},
+			McpTool {
+				name: "lsp_hover".to_string(),
+				description: "Get type info and documentation for a symbol via LSP.".to_string(),
+				input_schema: json!({
+					"type": "object",
+					"properties": {
+						"file_path": { "type": "string", "description": "Relative file path" },
+						"line": { "type": "integer", "minimum": 1, "description": "1-indexed line number" },
+						"symbol": { "type": "string", "description": "Symbol name on that line" }
+					},
+					"required": ["file_path", "line", "symbol"],
+					"additionalProperties": false
+				}),
+			},
+			McpTool {
+				name: "lsp_find_references".to_string(),
+				description: "Find all usages of a symbol across the workspace via LSP."
+					.to_string(),
+				input_schema: json!({
+					"type": "object",
+					"properties": {
+						"file_path": { "type": "string", "description": "Relative file path" },
+						"line": { "type": "integer", "minimum": 1, "description": "1-indexed line number" },
+						"symbol": { "type": "string", "description": "Symbol name on that line" },
+						"include_declaration": { "type": "boolean", "default": true, "description": "Include the declaration site in results" },
+						"include_declaration": { "type": "boolean", "default": true, "description": "Include the declaration site in results" }
+					},
+					"required": ["file_path", "line", "symbol"],
+					"additionalProperties": false
+				}),
+			},
+			McpTool {
+				name: "lsp_document_symbols".to_string(),
+				description:
+					"List all symbols (functions, types, variables) defined in a file via LSP."
+						.to_string(),
+				input_schema: json!({
+					"type": "object",
+					"properties": {
+						"file_path": { "type": "string", "description": "Relative file path" },
+						"file_path": { "type": "string", "description": "Relative file path" }
+					},
+					"required": ["file_path"],
+					"additionalProperties": false
+				}),
+			},
+			McpTool {
+				name: "lsp_workspace_symbols".to_string(),
+				description: "Search for symbols by name across the entire workspace via LSP."
+					.to_string(),
+				input_schema: json!({
+					"type": "object",
+					"properties": {
+						"query": { "type": "string", "minLength": 1, "description": "Symbol name or prefix to search" },
+						"query": { "type": "string", "minLength": 1, "description": "Symbol name or prefix to search" }
+					},
+					"required": ["query"],
+					"additionalProperties": false
+				}),
+			},
+			McpTool {
+				name: "lsp_completion".to_string(),
+				description: "Get code completion suggestions at a symbol position via LSP."
+					.to_string(),
+				input_schema: json!({
+					"type": "object",
+					"properties": {
+						"file_path": { "type": "string", "description": "Relative file path" },
+						"line": { "type": "integer", "minimum": 1, "description": "1-indexed line number" },
+						"symbol": { "type": "string", "description": "Partial symbol or prefix to complete" },
+						"symbol": { "type": "string", "description": "Partial symbol or prefix to complete" }
+					},
+					"required": ["file_path", "line", "symbol"],
+					"additionalProperties": false
+				}),
+			},
+		]
 	}
 
 	/// Find symbol position on a specific line
@@ -792,11 +725,6 @@ impl LspProvider {
 			.and_then(|v| v.as_bool())
 			.unwrap_or(true);
 
-		// Parse max_tokens parameter
-		let max_tokens = arguments
-			.get("max_tokens")
-			.and_then(|v| v.as_u64())
-			.unwrap_or(2000) as usize;
 
 		// Clean the file path to handle formatted paths like "[Rust file: main.rs]"
 		let clean_file_path = Self::clean_file_path(file_path);
@@ -813,8 +741,7 @@ impl LspProvider {
 			.find_references(&clean_file_path, line, character, include_declaration)
 			.await?;
 
-		// Apply token truncation if needed
-		Ok(truncate_output(&result, max_tokens))
+		Ok(result)
 	}
 
 	/// Execute LSP document symbols tool
@@ -832,11 +759,6 @@ impl LspProvider {
 			.and_then(|v| v.as_str())
 			.ok_or_else(|| anyhow::anyhow!("Missing required parameter: file_path"))?;
 
-		// Parse max_tokens parameter
-		let max_tokens = arguments
-			.get("max_tokens")
-			.and_then(|v| v.as_u64())
-			.unwrap_or(2000) as usize;
 
 		// Clean the file path to handle formatted paths like "[Rust file: main.rs]"
 		let clean_file_path = Self::clean_file_path(file_path);
@@ -850,8 +772,7 @@ impl LspProvider {
 
 		let result = self.document_symbols(&clean_file_path).await?;
 
-		// Apply token truncation if needed
-		Ok(truncate_output(&result, max_tokens))
+		Ok(result)
 	}
 
 	/// Execute LSP workspace symbols tool
@@ -869,16 +790,10 @@ impl LspProvider {
 			.and_then(|v| v.as_str())
 			.ok_or_else(|| anyhow::anyhow!("Missing required parameter: query"))?;
 
-		// Parse max_tokens parameter
-		let max_tokens = arguments
-			.get("max_tokens")
-			.and_then(|v| v.as_u64())
-			.unwrap_or(2000) as usize;
 
 		let result = self.workspace_symbols(query).await?;
 
-		// Apply token truncation if needed
-		Ok(truncate_output(&result, max_tokens))
+		Ok(result)
 	}
 
 	/// Execute LSP completion tool
@@ -904,11 +819,6 @@ impl LspProvider {
 			.and_then(|v| v.as_str())
 			.ok_or_else(|| anyhow::anyhow!("Missing required parameter: symbol"))?;
 
-		// Parse max_tokens parameter
-		let max_tokens = arguments
-			.get("max_tokens")
-			.and_then(|v| v.as_u64())
-			.unwrap_or(2000) as usize;
 
 		// Clean the file path to handle formatted paths like "[Rust file: main.rs]"
 		let clean_file_path = Self::clean_file_path(file_path);
@@ -923,8 +833,7 @@ impl LspProvider {
 
 		let result = self.completion(&clean_file_path, line, character).await?;
 
-		// Apply token truncation if needed
-		Ok(truncate_output(&result, max_tokens))
+		Ok(result)
 	}
 
 	/// Start LSP server process and perform initialization handshake
