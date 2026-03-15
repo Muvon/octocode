@@ -252,10 +252,10 @@ jobs:
     - name: Install Rust
       uses: dtolnay/rust-toolchain@1.92.0
 
-   - name: Install protobuf compiler
-     uses: arduino/setup-protoc@v3
-     with:
-       repo-token: ${{ secrets.GITHUB_TOKEN }}
+    - name: Install protobuf compiler
+      uses: arduino/setup-protoc@v3
+      with:
+        repo-token: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Cache dependencies
       uses: actions/cache@v4
