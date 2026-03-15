@@ -1,5 +1,68 @@
 # Changelog
 
+## [0.12.0] - 2026-03-15
+
+### 📋 Release Summary
+
+This release adds Python project support and introduces hybrid vector-keyword search with reranking for more accurate code discovery. The Model Context Protocol server now offers richer configuration and graceful handling outside Git repositories. Multiple fixes improve import resolution across Go, Java, and PHP, while dependency upgrades and indexing refinements boost overall performance and stability.
+
+
+### ✨ New Features & Enhancements
+
+- **release**: add Python project support with pyproject.toml `62282928`
+- **release**: add server.json version update and staging `05846ca6`
+- **mcp**: add server configuration for Model Context Protocol `f0ac9e75`
+- **search**: add hybrid vector and keyword search `32e11448`
+- **models**: add OpenRouter embedding provider support `8f816c5d`
+- **commit**: add -c flag to rewrite existing commit messages `6463cb22`
+- **search**: add reranker support for improved relevance `0f8386b6`
+
+### 🔧 Improvements & Optimizations
+
+- **vector**: migrate from IVF_PQ to IVF_HNSW_SQ indexing `46b41014`
+- **graphrag**: simplify tool interface and remove token limits `dfc2b2e9`
+- **search**: replace tokenization with string queries `e767b195`
+- **search**: replace inline reranker with octolib integration `e8b5bc75`
+- **store**: add table cache to reduce open overhead `26132071`
+- **mcp**: split module into http and watcher packages `4eb9bd38`
+- **search**: extract symbol formatting logic into helper function `e78d920f`
+- **proxy**: extract shared handlers into module `fd41f15f`
+- **store**: extract generic block operations `9cd9a401`
+- **languages**: extract shared symbol helpers `f5049453`
+- **graphrag**: update octolib and token tracking `fa630ad9`
+
+### 🐛 Bug Fixes & Stability
+
+- **config**: correct github owner capitalization in server.json `c324c84c`
+- **indexer**: resolve imports for Go, Java, PHP `54ed6f53`
+- **search**: correct vector similarity threshold parameter `22f11d86`
+- **mcp**: ensure all background tasks abort on server drop `2211f5a5`
+- **mcp**: send indexer-disabled notification before initialize response `4c3ce3f3`
+- **mcp**: add graceful handling when running outside git repository `9c52f627`
+- **storage**: replace unwrap with proper error handling `0120341f`
+
+### 🔄 Other Changes
+
+- **release**: add homebrew tap notification job `bb745289`
+- add MCP server badge `f76180d2`
+- **deps**: bump octolib to 0.10.4 and update related dependencies `ffa5fdca`
+- **deps**: upgrade datafusion to 51.0.0 and lance to 2.0.0 `33cc387a`
+- **deps**: bump fastembed, image, moxcms and related crates `8cbde13f`
+- use protoc action for cross-platform protobuf installation `238fc033`
+- **deps**: upgrade octolib to 0.10.1 for openrouter embeddings `0d51e436`
+- **deps**: bump octolib to 0.10.0 `2c438f8b`
+- **deps**: bump cargo dependencies `055c106f`
+- **search**: add unit tests for format_symbols_for_display `d4693757`
+
+### 📊 Release Summary
+
+**Total commits**: 35 across 4 categories
+
+✨ **7** new features - *Enhanced functionality*
+🔧 **11** improvements - *Better performance & code quality*
+🐛 **7** bug fixes - *Improved stability*
+🔄 **10** other changes - *Maintenance & tooling*
+
 ## [0.11.0] - 2026-02-13
 
 ### 📋 Release Summary
