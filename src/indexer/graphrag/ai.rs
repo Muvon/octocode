@@ -297,36 +297,15 @@ impl AIEnhancements {
 		Ok(Vec::new())
 	}
 
-	// Determine if a file is complex enough to benefit from AI analysis
+	// Use AI for description when AI is configured, language is supported, and file has symbols.
 	pub fn should_use_ai_for_description(
 		&self,
 		symbols: &[String],
-		lines: u32,
+		_lines: u32,
 		language: &str,
 	) -> bool {
-		// FIXED: Count actual symbols, not prefixed ones
-		let function_count = symbols.len(); // All extracted symbols are meaningful
-		let has_substantial_content = lines > 20; // Lower threshold for testing
-											// FIXED: Use dynamic language detection instead of hardcoded list
-		let is_important_language = crate::indexer::languages::get_language(language).is_some();
-
-		// For debugging: always use AI for substantial files in important languages
-		let should_use = has_substantial_content && is_important_language && function_count > 0;
-
-		if !self.quiet {
-			eprintln!(
-				"🤖 AI Decision: file={} lines, symbols={}, language={}, use_ai={}",
-				lines,
-				symbols.len(),
-				language,
-				should_use
-			);
-			if should_use && !symbols.is_empty() {
-				eprintln!("🔍 Symbols found: {:?}", &symbols[..symbols.len().min(5)]);
-			}
-		}
-
-		should_use
+		let is_supported_language = crate::indexer::languages::get_language(language).is_some();
+		!symbols.is_empty() && is_supported_language
 	}
 
 	// Build a meaningful content sample for AI analysis (not full file content)
