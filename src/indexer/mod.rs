@@ -1277,18 +1277,11 @@ pub async fn index_files_with_quiet(
 	);
 
 	// CRITICAL: Persist data and store git metadata atomically
-	// Only mark commit as "indexed" when all data is safely persisted
-	// Check if we should store metadata based on what was processed
-	let should_store_metadata = final_files > 0
-		|| git_changed_files.is_some()
-		|| (total_files_found == 0 && git_changed_files.is_none());
-
-	if should_store_metadata {
-		persist_and_store_metadata(store, git_repo_root, config, quiet, "indexing_complete")
-			.await?;
-	} else if !quiet {
-		println!("⚠️  Git metadata not stored - no files processed and no git optimization used");
-	}
+	// Always store metadata when we have a git repo — this records "we checked at this commit"
+	// even if all files were skipped by mtime. Without this, a repo with no initial commit
+	// at first index time will never store a commit hash, causing infinite "first-time indexing"
+	// loops on subsequent runs where all files are skipped by mtime but 0 files are processed.
+	persist_and_store_metadata(store, git_repo_root, config, quiet, "indexing_complete").await?;
 
 	Ok(())
 }

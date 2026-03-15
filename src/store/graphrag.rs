@@ -717,6 +717,63 @@ impl<'a> GraphRagOperations<'a> {
 		Ok(node_ids)
 	}
 
+	/// Get all graph nodes via full table scan (no vector search, no limit)
+	pub async fn get_all_graph_nodes(&self) -> Result<RecordBatch> {
+		if !self.table_ops.table_exists("graphrag_nodes").await? {
+			let schema = Arc::new(Schema::new(vec![
+				Field::new("id", DataType::Utf8, false),
+				Field::new("name", DataType::Utf8, false),
+				Field::new("kind", DataType::Utf8, false),
+				Field::new("path", DataType::Utf8, false),
+				Field::new("description", DataType::Utf8, false),
+				Field::new("symbols", DataType::Utf8, true),
+				Field::new("imports", DataType::Utf8, true),
+				Field::new("exports", DataType::Utf8, true),
+				Field::new("functions", DataType::Utf8, true),
+				Field::new("size_lines", DataType::UInt32, false),
+				Field::new("language", DataType::Utf8, false),
+				Field::new("hash", DataType::Utf8, false),
+			]));
+			return Ok(RecordBatch::new_empty(schema));
+		}
+
+		let table = self.get_table("graphrag_nodes").await?;
+
+		let mut results = table.query().execute().await?;
+
+		let mut all_batches = Vec::new();
+		while let Some(batch) = results.try_next().await? {
+			if batch.num_rows() > 0 {
+				all_batches.push(batch);
+			}
+		}
+
+		if all_batches.is_empty() {
+			let schema = Arc::new(Schema::new(vec![
+				Field::new("id", DataType::Utf8, false),
+				Field::new("name", DataType::Utf8, false),
+				Field::new("kind", DataType::Utf8, false),
+				Field::new("path", DataType::Utf8, false),
+				Field::new("description", DataType::Utf8, false),
+				Field::new("symbols", DataType::Utf8, true),
+				Field::new("imports", DataType::Utf8, true),
+				Field::new("exports", DataType::Utf8, true),
+				Field::new("functions", DataType::Utf8, true),
+				Field::new("size_lines", DataType::UInt32, false),
+				Field::new("language", DataType::Utf8, false),
+				Field::new("hash", DataType::Utf8, false),
+			]));
+			Ok(RecordBatch::new_empty(schema))
+		} else if all_batches.len() == 1 {
+			Ok(all_batches.into_iter().next().unwrap())
+		} else {
+			Ok(arrow::compute::concat_batches(
+				&all_batches[0].schema(),
+				&all_batches,
+			)?)
+		}
+	}
+
 	/// Search for graph nodes by vector similarity
 	pub async fn search_graph_nodes(&self, embedding: &[f32], limit: usize) -> Result<RecordBatch> {
 		// Check embedding dimension

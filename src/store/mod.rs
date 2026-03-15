@@ -776,6 +776,15 @@ impl Store {
 			.await
 	}
 
+	pub async fn get_all_graph_nodes(&self) -> Result<RecordBatch> {
+		let graphrag_ops = GraphRagOperations::new(
+			&self.db,
+			self.code_vector_dim,
+			Arc::clone(&self.table_cache),
+		);
+		graphrag_ops.get_all_graph_nodes().await
+	}
+
 	pub async fn search_graph_nodes(&self, embedding: &[f32], limit: usize) -> Result<RecordBatch> {
 		let graphrag_ops = GraphRagOperations::new(
 			&self.db,

@@ -80,14 +80,8 @@ impl<'a> DatabaseOperations<'a> {
 			return Ok(graph); // Return empty graph if tables don't exist
 		}
 
-		// Get vector dimension for embedding work
-		let vector_dim = self.store.get_code_vector_dim();
-
-		// Get all nodes
-		let node_batch = self
-			.store
-			.search_graph_nodes(&vec![0.0; vector_dim], 10000)
-			.await?;
+		// Get all nodes via full table scan (not vector search — avoids zero-vector returning 0 results)
+		let node_batch = self.store.get_all_graph_nodes().await?;
 		if node_batch.num_rows() == 0 {
 			return Ok(graph); // No nodes found
 		}
