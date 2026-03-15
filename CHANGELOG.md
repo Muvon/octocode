@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.12.1] - 2026-03-15
+
+### 📋 Release Summary
+
+This release fixes a search issue where queries could return no results when matching zero-vector embeddings.
+
+
+### 🐛 Bug Fixes & Stability
+
+- **graphrag**: resolve zero-vector search returning empty results `72ebbc7e`
+
+### 📊 Release Summary
+
+**Total commits**: 1 across 1 categories
+
+🐛 **1** bug fix - *Improved stability*
+
 ## [0.12.0] - 2026-03-15
 
 ### 📋 Release Summary
