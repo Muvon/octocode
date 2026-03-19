@@ -158,7 +158,7 @@ jobs:
       uses: actions/checkout@v4
 
     - name: Install Rust
-      uses: dtolnay/rust-toolchain@1.92.0
+      uses: dtolnay/rust-toolchain@1.94.0
       with:
         targets: ${{ matrix.target }}
 
@@ -188,7 +188,7 @@ jobs:
           docker run --rm \
             -v "$(pwd):/workspace" \
             -w /workspace \
-            rust:1.92.0-alpine3.21 \
+            rust:1.94.0-alpine3.23 \
             sh -c "
               apk add --no-cache musl-dev openssl-dev openssl-libs-static pkgconfig gcc g++ protobuf-dev && \
               rustup target add ${{ matrix.target }} && \
@@ -250,7 +250,7 @@ jobs:
       uses: actions/checkout@v4
 
     - name: Install Rust
-      uses: dtolnay/rust-toolchain@1.92.0
+      uses: dtolnay/rust-toolchain@1.94.0
 
     - name: Install protobuf compiler
       uses: arduino/setup-protoc@v3
