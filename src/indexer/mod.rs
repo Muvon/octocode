@@ -46,7 +46,6 @@ use crate::state::SharedState;
 use crate::store::DocumentBlock;
 use crate::store::Store;
 pub use render_utils::*;
-
 // Import the new modular utilities
 mod file_utils;
 pub mod git_utils;
@@ -568,6 +567,11 @@ pub async fn index_files_with_quiet(
 	let mut document_blocks_batch = Vec::new();
 	let mut all_code_blocks = Vec::new(); // Store all code blocks for GraphRAG
 
+	// Track file metadata for atomic storage after batch processing
+	let mut code_file_metadata = FileMetadataBatch::new();
+	let mut text_file_metadata = FileMetadataBatch::new();
+	let mut document_file_metadata = FileMetadataBatch::new();
+
 	let mut embedding_calls = 0;
 	let mut batches_processed = 0; // Track batches for intelligent flushing
 
@@ -827,6 +831,12 @@ pub async fn index_files_with_quiet(
 						// Store the file modification time after successful processing
 						let file_processed;
 
+						let ctx = ProcessFileContext {
+							store,
+							config,
+							state: state.clone(),
+						};
+
 						if language == "markdown" {
 							// Handle markdown files specially - index as document blocks
 							process_markdown_file_differential(
@@ -841,11 +851,6 @@ pub async fn index_files_with_quiet(
 							file_processed = true;
 						} else {
 							// Handle code files - index as semantic code blocks only
-							let ctx = ProcessFileContext {
-								store,
-								config,
-								state: state.clone(),
-							};
 							process_file_differential(
 								&ctx,
 								&contents,
@@ -859,10 +864,10 @@ pub async fn index_files_with_quiet(
 							file_processed = true;
 						}
 
-						// Store file modification time after successful processing
+						// Track file metadata for atomic storage after batch processing
 						if file_processed {
 							if let Ok(actual_mtime) = get_file_mtime(&full_path) {
-								let _ = store.store_file_metadata(file_path, actual_mtime).await;
+								code_file_metadata.add(file_path, actual_mtime);
 							}
 						}
 
@@ -884,8 +889,15 @@ pub async fn index_files_with_quiet(
 						// Process batches when they reach the batch size or token limit
 						if should_process_batch(&code_blocks_batch, |b| &b.content, config) {
 							embedding_calls += code_blocks_batch.len();
-							process_code_blocks_batch(store, &code_blocks_batch, config).await?;
+							process_code_blocks_batch(
+								store,
+								&code_blocks_batch,
+								config,
+								&code_file_metadata,
+							)
+							.await?;
 							code_blocks_batch.clear();
+							code_file_metadata.clear();
 							batches_processed += 1;
 							// Intelligent flush based on configuration
 							flush_if_needed(store, &mut batches_processed, config, false).await?;
@@ -893,17 +905,30 @@ pub async fn index_files_with_quiet(
 						// Only process text_blocks_batch if we have any (from unsupported files)
 						if should_process_batch(&text_blocks_batch, |b| &b.content, config) {
 							embedding_calls += text_blocks_batch.len();
-							process_text_blocks_batch(store, &text_blocks_batch, config).await?;
+							process_text_blocks_batch(
+								store,
+								&text_blocks_batch,
+								config,
+								&text_file_metadata,
+							)
+							.await?;
 							text_blocks_batch.clear();
+							text_file_metadata.clear();
 							batches_processed += 1;
 							// Intelligent flush based on configuration
 							flush_if_needed(store, &mut batches_processed, config, false).await?;
 						}
 						if should_process_batch(&document_blocks_batch, |b| &b.content, config) {
 							embedding_calls += document_blocks_batch.len();
-							process_document_blocks_batch(store, &document_blocks_batch, config)
-								.await?;
+							process_document_blocks_batch(
+								store,
+								&document_blocks_batch,
+								config,
+								&document_file_metadata,
+							)
+							.await?;
 							document_blocks_batch.clear();
+							document_file_metadata.clear();
 							batches_processed += 1;
 							// Intelligent flush based on configuration
 							flush_if_needed(store, &mut batches_processed, config, false).await?;
@@ -932,9 +957,9 @@ pub async fn index_files_with_quiet(
 							)
 							.await?;
 
-							// Store file modification time after successful processing
+							// Track file metadata for atomic storage after batch processing
 							if let Ok(actual_mtime) = get_file_mtime(&full_path) {
-								let _ = store.store_file_metadata(file_path, actual_mtime).await;
+								text_file_metadata.add(file_path, actual_mtime);
 							}
 
 							files_processed += 1;
@@ -955,9 +980,15 @@ pub async fn index_files_with_quiet(
 							// Process batch when it reaches the batch size or token limit
 							if should_process_batch(&text_blocks_batch, |b| &b.content, config) {
 								embedding_calls += text_blocks_batch.len();
-								process_text_blocks_batch(store, &text_blocks_batch, config)
-									.await?;
+								process_text_blocks_batch(
+									store,
+									&text_blocks_batch,
+									config,
+									&text_file_metadata,
+								)
+								.await?;
 								text_blocks_batch.clear();
+								text_file_metadata.clear();
 								batches_processed += 1;
 								// Intelligent flush based on configuration
 								flush_if_needed(store, &mut batches_processed, config, false)
@@ -1056,10 +1087,10 @@ pub async fn index_files_with_quiet(
 							file_processed = true;
 						}
 
-						// Store file modification time after successful processing
+						// Track file metadata for atomic storage after batch processing
 						if file_processed {
 							if let Ok(actual_mtime) = get_file_mtime(entry.path()) {
-								let _ = store.store_file_metadata(&file_path, actual_mtime).await;
+								code_file_metadata.add(&file_path, actual_mtime);
 							}
 						}
 
@@ -1081,8 +1112,15 @@ pub async fn index_files_with_quiet(
 						// Process batches when they reach the batch size or token limit
 						if should_process_batch(&code_blocks_batch, |b| &b.content, config) {
 							embedding_calls += code_blocks_batch.len();
-							process_code_blocks_batch(store, &code_blocks_batch, config).await?;
+							process_code_blocks_batch(
+								store,
+								&code_blocks_batch,
+								config,
+								&code_file_metadata,
+							)
+							.await?;
 							code_blocks_batch.clear();
+							code_file_metadata.clear();
 							batches_processed += 1;
 							// Intelligent flush based on configuration
 							flush_if_needed(store, &mut batches_processed, config, false).await?;
@@ -1090,17 +1128,30 @@ pub async fn index_files_with_quiet(
 						// Only process text_blocks_batch if we have any (from unsupported files)
 						if should_process_batch(&text_blocks_batch, |b| &b.content, config) {
 							embedding_calls += text_blocks_batch.len();
-							process_text_blocks_batch(store, &text_blocks_batch, config).await?;
+							process_text_blocks_batch(
+								store,
+								&text_blocks_batch,
+								config,
+								&text_file_metadata,
+							)
+							.await?;
 							text_blocks_batch.clear();
+							text_file_metadata.clear();
 							batches_processed += 1;
 							// Intelligent flush based on configuration
 							flush_if_needed(store, &mut batches_processed, config, false).await?;
 						}
 						if should_process_batch(&document_blocks_batch, |b| &b.content, config) {
 							embedding_calls += document_blocks_batch.len();
-							process_document_blocks_batch(store, &document_blocks_batch, config)
-								.await?;
+							process_document_blocks_batch(
+								store,
+								&document_blocks_batch,
+								config,
+								&document_file_metadata,
+							)
+							.await?;
 							document_blocks_batch.clear();
+							document_file_metadata.clear();
 							batches_processed += 1;
 							// Intelligent flush based on configuration
 							flush_if_needed(store, &mut batches_processed, config, false).await?;
@@ -1129,9 +1180,9 @@ pub async fn index_files_with_quiet(
 							)
 							.await?;
 
-							// Store file modification time after successful processing
+							// Track file metadata for atomic storage after batch processing
 							if let Ok(actual_mtime) = get_file_mtime(entry.path()) {
-								let _ = store.store_file_metadata(&file_path, actual_mtime).await;
+								text_file_metadata.add(&file_path, actual_mtime);
 							}
 
 							files_processed += 1;
@@ -1152,9 +1203,15 @@ pub async fn index_files_with_quiet(
 							// Process batch when it reaches the batch size or token limit
 							if should_process_batch(&text_blocks_batch, |b| &b.content, config) {
 								embedding_calls += text_blocks_batch.len();
-								process_text_blocks_batch(store, &text_blocks_batch, config)
-									.await?;
+								process_text_blocks_batch(
+									store,
+									&text_blocks_batch,
+									config,
+									&text_file_metadata,
+								)
+								.await?;
 								text_blocks_batch.clear();
+								text_file_metadata.clear();
 								batches_processed += 1;
 								// Intelligent flush based on configuration
 								flush_if_needed(store, &mut batches_processed, config, false)
@@ -1169,18 +1226,24 @@ pub async fn index_files_with_quiet(
 
 	// Process remaining batches
 	if !code_blocks_batch.is_empty() {
-		process_code_blocks_batch(store, &code_blocks_batch, config).await?;
+		process_code_blocks_batch(store, &code_blocks_batch, config, &code_file_metadata).await?;
 		embedding_calls += code_blocks_batch.len();
 		batches_processed += 1;
 	}
 	// Only process text_blocks_batch if we have any (from unsupported files)
 	if !text_blocks_batch.is_empty() {
-		process_text_blocks_batch(store, &text_blocks_batch, config).await?;
+		process_text_blocks_batch(store, &text_blocks_batch, config, &text_file_metadata).await?;
 		embedding_calls += text_blocks_batch.len();
 		batches_processed += 1;
 	}
 	if !document_blocks_batch.is_empty() {
-		process_document_blocks_batch(store, &document_blocks_batch, config).await?;
+		process_document_blocks_batch(
+			store,
+			&document_blocks_batch,
+			config,
+			&document_file_metadata,
+		)
+		.await?;
 		embedding_calls += document_blocks_batch.len();
 		batches_processed += 1;
 	}
@@ -1335,6 +1398,7 @@ pub async fn handle_file_change(store: &Store, file_path: &str, config: &Config)
 				if language == "markdown" {
 					// Handle markdown files specially
 					let mut document_blocks_batch = Vec::new();
+					let mut document_file_metadata = FileMetadataBatch::new();
 					process_markdown_file(
 						store,
 						&contents,
@@ -1345,15 +1409,26 @@ pub async fn handle_file_change(store: &Store, file_path: &str, config: &Config)
 					)
 					.await?;
 
+					// Track file metadata
+					if let Ok(mtime) = get_file_mtime(&absolute_path) {
+						document_file_metadata.add(&relative_file_path, mtime);
+					}
+
 					if !document_blocks_batch.is_empty() {
-						process_document_blocks_batch(store, &document_blocks_batch, config)
-							.await?;
+						process_document_blocks_batch(
+							store,
+							&document_blocks_batch,
+							config,
+							&document_file_metadata,
+						)
+						.await?;
 					}
 				} else {
 					// Handle code files
 					let mut code_blocks_batch = Vec::new();
 					let mut text_blocks_batch = Vec::new(); // Will remain empty for code files
 					let mut all_code_blocks = Vec::new(); // For GraphRAG
+					let mut code_file_metadata = FileMetadataBatch::new();
 
 					let ctx = ProcessFileContext {
 						store,
@@ -1371,8 +1446,19 @@ pub async fn handle_file_change(store: &Store, file_path: &str, config: &Config)
 					)
 					.await?;
 
+					// Track file metadata
+					if let Ok(mtime) = get_file_mtime(&absolute_path) {
+						code_file_metadata.add(&relative_file_path, mtime);
+					}
+
 					if !code_blocks_batch.is_empty() {
-						process_code_blocks_batch(store, &code_blocks_batch, config).await?;
+						process_code_blocks_batch(
+							store,
+							&code_blocks_batch,
+							config,
+							&code_file_metadata,
+						)
+						.await?;
 					}
 					// No need to process text_blocks_batch since it will be empty for code files
 
@@ -1409,8 +1495,20 @@ pub async fn handle_file_change(store: &Store, file_path: &str, config: &Config)
 						)
 						.await?;
 
+						// Track file metadata
+						let mut text_file_metadata = FileMetadataBatch::new();
+						if let Ok(mtime) = get_file_mtime(&absolute_path) {
+							text_file_metadata.add(&relative_file_path, mtime);
+						}
+
 						if !text_blocks_batch.is_empty() {
-							process_text_blocks_batch(store, &text_blocks_batch, config).await?;
+							process_text_blocks_batch(
+								store,
+								&text_blocks_batch,
+								config,
+								&text_file_metadata,
+							)
+							.await?;
 						}
 
 						// Explicitly flush to ensure all data is persisted

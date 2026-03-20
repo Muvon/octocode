@@ -1,7 +1,7 @@
 // Copyright 2025 Muvon Un Limited
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
+// you may use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
 //     http://www.apache.org/licenses/LICENSE-2.0
@@ -22,12 +22,59 @@ use crate::embedding::count_tokens;
 use crate::mcp::logging::log_performance_metrics;
 use crate::store::{CodeBlock, DocumentBlock, Store, TextBlock};
 use anyhow::Result;
+use std::collections::HashMap;
+
+/// Tracks file metadata for atomic storage after batch persistence
+/// This ensures file metadata is only stored AFTER blocks are successfully persisted
+#[derive(Default)]
+pub struct FileMetadataBatch {
+	/// Map of file path -> modification time
+	pending_files: HashMap<String, u64>,
+}
+
+impl FileMetadataBatch {
+	/// Create a new empty batch
+	pub fn new() -> Self {
+		Self::default()
+	}
+
+	/// Add a file's metadata to the pending batch
+	pub fn add(&mut self, file_path: &str, mtime: u64) {
+		self.pending_files.insert(file_path.to_string(), mtime);
+	}
+
+	/// Merge another batch into this one
+	pub fn extend(&mut self, other: &FileMetadataBatch) {
+		self.pending_files.extend(other.pending_files.clone());
+	}
+
+	/// Check if empty
+	pub fn is_empty(&self) -> bool {
+		self.pending_files.is_empty()
+	}
+
+	/// Clear all pending metadata
+	pub fn clear(&mut self) {
+		self.pending_files.clear();
+	}
+
+	/// Persist all pending file metadata to the store
+	/// This should only be called AFTER blocks are successfully stored
+	pub async fn persist(&self, store: &Store) -> Result<()> {
+		for (file_path, mtime) in &self.pending_files {
+			store.store_file_metadata(file_path, *mtime).await?;
+		}
+		Ok(())
+	}
+}
 
 /// Process a batch of code blocks for embedding and storage
+/// Also stores file metadata atomically after successful block storage
 pub async fn process_code_blocks_batch(
 	store: &Store,
 	blocks: &[CodeBlock],
 	config: &Config,
+	file_metadata: &FileMetadataBatch,
 ) -> Result<()> {
 	let start_time = std::time::Instant::now();
 
@@ -60,6 +107,10 @@ pub async fn process_code_blocks_batch(
 	// Store blocks with their embeddings (original blocks unchanged)
 	store.store_code_blocks(blocks, &embeddings).await?;
 
+	// CRITICAL: Store file metadata AFTER successful block storage
+	// This ensures atomicity - if blocks are stored, metadata is stored
+	file_metadata.persist(store).await?;
+
 	let duration_ms = start_time.elapsed().as_millis() as u64;
 	log_performance_metrics("code_blocks_batch", duration_ms, blocks.len(), None);
 
@@ -67,10 +118,12 @@ pub async fn process_code_blocks_batch(
 }
 
 /// Process a batch of text blocks for embedding and storage
+/// Also stores file metadata atomically after successful block storage
 pub async fn process_text_blocks_batch(
 	store: &Store,
 	blocks: &[TextBlock],
 	config: &Config,
+	file_metadata: &FileMetadataBatch,
 ) -> Result<()> {
 	let start_time = std::time::Instant::now();
 	let contents: Vec<String> = blocks.iter().map(|b| b.content.clone()).collect();
@@ -83,6 +136,9 @@ pub async fn process_text_blocks_batch(
 	.await?;
 	store.store_text_blocks(blocks, &embeddings).await?;
 
+	// CRITICAL: Store file metadata AFTER successful block storage
+	file_metadata.persist(store).await?;
+
 	let duration_ms = start_time.elapsed().as_millis() as u64;
 	log_performance_metrics("text_blocks_batch", duration_ms, blocks.len(), None);
 
@@ -90,10 +146,12 @@ pub async fn process_text_blocks_batch(
 }
 
 /// Process a batch of document blocks for embedding and storage
+/// Also stores file metadata atomically after successful block storage
 pub async fn process_document_blocks_batch(
 	store: &Store,
 	blocks: &[DocumentBlock],
 	config: &Config,
+	file_metadata: &FileMetadataBatch,
 ) -> Result<()> {
 	let start_time = std::time::Instant::now();
 	let contents: Vec<String> = blocks
@@ -114,6 +172,9 @@ pub async fn process_document_blocks_batch(
 	)
 	.await?;
 	store.store_document_blocks(blocks, &embeddings).await?;
+
+	// CRITICAL: Store file metadata AFTER successful block storage
+	file_metadata.persist(store).await?;
 
 	let duration_ms = start_time.elapsed().as_millis() as u64;
 	log_performance_metrics("document_blocks_batch", duration_ms, blocks.len(), None);
