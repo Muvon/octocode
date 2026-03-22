@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.12.2] - 2026-03-22
+
+### 📋 Release Summary
+
+This release improves indexing reliability and overall system performance. Enhanced metadata handling ensures more consistent code analysis results, while dependency updates provide better stability and compatibility.
+
+
+### 🔧 Improvements & Optimizations
+
+- **indexer**: atomic metadata storage after batch `d35ebfb2`
+
+### 🔄 Other Changes
+
+- **deps**: bump octolib to 0.11.0 and update related dependencies `61fb0cd7`
+- **deps**: bump dependency versions in Cargo.lock `ec53cb04`
+- bump Rust toolchain from 1.92.0 to 1.94.0 `2d40e7e6`
+
+### 📊 Release Summary
+
+**Total commits**: 4 across 2 categories
+
+🔧 **1** improvement - *Better performance & code quality*
+🔄 **3** other changes - *Maintenance & tooling*
+
 ## [0.12.1] - 2026-03-15
 
 ### 📋 Release Summary
