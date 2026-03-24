@@ -193,16 +193,26 @@ impl RelationshipDiscovery {
 				{
 					// Find the target node
 					if let Some(target_node) = file_map.get(&resolved_path) {
-						// Create semantic import relationship
+						// Use References for markdown cross-links, Imports for code
+						let rel_type = if source_file.language == "markdown" {
+							crate::indexer::graphrag::types::RelationType::References
+						} else {
+							crate::indexer::graphrag::types::RelationType::Imports
+						};
+						let description_prefix = if source_file.language == "markdown" {
+							"References"
+						} else {
+							"Direct import"
+						};
 						relationships.push(CodeRelationship {
 							source: source_file.id.clone(),
 							target: target_node.id.clone(),
-							relation_type: crate::indexer::graphrag::types::RelationType::Imports,
+							relation_type: rel_type,
 							description: format!(
-								"Direct import: {} -> {}",
-								import_path, resolved_path
+								"{}: {} -> {}",
+								description_prefix, import_path, resolved_path
 							),
-							confidence: 0.95, // High confidence for resolved imports
+							confidence: 0.95,
 							weight: 1.0,
 						});
 
@@ -482,10 +492,9 @@ impl RelationshipDiscovery {
 			|| relative_path.contains(".test.")
 		{
 			"test_file".to_string()
-		} else if relative_path.ends_with(".md")
-			|| relative_path.ends_with(".txt")
-			|| relative_path.ends_with(".rst")
-		{
+		} else if relative_path.ends_with(".md") || relative_path.ends_with(".markdown") {
+			"document_file".to_string()
+		} else if relative_path.ends_with(".txt") || relative_path.ends_with(".rst") {
 			"documentation".to_string()
 		} else if relative_path.contains("/config") || relative_path.contains(".config") {
 			"config_file".to_string()
