@@ -868,31 +868,32 @@ async fn call_llm_for_commit_message(prompt: &str, config: &Config) -> Result<St
 /// A refined, concise commit message
 async fn refine_commit_message_with_ai(verbose_message: &str, config: &Config) -> Result<String> {
 	let refinement_prompt = format!(
-		"REFINE COMMIT MESSAGE - CRITICAL: Output must be PLAIN TEXT ONLY, NO MARKDOWN, NO backticks, NO code blocks.
+		"SYNTHESISE COMMIT MESSAGE - CRITICAL: Output must be PLAIN TEXT ONLY, NO MARKDOWN, NO backticks, NO code blocks.
 
-ORIGINAL MESSAGE:
+The diff was too large to process at once, so it was split into chunks and each chunk was summarised separately.
+Below are the per-chunk summaries. Your job is to synthesise them into ONE accurate commit message that covers ALL changes across ALL chunks.
+
+PER-CHUNK SUMMARIES:
 {}
 
-REFINEMENT REQUIREMENTS:
-1. Keep conventional format: type(scope): description
-2. Choose single best type (feat, fix, refactor, chore, docs, etc.)
-3. Remove ALL duplication and redundancy
-4. Create concise bullet points for body (plain text, use dash space)
-5. Focus on WHAT changed, not implementation details
-6. Max 50 chars for subject line
-7. Max 72 chars per body line
-8. Group related changes together
-9. Remove verbose explanations, keep factual and brief
+SYNTHESIS REQUIREMENTS:
+1. Read ALL chunk summaries before writing anything
+2. Identify every distinct change across all chunks
+3. Choose a single conventional commit type that best represents the overall change set
+4. Subject line: type(scope): description — max 50 chars, imperative mood
+5. Body: list every meaningful change as a dash-space bullet, one per line, max 72 chars each
+6. Group related changes together; remove duplication
+7. Do NOT omit changes just because they appear in a later chunk
+8. Types: feat, fix, docs, style, refactor, test, chore, perf, ci, build
 
 OUTPUT FORMAT (PLAIN TEXT ONLY):
-refactor(diff_chunker): improve chunking with limits and robustness
+feat(agents): add multi-jurisdiction lawyer specialists
 
-- Add resource limits to prevent exhaustion
-- Enhance filename extraction accuracy
-- Improve error handling and logging
-- Add comprehensive test coverage
+- Add Australian, Canadian, French, German, Indian, Singaporean, UK, US specialists
+- Include federal Acts knowledge base per jurisdiction
+- Enable legal query handling for each region
 
-Return ONLY refined commit message as plain text, nothing else.",
+Return ONLY the synthesised commit message as plain text, nothing else.",
 		verbose_message
 	);
 

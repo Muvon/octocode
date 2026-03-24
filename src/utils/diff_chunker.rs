@@ -244,10 +244,12 @@ fn extract_file_summary(diff_content: &str) -> String {
 	}
 }
 
-/// Robust commit message combination with format validation
+/// Combine multiple chunk commit messages into raw material for AI refinement.
 ///
-/// Combines multiple AI responses into a coherent commit message.
-/// Handles various commit message formats and ensures proper structure.
+/// Each chunk only sees a subset of the diff, so individual chunk messages are
+/// partial. This function concatenates all of them as numbered sections so the
+/// AI refiner receives the full picture and can synthesise a single accurate
+/// commit message covering every changed file.
 pub fn combine_commit_messages(responses: Vec<String>) -> String {
 	if responses.is_empty() {
 		return "chore: update files".to_string();
@@ -257,53 +259,15 @@ pub fn combine_commit_messages(responses: Vec<String>) -> String {
 		return responses[0].clone();
 	}
 
-	// Extract subjects and bodies from responses with better parsing
-	let mut subjects = Vec::new();
-	let mut bodies = Vec::new();
+	// Concatenate all chunk summaries as numbered sections.
+	// The AI refiner will synthesise these into one coherent message.
+	let sections: Vec<String> = responses
+		.iter()
+		.enumerate()
+		.map(|(i, r)| format!("=== Chunk {} ===\n{}", i + 1, r.trim()))
+		.collect();
 
-	for response in &responses {
-		let lines: Vec<&str> = response.lines().collect();
-
-		// Extract subject (first non-empty line)
-		if let Some(subject) = lines.iter().find(|line| !line.trim().is_empty()) {
-			subjects.push(subject.trim());
-		}
-
-		// Extract body (lines after first empty line)
-		let mut found_empty = false;
-		let mut body_lines = Vec::new();
-
-		// Safe iteration: only slice if we have more than 1 line
-		for line in if lines.len() > 1 { &lines[1..] } else { &[] } {
-			if line.trim().is_empty() {
-				found_empty = true;
-				continue;
-			}
-			if found_empty {
-				body_lines.push(*line);
-			}
-		}
-
-		if !body_lines.is_empty() {
-			bodies.push(body_lines.join("\n"));
-		}
-	}
-
-	// Create combined subject - prefer the most comprehensive one
-	let combined_subject = subjects
-		.into_iter()
-		.max_by_key(|s| s.len())
-		.unwrap_or("chore: update multiple files")
-		.to_string();
-
-	// Combine unique bodies if present
-	if bodies.is_empty() {
-		combined_subject
-	} else {
-		let unique_bodies: std::collections::HashSet<String> = bodies.into_iter().collect();
-		let combined_body = unique_bodies.into_iter().collect::<Vec<_>>().join("\n\n");
-		format!("{}\n\n{}", combined_subject, combined_body)
-	}
+	sections.join("\n\n")
 }
 
 /// Enhanced review result combination with comprehensive error handling
