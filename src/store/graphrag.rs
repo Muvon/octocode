@@ -444,32 +444,74 @@ impl<'a> GraphRagOperations<'a> {
 	pub async fn get_all_code_blocks_for_graphrag(&self) -> Result<Vec<CodeBlock>> {
 		let mut all_blocks = Vec::new();
 
-		if !self.table_ops.table_exists("code_blocks").await? {
-			return Ok(all_blocks);
-		}
+		if self.table_ops.table_exists("code_blocks").await? {
+			let table = self.get_table("code_blocks").await?;
 
-		let table = self.get_table("code_blocks").await?;
+			// Get all code blocks in batches to avoid memory issues
+			let mut results = table.query().execute().await?;
 
-		// Get all code blocks in batches to avoid memory issues
-		let mut results = table.query().execute().await?;
+			// Process all result batches
+			while let Some(batch) = results.try_next().await? {
+				if batch.num_rows() > 0 {
+					// Convert batch to CodeBlocks
+					let converter =
+						crate::store::batch_converter::BatchConverter::new(self.code_vector_dim);
+					let mut code_blocks = converter.batch_to_code_blocks(&batch, None)?;
+					all_blocks.append(&mut code_blocks);
 
-		// Process all result batches
-		while let Some(batch) = results.try_next().await? {
-			if batch.num_rows() > 0 {
-				// Convert batch to CodeBlocks
-				let converter =
-					crate::store::batch_converter::BatchConverter::new(self.code_vector_dim);
-				let mut code_blocks = converter.batch_to_code_blocks(&batch, None)?;
-				all_blocks.append(&mut code_blocks);
-
-				// Log progress for large datasets
-				if cfg!(debug_assertions) && all_blocks.len() % 1000 == 0 {
-					tracing::debug!(
-						"Loaded {} code blocks for GraphRAG processing...",
-						all_blocks.len()
-					);
+					// Log progress for large datasets
+					if cfg!(debug_assertions) && all_blocks.len() % 1000 == 0 {
+						tracing::debug!(
+							"Loaded {} code blocks for GraphRAG processing...",
+							all_blocks.len()
+						);
+					}
 				}
 			}
+		}
+
+		// Also include markdown files from document_blocks so they get GraphRAG
+		// nodes and cross-reference relationships. Document blocks are stored
+		// separately from code blocks, so without this, markdown files would be
+		// invisible to GraphRAG when rebuilding from existing database.
+		if self.table_ops.table_exists("document_blocks").await? {
+			let doc_table = self.get_table("document_blocks").await?;
+			let mut doc_results = doc_table.query().execute().await?;
+
+			let mut seen_md_paths = std::collections::HashSet::new();
+			// Collect paths already covered by code blocks
+			for block in &all_blocks {
+				seen_md_paths.insert(block.path.clone());
+			}
+
+			while let Some(batch) = doc_results.try_next().await? {
+				if batch.num_rows() > 0 {
+					let converter =
+						crate::store::batch_converter::BatchConverter::new(self.code_vector_dim);
+					let doc_blocks = converter.batch_to_document_blocks(&batch, None)?;
+					for doc in &doc_blocks {
+						if doc.path.ends_with(".md") && seen_md_paths.insert(doc.path.clone()) {
+							// Create a synthetic CodeBlock so GraphBuilder processes
+							// this markdown file for nodes and cross-references
+							all_blocks.push(crate::store::CodeBlock {
+								path: doc.path.clone(),
+								language: "markdown".to_string(),
+								content: String::new(),
+								symbols: vec![],
+								start_line: 0,
+								end_line: doc.end_line,
+								hash: doc.hash.clone(),
+								distance: None,
+							});
+						}
+					}
+				}
+			}
+
+			tracing::debug!(
+				"Added {} markdown files from document_blocks for GraphRAG",
+				seen_md_paths.len().saturating_sub(all_blocks.len())
+			);
 		}
 
 		Ok(all_blocks)
