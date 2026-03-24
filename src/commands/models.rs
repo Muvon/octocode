@@ -171,6 +171,10 @@ async fn list_models(provider_filter: Option<String>) -> Result<()> {
 				println!("  OpenRouter: Dynamic discovery via API");
 				println!("  Use 'info' command with specific model names");
 			}
+			EmbeddingProviderType::OctoHub => {
+				println!("  OctoHub: Dynamic discovery via API");
+				println!("  Use 'info' command with specific model names");
+			}
 		}
 	}
 
