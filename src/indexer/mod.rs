@@ -42,6 +42,7 @@ use crate::config::Config;
 use crate::mcp::logging::{log_file_processing_error, log_indexing_progress};
 use crate::state;
 use crate::state::SharedState;
+use crate::store::CodeBlock;
 #[cfg(test)]
 use crate::store::DocumentBlock;
 use crate::store::Store;
@@ -848,6 +849,24 @@ pub async fn index_files_with_quiet(
 								state.clone(),
 							)
 							.await?;
+
+							// Also create a synthetic CodeBlock so GraphBuilder includes
+							// this file in the knowledge graph. The builder reads the file
+							// from disk and calls Markdown::extract_imports_exports for
+							// actual link extraction.
+							if config.graphrag.enabled {
+								all_code_blocks.push(CodeBlock {
+									path: file_path.to_string(),
+									language: "markdown".to_string(),
+									content: String::new(),
+									symbols: vec![],
+									start_line: 0,
+									end_line: contents.lines().count(),
+									hash: crate::embedding::calculate_content_hash(&contents),
+									distance: None,
+								});
+							}
+
 							file_processed = true;
 						} else {
 							// Handle code files - index as semantic code blocks only
@@ -1066,6 +1085,21 @@ pub async fn index_files_with_quiet(
 								state.clone(),
 							)
 							.await?;
+
+							// Also create a synthetic CodeBlock for GraphRAG
+							if config.graphrag.enabled {
+								all_code_blocks.push(CodeBlock {
+									path: file_path.to_string(),
+									language: "markdown".to_string(),
+									content: String::new(),
+									symbols: vec![],
+									start_line: 0,
+									end_line: contents.lines().count(),
+									hash: crate::embedding::calculate_content_hash(&contents),
+									distance: None,
+								});
+							}
+
 							file_processed = true;
 						} else {
 							// Handle code files - index as semantic code blocks only
@@ -1422,6 +1456,26 @@ pub async fn handle_file_change(store: &Store, file_path: &str, config: &Config)
 							&document_file_metadata,
 						)
 						.await?;
+					}
+
+					// Update GraphRAG for this markdown file
+					if config.graphrag.enabled {
+						let md_blocks = vec![CodeBlock {
+							path: relative_file_path.to_string(),
+							language: "markdown".to_string(),
+							content: String::new(),
+							symbols: vec![],
+							start_line: 0,
+							end_line: contents.lines().count(),
+							hash: crate::embedding::calculate_content_hash(&contents),
+							distance: None,
+						}];
+						let graph_builder =
+							graphrag::GraphBuilder::new_with_quiet(config.clone(), true)
+								.await?;
+						graph_builder
+							.process_code_blocks(&md_blocks, Some(state.clone()))
+							.await?;
 					}
 				} else {
 					// Handle code files
