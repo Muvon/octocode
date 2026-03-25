@@ -1,92 +1,132 @@
-# Octocode - Intelligent Code Indexer and Graph Builder
+<div align="center">
 
-**© 2025 Muvon Un Limited (Hong Kong)** | [Website](https://muvon.io) | [Product Page](https://octocode.muvon.io)
+<img src="https://raw.githubusercontent.com/Muvon/octocode/master/assets/logo.svg" width="120" alt="Octocode Logo">
 
+# Octocode
+
+### **AI-Powered Code Intelligence with Built-in MCP Server**
+
+[![GitHub stars](https://img.shields.io/github/stars/Muvon/octocode?style=social)](https://github.com/Muvon/octocode/stargazers)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
-[![Rust](https://img.shields.io/badge/rust-1.70%2B-orange.svg)](https://www.rust-lang.org)
+[![Rust](https://img.shields.io/badge/Rust-1.82%2B-orange.svg)](https://www.rust-lang.org)
+[![Release](https://img.shields.io/github/v/release/Muvon/octocode)](https://github.com/Muvon/octocode/releases)
+
+**Transform your codebase into a queryable knowledge graph. Ask questions in plain English, get precise answers.**
+
+[🚀 Quick Start](#quick-start) • [📖 Documentation](#documentation) • [🔌 MCP Server](#mcp-server) • [🌐 Website](https://octocode.muvon.io)
 
 <a href="https://glama.ai/mcp/servers/Muvon/octocode">
-  <img width="380" height="200" src="https://glama.ai/mcp/servers/Muvon/octocode/badge" alt="Octocode MCP server" />
+  <img width="300" src="https://glama.ai/mcp/servers/Muvon/octocode/badge" alt="Octocode MCP server" />
 </a>
 
-## 🚀 Overview
+</div>
 
-Octocode is a powerful code indexer and semantic search engine that builds intelligent knowledge graphs of your codebase. It combines advanced AI capabilities with local-first design to provide deep code understanding, relationship mapping, and intelligent assistance for developers.
+---
 
-## ✨ Key Features
+## 🤔 Why Octocode?
 
-- **🔍 Semantic Code Search** - Natural language queries with multi-query support
-- **🕸️ Knowledge Graph (GraphRAG)** - Automatic relationship discovery between files
-- **🌐 Multi-Language Support** - Rust, Python, JavaScript, TypeScript, Go, PHP, C++, Ruby, and more
-- **🧠 AI-Powered Features** - Smart commits, code review, memory system with semantic search
-- **🔌 MCP Server Integration** - Built-in Model Context Protocol server with LSP support
-- **⚡ Performance & Flexibility** - Intelligent LanceDB optimization, local/cloud embedding models
-
-## 📦 Quick Installation
+**You know that feeling** — staring at a 100k+ line codebase, trying to find where authentication is handled, or how the database layer connects to the API. Traditional search (`grep`, `ripgrep`) only finds exact matches. Octocode understands *meaning*.
 
 ```bash
-# Universal install script (Linux, macOS, Windows)
-curl -fsSL https://raw.githubusercontent.com/Muvon/octocode/master/install.sh | sh
+# Instead of this:
+grep -r "auth" --include="*.rs" | head -20  # 847 results, mostly noise
+
+# Do this:
+octocode search "how is user authentication implemented"
+# → 3 relevant files with context and relationships
 ```
 
-**Alternative methods:**
-- Download from [GitHub Releases](https://github.com/Muvon/octocode/releases)
-- Install with Cargo: `cargo install --git https://github.com/Muvon/octocode`
+Octocode builds a **semantic knowledge graph** of your entire codebase using tree-sitter AST parsing and vector embeddings. It connects your code to AI assistants via the **Model Context Protocol (MCP)** — giving Claude, Cursor, and other AI tools deep contextual understanding of your project.
 
-For detailed installation instructions, see [Installation Guide](INSTALL.md).
+## ✨ What Makes It Different
 
-## 🔑 API Keys Setup
+| Feature | Traditional Search | Octocode |
+|---------|-------------------|----------|
+| **Query style** | Exact keywords | Natural language |
+| **Results** | Text matches | Semantic meaning + relationships |
+| **Context** | Single file | Cross-file dependencies & imports |
+| **AI integration** | None | Native MCP server + LSP |
+| **Speed** | Instant | <2s indexing, instant queries |
 
-**⚠️ Required for functionality:**
-
-```bash
-# Required: Voyage AI (embeddings) - 200M free tokens/month
-export VOYAGE_API_KEY="your-voyage-api-key"
-
-# Optional: OpenRouter (LLM features)
-export OPENROUTER_API_KEY="your-openrouter-api-key"
-```
-
-**Get your free API keys:**
-- **Voyage AI**: [Get free API key](https://www.voyageai.com/) (200M tokens/month free)
-- **OpenRouter**: [Get API key](https://openrouter.ai/) (optional, for AI features)
+**Built with Rust** for performance. **Local-first** for privacy. **Open source** (Apache 2.0) for transparency.
 
 ## 🚀 Quick Start
 
+### 1. Install (30 seconds)
+
 ```bash
-# 1. Index your codebase
-octocode index
+# Universal installer (Linux, macOS, Windows)
+curl -fsSL https://raw.githubusercontent.com/Muvon/octocode/master/install.sh | sh
 
-# 2. Search with natural language
-octocode search "HTTP request handling"
-
-# 3. Multi-query search for comprehensive results
-octocode search "authentication" "middleware"
-
-# 4. AI-powered git workflow
-octocode commit --all
-
-# 5. Start MCP server for AI assistants
-octocode mcp --path /path/to/your/project
+# Or with Cargo
+cargo install --git https://github.com/Muvon/octocode
 ```
 
-## 📚 Complete Documentation
+### 2. Configure API Keys (1 minute)
 
-📖 **Quick Navigation**
+```bash
+# Required: Voyage AI (200M free tokens/month)
+export VOYAGE_API_KEY="your-voyage-api-key"
 
-- **[Installation Guide](INSTALL.md)** - Detailed installation methods and building from source
-- **[Getting Started](doc/GETTING_STARTED.md)** - First steps and basic workflow
-- **[API Keys Setup](doc/API_KEYS.md)** - Complete API configuration guide
-- **[Configuration Guide](doc/CONFIGURATION.md)** - Configuration system, templates, and customization
-- **[Commands Reference](doc/COMMANDS.md)** - Complete command reference with examples
-- **[Advanced Usage](doc/ADVANCED_USAGE.md)** - Advanced features and workflows
-- **[MCP Integration](doc/MCP_INTEGRATION.md)** - Model Context Protocol server setup
-- **[LSP Integration](doc/LSP_INTEGRATION.md)** - Language Server Protocol integration
-- **[Memory System](doc/MEMORY_SYSTEM.md)** - Memory management and semantic search
-- **[Release Management](doc/RELEASE_MANAGEMENT.md)** - AI-powered release automation
-- **[Architecture](doc/ARCHITECTURE.md)** - Core components and system design
-- **[Performance](doc/PERFORMANCE.md)** - Performance metrics and optimization
-- **[Contributing](doc/CONTRIBUTING.md)** - Development setup and contribution guidelines
+# Optional: OpenRouter (for AI commit messages, code review)
+export OPENROUTER_API_KEY="your-openrouter-api-key"
+```
+
+[Get Voyage AI key](https://www.voyageai.com/) • [Get OpenRouter key](https://openrouter.ai/)
+
+### 3. Index Your Codebase (2-5 minutes)
+
+```bash
+cd /your/project
+octocode index
+# → Indexed 12,847 blocks across 342 files
+```
+
+### 4. Search with Natural Language
+
+```bash
+# Single query
+octocode search "HTTP middleware pattern"
+
+# Multi-query for comprehensive results
+octocode search "authentication" "middleware" "session"
+
+# With filters
+octocode search "database connection pool" --lang rust
+```
+
+### 5. Connect AI Assistants (MCP Server)
+
+```bash
+# Start MCP server for Claude Desktop, Cursor, etc.
+octocode mcp --path /your/project
+
+# Or HTTP mode for custom integrations
+octocode mcp --bind 0.0.0.0:12345
+```
+
+## 🔌 MCP Server Integration
+
+Octocode includes a **built-in MCP server** that exposes your codebase as tools to AI assistants:
+
+| Tool | What It Does |
+|------|--------------|
+| `search_code` | Semantic search across your entire codebase |
+| `get_file_context` | Retrieve specific files with surrounding context |
+| `query_graph` | Ask questions about code relationships and dependencies |
+| `get_symbols` | Find functions, structs, classes by name or purpose |
+
+**Works with:** Claude Desktop • Cursor • Any MCP-compatible client
+
+See [MCP Integration Guide](doc/MCP_INTEGRATION.md) for setup instructions.
+
+## 🎯 Use Cases
+
+- **🆕 Onboarding** — "How does the auth system work?" → Get the full picture in seconds
+- **🔍 Code Archaeology** — Find legacy code patterns without knowing exact names
+- **🤖 AI Pair Programming** — Give your AI assistant complete codebase context
+- **📝 Refactoring** — Understand dependencies before making changes
+- **🔎 Code Review** — "Show me all error handling in the API layer"
 
 ## 🌐 Supported Languages
 
@@ -94,34 +134,55 @@ octocode mcp --path /path/to/your/project
 |----------|------------|----------|
 | **Rust** | `.rs` | Full AST parsing, pub/use detection, module structure |
 | **Python** | `.py` | Import/class/function extraction, docstring parsing |
-| **JavaScript** | `.js`, `.jsx` | ES6 imports/exports, function declarations |
-| **TypeScript** | `.ts`, `.tsx` | Type definitions, interface extraction |
+| **TypeScript/JavaScript** | `.ts`, `.tsx`, `.js`, `.jsx` | ES6 imports/exports, type definitions |
 | **Go** | `.go` | Package/import analysis, struct/interface parsing |
 | **PHP** | `.php` | Class/function extraction, namespace support |
 | **C++** | `.cpp`, `.hpp`, `.h` | Include analysis, class/function extraction |
 | **Ruby** | `.rb` | Class/module extraction, method definitions |
+| **Java** | `.java` | Import analysis, class/method extraction |
 | **JSON** | `.json` | Structure analysis, key extraction |
 | **Bash** | `.sh`, `.bash` | Function and variable extraction |
 | **Markdown** | `.md` | Document section indexing, header extraction |
 
+*Plus: CSS, Lua, Svelte, and more via tree-sitter*
+
+## 📚 Documentation
+
+- **[Getting Started](doc/GETTING_STARTED.md)** — First steps and basic workflow
+- **[Installation Guide](INSTALL.md)** — Detailed methods and building from source
+- **[MCP Integration](doc/MCP_INTEGRATION.md)** — Connect to Claude, Cursor, etc.
+- **[Commands Reference](doc/COMMANDS.md)** — Complete CLI reference
+- **[Configuration](doc/CONFIGURATION.md)** — Templates and customization
+- **[API Keys](doc/API_KEYS.md)** — Provider setup guide
+- **[Architecture](doc/ARCHITECTURE.md)** — How it works under the hood
+- **[Contributing](doc/CONTRIBUTING.md)** — Development setup
+
 ## 🔒 Privacy & Security
 
-- **🏠 Local-first option**: FastEmbed and SentenceTransformer run entirely offline (macOS only)
-- **🔑 Secure storage**: API keys stored locally, environment variables supported
-- **📁 Respects .gitignore**: Never indexes sensitive files or directories
-- **🛡️ MCP security**: Server runs locally with no external network access for search
-- **🌐 Cloud embeddings**: Voyage AI and other providers process only file metadata, not source code
+- **🏠 Local-first** — FastEmbed runs entirely offline (macOS)
+- **🔐 Secure** — API keys stored locally, env vars supported
+- **🚫 Respects .gitignore** — Never indexes sensitive files
+- **🛡️ MCP security** — Local-only server, no external network for search
+- **📤 Cloud-safe** — Embeddings process only metadata, never source code
 
-## 🤝 Support & Community
+## 🤝 Community & Support
 
-- **🐛 Issues**: [GitHub Issues](https://github.com/Muvon/octocode/issues)
-- **📧 Email**: [opensource@muvon.io](mailto:opensource@muvon.io)
-- **🏢 Company**: Muvon Un Limited (Hong Kong)
+- ⭐ **Star us on GitHub** — It really helps!
+- 🐛 [Report Issues](https://github.com/Muvon/octocode/issues)
+- 💬 [Discussions](https://github.com/Muvon/octocode/discussions)
+- 📧 [opensource@muvon.io](mailto:opensource@muvon.io)
+- 🌐 [muvon.io](https://muvon.io)
 
 ## ⚖️ License
 
-This project is licensed under the **Apache License 2.0** - see the [LICENSE](LICENSE) file for details.
+Apache License 2.0 — See [LICENSE](LICENSE) for details.
 
 ---
 
-**Built with ❤️ by the Muvon team in Hong Kong**
+<div align="center">
+
+**Built with 🦀 Rust by [Muvon](https://muvon.io) in Hong Kong**
+
+[⭐ Star](https://github.com/Muvon/octocode) • [🍴 Fork](https://github.com/Muvon/octocode/fork) • [📣 Share](https://twitter.com/intent/tweet?text=Octocode%20-%20AI-powered%20code%20intelligence%20with%20built-in%20MCP%20server&url=https://github.com/Muvon/octocode)
+
+</div>
