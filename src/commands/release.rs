@@ -595,10 +595,17 @@ async fn generate_changelog_content(
 		if commit.breaking {
 			breaking_commits.push(commit);
 		} else {
+			let is_deps = commit.scope.as_deref() == Some("deps")
+				|| commit.description.to_lowercase().starts_with("bump ");
 			match commit.commit_type.as_str() {
 				"feat" => feature_commits.push(commit),
 				"fix" => fix_commits.push(commit),
+				// Meaningful refactors/improvements — but not pure dep bumps
 				"perf" | "refactor" | "style" => improvement_commits.push(commit),
+				// chore/ci/build/test with a real scope are improvements; deps/tooling noise goes to other
+				"chore" | "ci" | "build" | "test" if !is_deps && commit.scope.is_some() => {
+					improvement_commits.push(commit)
+				}
 				"docs" => docs_commits.push(commit),
 				_ => other_commits.push(commit),
 			}
@@ -660,81 +667,62 @@ async fn generate_changelog_content(
 		content.push('\n');
 	}
 
-	// Other Changes
+	// Other Changes — just a count, no individual noise entries
 	if !other_commits.is_empty() {
-		content.push_str("### 🔄 Other Changes\n\n");
-		for commit in &other_commits {
-			content.push_str(&format_enhanced_commit_entry(commit));
-		}
-		content.push('\n');
-	}
-
-	// Enhanced commit summary with better organization
-	if !analysis.commits.is_empty() {
-		content.push_str("### 📊 Release Summary\n\n");
-
 		content.push_str(&format!(
-			"**Total commits**: {} across {} categories\n\n",
-			total_commits,
-			[
-				breaking_count > 0,
-				feature_count > 0,
-				improvement_count > 0,
-				fix_count > 0,
-				docs_count > 0,
-				other_count > 0
-			]
-			.iter()
-			.filter(|&&x| x)
-			.count()
+			"### 🔄 Other Changes\n\n\
+			{} maintenance, dependency, and tooling update{} not listed individually.\n\n",
+			other_count,
+			if other_count == 1 { "" } else { "s" }
 		));
-
-		// Priority-based summary
-		if breaking_count > 0 {
-			content.push_str(&format!(
-				"🚨 **{}** breaking change{} - *Review migration guide above*\n",
-				breaking_count,
-				if breaking_count == 1 { "" } else { "s" }
-			));
-		}
-		if feature_count > 0 {
-			content.push_str(&format!(
-				"✨ **{}** new feature{} - *Enhanced functionality*\n",
-				feature_count,
-				if feature_count == 1 { "" } else { "s" }
-			));
-		}
-		if improvement_count > 0 {
-			content.push_str(&format!(
-				"🔧 **{}** improvement{} - *Better performance & code quality*\n",
-				improvement_count,
-				if improvement_count == 1 { "" } else { "s" }
-			));
-		}
-		if fix_count > 0 {
-			content.push_str(&format!(
-				"🐛 **{}** bug fix{} - *Improved stability*\n",
-				fix_count,
-				if fix_count == 1 { "" } else { "es" }
-			));
-		}
-		if docs_count > 0 {
-			content.push_str(&format!(
-				"📚 **{}** documentation update{} - *Better developer experience*\n",
-				docs_count,
-				if docs_count == 1 { "" } else { "s" }
-			));
-		}
-		if other_count > 0 {
-			content.push_str(&format!(
-				"🔄 **{}** other change{} - *Maintenance & tooling*\n",
-				other_count,
-				if other_count == 1 { "" } else { "s" }
-			));
-		}
-
-		content.push('\n');
 	}
+
+	// Stats summary — only shown when there's no AI summary (fallback path)
+	content.push_str("### 📊 Release Summary\n\n");
+	content.push_str(&format!("**Total commits**: {}\n\n", total_commits));
+	if breaking_count > 0 {
+		content.push_str(&format!(
+			"🚨 **{}** breaking change{} - *Review migration guide above*\n",
+			breaking_count,
+			if breaking_count == 1 { "" } else { "s" }
+		));
+	}
+	if feature_count > 0 {
+		content.push_str(&format!(
+			"✨ **{}** new feature{} - *Enhanced functionality*\n",
+			feature_count,
+			if feature_count == 1 { "" } else { "s" }
+		));
+	}
+	if improvement_count > 0 {
+		content.push_str(&format!(
+			"🔧 **{}** improvement{} - *Better performance & code quality*\n",
+			improvement_count,
+			if improvement_count == 1 { "" } else { "s" }
+		));
+	}
+	if fix_count > 0 {
+		content.push_str(&format!(
+			"🐛 **{}** bug fix{} - *Improved stability*\n",
+			fix_count,
+			if fix_count == 1 { "" } else { "es" }
+		));
+	}
+	if docs_count > 0 {
+		content.push_str(&format!(
+			"📚 **{}** documentation update{} - *Better developer experience*\n",
+			docs_count,
+			if docs_count == 1 { "" } else { "s" }
+		));
+	}
+	if other_count > 0 {
+		content.push_str(&format!(
+			"🔄 **{}** other change{} - *Maintenance & tooling*\n",
+			other_count,
+			if other_count == 1 { "" } else { "s" }
+		));
+	}
+	content.push('\n');
 
 	Ok(content)
 }
@@ -788,18 +776,31 @@ async fn generate_enhanced_changelog_with_ai(
 					enhanced.push_str("\n\n");
 				}
 
-				// Add the detailed sections from standard changelog (skip the header)
+				// Append detailed sections from standard changelog, skipping its header and
+				// the trailing stats block (AI summary already covers the high-level view).
 				let lines: Vec<&str> = standard_changelog.lines().collect();
 				let mut skip_header = true;
-				for line in lines {
+				let mut skip_stats = false;
+				for line in &lines {
 					if skip_header && line.starts_with("## [") {
 						skip_header = false;
 						continue;
 					}
-					if !skip_header && !line.trim().is_empty() {
+					if skip_header {
+						continue;
+					}
+					// Drop the stats summary section — redundant when AI summary is present
+					if line.starts_with("### 📊 Release Summary") {
+						skip_stats = true;
+						continue;
+					}
+					if skip_stats {
+						continue;
+					}
+					if !line.trim().is_empty() {
 						enhanced.push_str(line);
 						enhanced.push('\n');
-					} else if !skip_header {
+					} else {
 						enhanced.push('\n');
 					}
 				}
