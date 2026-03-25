@@ -216,6 +216,41 @@ Non-md links are ignored: [Image](./photo.png)
 	}
 
 	#[test]
+	fn test_resolve_with_deep_project_paths() {
+		let md = Markdown;
+		// Real-world paths from ai-assistant repo
+		let all_files = vec![
+			"projects/gearbox/autodocs-about/docs/core-architecture/credit-suite.md".to_string(),
+			"projects/gearbox/autodocs-about/docs/core-architecture/pool.md".to_string(),
+			"projects/gearbox/autodocs-about/docs/introduction/credit-accounts.md".to_string(),
+		];
+
+		// adapters-integrations.md links to credit-suite.md (same dir)
+		let resolved = md.resolve_import(
+			"credit-suite.md",
+			"projects/gearbox/autodocs-about/docs/core-architecture/adapters-integrations.md",
+			&all_files,
+		);
+		assert_eq!(
+			resolved,
+			Some("projects/gearbox/autodocs-about/docs/core-architecture/credit-suite.md".to_string()),
+			"Same-dir link should resolve"
+		);
+
+		// adapters-integrations.md links to ../introduction/credit-accounts.md
+		let resolved = md.resolve_import(
+			"../introduction/credit-accounts.md",
+			"projects/gearbox/autodocs-about/docs/core-architecture/adapters-integrations.md",
+			&all_files,
+		);
+		assert_eq!(
+			resolved,
+			Some("projects/gearbox/autodocs-about/docs/introduction/credit-accounts.md".to_string()),
+			"Parent-dir link should resolve"
+		);
+	}
+
+	#[test]
 	fn test_no_links_in_empty_doc() {
 		let link_re =
 			regex::Regex::new(r"\[[^\]]*\]\(([^)]+\.md)(?:#[^)]*)?\)").unwrap();

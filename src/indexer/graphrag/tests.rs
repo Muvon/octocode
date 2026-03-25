@@ -954,4 +954,101 @@ def _private_function():
 			extract_imports_exports_recursive(child, contents, lang_impl, all_imports, all_exports);
 		}
 	}
+
+	/// Integration test: verify discover_relationships_efficiently produces
+	/// References edges for markdown nodes with file-path imports.
+	/// This is the exact code path used at runtime (not discover_import_relationships directly).
+	#[tokio::test]
+	async fn test_markdown_references_via_efficient_discovery() {
+		use crate::indexer::graphrag::types::RelationType;
+
+		// Source: adapters-integrations.md imports credit-suite.md and credit-accounts.md
+		let source = CodeNode {
+			id: "projects/docs/core/adapters-integrations.md".to_string(),
+			name: "adapters-integrations".to_string(),
+			kind: "document_file".to_string(),
+			path: "projects/docs/core/adapters-integrations.md".to_string(),
+			description: String::new(),
+			symbols: vec![],
+			imports: vec![
+				"credit-suite.md".to_string(),             // same-dir
+				"../intro/credit-accounts.md".to_string(),  // parent-dir
+			],
+			exports: vec!["Adapters".to_string()],
+			functions: vec![],
+			hash: "aaa".to_string(),
+			embedding: vec![],
+			size_lines: 50,
+			language: "markdown".to_string(),
+		};
+
+		let target1 = CodeNode {
+			id: "projects/docs/core/credit-suite.md".to_string(),
+			name: "credit-suite".to_string(),
+			kind: "document_file".to_string(),
+			path: "projects/docs/core/credit-suite.md".to_string(),
+			description: String::new(),
+			symbols: vec![],
+			imports: vec![],
+			exports: vec!["Credit Suite".to_string()],
+			functions: vec![],
+			hash: "bbb".to_string(),
+			embedding: vec![],
+			size_lines: 100,
+			language: "markdown".to_string(),
+		};
+
+		let target2 = CodeNode {
+			id: "projects/docs/intro/credit-accounts.md".to_string(),
+			name: "credit-accounts".to_string(),
+			kind: "document_file".to_string(),
+			path: "projects/docs/intro/credit-accounts.md".to_string(),
+			description: String::new(),
+			symbols: vec![],
+			imports: vec![],
+			exports: vec!["Credit Accounts".to_string()],
+			functions: vec![],
+			hash: "ccc".to_string(),
+			embedding: vec![],
+			size_lines: 80,
+			language: "markdown".to_string(),
+		};
+
+		let all_nodes = vec![source.clone(), target1.clone(), target2.clone()];
+		let new_files = vec![source.clone()];
+
+		// Call the SAME function used at runtime
+		let relationships = RelationshipDiscovery::discover_relationships_efficiently(
+			&new_files,
+			&all_nodes,
+		)
+		.await
+		.expect("relationship discovery should succeed");
+
+		// Find References relationships (not just sibling_module)
+		let refs: Vec<_> = relationships
+			.iter()
+			.filter(|r| r.relation_type == RelationType::References)
+			.collect();
+
+		assert!(
+			refs.len() >= 2,
+			"Expected at least 2 References relationships, got {}: {:?}",
+			refs.len(),
+			refs.iter().map(|r| format!("{} -> {}", r.source, r.target)).collect::<Vec<_>>()
+		);
+
+		// Verify specific edges
+		let has_suite = refs.iter().any(|r| {
+			r.source == "projects/docs/core/adapters-integrations.md"
+				&& r.target == "projects/docs/core/credit-suite.md"
+		});
+		assert!(has_suite, "Should have reference to credit-suite.md");
+
+		let has_accounts = refs.iter().any(|r| {
+			r.source == "projects/docs/core/adapters-integrations.md"
+				&& r.target == "projects/docs/intro/credit-accounts.md"
+		});
+		assert!(has_accounts, "Should have reference to credit-accounts.md");
+	}
 }

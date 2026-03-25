@@ -32,30 +32,36 @@ impl RelationshipDiscovery {
 
 		for source_file in new_files {
 			// 1. Import/Export relationships (high confidence)
-			for import in &source_file.imports {
-				for target_file in all_nodes {
-					if target_file.id == source_file.id {
-						continue;
-					}
+			// For markdown files, use proper path-based import resolution
+			// (the symbol-matching approach doesn't work for file path imports)
+			if source_file.language == "markdown" {
+				Self::discover_import_relationships(source_file, all_nodes, &mut relationships);
+			} else {
+				for import in &source_file.imports {
+					for target_file in all_nodes {
+						if target_file.id == source_file.id {
+							continue;
+						}
 
-					// Check if target exports what source imports
-					if target_file
-						.exports
-						.iter()
-						.any(|exp| symbols_match(import, exp))
-						|| target_file
-							.symbols
+						// Check if target exports what source imports
+						if target_file
+							.exports
 							.iter()
-							.any(|sym| symbols_match(import, sym))
-					{
-						relationships.push(CodeRelationship {
-							source: source_file.id.clone(),
-							target: target_file.id.clone(),
-							relation_type: crate::indexer::graphrag::types::RelationType::Imports,
-							description: format!("Imports {} from {}", import, target_file.name),
-							confidence: 0.9,
-							weight: 1.0,
-						});
+							.any(|exp| symbols_match(import, exp))
+							|| target_file
+								.symbols
+								.iter()
+								.any(|sym| symbols_match(import, sym))
+						{
+							relationships.push(CodeRelationship {
+								source: source_file.id.clone(),
+								target: target_file.id.clone(),
+								relation_type: crate::indexer::graphrag::types::RelationType::Imports,
+								description: format!("Imports {} from {}", import, target_file.name),
+								confidence: 0.9,
+								weight: 1.0,
+							});
+						}
 					}
 				}
 			}
