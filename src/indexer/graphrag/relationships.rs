@@ -40,7 +40,6 @@ impl RelationshipDiscovery {
 				symbol_index.entry(sym.as_str()).or_default().push(&node.id);
 			}
 		}
-
 		// Pre-build path index for parent-child lookups
 		let all_node_ids: Vec<(&str, &str)> = all_nodes
 			.iter()
@@ -57,19 +56,24 @@ impl RelationshipDiscovery {
 
 		for source_file in new_files {
 			// 1. Import/Export relationships via pre-built index (O(1) per import)
-			for import in &source_file.imports {
-				// Check both the raw import and cleaned versions
-				let candidates = Self::get_import_candidates(import, &symbol_index);
-				for target_id in candidates {
-					if target_id != source_file.id {
-						relationships.push(CodeRelationship {
-							source: source_file.id.clone(),
-							target: target_id.to_string(),
-							relation_type: crate::indexer::graphrag::types::RelationType::Imports,
-							description: format!("Imports {} from {}", import, target_id),
-							confidence: 0.9,
-							weight: 1.0,
-						});
+			if source_file.language == "markdown" {
+				Self::discover_import_relationships(source_file, all_nodes, &mut relationships);
+			} else {
+				for import in &source_file.imports {
+					// Check both the raw import and cleaned versions
+					let candidates = Self::get_import_candidates(import, &symbol_index);
+					for target_id in candidates {
+						if target_id != source_file.id {
+							relationships.push(CodeRelationship {
+								source: source_file.id.clone(),
+								target: target_id.to_string(),
+								relation_type:
+									crate::indexer::graphrag::types::RelationType::Imports,
+								description: format!("Imports {} from {}", import, target_id),
+								confidence: 0.9,
+								weight: 1.0,
+							});
+						}
 					}
 				}
 			}
