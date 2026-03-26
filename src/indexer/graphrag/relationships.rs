@@ -57,7 +57,7 @@ impl RelationshipDiscovery {
 		for source_file in new_files {
 			// 1. Import/Export relationships via pre-built index (O(1) per import)
 			if source_file.language == "markdown" {
-				Self::discover_import_relationships(source_file, all_nodes, &mut relationships);
+	Self::discover_import_relationships(source_file, all_nodes, &mut relationships);
 			} else {
 				for import in &source_file.imports {
 					// Check both the raw import and cleaned versions
