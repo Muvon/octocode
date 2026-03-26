@@ -35,7 +35,7 @@ impl RelationshipDiscovery {
 			// For markdown files, use proper path-based import resolution
 			// (the symbol-matching approach doesn't work for file path imports)
 			if source_file.language == "markdown" {
-				Self::discover_import_relationships(source_file, all_nodes, &mut relationships);
+	Self::discover_import_relationships(source_file, all_nodes, &mut relationships);
 			} else {
 				for import in &source_file.imports {
 					for target_file in all_nodes {
