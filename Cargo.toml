@@ -96,8 +96,14 @@ url = "2.5.8"
 dotenvy = "0.15"
 
 # Local dependency on octolib with embedding features
-# octolib = { path = "../octolib", features = ["fastembed", "huggingface"] }
-octolib = { version = "0.13.0", default-features = false }
+octolib = { path = "../octolib", features = ["fastembed", "huggingface"] }
+# octolib = { version = "0.13.0", default-features = false }
+
+# MCP SDK - official Rust implementation
+rmcp = { version = "1.3.0", features = ["server", "macros", "transport-io", "transport-streamable-http-server"] }
+schemars = "1"  # Required for rmcp schema generation (must match rmcp's version)
+hyper = { version = "1", features = ["server", "http1"] }  # Required for HTTP mode connection handling
+hyper-util = { version = "0.1", features = ["server", "tokio", "service"] }  # Required for HTTP mode connection handling
 
 [profile.dev]
 opt-level = 1          # Basic optimizations without slowing compilation too much

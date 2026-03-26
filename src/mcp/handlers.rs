@@ -30,7 +30,7 @@ pub fn handle_initialize(
 		jsonrpc: "2.0".to_string(),
 		id: request.id.clone(),
 		result: Some(serde_json::json!({
-			"protocolVersion": "2024-11-05",
+			"protocolVersion": "2025-03-26",
 			"capabilities": {
 				"tools": {
 					"listChanged": false

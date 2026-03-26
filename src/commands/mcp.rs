@@ -57,14 +57,11 @@ pub async fn run(args: McpArgs) -> Result<()> {
 		));
 	}
 
-	// Note: No console output here - MCP protocol compliance requires clean stdout/stderr
-	// All debug information is logged to files via structured logging in the server
-	// Git validation is now handled in the server - indexer will only start if in git repo or --no-git is set
+	// No console output here — MCP protocol compliance requires clean stdout/stderr.
+	// All debug information is logged to files via structured logging in the server.
+	// Git validation is handled in the server: indexer only starts if in git repo or --no-git is set.
 
-	// Note: No console output here - MCP protocol compliance requires clean stdout/stderr
-	// All debug information is logged to files via structured logging in the server
-
-	let mut server = McpServer::new(
+	let (server, bg) = McpServer::new(
 		config,
 		args.debug,
 		working_directory,
@@ -75,8 +72,8 @@ pub async fn run(args: McpArgs) -> Result<()> {
 
 	// Check if HTTP binding is requested
 	if let Some(bind_addr) = args.bind {
-		server.run_http(&bind_addr).await
+		server.run_http(&bind_addr, bg).await
 	} else {
-		server.run().await
+		server.run_stdio(bg).await
 	}
 }

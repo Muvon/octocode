@@ -26,6 +26,8 @@ use crate::mcp::logging::{log_critical_anyhow_error, log_critical_error, log_wat
 use crate::watcher_config::{IgnorePatterns, MIN_DEBOUNCE_MS};
 
 const MAX_WATCHER_ERRORS: u32 = 5;
+// Set to true to log individual file events (useful for debugging)
+const MCP_ENABLE_VERBOSE_EVENTS: bool = false;
 
 /// Run file watcher with debouncing and error recovery
 pub async fn run_watcher(
@@ -54,7 +56,7 @@ pub async fn run_watcher(
 					// Log file watcher events using our structured logging
 					log_watcher_event("file_change_batch", None, relevant_events.len());
 
-					if debug && crate::mcp::server::MCP_ENABLE_VERBOSE_EVENTS {
+					if debug && MCP_ENABLE_VERBOSE_EVENTS {
 						trace!(
 							event_count = relevant_events.len(),
 							"File watcher detected relevant events"

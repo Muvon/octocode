@@ -263,7 +263,9 @@ impl SemanticCodeProvider {
 		}
 
 		// Parse and validate language filter if provided
-		let language_filter = if let Some(language_value) = arguments.get("language") {
+		let language_filter = if let Some(language_value) =
+			arguments.get("language").filter(|v| !v.is_null())
+		{
 			let language = language_value.as_str().ok_or_else(|| {
 				McpError::invalid_params(
 					"Invalid language parameter: must be a string",

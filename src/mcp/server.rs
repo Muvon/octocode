@@ -12,77 +12,400 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::Result;
-use serde_json::json;
-use std::panic;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::net::TcpListener;
-use tokio::sync::mpsc;
-use tokio::sync::Mutex;
-use tokio::time::{sleep, Duration, Instant};
-use tracing::{debug, info, trace, warn};
+//! MCP Server implementation using official rmcp SDK
+//!
+//! Supports both stdio and Streamable HTTP transports.
+//! All core logic from the original server.rs is preserved:
+//! - Semantic search, view signatures, GraphRAG tools
+//! - LSP tools (goto_definition, hover, find_references, document_symbols, workspace_symbols, completion)
+//! - File watcher with debounced background indexing
+//! - Structured logging, graceful shutdown
 
+use super::graphrag::GraphRagProvider;
+use super::logging::{
+	init_mcp_logging, log_critical_anyhow_error, log_indexing_operation, log_watcher_event,
+};
+use super::semantic_code::SemanticCodeProvider;
+use super::watcher::run_watcher;
 use crate::config::Config;
 use crate::indexer;
 use crate::lock::IndexLock;
-use crate::mcp::graphrag::GraphRagProvider;
-use crate::mcp::http::{handle_http_connection, HttpServerState};
-use crate::mcp::logging::{
-	init_mcp_logging, log_critical_anyhow_error, log_critical_error, log_indexing_operation,
-	log_mcp_request, log_mcp_response, log_watcher_event,
-};
-use crate::mcp::semantic_code::SemanticCodeProvider;
-use crate::mcp::types::{parse_mcp_error, JsonRpcError, JsonRpcRequest, JsonRpcResponse, McpError};
-use crate::mcp::watcher::run_watcher;
 use crate::state;
 use crate::store::Store;
 use crate::watcher_config::{DEFAULT_ADDITIONAL_DELAY_MS, MCP_DEFAULT_DEBOUNCE_MS};
+use anyhow::Result;
+use rmcp::{
+	handler::server::{router::tool::ToolRouter, wrapper::Parameters},
+	model::{Implementation, ServerCapabilities, ServerInfo},
+	schemars, tool, tool_handler, tool_router, ServerHandler, ServiceExt,
+};
+use serde::{Deserialize, Serialize};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use tokio::sync::{mpsc, Mutex};
+use tokio::time::{sleep, Duration, Instant};
+use tracing::{debug, info, warn};
 
-// Configurable debounce settings (code-only configuration for now)
-//
-// You can modify these constants to tune the MCP server behavior:
-// - MCP_DEBOUNCE_MS: How long to wait after the last file change before triggering reindex
-// - MCP_MAX_PENDING_EVENTS: Maximum number of file events to queue (prevents memory issues)
-// - MCP_INDEX_TIMEOUT_MS: Maximum time to wait for indexing to complete before timing out
-// - MCP_ENABLE_VERBOSE_EVENTS: Whether to log individual file events (useful for debugging)
-// - MCP_MAX_REQUEST_SIZE: Maximum size of incoming JSON-RPC requests (prevents memory exhaustion)
-// - MCP_IO_TIMEOUT_MS: Timeout for individual stdin/stdout operations (prevents hanging on broken pipes, NOT for server lifecycle)
-//
-pub const MCP_DEBOUNCE_MS: u64 = MCP_DEFAULT_DEBOUNCE_MS; // 2000ms = 2 seconds
-pub const MCP_MAX_PENDING_EVENTS: usize = 100;
+// Configurable debounce settings
+const MCP_DEBOUNCE_MS: u64 = MCP_DEFAULT_DEBOUNCE_MS; // 2000ms = 2 seconds
+const MCP_MAX_PENDING_EVENTS: usize = 100;
 const MCP_INDEX_TIMEOUT_MS: u64 = 300_000; // 5 minutes
-pub const MCP_ENABLE_VERBOSE_EVENTS: bool = false; // Set to true for detailed event logging
-const MCP_MAX_REQUEST_SIZE: usize = 10_485_760; // 10MB maximum request size
-const MCP_IO_TIMEOUT_MS: u64 = 30_000; // 30 seconds for individual I/O operations (NOT for server lifecycle)
 
-/// MCP Server implementation with modular tool providers
+// ---------------------------------------------------------------------------
+// Parameter structs for rmcp tool schema generation
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct SemanticSearchParams {
+	/// String or array of strings describing functionality to find. Array preferred for comprehensive results.
+	pub query: serde_json::Value,
+	/// Max results to return (default: 3)
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	#[schemars(range(min = 1, max = 20), extend("default" = 3))]
+	pub max_results: Option<usize>,
+	/// Result verbosity: 'signatures' (declarations only), 'partial' (truncated, default), 'full' (complete bodies)
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	#[schemars(extend("enum" = ["signatures", "partial", "full"]), extend("default" = "partial"))]
+	pub detail_level: Option<String>,
+	/// Filter code results by language (rust, python, typescript, go, etc.)
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub language: Option<String>,
+	/// Content type filter: 'code' (functions/classes), 'text' (plain text), 'docs' (markdown/README), 'all' (default)
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	#[schemars(extend("enum" = ["code", "text", "docs", "all"]), extend("default" = "all"))]
+	pub mode: Option<String>,
+	/// Similarity cutoff 0.0-1.0 (higher = stricter match)
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	#[schemars(range(min = 0, max = 1))]
+	pub threshold: Option<f32>,
+}
+
+#[derive(Debug, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ViewSignaturesParams {
+	/// File paths or glob patterns (e.g. 'src/main.rs', '**/*.py', 'src/**/*.ts')
+	#[schemars(length(min = 1, max = 100))]
+	pub files: Vec<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct GraphRagParams {
+	/// 'search' (semantic node search), 'get-node' (node details), 'get-relationships' (node connections), 'find-path' (path between two nodes), 'overview' (graph stats)
+	#[schemars(extend("enum" = ["search", "get-node", "get-relationships", "find-path", "overview"]))]
+	pub operation: String,
+	/// Search query for 'search' operation
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub query: Option<String>,
+	/// Node ID for 'get-node'/'get-relationships' (format: 'path/to/file' or 'path/to/file/symbol')
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub node_id: Option<String>,
+	/// Source node ID for 'find-path'
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub source_id: Option<String>,
+	/// Target node ID for 'find-path'
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub target_id: Option<String>,
+	/// Max path depth for 'find-path' (default: 3)
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	#[schemars(range(min = 1, max = 10), extend("default" = 3))]
+	pub max_depth: Option<usize>,
+	/// Output format (default: 'text')
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	#[schemars(extend("enum" = ["text", "json", "markdown"]), extend("default" = "text"))]
+	pub format: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct LspPositionParams {
+	/// Relative file path
+	pub file_path: String,
+	/// 1-indexed line number
+	pub line: u32,
+	/// Symbol name on that line
+	pub symbol: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct LspFindReferencesParams {
+	/// Relative file path
+	pub file_path: String,
+	/// 1-indexed line number
+	pub line: u32,
+	/// Symbol name on that line
+	pub symbol: String,
+	/// Include the declaration site in results
+	#[serde(default = "default_true")]
+	pub include_declaration: bool,
+}
+
+fn default_true() -> bool {
+	true
+}
+
+#[derive(Debug, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct LspDocumentSymbolsParams {
+	/// Relative file path
+	pub file_path: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct LspWorkspaceSymbolsParams {
+	/// Symbol name or prefix to search
+	pub query: String,
+}
+
+// ---------------------------------------------------------------------------
+// Background services: watcher + indexing (preserves all original logic)
+// ---------------------------------------------------------------------------
+
+/// Manages background tasks (file watcher, debouncer, indexing).
+/// Abort-on-drop ensures clean shutdown.
+pub struct BackgroundServices {
+	watcher_handle: Option<tokio::task::JoinHandle<()>>,
+	index_handle: Option<tokio::task::JoinHandle<()>>,
+	indexing_handle: Option<tokio::task::JoinHandle<()>>,
+}
+
+impl Drop for BackgroundServices {
+	fn drop(&mut self) {
+		if let Some(h) = self.watcher_handle.take() {
+			h.abort();
+		}
+		if let Some(h) = self.index_handle.take() {
+			h.abort();
+		}
+		if let Some(h) = self.indexing_handle.take() {
+			h.abort();
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// McpServer
+// ---------------------------------------------------------------------------
+
+/// MCP Server implementation using rmcp SDK.
+#[derive(Clone)]
 pub struct McpServer {
 	semantic_code: SemanticCodeProvider,
 	graphrag: Option<GraphRagProvider>,
 	lsp: Option<Arc<Mutex<crate::mcp::lsp::LspProvider>>>,
-	debug: bool,
-	working_directory: std::path::PathBuf,
-	no_git: bool,
 	indexer_enabled: bool,
-	watcher_handle: Option<tokio::task::JoinHandle<()>>,
-	index_handle: Option<tokio::task::JoinHandle<()>>,
-	indexing_handle: Option<tokio::task::JoinHandle<()>>,
-	indexing_in_progress: Arc<AtomicBool>,
-	store: Arc<Store>,
-	config: Config,
-	index_rx: Option<mpsc::Receiver<()>>,
+	tool_router: ToolRouter<Self>,
+}
+
+/// Tool execution error -> CallToolResult with is_error=true (MCP spec).
+#[tool_router]
+impl McpServer {
+	#[tool(
+		description = "Search codebase by meaning. Finds code by what it does, not exact symbol names. Prefer an array of related terms over a single query for broader coverage."
+	)]
+	async fn semantic_search(
+		&self,
+		Parameters(params): Parameters<SemanticSearchParams>,
+	) -> Result<String, String> {
+		debug!("Executing semantic_search with query: {:?}", params.query);
+
+		let mut arguments = match serde_json::to_value(&params) {
+			Ok(v) => v,
+			Err(e) => return Err(format!("Failed to serialize params: {}", e)),
+		};
+
+		// Apply default for max_results if not provided
+		if params.max_results.is_none() {
+			arguments["max_results"] = serde_json::json!(3);
+		}
+
+		match self.semantic_code.execute_search(&arguments).await {
+			Ok(result) => Ok(result),
+			Err(e) => Err(e.to_string()),
+		}
+	}
+
+	#[tool(
+		description = "Extract function signatures, class definitions, and declarations from files without implementation bodies. Supports Rust, JS/TS, Python, Go, C++, PHP, Ruby, Bash, JSON, CSS, Svelte, Markdown."
+	)]
+	async fn view_signatures(
+		&self,
+		Parameters(params): Parameters<ViewSignaturesParams>,
+	) -> Result<String, String> {
+		debug!("Executing view_signatures for {} files", params.files.len());
+
+		let arguments = match serde_json::to_value(&params) {
+			Ok(v) => v,
+			Err(e) => return Err(format!("Failed to serialize params: {}", e)),
+		};
+
+		match self.semantic_code.execute_view_signatures(&arguments).await {
+			Ok(result) => Ok(result),
+			Err(e) => Err(e.to_string()),
+		}
+	}
+
+	#[tool(
+		description = "Knowledge graph operations over the indexed codebase. Use for architectural queries: component relationships, dependency chains, data flows. For simple code lookup use semantic_search instead."
+	)]
+	async fn graphrag(
+		&self,
+		Parameters(params): Parameters<GraphRagParams>,
+	) -> Result<String, String> {
+		debug!("Executing graphrag with operation: {}", params.operation);
+
+		match &self.graphrag {
+			Some(provider) => {
+				let arguments = match serde_json::to_value(&params) {
+					Ok(v) => v,
+					Err(e) => return Err(format!("Failed to serialize params: {}", e)),
+				};
+
+				match provider.execute(&arguments).await {
+					Ok(result) => Ok(result),
+					Err(e) => Err(e.to_string()),
+				}
+			}
+			None => Err(
+				"GraphRAG is not enabled in the current configuration. Please enable GraphRAG in octocode.toml to use relationship-aware search.".to_string(),
+			),
+		}
+	}
+
+	// --- LSP tools ---
+
+	#[tool(description = "Jump to the definition of a symbol via LSP.")]
+	async fn lsp_goto_definition(
+		&self,
+		Parameters(params): Parameters<LspPositionParams>,
+	) -> Result<String, String> {
+		let Some(ref provider) = self.lsp else {
+			return Err("LSP server is not available. Start MCP server with --with-lsp=\"<command>\" to enable LSP features.".to_string());
+		};
+		let args = serde_json::to_value(&params).unwrap_or_default();
+		provider
+			.lock()
+			.await
+			.execute_goto_definition(&args)
+			.await
+			.map_err(|e| e.to_string())
+	}
+
+	#[tool(description = "Get type info and documentation for a symbol via LSP.")]
+	async fn lsp_hover(
+		&self,
+		Parameters(params): Parameters<LspPositionParams>,
+	) -> Result<String, String> {
+		let Some(ref provider) = self.lsp else {
+			return Err("LSP server is not available. Start MCP server with --with-lsp=\"<command>\" to enable LSP features.".to_string());
+		};
+		let args = serde_json::to_value(&params).unwrap_or_default();
+		provider
+			.lock()
+			.await
+			.execute_hover(&args)
+			.await
+			.map_err(|e| e.to_string())
+	}
+
+	#[tool(description = "Find all usages of a symbol across the workspace via LSP.")]
+	async fn lsp_find_references(
+		&self,
+		Parameters(params): Parameters<LspFindReferencesParams>,
+	) -> Result<String, String> {
+		let Some(ref provider) = self.lsp else {
+			return Err("LSP server is not available. Start MCP server with --with-lsp=\"<command>\" to enable LSP features.".to_string());
+		};
+		let args = serde_json::to_value(&params).unwrap_or_default();
+		provider
+			.lock()
+			.await
+			.execute_find_references(&args)
+			.await
+			.map_err(|e| e.to_string())
+	}
+
+	#[tool(
+		description = "List all symbols (functions, types, variables) defined in a file via LSP."
+	)]
+	async fn lsp_document_symbols(
+		&self,
+		Parameters(params): Parameters<LspDocumentSymbolsParams>,
+	) -> Result<String, String> {
+		let Some(ref provider) = self.lsp else {
+			return Err("LSP server is not available. Start MCP server with --with-lsp=\"<command>\" to enable LSP features.".to_string());
+		};
+		let args = serde_json::to_value(&params).unwrap_or_default();
+		provider
+			.lock()
+			.await
+			.execute_document_symbols(&args)
+			.await
+			.map_err(|e| e.to_string())
+	}
+
+	#[tool(description = "Search for symbols by name across the entire workspace via LSP.")]
+	async fn lsp_workspace_symbols(
+		&self,
+		Parameters(params): Parameters<LspWorkspaceSymbolsParams>,
+	) -> Result<String, String> {
+		let Some(ref provider) = self.lsp else {
+			return Err("LSP server is not available. Start MCP server with --with-lsp=\"<command>\" to enable LSP features.".to_string());
+		};
+		let args = serde_json::to_value(&params).unwrap_or_default();
+		provider
+			.lock()
+			.await
+			.execute_workspace_symbols(&args)
+			.await
+			.map_err(|e| e.to_string())
+	}
+
+	#[tool(description = "Get code completion suggestions at a symbol position via LSP.")]
+	async fn lsp_completion(
+		&self,
+		Parameters(params): Parameters<LspPositionParams>,
+	) -> Result<String, String> {
+		let Some(ref provider) = self.lsp else {
+			return Err("LSP server is not available. Start MCP server with --with-lsp=\"<command>\" to enable LSP features.".to_string());
+		};
+		let args = serde_json::to_value(&params).unwrap_or_default();
+		provider
+			.lock()
+			.await
+			.execute_completion(&args)
+			.await
+			.map_err(|e| e.to_string())
+	}
+}
+
+#[tool_handler(router = self.tool_router)]
+impl ServerHandler for McpServer {
+	fn get_info(&self) -> ServerInfo {
+		let capabilities = ServerCapabilities::builder().enable_tools().build();
+
+		let instructions = if self.indexer_enabled {
+			"This server provides modular AI tools: semantic code search, view signatures, and GraphRAG (if available). Use 'semantic_search' for code/documentation searches and 'graphrag' (if enabled) for relationship queries."
+		} else {
+			"WARNING: Octocode indexer is disabled: not in a git repository root. Run with --no-git to enable indexing outside git repos. Tools available: semantic_search, view_signatures, graphrag (if enabled)."
+		};
+
+		ServerInfo::new(capabilities)
+			.with_server_info(
+				Implementation::new("octocode-mcp", env!("CARGO_PKG_VERSION"))
+					.with_description("Semantic code search server with vector embeddings and optional GraphRAG support"),
+			)
+			.with_instructions(instructions)
+	}
 }
 
 impl McpServer {
+	/// Create a new MCP server instance.
+	///
+	/// Initialises the store, logging, providers, and optionally spawns LSP background init.
 	pub async fn new(
 		config: Config,
-		debug: bool,
+		debug_mode: bool,
 		working_directory: std::path::PathBuf,
 		no_git: bool,
 		lsp_command: Option<String>,
-	) -> Result<Self> {
+	) -> Result<(Self, BackgroundServices)> {
 		// Change to the working directory at server startup
 		std::env::set_current_dir(&working_directory).map_err(|e| {
 			anyhow::anyhow!(
@@ -92,20 +415,20 @@ impl McpServer {
 			)
 		})?;
 
-		// Initialize the store for the MCP server
+		// Initialize the store
 		let store = Store::new().await?;
 		store.initialize_collections().await?;
 		let store = Arc::new(store);
 
 		// Initialize logging
-		init_mcp_logging(working_directory.clone(), debug)?;
+		init_mcp_logging(working_directory.clone(), debug_mode)?;
 
 		let semantic_code = SemanticCodeProvider::new(config.clone(), working_directory.clone());
 		let graphrag = GraphRagProvider::new(config.clone(), working_directory.clone());
 
 		// Initialize LSP provider if command is provided (lazy initialization)
 		let lsp = if let Some(command) = lsp_command {
-			tracing::info!(
+			info!(
 				"LSP provider will be initialized lazily with command: {}",
 				command
 			);
@@ -119,7 +442,7 @@ impl McpServer {
 			tokio::spawn(async move {
 				let mut provider_guard = provider_clone.lock().await;
 				if let Err(e) = provider_guard.start_initialization().await {
-					tracing::warn!("LSP initialization failed: {}", e);
+					warn!("LSP initialization failed: {}", e);
 				}
 			});
 
@@ -128,1041 +451,306 @@ impl McpServer {
 			None
 		};
 
-		Ok(Self {
+		// Determine if indexer should start
+		let should_start_indexer = if !no_git && config.index.require_git {
+			indexer::git::is_git_repo_root(&working_directory)
+		} else {
+			true
+		};
+
+		if !should_start_indexer {
+			warn!(
+				"Indexer not started: Not in a git repository and --no-git flag not set. \
+				 Use --no-git to enable indexing outside git repos."
+			);
+		}
+
+		// Build tool router — LSP tools return helpful errors when LSP is not configured
+		let mut tool_router = Self::tool_router();
+
+		// Remove LSP tools from router if LSP is not configured (matching old server behaviour)
+		if lsp.is_none() {
+			for name in [
+				"lsp_goto_definition",
+				"lsp_hover",
+				"lsp_find_references",
+				"lsp_document_symbols",
+				"lsp_workspace_symbols",
+				"lsp_completion",
+			] {
+				tool_router.remove_route(name);
+			}
+		}
+
+		// Remove GraphRAG tool if not configured
+		if graphrag.is_none() {
+			tool_router.remove_route("graphrag");
+		}
+
+		let server = Self {
 			semantic_code,
 			graphrag,
 			lsp,
-			debug,
-			working_directory,
-			no_git,
-			indexer_enabled: false,
-			watcher_handle: None,
-			index_handle: None,
-			indexing_handle: None,
-			indexing_in_progress: Arc::new(AtomicBool::new(false)),
-			store,
-			config,
-			index_rx: None,
-		})
-	}
-
-	pub async fn run(&mut self) -> Result<()> {
-		// Set up panic handler to prevent server crashes from tool execution
-		let original_hook = panic::take_hook();
-		panic::set_hook(Box::new(move |panic_info| {
-			log_critical_anyhow_error("Panic in MCP server", &anyhow::anyhow!("{}", panic_info));
-			// Call original hook for debugging
-			original_hook(panic_info);
-		}));
-
-		// Check if we should start the indexer (only if in git repo or --no-git is set)
-		let should_start_indexer = if !self.no_git && self.config.index.require_git {
-			indexer::git::is_git_repo_root(&self.working_directory)
-		} else {
-			true
+			indexer_enabled: should_start_indexer,
+			tool_router,
 		};
 
-		if should_start_indexer {
-			// Start the file watcher as a completely independent background task
-			self.start_watcher().await?;
-
-			// Start background indexing task - separate from MCP request handling
-			self.start_background_indexing().await?;
+		// Start background services (watcher + indexing)
+		let bg = if should_start_indexer {
+			start_background_services(
+				config,
+				store,
+				working_directory,
+				no_git,
+				debug_mode,
+				server.lsp.clone(),
+			)
+			.await?
 		} else {
-			// Log warning about indexer not starting
-			warn!(
-				"Indexer not started: Not in a git repository and --no-git flag not set. Use --no-git to enable indexing outside git repos."
-			);
-		}
+			BackgroundServices {
+				watcher_handle: None,
+				index_handle: None,
+				indexing_handle: None,
+			}
+		};
 
-		// Store indexer enabled state for use in initialize response
-		self.indexer_enabled = should_start_indexer;
-
-		// Log server startup details using structured logging (no console output for MCP protocol compliance)
 		info!(
-			debug_mode = self.debug,
-			indexer_enabled = should_start_indexer,
-			debounce_ms = MCP_DEBOUNCE_MS,
-			timeout_ms = MCP_INDEX_TIMEOUT_MS,
-			max_events = MCP_MAX_PENDING_EVENTS,
-			max_request_size_mb = MCP_MAX_REQUEST_SIZE / 1_048_576,
-			io_timeout_ms = MCP_IO_TIMEOUT_MS,
-			"MCP Server started"
+			"MCP Server initialized (debug_mode={}, indexer={}, debounce={}ms, timeout={}ms, max_events={})",
+			debug_mode, should_start_indexer, MCP_DEBOUNCE_MS, MCP_INDEX_TIMEOUT_MS, MCP_MAX_PENDING_EVENTS
 		);
 
-		// Handle MCP protocol communication (stdin/stdout) with error resilience
-		// This runs independently of file watching and indexing
-		let stdin = tokio::io::stdin();
-		let stdout = tokio::io::stdout();
-		let mut reader = BufReader::new(stdin);
-		let mut writer = stdout;
+		Ok((server, bg))
+	}
 
-		let mut line = String::with_capacity(1024); // Pre-allocate reasonable buffer
-		let mut consecutive_errors = 0u32;
-		const MAX_CONSECUTIVE_ERRORS: u32 = 10;
+	/// Run the server using stdio transport (default MCP mode)
+	pub async fn run_stdio(self, _bg: BackgroundServices) -> Result<()> {
+		// Guard against panics in tool handlers crashing the whole server
+		let original_hook = std::panic::take_hook();
+		std::panic::set_hook(Box::new(move |info| {
+			super::logging::log_critical_anyhow_error(
+				"Panic in MCP server",
+				&anyhow::anyhow!("{}", info),
+			);
+			original_hook(info);
+		}));
 
-		loop {
-			line.clear();
+		info!("Starting MCP server in stdio mode");
 
-			tokio::select! {
-				// Handle MCP protocol messages from stdin with timeout and error recovery
-				result = tokio::time::timeout(
-					Duration::from_millis(MCP_IO_TIMEOUT_MS),
-					reader.read_line(&mut line)
-				) => {
-					match result {
-						Ok(Ok(0)) => {
-							// EOF reached - normal shutdown
-							debug!("MCP Server: EOF received, shutting down gracefully");
-							break;
-						}
-						Ok(Ok(bytes_read)) => {
-							// Check for oversized requests to prevent memory exhaustion
-							if bytes_read > MCP_MAX_REQUEST_SIZE {
-								log_critical_anyhow_error(
-									"Request size limit exceeded",
-									&anyhow::anyhow!("Request size {} exceeds limit {}", bytes_read, MCP_MAX_REQUEST_SIZE)
-								);
+		let transport = rmcp::transport::io::stdio();
+		let service = self.serve(transport).await?;
 
-								// Send error response for oversized request
-								if let Err(e) = self.send_error_response(
-									&mut writer,
-									None,
-									-32700,
-									"Request too large",
-									Some(json!({"max_size": MCP_MAX_REQUEST_SIZE}))
-								).await {
-									log_critical_anyhow_error("Failed to send error response", &e);
-								}
-								continue;
-							}
+		// Wait for the service to complete (EOF / client disconnect)
+		service.waiting().await?;
 
-							// Process the request with panic recovery
-							// Capture method before moving line into handler
-							let request_method_for_notif = {
-								serde_json::from_str::<serde_json::Value>(line.trim())
-									.ok()
-									.and_then(|v| v.get("method").and_then(|m| m.as_str()).map(|s| s.to_string()))
-							};
-							match self.handle_request_safe(&line).await {
-								Ok(Some(response)) => {
-									// For initialize: send warning notification BEFORE the response so
-									// the client reads it while still in the initialize read loop
-									// (which correctly skips notifications). Sending after would cause
-									// it to be consumed by the notifications/initialized handshake read.
-									if request_method_for_notif.as_deref() == Some("initialize") && !self.indexer_enabled {
-										let notif_params = json!({
-											"level": "warning",
-											"message": "Octocode indexer is disabled: not in a git repository root. Run with --no-git to enable indexing outside git repos."
-										});
-										if let Err(e) = self.send_notification(&mut writer, "notifications/message", notif_params).await {
-											log_critical_anyhow_error("Failed to send indexer-disabled notification", &e);
-										}
-									}
-
-									// Send response with error handling
-									if let Err(e) = self.send_response(&mut writer, &response).await {
-										log_critical_anyhow_error("Failed to send response", &e);
-										consecutive_errors += 1;
-										if consecutive_errors >= MAX_CONSECUTIVE_ERRORS {
-											log_critical_anyhow_error(
-												"Too many consecutive errors",
-												&anyhow::anyhow!("Shutting down after {} consecutive errors", consecutive_errors)
-											);
-											break;
-										}
-									} else {
-										consecutive_errors = 0; // Reset on successful send
-									}
-								}
-								Ok(None) => {
-									// No response needed (e.g., empty request)
-									consecutive_errors = 0;
-								}
-								Err(e) => {
-									log_critical_anyhow_error("Request handling failed", &e);
-									consecutive_errors += 1;
-
-									// Try to send error response
-									if let Err(send_err) = self.send_error_response(
-										&mut writer,
-										None,
-										-32603,
-										"Internal server error",
-										Some(json!({"error": e.to_string()}))
-									).await {
-										log_critical_anyhow_error("Failed to send error response", &send_err);
-									}
-
-									if consecutive_errors >= MAX_CONSECUTIVE_ERRORS {
-										log_critical_anyhow_error(
-											"Too many consecutive errors",
-											&anyhow::anyhow!("Shutting down after {} consecutive errors", consecutive_errors)
-										);
-										break;
-									}
-								}
-							}
-						}
-						Ok(Err(e)) => {
-							// I/O error reading from stdin
-							if self.is_broken_pipe_error(&e) {
-								debug!("MCP Server: Broken pipe detected, shutting down gracefully");
-								break;
-							} else {
-								log_critical_error("Error reading from stdin", &e);
-								consecutive_errors += 1;
-								if consecutive_errors >= MAX_CONSECUTIVE_ERRORS {
-									break;
-								}
-								// Brief delay before retrying
-								tokio::time::sleep(Duration::from_millis(100)).await;
-							}
-						}
-				Err(_) => {
-					// Timeout on stdin read - this is normal when no client requests are pending
-					// MCP servers should wait indefinitely for client requests, not terminate on timeouts
-					trace!("MCP Server: Timeout reading from stdin (normal - waiting for client requests)");
-					// Do NOT increment consecutive_errors for timeouts - this is expected behavior
-					// Reset consecutive_errors since timeout is not an actual error
-					consecutive_errors = 0;
-				}
-					}
-				}
-
-				// MCP request handling only - indexing moved to background task
-			}
-		}
-
-		// Cleanup: abort background tasks
-		if let Some(handle) = self.watcher_handle.take() {
-			handle.abort();
-		}
-		if let Some(handle) = self.index_handle.take() {
-			handle.abort();
-		}
-		if let Some(handle) = self.indexing_handle.take() {
-			handle.abort();
-		}
-
-		debug!("MCP Server stopped");
-
+		// _bg is dropped here -> background tasks aborted
 		Ok(())
 	}
 
-	/// Run MCP server over HTTP instead of stdin/stdout
-	pub async fn run_http(&mut self, bind_addr: &str) -> Result<()> {
-		// Set up panic handler to prevent server crashes from tool execution
-		let original_hook = panic::take_hook();
-		panic::set_hook(Box::new(move |panic_info| {
-			log_critical_anyhow_error("Panic in MCP server", &anyhow::anyhow!("{}", panic_info));
-			// Call original hook for debugging
-			original_hook(panic_info);
-		}));
-
-		// Check if we should start the indexer (only if in git repo or --no-git is set)
-		let should_start_indexer = if !self.no_git && self.config.index.require_git {
-			indexer::git::is_git_repo_root(&self.working_directory)
-		} else {
-			true
+	/// Run the server using Streamable HTTP transport (MCP 2025-03-26 spec).
+	///
+	/// Uses rmcp's `StreamableHttpService` with `LocalSessionManager` for
+	/// proper session management. Supports both SSE and plain JSON responses
+	/// as required by the spec.
+	pub async fn run_http(self, bind_addr: &str, _bg: BackgroundServices) -> Result<()> {
+		use hyper_util::rt::TokioIo;
+		use hyper_util::service::TowerToHyperService;
+		use rmcp::transport::streamable_http_server::{
+			session::local::LocalSessionManager, StreamableHttpService,
 		};
 
-		if should_start_indexer {
-			// Start the file watcher as a completely independent background task
-			self.start_watcher().await?;
-		} else {
-			// Log warning about indexer not starting
-			warn!(
-				"Indexer not started: Not in a git repository and --no-git flag not set. Use --no-git to enable indexing outside git repos."
-			);
-		}
+		info!("Starting MCP server in HTTP mode on {}", bind_addr);
 
-		// Store indexer enabled state for use in initialize response
-		self.indexer_enabled = should_start_indexer;
+		let server = self.clone();
 
-		// Parse bind address
-		let addr = bind_addr
-			.parse::<std::net::SocketAddr>()
-			.map_err(|e| anyhow::anyhow!("Invalid bind address '{}': {}", bind_addr, e))?;
-
-		// Log server startup details
-		info!(
-			debug_mode = self.debug,
-			bind_address = %addr,
-			indexer_enabled = should_start_indexer,
-			debounce_ms = MCP_DEBOUNCE_MS,
-			timeout_ms = MCP_INDEX_TIMEOUT_MS,
-			max_events = MCP_MAX_PENDING_EVENTS,
-			max_request_size_mb = MCP_MAX_REQUEST_SIZE / 1_048_576,
-			io_timeout_ms = MCP_IO_TIMEOUT_MS,
-			"MCP Server started in HTTP mode"
+		// StreamableHttpService handles session lifecycle, SSE vs JSON content
+		// negotiation, and MCP protocol compliance automatically.
+		let service = StreamableHttpService::new(
+			move || Ok(server.clone()),
+			Arc::new(LocalSessionManager::default()),
+			Default::default(),
 		);
 
-		// Get the index receiver for handling indexing requests (only if indexer is enabled)
-		let mut index_rx = if should_start_indexer {
-			self.index_rx.take().unwrap()
-		} else {
-			// Create a dummy channel that will never receive messages
-			let (_, rx) = mpsc::channel(1);
-			rx
-		};
+		let addr: std::net::SocketAddr = bind_addr
+			.parse()
+			.map_err(|e| anyhow::anyhow!("Invalid bind address '{}': {}", bind_addr, e))?;
 
-		// Create shared server state for HTTP handlers
-		let server_state = Arc::new(Mutex::new(HttpServerState {
-			semantic_code: self.semantic_code.clone(),
-			graphrag: self.graphrag.clone(),
-			lsp: self.lsp.clone(),
-		}));
-
-		// Start HTTP server
-		let listener = TcpListener::bind(&addr)
-			.await
-			.map_err(|e| anyhow::anyhow!("Failed to bind to {}: {}", addr, e))?;
-
+		let listener = tokio::net::TcpListener::bind(addr).await?;
 		info!("MCP HTTP server listening on {}", addr);
 
-		// Clone state for the server task
-		let state_for_server = server_state.clone();
-		let mut server_handle = tokio::spawn(async move {
-			loop {
-				match listener.accept().await {
-					Ok((stream, addr)) => {
-						let state = state_for_server.clone();
-						tokio::spawn(async move {
-							if let Err(e) = handle_http_connection(stream, state).await {
-								debug!("HTTP connection error from {}: {}", addr, e);
-							}
-						});
+		loop {
+			let (stream, remote_addr) = listener.accept().await?;
+			debug!("Accepted connection from {}", remote_addr);
+
+			let service = service.clone();
+			tokio::spawn(async move {
+				let io = TokioIo::new(stream);
+				let hyper_service = TowerToHyperService::new(service);
+
+				if let Err(e) = hyper::server::conn::http1::Builder::new()
+					.serve_connection(io, hyper_service)
+					.await
+				{
+					debug!("Connection error from {}: {}", remote_addr, e);
+				}
+			});
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Background services setup (preserves all watcher + indexing logic)
+// ---------------------------------------------------------------------------
+
+async fn start_background_services(
+	config: Config,
+	store: Arc<Store>,
+	working_directory: std::path::PathBuf,
+	no_git: bool,
+	debug: bool,
+	lsp: Option<Arc<Mutex<crate::mcp::lsp::LspProvider>>>,
+) -> Result<BackgroundServices> {
+	let (file_tx, file_rx) = mpsc::channel(MCP_MAX_PENDING_EVENTS);
+	let (index_tx, index_rx) = mpsc::channel(10);
+
+	// 1. File watcher
+	let working_dir = working_directory.clone();
+	let watcher_handle = tokio::spawn(async move {
+		if let Err(e) = run_watcher(file_tx, working_dir, debug, MCP_MAX_PENDING_EVENTS).await {
+			log_critical_anyhow_error("Watcher error", &e);
+		}
+	});
+
+	// 2. Debouncer: accumulates file events, triggers indexing after quiet period
+	let indexing_in_progress = Arc::new(AtomicBool::new(false));
+	let indexing_flag = indexing_in_progress.clone();
+	let debug_mode = debug;
+	let index_handle = tokio::spawn(async move {
+		let mut file_rx = file_rx;
+		let mut last_event_time = None::<Instant>;
+		let mut pending_events = 0u32;
+
+		loop {
+			let timeout_duration = Duration::from_millis(MCP_DEBOUNCE_MS);
+
+			tokio::select! {
+				event_result = file_rx.recv() => {
+					match event_result {
+						Some(_) => {
+							pending_events += 1;
+							last_event_time = Some(Instant::now());
+							log_watcher_event("file_change", None, pending_events as usize);
+						}
+						None => {
+							debug!("File watcher channel closed, stopping debouncer");
+							break;
+						}
 					}
-					Err(e) => {
-						log_critical_anyhow_error(
-							"HTTP server accept error",
-							&anyhow::anyhow!("{}", e),
-						);
-						break;
+				}
+
+				_ = sleep(timeout_duration), if last_event_time.is_some() => {
+					if let Some(last_time) = last_event_time {
+						if last_time.elapsed() >= timeout_duration && pending_events > 0 {
+							if indexing_flag
+								.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+								.is_ok()
+							{
+								if debug_mode {
+									debug!(
+										"Debounce period completed ({} pending events), requesting reindex",
+										pending_events
+									);
+								}
+								log_watcher_event("debounce_trigger", None, pending_events as usize);
+
+								if (index_tx.send(()).await).is_err() {
+									if debug_mode {
+										debug!("Failed to send index request - server may be shutting down");
+									}
+									indexing_flag.store(false, Ordering::SeqCst);
+									break;
+								}
+
+								pending_events = 0;
+								last_event_time = None;
+							} else if debug_mode {
+								debug!("Indexing already in progress, will retry after current indexing completes");
+							}
+						}
 					}
 				}
 			}
-		});
+		}
+	});
 
-		// Handle indexing requests from file watcher (runs independently)
+	// 3. Background indexing task
+	let indexing_flag2 = indexing_in_progress;
+	let indexing_handle = tokio::spawn(async move {
+		let mut index_rx = index_rx;
 		loop {
-			tokio::select! {
-				Some(_) = index_rx.recv() => {
-					debug!("Processing index request");
+			match index_rx.recv().await {
+				Some(_) => {
+					debug!("Processing index request in background");
 
 					// Additional delay to ensure all file operations are complete
 					sleep(Duration::from_millis(DEFAULT_ADDITIONAL_DELAY_MS)).await;
 
-					// Perform direct indexing with timeout protection
 					let indexing_result = tokio::time::timeout(
 						Duration::from_millis(MCP_INDEX_TIMEOUT_MS),
-						perform_indexing(&self.store, &self.config, &self.working_directory, self.no_git)
-					).await;
+						perform_indexing(&store, &config, &working_directory, no_git),
+					)
+					.await;
 
 					match indexing_result {
 						Ok(Ok(())) => {
-							info!("Reindex completed successfully");
+							info!("Background reindex completed successfully");
 
 							// Update LSP with changed files if LSP is enabled
-							if let Some(ref lsp_provider) = self.lsp {
+							if let Some(ref lsp_provider) = lsp {
 								let mut lsp_guard = lsp_provider.lock().await;
-								if let Err(e) = Self::update_lsp_after_indexing(&mut lsp_guard, &self.working_directory).await {
+								if let Err(e) =
+									update_lsp_after_indexing(&mut lsp_guard, &working_directory)
+										.await
+								{
 									debug!("LSP update after indexing failed: {}", e);
 								}
 							}
 						}
 						Ok(Err(e)) => {
-							log_critical_anyhow_error("Reindex error", &e);
+							log_critical_anyhow_error("Background reindex error", &e);
 						}
 						Err(_) => {
 							log_critical_anyhow_error(
-								"Reindex timeout",
-								&anyhow::anyhow!("Reindex timed out after {}ms", MCP_INDEX_TIMEOUT_MS)
+								"Background reindex timeout",
+								&anyhow::anyhow!(
+									"Background reindex timed out after {}ms",
+									MCP_INDEX_TIMEOUT_MS
+								),
 							);
 						}
 					}
 
-					// Always reset the indexing flag, even on error/timeout
-					self.indexing_in_progress.store(false, Ordering::SeqCst);
+					// Always reset the indexing flag
+					indexing_flag2.store(false, Ordering::SeqCst);
 				}
-
-				// Check if HTTP server is still running
-				_ = &mut server_handle => {
-					warn!("HTTP server task completed unexpectedly");
+				None => {
+					debug!("Background indexing channel closed, stopping indexing task");
 					break;
 				}
 			}
 		}
+	});
 
-		// Cleanup: abort background tasks
-		if let Some(handle) = self.watcher_handle.take() {
-			handle.abort();
-		}
-		if let Some(handle) = self.index_handle.take() {
-			handle.abort();
-		}
-		server_handle.abort();
-
-		debug!("MCP HTTP Server stopped");
-
-		Ok(())
-	}
-
-	async fn start_watcher(&mut self) -> Result<()> {
-		let (file_tx, file_rx) = mpsc::channel(MCP_MAX_PENDING_EVENTS);
-		let (index_tx, index_rx) = mpsc::channel(10);
-		let working_dir = self.working_directory.clone();
-		let debug = self.debug;
-
-		// Start file watcher in background
-		let watcher_handle = tokio::spawn(async move {
-			if let Err(e) = run_watcher(file_tx, working_dir, debug, MCP_MAX_PENDING_EVENTS).await {
-				log_critical_anyhow_error("Watcher error", &e);
-			}
-		});
-
-		// Start improved debouncing handler that properly accumulates events
-		let indexing_in_progress = self.indexing_in_progress.clone();
-		let debug_mode = self.debug;
-		let index_handle = tokio::spawn(async move {
-			let mut file_rx = file_rx;
-			let mut last_event_time = None::<Instant>;
-			let mut pending_events = 0u32;
-
-			loop {
-				// Wait for either a file event or timeout
-				let timeout_duration = Duration::from_millis(MCP_DEBOUNCE_MS);
-
-				tokio::select! {
-					// New file event received
-					event_result = file_rx.recv() => {
-						match event_result {
-						Some(_) => {
-							pending_events += 1;
-							last_event_time = Some(Instant::now());
-
-							log_watcher_event("file_change", None, pending_events as usize);
-						}
-							None => {
-								debug!("File watcher channel closed, stopping debouncer");
-								break;
-							}
-						}
-					}
-
-					// Debounce timeout - check if we should trigger indexing
-					_ = sleep(timeout_duration), if last_event_time.is_some() => {
-						if let Some(last_time) = last_event_time {
-							// Check if enough time has passed since the last event
-							if last_time.elapsed() >= timeout_duration && pending_events > 0 {
-								// Try to acquire indexing lock
-								if indexing_in_progress
-									.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
-									.is_ok()
-								{
-									if debug_mode {
-										debug!(
-							pending_events = pending_events,
-							"Debounce period completed, requesting reindex"
-						);
-									}
-
-									// Log the debounce trigger
-								log_watcher_event("debounce_trigger", None, pending_events as usize);
-
-								// Send indexing request to main loop
-									if (index_tx.send(()).await).is_err() {
-										if debug_mode {
-											debug!("Failed to send index request - server may be shutting down");
-										}
-										indexing_in_progress.store(false, Ordering::SeqCst);
-										break;
-									}
-
-									// Reset counters
-									pending_events = 0;
-									last_event_time = None;
-								} else if debug_mode {
-									debug!("Indexing already in progress, will retry after current indexing completes");
-									// Don't reset counters, will retry later
-								}
-							}
-						}
-					}
-				}
-			}
-		});
-
-		// Store the index receiver for handling in the main loop
-		self.index_rx = Some(index_rx);
-		self.watcher_handle = Some(watcher_handle);
-		self.index_handle = Some(index_handle);
-		Ok(())
-	}
-
-	/// Start background indexing task - separate from MCP request handling
-	async fn start_background_indexing(&mut self) -> Result<()> {
-		// Get the index receiver for handling indexing requests
-		let mut index_rx = self.index_rx.take().unwrap();
-		let store = self.store.clone();
-		let config = self.config.clone();
-		let working_directory = self.working_directory.clone();
-		let no_git = self.no_git;
-		let indexing_in_progress = self.indexing_in_progress.clone();
-
-		// Start background indexing task
-		let indexing_handle = tokio::spawn(async move {
-			loop {
-				// Wait for indexing requests from file watcher
-				match index_rx.recv().await {
-					Some(_) => {
-						debug!("Processing index request in background");
-
-						// Additional delay to ensure all file operations are complete
-						sleep(Duration::from_millis(DEFAULT_ADDITIONAL_DELAY_MS)).await;
-
-						// Perform direct indexing with timeout protection
-						let indexing_result = tokio::time::timeout(
-							Duration::from_millis(MCP_INDEX_TIMEOUT_MS),
-							perform_indexing(&store, &config, &working_directory, no_git),
-						)
-						.await;
-
-						match indexing_result {
-							Ok(Ok(())) => {
-								info!("Background reindex completed successfully");
-								// LSP update removed from background task to avoid Send issues
-								// LSP updates can be handled separately if needed
-							}
-							Ok(Err(e)) => {
-								log_critical_anyhow_error("Background reindex error", &e);
-							}
-							Err(_) => {
-								log_critical_anyhow_error(
-									"Background reindex timeout",
-									&anyhow::anyhow!(
-										"Background reindex timed out after {}ms",
-										MCP_INDEX_TIMEOUT_MS
-									),
-								);
-							}
-						}
-
-						// Always reset the indexing flag, even on error/timeout
-						indexing_in_progress.store(false, Ordering::SeqCst);
-					}
-					None => {
-						debug!("Background indexing channel closed, stopping indexing task");
-						break;
-					}
-				}
-			}
-		});
-
-		// Store the indexing handle for cleanup
-		self.indexing_handle = Some(indexing_handle);
-		Ok(())
-	}
-
-	/// Send a JSON-RPC notification (no id — server-to-client push, no response expected).
-	async fn send_notification(
-		&self,
-		writer: &mut tokio::io::Stdout,
-		method: &str,
-		params: serde_json::Value,
-	) -> Result<()> {
-		let notification = json!({
-			"jsonrpc": "2.0",
-			"method": method,
-			"params": params,
-		});
-		let json = serde_json::to_string(&notification)?;
-		tokio::time::timeout(Duration::from_millis(MCP_IO_TIMEOUT_MS), async {
-			writer.write_all(json.as_bytes()).await?;
-			writer.write_all(b"\n").await?;
-			writer.flush().await
-		})
-		.await
-		.map_err(|_| anyhow::anyhow!("Notification send timeout"))??;
-		Ok(())
-	}
-
-	/// Safe request handling with comprehensive error recovery
-	async fn handle_request_safe(&mut self, line: &str) -> Result<Option<JsonRpcResponse>> {
-		let line = line.trim();
-		if line.is_empty() {
-			return Ok(None);
-		}
-
-		// Ensure clean UTF-8 by using lossy conversion to handle any potential issues
-		let clean_line = String::from_utf8_lossy(line.as_bytes()).to_string();
-		let line = clean_line.as_str();
-
-		// Parse request with enhanced error handling
-		let parsed_request: Result<JsonRpcRequest, _> =
-			panic::catch_unwind(|| serde_json::from_str(line)).unwrap_or_else(|_| {
-				Err(serde_json::Error::io(std::io::Error::new(
-					std::io::ErrorKind::InvalidData,
-					"JSON parsing panicked",
-				)))
-			});
-
-		let request: JsonRpcRequest = match parsed_request {
-			Ok(req) => {
-				// Log the request with proper method and ID
-				log_mcp_request(&req.method, req.params.as_ref(), req.id.as_ref());
-				req
-			}
-			Err(e) => {
-				log_critical_error("Request parsing", &e);
-				return Ok(Some(JsonRpcResponse {
-					jsonrpc: "2.0".to_string(),
-					id: None,
-					result: None,
-					error: Some(JsonRpcError {
-						code: -32700,
-						message: format!("Parse error: {}", e),
-						data: None,
-					}),
-				}));
-			}
-		};
-
-		let start_time = std::time::Instant::now();
-		let request_id = request.id.clone();
-		let request_id_for_error = request_id.clone(); // Clone for error handling
-		let request_method = request.method.clone(); // Clone for error handling
-
-		// Execute request with comprehensive panic recovery (timeout control left to external MCP client)
-		let response = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-			// Create a new async runtime for the panic-safe execution
-			// Note: This is a workaround since we can't easily catch panics in async code
-			tokio::task::block_in_place(|| {
-				tokio::runtime::Handle::current().block_on(async {
-					// Execute request without internal timeout - let external MCP client control timeouts
-					match request.method.as_str() {
-						"initialize" => self.handle_initialize(&request).await,
-						"tools/list" => self.handle_tools_list(&request).await,
-						"tools/call" => self.handle_tools_call(&request).await,
-						"ping" => self.handle_ping(&request).await,
-						_ => JsonRpcResponse {
-							jsonrpc: "2.0".to_string(),
-							id: request.id,
-							result: None,
-							error: Some(JsonRpcError {
-								code: -32601,
-								message: "Method not found".to_string(),
-								data: Some(json!({
-									"method": request.method,
-									"available_methods": ["initialize", "tools/list", "tools/call", "ping"]
-								})),
-							}),
-						},
-					}
-				})
-			})
-		})) {
-			Ok(response) => response,
-			Err(_) => {
-				log_critical_anyhow_error(
-					"Request handler panicked",
-					&anyhow::anyhow!("Method '{}' caused a panic", request_method),
-				);
-				JsonRpcResponse {
-					jsonrpc: "2.0".to_string(),
-					id: request_id_for_error,
-					result: None,
-					error: Some(JsonRpcError {
-						code: -32603,
-						message: "Internal server error (panic recovered)".to_string(),
-						data: Some(json!({"method": request_method})),
-					}),
-				}
-			}
-		};
-
-		// Log the response with timing
-		let duration_ms = start_time.elapsed().as_millis() as u64;
-		log_mcp_response(
-			&request_method,
-			response.error.is_none(),
-			request_id.as_ref(),
-			Some(duration_ms),
-		);
-
-		// Notifications (no id) must not receive a response per JSON-RPC/MCP behavior
-		if request_id.is_none() {
-			return Ok(None);
-		}
-
-		Ok(Some(response))
-	}
-
-	/// Helper method to detect broken pipe errors
-	fn is_broken_pipe_error(&self, error: &std::io::Error) -> bool {
-		use std::io::ErrorKind;
-		matches!(
-			error.kind(),
-			ErrorKind::BrokenPipe
-				| ErrorKind::ConnectionAborted
-				| ErrorKind::ConnectionReset
-				| ErrorKind::UnexpectedEof
-		)
-	}
-
-	/// Safe response sending with error handling and size limits
-	async fn send_response(
-		&self,
-		writer: &mut tokio::io::Stdout,
-		response: &JsonRpcResponse,
-	) -> Result<()> {
-		// Serialize response with panic recovery and size checking
-		let response_json = match panic::catch_unwind(|| serde_json::to_string(response)) {
-			Ok(Ok(json)) => {
-				// Check response size to prevent memory issues
-				if json.len() > MCP_MAX_REQUEST_SIZE {
-					log_critical_anyhow_error(
-						"Response too large",
-						&anyhow::anyhow!(
-							"Response size {} exceeds limit {}",
-							json.len(),
-							MCP_MAX_REQUEST_SIZE
-						),
-					);
-					// Create a minimal error response instead
-					r#"{"jsonrpc":"2.0","id":null,"error":{"code":-32603,"message":"Response too large"}}"#.to_string()
-				} else {
-					json
-				}
-			}
-			Ok(Err(e)) => {
-				log_critical_error("Response serialization failed", &e);
-				// Create a minimal error response
-				r#"{"jsonrpc":"2.0","id":null,"error":{"code":-32603,"message":"Response serialization failed"}}"#.to_string()
-			}
-			Err(_) => {
-				log_critical_anyhow_error(
-					"Response serialization panicked",
-					&anyhow::anyhow!("JSON serialization panicked"),
-				);
-				r#"{"jsonrpc":"2.0","id":null,"error":{"code":-32603,"message":"Response serialization panicked"}}"#.to_string()
-			}
-		};
-
-		// Send with timeout to prevent hanging on broken pipes
-		tokio::time::timeout(Duration::from_millis(MCP_IO_TIMEOUT_MS), async {
-			writer.write_all(response_json.as_bytes()).await?;
-			writer.write_all(b"\n").await?;
-			writer.flush().await
-		})
-		.await
-		.map_err(|_| anyhow::anyhow!("Response send timeout"))??;
-
-		Ok(())
-	}
-
-	/// Helper method to send error responses
-	async fn send_error_response(
-		&self,
-		writer: &mut tokio::io::Stdout,
-		id: Option<&serde_json::Value>,
-		code: i32,
-		message: &str,
-		data: Option<serde_json::Value>,
-	) -> Result<()> {
-		let error_response = JsonRpcResponse {
-			jsonrpc: "2.0".to_string(),
-			id: id.cloned(),
-			result: None,
-			error: Some(JsonRpcError {
-				code,
-				message: message.to_string(),
-				data,
-			}),
-		};
-
-		self.send_response(writer, &error_response).await
-	}
-
-	async fn handle_initialize(&self, request: &JsonRpcRequest) -> JsonRpcResponse {
-		// Build instructions with indexer warning if applicable
-		let mut instructions = "This server provides modular AI tools: semantic code search and GraphRAG (if available). Use semantic_search for code/documentation searches and graphrag (if enabled) for relationship queries.".to_string();
-
-		if !self.indexer_enabled {
-			instructions.push_str("\n\nWARNING: Indexer is disabled because you're not in a git repository and the --no-git flag was not set. Use --no-git to enable indexing outside git repos.");
-		}
-
-		JsonRpcResponse {
-			jsonrpc: "2.0".to_string(),
-			id: request.id.clone(),
-			result: Some(json!({
-				"protocolVersion": "2024-11-05",
-				"capabilities": {
-					"tools": {
-						"listChanged": false
-					}
-				},
-				"serverInfo": {
-					"name": "octocode-mcp",
-					"version": "0.1.0",
-					"description": "Semantic code search server with vector embeddings and optional GraphRAG support"
-				},
-				"instructions": instructions
-			})),
-			error: None,
-		}
-	}
-
-	async fn handle_tools_list(&self, request: &JsonRpcRequest) -> JsonRpcResponse {
-		let mut tools = vec![
-			SemanticCodeProvider::get_tool_definition(),
-			SemanticCodeProvider::get_view_signatures_tool_definition(),
-		];
-
-		// Add GraphRAG tools if available
-		if self.graphrag.is_some() {
-			tools.push(GraphRagProvider::get_tool_definition());
-		}
-
-		// Add LSP tools if LSP provider is configured (always show tools when --with-lsp is used)
-		if self.lsp.is_some() {
-			tools.extend(crate::mcp::lsp::LspProvider::get_tool_definitions());
-		}
-
-		JsonRpcResponse {
-			jsonrpc: "2.0".to_string(),
-			id: request.id.clone(),
-			result: Some(json!({
-				"tools": tools
-			})),
-			error: None,
-		}
-	}
-
-	async fn handle_tools_call(&mut self, request: &JsonRpcRequest) -> JsonRpcResponse {
-		let params = match &request.params {
-			Some(params) => params,
-			None => {
-				return JsonRpcResponse {
-					jsonrpc: "2.0".to_string(),
-					id: request.id.clone(),
-					result: None,
-					error: Some(JsonRpcError {
-						code: -32602,
-						message: "Invalid params: missing parameters object".to_string(),
-						data: Some(json!({
-							"details": "Tool calls require a 'params' object with 'name' and 'arguments' fields"
-						})),
-					}),
-				};
-			}
-		};
-
-		let tool_name = match params.get("name").and_then(|v| v.as_str()) {
-			Some(name) => name,
-			None => {
-				return JsonRpcResponse {
-					jsonrpc: "2.0".to_string(),
-					id: request.id.clone(),
-					result: None,
-					error: Some(JsonRpcError {
-						code: -32602,
-						message: "Invalid params: missing tool name".to_string(),
-						data: Some(json!({
-							"details": "Required field 'name' must be provided with the tool name to call"
-						})),
-					}),
-				};
-			}
-		};
-
-		let default_args = json!({});
-		let arguments = params.get("arguments").unwrap_or(&default_args);
-
-		// Validate arguments size to prevent memory exhaustion
-		if let Ok(args_str) = serde_json::to_string(arguments) {
-			if args_str.len() > MCP_MAX_REQUEST_SIZE {
-				return JsonRpcResponse {
-					jsonrpc: "2.0".to_string(),
-					id: request.id.clone(),
-					result: None,
-					error: Some(JsonRpcError {
-						code: -32602,
-						message: "Tool arguments too large".to_string(),
-						data: Some(json!({
-							"max_size": MCP_MAX_REQUEST_SIZE,
-							"actual_size": args_str.len()
-						})),
-					}),
-				};
-			}
-		}
-
-		let result = match tool_name {
-			"semantic_search" => self.semantic_code.execute_search(arguments).await,
-			"view_signatures" => self.semantic_code.execute_view_signatures(arguments).await,
-			"graphrag" => match &self.graphrag {
-				Some(provider) => provider.execute(arguments).await,
-				None => Err(McpError::method_not_found("GraphRAG is not enabled in the current configuration. Please enable GraphRAG in octocode.toml to use relationship-aware search.", "graphrag")),
-			},
-			// LSP tools
-			"lsp_goto_definition" => match &self.lsp {
-				Some(provider) => {
-					let mut lsp_guard = provider.lock().await;
-					lsp_guard.execute_goto_definition(arguments).await
-				},
-				None => Err(McpError::method_not_found("LSP server is not available. Start MCP server with --with-lsp=\"<command>\" to enable LSP features.", "lsp_goto_definition")),
-			},
-			"lsp_hover" => match &self.lsp {
-				Some(provider) => {
-					let mut lsp_guard = provider.lock().await;
-					lsp_guard.execute_hover(arguments).await
-				},
-				None => Err(McpError::method_not_found("LSP server is not available. Start MCP server with --with-lsp=\"<command>\" to enable LSP features.", "lsp_hover")),
-			},
-			"lsp_find_references" => match &self.lsp {
-				Some(provider) => {
-					let mut lsp_guard = provider.lock().await;
-					lsp_guard.execute_find_references(arguments).await
-				},
-				None => Err(McpError::method_not_found("LSP server is not available. Start MCP server with --with-lsp=\"<command>\" to enable LSP features.", "lsp_find_references")),
-			},
-			"lsp_document_symbols" => match &self.lsp {
-				Some(provider) => {
-					let mut lsp_guard = provider.lock().await;
-					lsp_guard.execute_document_symbols(arguments).await
-				},
-				None => Err(McpError::method_not_found("LSP server is not available. Start MCP server with --with-lsp=\"<command>\" to enable LSP features.", "lsp_document_symbols")),
-			},
-			"lsp_workspace_symbols" => match &self.lsp {
-				Some(provider) => {
-					let mut lsp_guard = provider.lock().await;
-					lsp_guard.execute_workspace_symbols(arguments).await
-				},
-				None => Err(McpError::method_not_found("LSP server is not available. Start MCP server with --with-lsp=\"<command>\" to enable LSP features.", "lsp_workspace_symbols")),
-			},
-			"lsp_completion" => match &self.lsp {
-				Some(provider) => {
-					let mut lsp_guard = provider.lock().await;
-					lsp_guard.execute_completion(arguments).await
-				},
-				None => Err(McpError::method_not_found("LSP server is not available. Start MCP server with --with-lsp=\"<command>\" to enable LSP features.", "lsp_completion")),
-			},
-			_ => {
-			let available_tools = format!("semantic_search, view_signatures{}{}",
-				if self.graphrag.is_some() { ", graphrag" } else { "" },
-				if self.lsp.is_some() { ", lsp_goto_definition, lsp_hover, lsp_find_references, lsp_document_symbols, lsp_workspace_symbols, lsp_completion" } else { "" }
-			);
-				Err(McpError::method_not_found(format!("Unknown tool '{}'. Available tools: {}", tool_name, available_tools), tool_name))
-			}
-		};
-
-		match result {
-			Ok(content) => JsonRpcResponse {
-				jsonrpc: "2.0".to_string(),
-				id: request.id.clone(),
-				result: Some(json!({
-					"content": [{
-						"type": "text",
-						"text": content
-					}]
-				})),
-				error: None,
-			},
-			Err(e) => {
-				// Try to parse MCP-compliant error first
-				let error_message = e.to_string();
-				if let Some(mcp_error) = parse_mcp_error(&error_message) {
-					JsonRpcResponse {
-						jsonrpc: "2.0".to_string(),
-						id: request.id.clone(),
-						result: None,
-						error: Some(mcp_error),
-					}
-				} else {
-					// Handle McpError directly
-					JsonRpcResponse {
-						jsonrpc: "2.0".to_string(),
-						id: request.id.clone(),
-						result: None,
-						error: Some(e.into_jsonrpc()),
-					}
-				}
-			}
-		}
-	}
-
-	async fn handle_ping(&self, request: &JsonRpcRequest) -> JsonRpcResponse {
-		JsonRpcResponse {
-			jsonrpc: "2.0".to_string(),
-			id: request.id.clone(),
-			result: Some(json!({})),
-			error: None,
-		}
-	}
-
-	/// Update LSP server with recently changed files
-	async fn update_lsp_after_indexing(
-		lsp_provider: &mut crate::mcp::lsp::LspProvider,
-		working_directory: &std::path::Path,
-	) -> Result<()> {
-		use crate::indexer::{detect_language, NoindexWalker, PathUtils};
-
-		debug!("Updating LSP server with changed files");
-
-		// Use existing file walker that respects .gitignore and .noindex
-		let walker = NoindexWalker::create_walker(working_directory).build();
-		let mut files_updated = 0;
-
-		for result in walker {
-			let entry = match result {
-				Ok(entry) => entry,
-				Err(_) => continue,
-			};
-
-			// Skip directories, only process files
-			if !entry.file_type().is_some_and(|ft| ft.is_file()) {
-				continue;
-			}
-
-			// Only process files that have a detected language (code files)
-			if detect_language(entry.path()).is_some() {
-				let relative_path = PathUtils::to_relative_string(entry.path(), working_directory);
-
-				// Try to update the file in LSP
-				if let Err(e) = lsp_provider.update_file(&relative_path).await {
-					debug!("Failed to update file {} in LSP: {}", relative_path, e);
-				} else {
-					files_updated += 1;
-				}
-			}
-		}
-
-		debug!("LSP update completed: {} files updated", files_updated);
-		Ok(())
-	}
+	Ok(BackgroundServices {
+		watcher_handle: Some(watcher_handle),
+		index_handle: Some(index_handle),
+		indexing_handle: Some(indexing_handle),
+	})
 }
 
-impl Drop for McpServer {
-	fn drop(&mut self) {
-		// Abort all background tasks so they don't outlive the server in any exit path
-		// (panic, early return via ?, or graceful shutdown). Tokio tasks are NOT OS processes
-		// so they can't truly escape the runtime, but aborting here ensures clean cancellation
-		// and releases resources (file watchers, DB connections) immediately.
-		if let Some(handle) = self.watcher_handle.take() {
-			handle.abort();
-		}
-		if let Some(handle) = self.index_handle.take() {
-			handle.abort();
-		}
-		if let Some(handle) = self.indexing_handle.take() {
-			handle.abort();
-		}
-	}
-}
+// ---------------------------------------------------------------------------
+// Indexing helpers (preserved from original server.rs)
+// ---------------------------------------------------------------------------
 
-// Helper functions
 async fn perform_indexing(
 	store: &Store,
 	config: &Config,
@@ -1172,23 +760,19 @@ async fn perform_indexing(
 	let start_time = std::time::Instant::now();
 	log_indexing_operation("direct_reindex_start", None, None, true);
 
-	// Acquire indexing lock before starting
 	let mut lock = IndexLock::new(working_directory)?;
 	lock.acquire()?;
 	debug!("MCP server: acquired indexing lock");
 
-	// Create shared state for indexing (same as watch command)
 	let state = state::create_shared_state();
 	state.write().current_directory = working_directory.to_path_buf();
 
-	// Get git root for optimization (same as watch command)
 	let git_repo_root = if !no_git {
 		indexer::git::find_git_root(working_directory)
 	} else {
 		None
 	};
 
-	// Perform the indexing directly (same as watch command in quiet mode)
 	let indexing_result = indexer::index_files_with_quiet(
 		store,
 		state.clone(),
@@ -1198,7 +782,6 @@ async fn perform_indexing(
 	)
 	.await;
 
-	// Release the lock
 	lock.release()?;
 	debug!("MCP server: released indexing lock");
 
@@ -1211,8 +794,45 @@ async fn perform_indexing(
 		}
 		Err(e) => {
 			log_indexing_operation("direct_reindex_complete", None, Some(duration_ms), false);
-			log_critical_error("Direct indexing", e.as_ref());
+			log_critical_anyhow_error("Direct indexing", &e);
 			Err(e)
 		}
 	}
+}
+
+/// Update LSP server with recently changed files after indexing
+async fn update_lsp_after_indexing(
+	lsp_provider: &mut crate::mcp::lsp::LspProvider,
+	working_directory: &std::path::Path,
+) -> Result<()> {
+	use crate::indexer::{detect_language, NoindexWalker, PathUtils};
+
+	debug!("Updating LSP server with changed files");
+
+	let walker = NoindexWalker::create_walker(working_directory).build();
+	let mut files_updated = 0;
+
+	for result in walker {
+		let entry = match result {
+			Ok(entry) => entry,
+			Err(_) => continue,
+		};
+
+		if !entry.file_type().is_some_and(|ft| ft.is_file()) {
+			continue;
+		}
+
+		if detect_language(entry.path()).is_some() {
+			let relative_path = PathUtils::to_relative_string(entry.path(), working_directory);
+
+			if let Err(e) = lsp_provider.update_file(&relative_path).await {
+				debug!("Failed to update file {} in LSP: {}", relative_path, e);
+			} else {
+				files_updated += 1;
+			}
+		}
+	}
+
+	debug!("LSP update completed: {} files updated", files_updated);
+	Ok(())
 }

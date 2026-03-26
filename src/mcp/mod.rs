@@ -21,7 +21,6 @@
 
 pub mod graphrag;
 pub mod handlers;
-pub mod http;
 pub mod logging;
 pub mod lsp;
 pub mod proxy;
