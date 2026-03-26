@@ -75,6 +75,8 @@ async fn list_models(provider_filter: Option<String>) -> Result<()> {
 			EmbeddingProviderType::Google,
 			EmbeddingProviderType::OpenAI,
 			EmbeddingProviderType::OpenRouter,
+			EmbeddingProviderType::OctoHub,
+			EmbeddingProviderType::Together,
 		]
 	};
 
@@ -174,6 +176,14 @@ async fn list_models(provider_filter: Option<String>) -> Result<()> {
 			EmbeddingProviderType::OctoHub => {
 				println!("  OctoHub: Dynamic discovery via API");
 				println!("  Use 'info' command with specific model names");
+			}
+			EmbeddingProviderType::Together => {
+				let together_models = [("intfloat/multilingual-e5-large-instruct", 1024)];
+				println!("Found {} models:", together_models.len());
+				for (i, (model, dim)) in together_models.iter().enumerate() {
+					println!("  {}. {} ({}d)", i + 1, model, dim);
+				}
+				println!("  Use 'info' command for real-time API validation");
 			}
 		}
 	}
