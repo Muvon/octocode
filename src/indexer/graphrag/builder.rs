@@ -582,6 +582,9 @@ impl GraphBuilder {
 				// Store relationships in batches for incremental storage
 				if !all_relationships.is_empty() {
 					let mut relationship_batches_processed = 0;
+					let mut total_relationship_batches_done = 0;
+					let total_relationship_batches =
+						all_relationships.len().div_ceil(relationship_batch_size);
 
 					for relationship_batch in all_relationships.chunks(relationship_batch_size) {
 						// Add relationships to in-memory graph
@@ -599,6 +602,7 @@ impl GraphBuilder {
 							.await?;
 
 						relationship_batches_processed += 1;
+						total_relationship_batches_done += 1;
 
 						// Flush relationships periodically (same logic as nodes)
 						if relationship_batches_processed >= self.config.index.flush_frequency {
@@ -611,8 +615,7 @@ impl GraphBuilder {
 							let mut state_guard = state.write();
 							state_guard.status_message = format!(
 								"Processing relationships: {} of {} batches completed",
-								(relationship_batches_processed + 1),
-								all_relationships.len().div_ceil(relationship_batch_size)
+								total_relationship_batches_done, total_relationship_batches
 							);
 						}
 					}
