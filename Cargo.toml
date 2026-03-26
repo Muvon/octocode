@@ -36,7 +36,7 @@ lto = true              # Enable Link Time Optimization
 codegen-units = 1       # Reduce parallel code generation units for better optimization
 panic = "abort"         # Abort on panic for smaller binary size
 strip = true            # Strip symbols from binary
-opt-level = "z"         # Optimize for size
+opt-level = 3         # Optimize for speed
 overflow-checks = false # Disable overflow checks in release mode
 
 # Cross-compilation configuration is in .cargo/config.toml
@@ -97,7 +97,7 @@ dotenvy = "0.15"
 
 # Local dependency on octolib with embedding features
 # octolib = { path = "../octolib", features = ["fastembed", "huggingface"] }
-octolib = { version = "0.12.1", default-features = false }
+octolib = { version = "0.13.0", default-features = false }
 
 [profile.dev]
 opt-level = 1          # Basic optimizations without slowing compilation too much
