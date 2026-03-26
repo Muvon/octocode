@@ -961,9 +961,9 @@ impl<'a> GraphRagOperations<'a> {
 		} else if all_batches.len() == 1 {
 			Ok(all_batches.into_iter().next().unwrap())
 		} else {
-			// For simplicity, return the first batch
-			// In a production system, you might want to concatenate all batches
-			Ok(all_batches.into_iter().next().unwrap())
+			// Concatenate all batches into one
+			let schema = all_batches[0].schema();
+			Ok(arrow::compute::concat_batches(&schema, &all_batches)?)
 		}
 	}
 
