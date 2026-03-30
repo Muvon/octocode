@@ -186,3 +186,8 @@ Apache License 2.0 — See [LICENSE](LICENSE) for details.
 [⭐ Star](https://github.com/Muvon/octocode) • [🍴 Fork](https://github.com/Muvon/octocode/fork) • [📣 Share](https://twitter.com/intent/tweet?text=Octocode%20-%20AI-powered%20code%20intelligence%20with%20built-in%20MCP%20server&url=https://github.com/Muvon/octocode)
 
 </div>
+
+## Hosted deployment
+
+A hosted deployment is available on [Fronteir AI](https://fronteir.ai/mcp/muvon-octocode).
+
