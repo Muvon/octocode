@@ -487,7 +487,7 @@ async fn generate_commit_message_chunked(
 	// Build the guidance section
 	let mut guidance_section = String::new();
 	if let Some(context) = extra_context {
-		guidance_section = format!("\n\nUser guidance for commit intent:\n{}", context);
+		guidance_section = format!("\n\nIMPORTANT - USER'S DESCRIPTION OF CHANGES (incorporate this into your commit message):\n{}", context);
 	}
 
 	// Build docs type restriction based on file analysis
@@ -606,7 +606,7 @@ async fn generate_commit_message_from_diff(
 		.saturating_sub(diff.matches("\n---").count());
 
 	let guidance_section = extra_context
-		.map(|c| format!("\n\nUser guidance for commit intent:\n{}", c))
+		.map(|c| format!("\n\nIMPORTANT - USER'S DESCRIPTION OF CHANGES (incorporate this into your commit message):\n{}", c))
 		.unwrap_or_default();
 
 	let docs_restriction = if has_non_markdown_files && !has_markdown_files {
@@ -692,7 +692,7 @@ type(scope): description under 50 chars
 Types: feat, fix, docs, style, refactor, test, chore, perf, ci, build
 Use imperative mood (add not added, fix not fixed)
 Avoid generic words: update, change, modify, various, several
-Focus on WHAT functionality changed, not implementation details{}
+Focus on WHAT functionality changed, not implementation details
 ---
 COMMIT TYPE GUIDE:
 feat: NEW functionality being added
@@ -728,15 +728,15 @@ Subject: type(scope): description
 If body: blank line then dash bullets
 If breaking: BREAKING CHANGE: line
 NO code blocks, NO backticks, NO markdown
----
+---{}
 Changes: {} files (+{} -{} lines)
 
 Git diff:
 {}
 
 Generate commit message:",
-		guidance_section,
 		docs_restriction,
+		guidance_section,
 		file_count,
 		additions,
 		deletions,
