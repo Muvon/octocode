@@ -222,6 +222,66 @@ pub fn graphrag_nodes_to_markdown(nodes: &[CodeNode]) -> String {
 	markdown
 }
 
+/// Normalize a node ID for consistent lookup.
+/// Strips leading `./`, normalizes separators to `/`, removes trailing `/`.
+pub fn normalize_node_id(input: &str) -> String {
+	use crate::utils::path::PathNormalizer;
+
+	let mut normalized = PathNormalizer::normalize_separators(input);
+
+	// Strip leading "./"
+	while normalized.starts_with("./") {
+		normalized = normalized[2..].to_string();
+	}
+
+	// Remove trailing "/"
+	while normalized.ends_with('/') {
+		normalized.pop();
+	}
+
+	normalized
+}
+
+/// Find a node in the graph with fuzzy matching.
+/// Tries: exact match → normalized match → suffix match.
+/// Returns the actual node ID stored in the graph.
+pub fn find_node_id<'a>(graph: &'a super::types::CodeGraph, input: &str) -> Option<&'a str> {
+	// 1. Exact match
+	if graph.nodes.contains_key(input) {
+		return graph.nodes.get_key_value(input).map(|(k, _)| k.as_str());
+	}
+
+	// 2. Normalized match
+	let normalized = normalize_node_id(input);
+	if graph.nodes.contains_key(&normalized) {
+		return graph
+			.nodes
+			.get_key_value(&normalized)
+			.map(|(k, _)| k.as_str());
+	}
+
+	// 3. Suffix match — user provides "searchd.cpp", stored as "src/searchd.cpp"
+	let normalized_lower = normalized.to_lowercase();
+	let mut best_match: Option<&str> = None;
+	let mut best_len = usize::MAX;
+
+	for key in graph.nodes.keys() {
+		let key_lower = key.to_lowercase();
+		if key_lower == normalized_lower {
+			return Some(key.as_str()); // Case-insensitive exact match
+		}
+		if key_lower.ends_with(&format!("/{}", normalized_lower)) {
+			// Prefer shortest matching path (most specific)
+			if key.len() < best_len {
+				best_match = Some(key.as_str());
+				best_len = key.len();
+			}
+		}
+	}
+
+	best_match
+}
+
 // Check if two symbols match (accounting for common patterns)
 pub fn symbols_match(import: &str, export: &str) -> bool {
 	// Direct match

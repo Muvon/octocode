@@ -15,7 +15,7 @@
 // GraphRAG relationship discovery logic
 
 use crate::indexer::graphrag::types::{CodeNode, CodeRelationship, FunctionInfo};
-use crate::indexer::graphrag::utils::{is_parent_child_relationship, symbols_match};
+use crate::indexer::graphrag::utils::is_parent_child_relationship;
 use crate::store::CodeBlock;
 use anyhow::Result;
 use std::path::Path;
@@ -30,29 +30,33 @@ impl RelationshipDiscovery {
 	) -> Result<Vec<CodeRelationship>> {
 		let mut relationships = Vec::new();
 
-		for source_file in new_files {
-			// 1. Import/Export relationships (high confidence)
-			for import in &source_file.imports {
-				for target_file in all_nodes {
-					if target_file.id == source_file.id {
-						continue;
-					}
+		// Pre-build lookup indexes for O(1) symbol resolution instead of O(N) scans
+		let mut symbol_index: std::collections::HashMap<String, Vec<&str>> =
+			std::collections::HashMap::new();
+		for node in all_nodes {
+			for sym in node.exports.iter().chain(node.symbols.iter()) {
+				symbol_index.entry(sym.clone()).or_default().push(&node.id);
+			}
+		}
 
-					// Check if target exports what source imports
-					if target_file
-						.exports
-						.iter()
-						.any(|exp| symbols_match(import, exp))
-						|| target_file
-							.symbols
-							.iter()
-							.any(|sym| symbols_match(import, sym))
-					{
+		// Pre-build path index for parent-child lookups
+		let all_node_ids: Vec<(&str, &str)> = all_nodes
+			.iter()
+			.map(|n| (n.id.as_str(), n.path.as_str()))
+			.collect();
+
+		for source_file in new_files {
+			// 1. Import/Export relationships via pre-built index (O(1) per import)
+			for import in &source_file.imports {
+				// Check both the raw import and cleaned versions
+				let candidates = Self::get_import_candidates(import, &symbol_index);
+				for target_id in candidates {
+					if target_id != source_file.id {
 						relationships.push(CodeRelationship {
 							source: source_file.id.clone(),
-							target: target_file.id.clone(),
+							target: target_id.to_string(),
 							relation_type: crate::indexer::graphrag::types::RelationType::Imports,
-							description: format!("Imports {} from {}", import, target_file.name),
+							description: format!("Imports {} from {}", import, target_id),
 							confidence: 0.9,
 							weight: 1.0,
 						});
@@ -60,52 +64,22 @@ impl RelationshipDiscovery {
 				}
 			}
 
-			// 2. Directory-based relationships (medium confidence)
-			let source_dir = Path::new(&source_file.path)
-				.parent()
-				.map(|p| p.to_string_lossy().to_string())
-				.unwrap_or_else(|| ".".to_string());
-
-			for other_file in all_nodes {
-				if other_file.id == source_file.id {
+			// 2. Hierarchical module relationships (high confidence)
+			for &(other_id, other_path) in &all_node_ids {
+				if other_id == source_file.id {
 					continue;
 				}
 
-				let other_dir = Path::new(&other_file.path)
-					.parent()
-					.map(|p| p.to_string_lossy().to_string())
-					.unwrap_or_else(|| ".".to_string());
-
-				// Same directory relationship
-				if source_dir == other_dir && source_file.language == other_file.language {
-					relationships.push(CodeRelationship {
-						source: source_file.id.clone(),
-						target: other_file.id.clone(),
-						relation_type: crate::indexer::graphrag::types::RelationType::SiblingModule,
-						description: format!("Same directory: {}", source_dir),
-						confidence: 0.6,
-						weight: 0.5,
-					});
-				}
-			}
-
-			// 3. Hierarchical module relationships (high confidence)
-			for other_file in all_nodes {
-				if other_file.id == source_file.id {
-					continue;
-				}
-
-				// Check for parent-child relationships based on path structure
-				if is_parent_child_relationship(&source_file.path, &other_file.path) {
-					let (parent, child) = if source_file.path.len() < other_file.path.len() {
-						(&source_file.id, &other_file.id)
+				if is_parent_child_relationship(&source_file.path, other_path) {
+					let (parent, child) = if source_file.path.len() < other_path.len() {
+						(source_file.id.as_str(), other_id)
 					} else {
-						(&other_file.id, &source_file.id)
+						(other_id, source_file.id.as_str())
 					};
 
 					relationships.push(CodeRelationship {
-						source: parent.clone(),
-						target: child.clone(),
+						source: parent.to_string(),
+						target: child.to_string(),
 						relation_type: crate::indexer::graphrag::types::RelationType::ParentModule,
 						description: "Hierarchical module relationship".to_string(),
 						confidence: 0.8,
@@ -114,7 +88,7 @@ impl RelationshipDiscovery {
 				}
 			}
 
-			// 4. Language-specific pattern relationships
+			// 3. Language-specific pattern relationships
 			Self::discover_language_specific_relationships(
 				source_file,
 				all_nodes,
@@ -135,6 +109,37 @@ impl RelationshipDiscovery {
 		});
 
 		Ok(relationships)
+	}
+
+	/// Resolve import string against the pre-built symbol index.
+	/// Returns matching node IDs (deduplicated).
+	fn get_import_candidates<'a>(
+		import: &str,
+		symbol_index: &'a std::collections::HashMap<String, Vec<&'a str>>,
+	) -> Vec<&'a str> {
+		let mut results = Vec::new();
+
+		// Direct match
+		if let Some(ids) = symbol_index.get(import) {
+			results.extend(ids.iter().copied());
+		}
+
+		// Try cleaned variants (strip common prefixes)
+		let clean_import = import
+			.trim_start_matches("import_")
+			.trim_start_matches("use_")
+			.trim_start_matches("from_");
+
+		if clean_import != import {
+			if let Some(ids) = symbol_index.get(clean_import) {
+				results.extend(ids.iter().copied());
+			}
+		}
+
+		// Deduplicate
+		results.sort_unstable();
+		results.dedup();
+		results
 	}
 
 	// Discover language-specific relationships with import resolution

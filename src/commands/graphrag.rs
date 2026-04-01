@@ -16,6 +16,7 @@ use clap::{Args, ValueEnum};
 
 use octocode::config::Config;
 use octocode::indexer;
+use octocode::indexer::graphrag::find_node_id;
 use octocode::store::Store;
 
 use crate::commands::OutputFormat;
@@ -157,9 +158,10 @@ pub async fn execute(
 			// Get the graph
 			let graph = graph_builder.get_graph().await?;
 
-			// Get node details
-			match graph.nodes.get(node_id) {
-				Some(node) => {
+			// Get node details with fuzzy matching
+			match find_node_id(&graph, node_id) {
+				Some(resolved_id) => {
+					let node = &graph.nodes[resolved_id];
 					println!("\u{2554}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550} Node: {} \u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}", node.name);
 					println!("\u{2551} ID: {}", node.id);
 					println!("\u{2551} Kind: {}", node.kind);
@@ -192,32 +194,35 @@ pub async fn execute(
 			// Get the graph
 			let graph = graph_builder.get_graph().await?;
 
-			// Check if the node exists
-			if !graph.nodes.contains_key(node_id) {
-				println!("Node not found: {}", node_id);
-				return Ok(());
-			}
+			// Resolve node ID with fuzzy matching
+			let resolved_id = match find_node_id(&graph, node_id) {
+				Some(id) => id.to_string(),
+				None => {
+					println!("Node not found: {}", node_id);
+					return Ok(());
+				}
+			};
 
 			// Find relationships where this node is either source or target
 			let relationships: Vec<_> = graph
 				.relationships
 				.iter()
-				.filter(|rel| rel.source == *node_id || rel.target == *node_id)
+				.filter(|rel| rel.source == resolved_id || rel.target == resolved_id)
 				.collect();
 
 			if relationships.is_empty() {
-				println!("No relationships found for node: {}", node_id);
+				println!("No relationships found for node: {}", resolved_id);
 			} else {
 				println!(
 					"Found {} relationships for node {}:\n",
 					relationships.len(),
-					node_id
+					resolved_id
 				);
 
 				// Outgoing relationships
 				let outgoing: Vec<_> = relationships
 					.iter()
-					.filter(|rel| rel.source == *node_id)
+					.filter(|rel| rel.source == resolved_id)
 					.collect();
 
 				if !outgoing.is_empty() {
@@ -240,7 +245,7 @@ pub async fn execute(
 				// Incoming relationships
 				let incoming: Vec<_> = relationships
 					.iter()
-					.filter(|rel| rel.target == *node_id)
+					.filter(|rel| rel.target == resolved_id)
 					.collect();
 
 				if !incoming.is_empty() {
@@ -280,17 +285,33 @@ pub async fn execute(
 				}
 			};
 
+			// Get the graph for node name lookup and ID resolution
+			let graph = graph_builder.get_graph().await?;
+
+			// Resolve node IDs with fuzzy matching
+			let resolved_source = match find_node_id(&graph, source_id) {
+				Some(id) => id.to_string(),
+				None => {
+					println!("Source node not found: {}", source_id);
+					return Ok(());
+				}
+			};
+			let resolved_target = match find_node_id(&graph, target_id) {
+				Some(id) => id.to_string(),
+				None => {
+					println!("Target node not found: {}", target_id);
+					return Ok(());
+				}
+			};
+
 			// Find paths
 			println!(
 				"Finding paths from {} to {} (max depth: {})...",
-				source_id, target_id, args.max_depth
+				resolved_source, resolved_target, args.max_depth
 			);
 			let paths = graph_builder
-				.find_paths(source_id, target_id, args.max_depth)
+				.find_paths(&resolved_source, &resolved_target, args.max_depth)
 				.await?;
-
-			// Get the graph for node name lookup
-			let graph = graph_builder.get_graph().await?;
 
 			// Display results
 			if paths.is_empty() {

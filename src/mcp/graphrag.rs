@@ -17,6 +17,7 @@ use serde_json::{json, Value};
 use tracing::debug;
 
 use crate::config::Config;
+use crate::indexer::graphrag::find_node_id;
 use crate::indexer::{self, graphrag::GraphRAG};
 use crate::mcp::types::{McpError, McpTool};
 
@@ -106,7 +107,7 @@ impl GraphRagProvider {
 					},
 					"node_id": {
 						"type": "string",
-						"description": "Node ID for 'get-node'/'get-relationships' (format: 'path/to/file' or 'path/to/file/symbol')"
+						"description": "Node ID for 'get-node'/'get-relationships' (format: 'path/to/file', e.g. 'src/main.rs')"
 					},
 					"source_id": {
 						"type": "string",
@@ -325,8 +326,9 @@ impl GraphRagProvider {
 			}
 			GraphRAGOperation::GetNode => {
 				let node_id = args.node_id.as_ref().unwrap(); // Validated in caller
-				match graph.nodes.get(node_id) {
-					Some(node) => {
+				match find_node_id(&graph, node_id) {
+					Some(resolved_id) => {
+						let node = &graph.nodes[resolved_id];
 						match args.format {
 							OutputFormat::Json => {
 								Ok(serde_json::to_string_pretty(node)
@@ -363,32 +365,31 @@ impl GraphRagProvider {
 			GraphRAGOperation::GetRelationships => {
 				let node_id = args.node_id.as_ref().unwrap(); // Validated in caller
 
-				// Check if node exists
-				if !graph.nodes.contains_key(node_id) {
-					return Err(anyhow::anyhow!("Node not found: {}", node_id));
-				}
+				// Resolve node ID with fuzzy matching
+				let resolved_id = find_node_id(&graph, node_id)
+					.ok_or_else(|| anyhow::anyhow!("Node not found: {}", node_id))?;
 
 				// Find relationships
 				let relationships: Vec<_> = graph
 					.relationships
 					.iter()
-					.filter(|rel| rel.source == *node_id || rel.target == *node_id)
+					.filter(|rel| rel.source == resolved_id || rel.target == resolved_id)
 					.collect();
 
 				if relationships.is_empty() {
-					return Ok(format!("No relationships found for node: {}", node_id));
+					return Ok(format!("No relationships found for node: {}", resolved_id));
 				}
 
 				match args.format {
 					OutputFormat::Json => Ok(serde_json::to_string_pretty(&relationships)
 						.map_err(|e| anyhow::anyhow!("JSON serialization failed: {}", e))?),
 					OutputFormat::Md => {
-						let mut output = format!("# Relationships for {}\n\n", node_id);
+						let mut output = format!("# Relationships for {}\n\n", resolved_id);
 
 						// Outgoing relationships
 						let outgoing: Vec<_> = relationships
 							.iter()
-							.filter(|rel| rel.source == *node_id)
+							.filter(|rel| rel.source == resolved_id)
 							.collect();
 						if !outgoing.is_empty() {
 							output.push_str("## Outgoing Relationships\n\n");
@@ -409,7 +410,7 @@ impl GraphRagProvider {
 						// Incoming relationships
 						let incoming: Vec<_> = relationships
 							.iter()
-							.filter(|rel| rel.target == *node_id)
+							.filter(|rel| rel.target == resolved_id)
 							.collect();
 						if !incoming.is_empty() {
 							output.push_str("## Incoming Relationships\n\n");
@@ -431,14 +432,14 @@ impl GraphRagProvider {
 						// Text format for token efficiency
 						let mut output = format!(
 							"Relationships for {} ({} total):\n\n",
-							node_id,
+							resolved_id,
 							relationships.len()
 						);
 
 						// Outgoing relationships
 						let outgoing: Vec<_> = relationships
 							.iter()
-							.filter(|rel| rel.source == *node_id)
+							.filter(|rel| rel.source == resolved_id)
 							.collect();
 						if !outgoing.is_empty() {
 							output.push_str("Outgoing:\n");
@@ -459,7 +460,7 @@ impl GraphRagProvider {
 						// Incoming relationships
 						let incoming: Vec<_> = relationships
 							.iter()
-							.filter(|rel| rel.target == *node_id)
+							.filter(|rel| rel.target == resolved_id)
 							.collect();
 						if !incoming.is_empty() {
 							output.push_str("Incoming:\n");
@@ -480,12 +481,20 @@ impl GraphRagProvider {
 				}
 			}
 			GraphRAGOperation::FindPath => {
-				let source_id = args.source_id.as_ref().unwrap(); // Validated in caller
-				let target_id = args.target_id.as_ref().unwrap(); // Validated in caller
+				let source_id_input = args.source_id.as_ref().unwrap(); // Validated in caller
+				let target_id_input = args.target_id.as_ref().unwrap(); // Validated in caller
+
+				// Resolve source and target with fuzzy matching
+				let source_id = find_node_id(&graph, source_id_input)
+					.ok_or_else(|| anyhow::anyhow!("Source node not found: {}", source_id_input))?
+					.to_string();
+				let target_id = find_node_id(&graph, target_id_input)
+					.ok_or_else(|| anyhow::anyhow!("Target node not found: {}", target_id_input))?
+					.to_string();
 
 				// Find paths
 				let paths = graph_builder
-					.find_paths(source_id, target_id, args.max_depth)
+					.find_paths(&source_id, &target_id, args.max_depth)
 					.await
 					.map_err(|e| anyhow::anyhow!("Path finding failed: {}", e))?;
 

@@ -28,8 +28,8 @@ mod tests;
 pub use builder::GraphBuilder;
 pub use types::{CodeGraph, CodeNode, CodeRelationship, FunctionInfo};
 pub use utils::{
-	cosine_similarity, detect_project_root, graphrag_nodes_to_markdown, graphrag_nodes_to_text,
-	render_graphrag_nodes_json, to_relative_path,
+	cosine_similarity, detect_project_root, find_node_id, graphrag_nodes_to_markdown,
+	graphrag_nodes_to_text, normalize_node_id, render_graphrag_nodes_json, to_relative_path,
 };
 
 // GraphRAG implementation for all operations (backward compatibility + new operations)
@@ -57,16 +57,19 @@ impl GraphRAG {
 	pub async fn get_node(&self, node_id: &str) -> Result<String> {
 		let builder = GraphBuilder::new_with_quiet(self.config.clone(), true).await?;
 		let graph = builder.get_graph().await?;
-		match graph.nodes.get(node_id) {
-			Some(node) => Ok(format!(
-				"Node: {}\nID: {}\nKind: {}\nPath: {}\nDescription: {}\nSymbols: {}\n",
-				node.name,
-				node.id,
-				node.kind,
-				node.path,
-				node.description,
-				node.symbols.join(", ")
-			)),
+		match find_node_id(&graph, node_id) {
+			Some(resolved_id) => {
+				let node = &graph.nodes[resolved_id];
+				Ok(format!(
+					"Node: {}\nID: {}\nKind: {}\nPath: {}\nDescription: {}\nSymbols: {}\n",
+					node.name,
+					node.id,
+					node.kind,
+					node.path,
+					node.description,
+					node.symbols.join(", ")
+				))
+			}
 			None => Err(anyhow::anyhow!("Node not found: {}", node_id)),
 		}
 	}
@@ -76,30 +79,29 @@ impl GraphRAG {
 		let builder = GraphBuilder::new_with_quiet(self.config.clone(), true).await?;
 		let graph = builder.get_graph().await?;
 
-		if !graph.nodes.contains_key(node_id) {
-			return Err(anyhow::anyhow!("Node not found: {}", node_id));
-		}
+		let resolved_id = find_node_id(&graph, node_id)
+			.ok_or_else(|| anyhow::anyhow!("Node not found: {}", node_id))?;
 
 		let relationships: Vec<_> = graph
 			.relationships
 			.iter()
-			.filter(|rel| rel.source == *node_id || rel.target == *node_id)
+			.filter(|rel| rel.source == resolved_id || rel.target == resolved_id)
 			.collect();
 
 		if relationships.is_empty() {
-			return Ok(format!("No relationships found for node: {}", node_id));
+			return Ok(format!("No relationships found for node: {}", resolved_id));
 		}
 
 		let mut output = format!(
 			"Relationships for {} ({} total):\n\n",
-			node_id,
+			resolved_id,
 			relationships.len()
 		);
 
 		// Outgoing relationships
 		let outgoing: Vec<_> = relationships
 			.iter()
-			.filter(|rel| rel.source == *node_id)
+			.filter(|rel| rel.source == resolved_id)
 			.collect();
 		if !outgoing.is_empty() {
 			output.push_str("Outgoing:\n");
@@ -120,7 +122,7 @@ impl GraphRAG {
 		// Incoming relationships
 		let incoming: Vec<_> = relationships
 			.iter()
-			.filter(|rel| rel.target == *node_id)
+			.filter(|rel| rel.target == resolved_id)
 			.collect();
 		if !incoming.is_empty() {
 			output.push_str("Incoming:\n");
@@ -147,8 +149,17 @@ impl GraphRAG {
 		max_depth: usize,
 	) -> Result<String> {
 		let builder = GraphBuilder::new_with_quiet(self.config.clone(), true).await?;
-		let paths = builder.find_paths(source_id, target_id, max_depth).await?;
 		let graph = builder.get_graph().await?;
+
+		// Resolve node IDs with fuzzy matching
+		let resolved_source = find_node_id(&graph, source_id)
+			.ok_or_else(|| anyhow::anyhow!("Source node not found: {}", source_id))?;
+		let resolved_target = find_node_id(&graph, target_id)
+			.ok_or_else(|| anyhow::anyhow!("Target node not found: {}", target_id))?;
+
+		let paths = builder
+			.find_paths(resolved_source, resolved_target, max_depth)
+			.await?;
 
 		if paths.is_empty() {
 			return Ok(format!(

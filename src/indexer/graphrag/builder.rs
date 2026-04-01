@@ -189,6 +189,10 @@ impl GraphBuilder {
 					if graph.nodes.remove(&relative_path).is_some() && !self.quiet {
 						eprintln!("🗑️  Removed stale in-memory node: {}", relative_path);
 					}
+					// Remove stale relationships referencing this node
+					graph
+						.relationships
+						.retain(|rel| rel.source != relative_path && rel.target != relative_path);
 				}
 
 				// Extract file information efficiently
@@ -375,9 +379,13 @@ impl GraphBuilder {
 					)
 				};
 
-				// Generate summary text for embedding (much lighter than full content)
-				let summary_text =
-					format!("{} {} symbols: {}", file_name, language, symbols.join(" "));
+				// Generate summary text for embedding (include description for semantic quality)
+				let summary_text = format!(
+					"{}\n{}\nKey symbols: {}",
+					description,
+					language,
+					symbols.join(", ")
+				);
 
 				// Store summary text for batch embedding generation
 				pending_embeddings.push(summary_text);
