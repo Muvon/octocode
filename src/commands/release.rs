@@ -1121,7 +1121,6 @@ async fn update_project_version(project_type: &ProjectType, new_version: &str) -
 	}
 
 	// Update server.json if it exists (MCP publishing metadata)
-	// Update server.json if it exists (MCP publishing metadata)
 	let server_json_path = match project_type {
 		ProjectType::Rust(p)
 		| ProjectType::Node(p)
@@ -1134,6 +1133,29 @@ async fn update_project_version(project_type: &ProjectType, new_version: &str) -
 		let content = fs::read_to_string(&server_json_path)?;
 		let updated = update_json_version(&content, new_version, "version")?;
 		fs::write(&server_json_path, updated)?;
+	}
+
+	// Update Info.plist files if they exist (macOS/iOS apps)
+	let project_root = match project_type {
+		ProjectType::Rust(p)
+		| ProjectType::Node(p)
+		| ProjectType::Php(p)
+		| ProjectType::Go(p)
+		| ProjectType::Python(p) => p.parent().unwrap().to_path_buf(),
+		ProjectType::Unknown => std::env::current_dir()?,
+	};
+	for plist_path in find_info_plists(&project_root) {
+		let content = fs::read_to_string(&plist_path)?;
+		if let Ok(updated) = update_plist_version(&content, new_version) {
+			fs::write(&plist_path, updated)?;
+			println!(
+				"📱 Updated {}",
+				plist_path
+					.strip_prefix(&project_root)
+					.unwrap_or(&plist_path)
+					.display()
+			);
+		}
 	}
 
 	Ok(())
@@ -1402,6 +1424,73 @@ fn update_json_version(content: &str, new_version: &str, field_name: &str) -> Re
 	Ok(result)
 }
 
+/// Find Info.plist files in the project directory (macOS/iOS apps).
+/// Searches common locations and skips build artifacts.
+fn find_info_plists(project_root: &Path) -> Vec<PathBuf> {
+	let mut results = Vec::new();
+
+	// Check root Info.plist first
+	let root_plist = project_root.join("Info.plist");
+	if root_plist.exists() {
+		results.push(root_plist);
+	}
+
+	// Scan immediate subdirectories (e.g., <AppName>/Info.plist, Sources/Info.plist)
+	if let Ok(entries) = fs::read_dir(project_root) {
+		for entry in entries.flatten() {
+			let path = entry.path();
+			if !path.is_dir() {
+				continue;
+			}
+			// Skip build artifacts, dependencies, and hidden directories
+			let name = entry.file_name();
+			let name = name.to_string_lossy();
+			if name.starts_with('.')
+				|| name == "target"
+				|| name == "build"
+				|| name == "node_modules"
+				|| name == "vendor"
+				|| name == "DerivedData"
+				|| name == "Pods"
+			{
+				continue;
+			}
+			let plist = path.join("Info.plist");
+			if plist.exists() {
+				results.push(plist);
+			}
+		}
+	}
+
+	results
+}
+
+/// Update CFBundleShortVersionString in an Info.plist XML file.
+fn update_plist_version(content: &str, new_version: &str) -> Result<String> {
+	let key = "CFBundleShortVersionString";
+	let key_tag = format!("<key>{}</key>", key);
+
+	let key_pos = content
+		.find(&key_tag)
+		.ok_or_else(|| anyhow::anyhow!("CFBundleShortVersionString not found in Info.plist"))?;
+
+	let after_key = &content[key_pos + key_tag.len()..];
+
+	let string_open = after_key
+		.find("<string>")
+		.ok_or_else(|| anyhow::anyhow!("Missing <string> after CFBundleShortVersionString"))?;
+	let string_close = after_key
+		.find("</string>")
+		.ok_or_else(|| anyhow::anyhow!("Missing </string> after CFBundleShortVersionString"))?;
+
+	let abs_value_start = key_pos + key_tag.len() + string_open + "<string>".len();
+	let abs_value_end = key_pos + key_tag.len() + string_close;
+
+	let mut result = content.to_string();
+	result.replace_range(abs_value_start..abs_value_end, new_version);
+	Ok(result)
+}
+
 async fn update_changelog(changelog_path: &str, new_content: &str) -> Result<()> {
 	let changelog_path = Path::new(changelog_path);
 
@@ -1531,6 +1620,11 @@ async fn stage_release_files(changelog_path: &str, project_type: &ProjectType) -
 	let server_json = current_dir.join("server.json");
 	if server_json.exists() {
 		files_to_stage.push(server_json.to_string_lossy().to_string());
+	}
+
+	// Stage Info.plist files if they were updated (macOS/iOS apps)
+	for plist_path in find_info_plists(&current_dir) {
+		files_to_stage.push(plist_path.to_string_lossy().to_string());
 	}
 
 	for file in files_to_stage {
