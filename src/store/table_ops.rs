@@ -329,6 +329,7 @@ impl<'a> TableOperations<'a> {
 		table_name: &str,
 		column_name: &str,
 		vector_dimension: usize,
+		use_quantization: bool,
 	) -> Result<()> {
 		if !self.table_exists(table_name).await? {
 			return Err(anyhow::anyhow!("Table {} does not exist", table_name));
@@ -341,6 +342,7 @@ impl<'a> TableOperations<'a> {
 		let index_params = super::vector_optimizer::VectorOptimizer::calculate_index_params(
 			row_count,
 			vector_dimension,
+			use_quantization,
 		);
 
 		if !index_params.should_create_index {
@@ -367,10 +369,15 @@ impl<'a> TableOperations<'a> {
 			return Ok(());
 		}
 
-		// Create optimized vector index using IVF_HNSW_SQ
-		// This provides better recall/latency trade-off than IVF_PQ
+		// Create optimized vector index based on quantization setting
+		let index_type_name = match index_params.index_type {
+			super::vector_optimizer::IndexType::IvfHnswSq => "IVF_HNSW_SQ",
+			super::vector_optimizer::IndexType::IvfRq => "IVF_RQ",
+		};
+
 		tracing::info!(
-			"Creating IVF_HNSW_SQ vector index for table '{}': {} rows, {} partitions",
+			"Creating {} vector index for table '{}': {} rows, {} partitions",
+			index_type_name,
 			table_name,
 			row_count,
 			index_params.num_partitions
@@ -378,23 +385,42 @@ impl<'a> TableOperations<'a> {
 
 		let start_time = std::time::Instant::now();
 
-		table
-			.create_index(
-				&[column_name],
-				lancedb::index::Index::IvfHnswSq(
-					lancedb::index::vector::IvfHnswSqIndexBuilder::default()
-						.distance_type(index_params.distance_type)
-						.num_partitions(index_params.num_partitions)
-						.num_edges(index_params.num_edges)
-						.ef_construction(index_params.ef_construction),
-				),
-			)
-			.execute()
-			.await?;
+		// Create the appropriate index type
+		match index_params.index_type {
+			super::vector_optimizer::IndexType::IvfHnswSq => {
+				table
+					.create_index(
+						&[column_name],
+						lancedb::index::Index::IvfHnswSq(
+							lancedb::index::vector::IvfHnswSqIndexBuilder::default()
+								.distance_type(index_params.distance_type)
+								.num_partitions(index_params.num_partitions)
+								.num_edges(index_params.num_edges)
+								.ef_construction(index_params.ef_construction),
+						),
+					)
+					.execute()
+					.await?;
+			}
+			super::vector_optimizer::IndexType::IvfRq => {
+				table
+					.create_index(
+						&[column_name],
+						lancedb::index::Index::IvfRq(
+							lancedb::index::vector::IvfRqIndexBuilder::default()
+								.distance_type(index_params.distance_type)
+								.num_partitions(index_params.num_partitions),
+						),
+					)
+					.execute()
+					.await?;
+			}
+		}
 
 		let duration = start_time.elapsed();
 		tracing::info!(
-			"Successfully created IVF_HNSW_SQ index for table '{}' in {:.2}s",
+			"Successfully created {} index for table '{}' in {:.2}s",
+			index_type_name,
 			table_name,
 			duration.as_secs_f64()
 		);
@@ -407,6 +433,7 @@ impl<'a> TableOperations<'a> {
 		table_name: &str,
 		column_name: &str,
 		vector_dimension: usize,
+		use_quantization: bool,
 	) -> Result<()> {
 		if !self.table_exists(table_name).await? {
 			return Err(anyhow::anyhow!("Table {} does not exist", table_name));
@@ -436,6 +463,7 @@ impl<'a> TableOperations<'a> {
 		let index_params = super::vector_optimizer::VectorOptimizer::calculate_index_params(
 			row_count,
 			vector_dimension,
+			use_quantization,
 		);
 
 		if !index_params.should_create_index {
@@ -443,26 +471,50 @@ impl<'a> TableOperations<'a> {
 			return Ok(());
 		}
 
-		// Create new optimized index using IVF_HNSW_SQ
+		// Create new optimized index based on quantization setting
+		let index_type_name = match index_params.index_type {
+			super::vector_optimizer::IndexType::IvfHnswSq => "IVF_HNSW_SQ",
+			super::vector_optimizer::IndexType::IvfRq => "IVF_RQ",
+		};
+
 		let start_time = std::time::Instant::now();
 
-		table
-			.create_index(
-				&[column_name],
-				lancedb::index::Index::IvfHnswSq(
-					lancedb::index::vector::IvfHnswSqIndexBuilder::default()
-						.distance_type(index_params.distance_type)
-						.num_partitions(index_params.num_partitions)
-						.num_edges(index_params.num_edges)
-						.ef_construction(index_params.ef_construction),
-				),
-			)
-			.execute()
-			.await?;
+		// Create the appropriate index type
+		match index_params.index_type {
+			super::vector_optimizer::IndexType::IvfHnswSq => {
+				table
+					.create_index(
+						&[column_name],
+						lancedb::index::Index::IvfHnswSq(
+							lancedb::index::vector::IvfHnswSqIndexBuilder::default()
+								.distance_type(index_params.distance_type)
+								.num_partitions(index_params.num_partitions)
+								.num_edges(index_params.num_edges)
+								.ef_construction(index_params.ef_construction),
+						),
+					)
+					.execute()
+					.await?;
+			}
+			super::vector_optimizer::IndexType::IvfRq => {
+				table
+					.create_index(
+						&[column_name],
+						lancedb::index::Index::IvfRq(
+							lancedb::index::vector::IvfRqIndexBuilder::default()
+								.distance_type(index_params.distance_type)
+								.num_partitions(index_params.num_partitions),
+						),
+					)
+					.execute()
+					.await?;
+			}
+		}
 
 		let duration = start_time.elapsed();
 		tracing::info!(
-			"Successfully recreated IVF_HNSW_SQ index for table '{}' in {:.2}s - {} partitions",
+			"Successfully recreated {} index for table '{}' in {:.2}s - {} partitions",
+			index_type_name,
 			table_name,
 			duration.as_secs_f64(),
 			index_params.num_partitions

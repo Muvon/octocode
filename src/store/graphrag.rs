@@ -487,6 +487,9 @@ impl<'a> GraphRagOperations<'a> {
 			let row_count = table.count_rows(None).await?;
 			let indices = table.list_indices().await?;
 			let has_index = indices.iter().any(|idx| idx.columns == vec!["embedding"]);
+			let use_quantization = crate::config::Config::load()
+				.map(|c| c.index.quantization)
+				.unwrap_or(true);
 
 			if !has_index {
 				// Create initial index
@@ -496,6 +499,7 @@ impl<'a> GraphRagOperations<'a> {
 						"graphrag_nodes",
 						"embedding",
 						self.code_vector_dim,
+						use_quantization,
 					)
 					.await
 				{
@@ -518,6 +522,7 @@ impl<'a> GraphRagOperations<'a> {
 							"graphrag_nodes",
 							"embedding",
 							self.code_vector_dim,
+							use_quantization,
 						)
 						.await
 					{

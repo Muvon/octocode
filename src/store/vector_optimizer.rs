@@ -21,15 +21,23 @@
 //!
 //! ## Index Type Choice
 //!
-//! We use IVF_HNSW_SQ (Inverted File with HNSW and Scalar Quantization) because:
+//! We support two index types:
+//!
+//! ### IVF_HNSW_SQ (Scalar Quantization) - Default when quantization=false
 //! - Best recall/latency trade-off according to LanceDB documentation
 //! - HNSW provides fast approximate nearest neighbor search
 //! - Scalar Quantization (SQ) compresses vectors to 8-bit (4x compression for float32)
 //! - Simpler than IVF_PQ (no sub-vector tuning needed)
 //!
+//! ### IVF_RQ (RaBitQ Quantization) - Default when quantization=true
+//! - Better storage efficiency with 32x compression
+//! - Uses 1-bit quantization for vectors
+//! - Optimal for large-scale semantic search
+//! - Maintains good recall while significantly reducing storage footprint
+//!
 //! ## Parameter Guidelines
 //!
-//! - `num_partitions`: For IVF_HNSW_SQ, LanceDB recommends `num_rows // 1,048,576`
+//! - `num_partitions`: For IVF indexes, LanceDB recommends `num_rows // 1,048,576`
 //!   - For small datasets (< 1M rows), use sqrt(num_rows) as fallback
 //!   - Minimum 2 partitions to avoid single-partition degradation
 //! - `num_edges` (M): HNSW graph connectivity, default 20 is good for most cases
@@ -38,10 +46,20 @@
 use lancedb::Table;
 use lancedb::{query::VectorQuery, DistanceType};
 
+/// Vector index type selection
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IndexType {
+	/// IVF_HNSW_SQ: Inverted File with HNSW and Scalar Quantization (4x compression)
+	IvfHnswSq,
+	/// IVF_RQ: Inverted File with RaBitQ Quantization (32x compression)
+	IvfRq,
+}
+
 /// Vector index optimization parameters automatically calculated from dataset characteristics
 #[derive(Debug, Clone)]
 pub struct VectorIndexParams {
 	pub should_create_index: bool,
+	pub index_type: IndexType,
 	pub num_partitions: u32,
 	pub num_edges: u32,       // HNSW M parameter
 	pub ef_construction: u32, // HNSW build quality
@@ -109,7 +127,11 @@ impl VectorOptimizer {
 	///
 	/// # Returns
 	/// Optimized index parameters or recommendation to skip indexing
-	pub fn calculate_index_params(row_count: usize, _vector_dimension: usize) -> VectorIndexParams {
+	pub fn calculate_index_params(
+		row_count: usize,
+		_vector_dimension: usize,
+		use_quantization: bool,
+	) -> VectorIndexParams {
 		// LanceDB performs excellently with brute force search up to ~100K rows
 		// For smaller datasets, indexing overhead outweighs benefits
 		if row_count < 1000 {
@@ -119,6 +141,11 @@ impl VectorOptimizer {
 			);
 			return VectorIndexParams {
 				should_create_index: false,
+				index_type: if use_quantization {
+					IndexType::IvfRq
+				} else {
+					IndexType::IvfHnswSq
+				},
 				num_partitions: 0,
 				num_edges: 20,
 				ef_construction: 300,
@@ -126,7 +153,7 @@ impl VectorOptimizer {
 			};
 		}
 
-		// Calculate optimal number of partitions for IVF_HNSW_SQ
+		// Calculate optimal number of partitions for IVF indexes
 		// LanceDB recommends: num_rows // 1,048,576 for large datasets
 		// For smaller datasets, use sqrt(num_rows) as a reasonable default
 		let num_partitions = if row_count >= 1_048_576 {
@@ -141,13 +168,27 @@ impl VectorOptimizer {
 		// Clamp partitions to reasonable bounds
 		let num_partitions = num_partitions.clamp(2, 1024);
 
+		let index_type = if use_quantization {
+			IndexType::IvfRq
+		} else {
+			IndexType::IvfHnswSq
+		};
+
+		let index_type_name = match index_type {
+			IndexType::IvfHnswSq => "IVF_HNSW_SQ",
+			IndexType::IvfRq => "IVF_RQ",
+		};
+
 		tracing::debug!(
-			"Calculated IVF_HNSW_SQ index params for {} rows: partitions={}, num_edges=20, ef_construction=300",
-			row_count, num_partitions
+			"Calculated {} index params for {} rows: partitions={}, num_edges=20, ef_construction=300",
+			index_type_name,
+			row_count,
+			num_partitions
 		);
 
 		VectorIndexParams {
 			should_create_index: true,
+			index_type,
 			num_partitions,
 			num_edges: 20,                       // Default M for HNSW - good balance
 			ef_construction: 300,                // Default ef for build quality
@@ -259,21 +300,21 @@ mod tests {
 
 	#[test]
 	fn test_small_dataset_no_index() {
-		let params = VectorOptimizer::calculate_index_params(500, 768);
+		let params = VectorOptimizer::calculate_index_params(500, 768, true);
 		assert!(!params.should_create_index);
 	}
 
 	#[test]
 	fn test_medium_dataset_creates_index() {
-		let params = VectorOptimizer::calculate_index_params(5000, 768);
+		let params = VectorOptimizer::calculate_index_params(5000, 768, true);
 		assert!(params.should_create_index);
 		assert!(params.num_partitions >= 2);
 	}
 
 	#[test]
 	fn test_large_dataset_more_partitions() {
-		let params_small = VectorOptimizer::calculate_index_params(5000, 768);
-		let params_large = VectorOptimizer::calculate_index_params(50000, 768);
+		let params_small = VectorOptimizer::calculate_index_params(5000, 768, true);
+		let params_large = VectorOptimizer::calculate_index_params(50000, 768, true);
 
 		assert!(params_large.num_partitions > params_small.num_partitions);
 	}
@@ -281,7 +322,7 @@ mod tests {
 	#[test]
 	fn test_very_large_dataset_formula() {
 		// For datasets >= 1M rows, use LanceDB recommended formula
-		let params = VectorOptimizer::calculate_index_params(2_000_000, 768);
+		let params = VectorOptimizer::calculate_index_params(2_000_000, 768, true);
 		assert!(params.should_create_index);
 		// 2_000_000 / 1_048_576 ≈ 1.9, so should be ~2 partitions
 		assert_eq!(params.num_partitions, 2);
@@ -290,7 +331,7 @@ mod tests {
 	#[test]
 	fn test_minimum_partitions() {
 		// Even small indexed datasets should have at least 2 partitions
-		let params = VectorOptimizer::calculate_index_params(1000, 768);
+		let params = VectorOptimizer::calculate_index_params(1000, 768, true);
 		assert!(params.num_partitions >= 2);
 	}
 
@@ -298,6 +339,7 @@ mod tests {
 	fn test_should_recreate_index() {
 		let optimal = VectorIndexParams {
 			should_create_index: true,
+			index_type: IndexType::IvfHnswSq,
 			num_partitions: 100,
 			num_edges: 20,
 			ef_construction: 300,
@@ -309,6 +351,20 @@ mod tests {
 
 		// Large difference - recreate
 		assert!(VectorOptimizer::should_recreate_index(10, &optimal));
+	}
+
+	#[test]
+	fn test_quantization_false_uses_ivf_hnsw_sq() {
+		let params = VectorOptimizer::calculate_index_params(5000, 768, false);
+		assert!(params.should_create_index);
+		assert_eq!(params.index_type, IndexType::IvfHnswSq);
+	}
+
+	#[test]
+	fn test_quantization_true_uses_ivf_rq() {
+		let params = VectorOptimizer::calculate_index_params(5000, 768, true);
+		assert!(params.should_create_index);
+		assert_eq!(params.index_type, IndexType::IvfRq);
 	}
 
 	#[test]

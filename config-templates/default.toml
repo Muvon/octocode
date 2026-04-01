@@ -19,6 +19,7 @@ embeddings_batch_size = 16  # 16 files per batch - table.add() every 16 files fo
 embeddings_max_tokens_per_batch = 100000  # Keep existing token limit
 flush_frequency = 2  # Flush every 2 batches = every 32 files for coordinated persistence
 require_git = true  # Require git repository for indexing
+quantization = true  # Enable RaBitQ quantization (32x compression) vs IVF_HNSW_SQ (4x compression)
 
 [search]
 max_results = 20

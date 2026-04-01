@@ -547,10 +547,18 @@ impl Store {
 			let row_count = table.count_rows(None).await?;
 			let indices = table.list_indices().await?;
 			let has_vector_index = indices.iter().any(|idx| idx.columns == vec!["embedding"]);
+			let use_quantization = crate::config::Config::load()
+				.map(|c| c.index.quantization)
+				.unwrap_or(true);
 
 			if !has_vector_index {
 				if let Err(e) = table_ops
-					.create_vector_index_optimized(B::TABLE_NAME, "embedding", vector_dim)
+					.create_vector_index_optimized(
+						B::TABLE_NAME,
+						"embedding",
+						vector_dim,
+						use_quantization,
+					)
 					.await
 				{
 					tracing::warn!("Failed to create optimized vector index: {}", e);
@@ -561,7 +569,12 @@ impl Store {
 					B::TABLE_NAME
 				);
 				if let Err(e) = table_ops
-					.recreate_vector_index_optimized(B::TABLE_NAME, "embedding", vector_dim)
+					.recreate_vector_index_optimized(
+						B::TABLE_NAME,
+						"embedding",
+						vector_dim,
+						use_quantization,
+					)
 					.await
 				{
 					tracing::warn!("Failed to recreate optimized vector index: {}", e);

@@ -98,6 +98,11 @@ pub struct IndexConfig {
 
 	/// Require git repository for indexing (default: true)
 	pub require_git: bool,
+
+	/// Enable RaBitQ quantization for vector indexes (default: true)
+	/// When enabled, uses IVF_RQ (32x compression) instead of IVF_HNSW_SQ (4x compression)
+	/// RaBitQ provides better storage efficiency while maintaining good recall
+	pub quantization: bool,
 }
 
 impl Default for IndexConfig {
@@ -109,6 +114,7 @@ impl Default for IndexConfig {
 			embeddings_max_tokens_per_batch: 100000,
 			flush_frequency: 2,
 			require_git: true,
+			quantization: true,
 		}
 	}
 }
