@@ -364,4 +364,81 @@ impl<'a> MetadataOperations<'a> {
 			.create_table_with_schema("graphrag_git_metadata", schema)
 			.await
 	}
+
+	/// Get the last commits commit hash
+	pub async fn get_commits_last_commit_hash(&self) -> Result<Option<String>> {
+		if !self.table_ops.table_exists("commits_git_metadata").await? {
+			return Ok(None);
+		}
+
+		let table = self.db.open_table("commits_git_metadata").execute().await?;
+
+		let mut results = table
+			.query()
+			.select(Select::Columns(vec!["commit_hash".to_string()]))
+			.limit(1)
+			.execute()
+			.await?;
+
+		while let Some(batch) = results.try_next().await? {
+			if batch.num_rows() > 0 {
+				if let Some(column) = batch.column_by_name("commit_hash") {
+					if let Some(hash_array) = column.as_any().downcast_ref::<StringArray>() {
+						if let Some(hash) = hash_array.iter().next() {
+							return Ok(hash.map(|s| s.to_string()));
+						}
+					}
+				}
+			}
+		}
+
+		Ok(None)
+	}
+
+	/// Store commits git metadata (commit hash and timestamp)
+	pub async fn store_commits_last_commit_hash(&self, commit_hash: &str) -> Result<()> {
+		if !self.table_ops.table_exists("commits_git_metadata").await? {
+			self.create_commits_git_metadata_table().await?;
+		}
+
+		if let Ok(Some(existing_hash)) = self.get_commits_last_commit_hash().await {
+			if existing_hash == commit_hash {
+				return Ok(());
+			}
+		}
+
+		let schema = Arc::new(Schema::new(vec![
+			Field::new("commit_hash", DataType::Utf8, false),
+			Field::new("indexed_at", DataType::Int64, false),
+		]));
+
+		let commit_hashes = vec![commit_hash];
+		let timestamps = vec![chrono::Utc::now().timestamp()];
+
+		let batch = RecordBatch::try_new(
+			schema,
+			vec![
+				Arc::new(StringArray::from(commit_hashes)),
+				Arc::new(Int64Array::from(timestamps)),
+			],
+		)?;
+
+		self.table_ops.clear_table("commits_git_metadata").await?;
+		self.table_ops
+			.store_batch("commits_git_metadata", batch)
+			.await?;
+
+		Ok(())
+	}
+
+	async fn create_commits_git_metadata_table(&self) -> Result<()> {
+		let schema = Arc::new(Schema::new(vec![
+			Field::new("commit_hash", DataType::Utf8, false),
+			Field::new("indexed_at", DataType::Int64, false),
+		]));
+
+		self.table_ops
+			.create_table_with_schema("commits_git_metadata", schema)
+			.await
+	}
 }

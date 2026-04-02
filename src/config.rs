@@ -189,6 +189,18 @@ impl Default for SearchConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommitsConfig {
+	/// Use LLM to generate rich descriptions of commit diffs
+	pub use_llm: bool,
+}
+
+impl Default for CommitsConfig {
+	fn default() -> Self {
+		Self { use_llm: false }
+	}
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
 	/// Configuration version for future migrations
 	#[serde(default = "default_version")]
@@ -208,6 +220,9 @@ pub struct Config {
 
 	#[serde(default)]
 	pub graphrag: GraphRAGConfig,
+
+	#[serde(default)]
+	pub commits: CommitsConfig,
 }
 
 fn default_version() -> u32 {
@@ -224,6 +239,7 @@ impl Default for Config {
 			embedding: EmbeddingConfig::default(),
 			// This should never be reached - template loading should provide GraphRAG config
 			graphrag: GraphRAGConfig::default(),
+			commits: CommitsConfig::default(),
 		}
 	}
 }

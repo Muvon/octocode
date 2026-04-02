@@ -136,3 +136,6 @@ Focus on:
 - Key patterns or architectural decisions it implements
 
 Avoid listing specific functions/classes. Instead, describe the file's architectural significance and how it fits into the larger system design."""
+
+[commits]
+use_llm = false

@@ -71,7 +71,7 @@ pub struct SearchArgs {
 	#[arg(required = true)]
 	pub queries: Vec<String>,
 
-	/// Search mode: 'all' (default), 'code', 'docs', or 'text'
+	/// Search mode: 'all' (default), 'code', 'docs', 'text', or 'commits'
 	#[arg(short, long, default_value = "all")]
 	pub mode: String,
 
@@ -129,10 +129,10 @@ pub async fn execute(
 
 	// Validate search mode
 	let search_mode = match args.mode.as_str() {
-		"all" | "code" | "docs" | "text" => args.mode.as_str(),
+		"all" | "code" | "docs" | "text" | "commits" => args.mode.as_str(),
 		_ => {
 			return Err(anyhow::anyhow!(
-				"Invalid search mode '{}'. Use 'all', 'code', 'docs', or 'text'.",
+				"Invalid search mode '{}'. Use 'all', 'code', 'docs', 'text', or 'commits'.",
 				args.mode
 			));
 		}
@@ -195,7 +195,7 @@ pub async fn execute(
 	let distance_threshold = 1.0 - threshold;
 
 	// Deduplicate and merge with multi-query bonuses
-	let (mut code_blocks, mut doc_blocks, mut text_blocks) =
+	let (mut code_blocks, mut doc_blocks, mut text_blocks, commit_blocks) =
 		indexer::search::deduplicate_and_merge_results(
 			search_results,
 			&args.queries,
@@ -294,6 +294,15 @@ pub async fn execute(
 				println!("{}", text_output);
 			} else {
 				render_text_blocks_with_config(&text_blocks, config, effective_detail_level);
+			}
+		}
+		"commits" => {
+			let output = indexer::search::format_commit_search_results_as_text(&commit_blocks);
+			if args.format.is_json() {
+				let json = serde_json::to_string_pretty(&commit_blocks)?;
+				println!("{}", json);
+			} else {
+				println!("{}", output);
 			}
 		}
 		"all" => {

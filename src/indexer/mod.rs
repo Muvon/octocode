@@ -17,6 +17,7 @@
 
 pub mod batch_processor; // Batch processing utilities for embedding operations
 pub mod code_region_extractor; // Code region extraction and smart merging utilities
+pub mod commits; // Commit history indexing
 pub mod differential_processor; // Differential processing utilities for incremental updates
 pub mod file_processor; // File processing utilities for text and markdown files
 pub mod graph_optimization;
@@ -699,6 +700,14 @@ pub async fn index_files_with_quiet(
 							}
 						}
 
+						// Index commits before returning
+						if let Err(e) =
+							commits::index_commits(config, store, git_root, state.clone(), quiet)
+								.await
+						{
+							tracing::warn!("Commit indexing failed: {}", e);
+						}
+
 						{
 							let mut state_guard = state.write();
 							state_guard.indexing_complete = true;
@@ -1338,6 +1347,14 @@ pub async fn index_files_with_quiet(
 		None,
 		embedding_calls,
 	);
+
+	// Index commits from default branch
+	if let Some(repo_root) = git_repo_root {
+		if let Err(e) = commits::index_commits(config, store, repo_root, state.clone(), quiet).await
+		{
+			tracing::warn!("Commit indexing failed: {}", e);
+		}
+	}
 
 	// CRITICAL: Persist data and store git metadata atomically
 	// Always store metadata when we have a git repo — this records "we checked at this commit"

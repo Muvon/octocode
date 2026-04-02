@@ -156,8 +156,8 @@ pub async fn generate_search_embeddings(
 				text_embeddings: None,
 			})
 		}
-		"docs" | "text" => {
-			// Use text model for documents and text searches only
+		"docs" | "text" | "commits" => {
+			// Use text model for documents, text, and commit searches
 			let embeddings = generate_embeddings(query, false, config).await?;
 			Ok(SearchModeEmbeddings {
 				code_embeddings: None,
@@ -189,7 +189,7 @@ pub async fn generate_search_embeddings(
 			}
 		}
 		_ => Err(anyhow::anyhow!(
-			"Invalid search mode '{}'. Use 'all', 'code', 'docs', or 'text'.",
+			"Invalid search mode '{}'. Use 'all', 'code', 'docs', 'text', or 'commits'.",
 			mode
 		)),
 	}

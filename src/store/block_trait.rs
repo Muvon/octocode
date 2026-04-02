@@ -3,7 +3,7 @@
 use anyhow::Result;
 use arrow_array::RecordBatch;
 
-use super::{CodeBlock, DocumentBlock, TextBlock};
+use super::{CodeBlock, CommitBlock, DocumentBlock, TextBlock};
 
 /// Trait for block types to enable generic store operations
 pub trait BlockType: Clone + Send + Sync + 'static {
@@ -99,6 +99,35 @@ impl BlockType for DocumentBlock {
 
 	fn from_batch(batch: &RecordBatch) -> Result<Vec<Self>> {
 		super::batch_converter::BatchConverter::new(0).batch_to_document_blocks(batch, None)
+	}
+
+	fn distance(&self) -> Option<f32> {
+		self.distance
+	}
+
+	fn set_distance(&mut self, distance: f32) {
+		self.distance = Some(distance);
+	}
+
+	fn get_hash(&self) -> String {
+		self.hash.clone()
+	}
+}
+
+impl BlockType for CommitBlock {
+	const TABLE_NAME: &'static str = "commit_blocks";
+
+	fn to_batch(
+		blocks: &[Self],
+		embeddings: &[Vec<f32>],
+		vector_dim: usize,
+	) -> Result<RecordBatch> {
+		super::batch_converter::BatchConverter::new(vector_dim)
+			.commit_block_to_batch(blocks, embeddings)
+	}
+
+	fn from_batch(batch: &RecordBatch) -> Result<Vec<Self>> {
+		super::batch_converter::BatchConverter::new(0).batch_to_commit_blocks(batch)
 	}
 
 	fn distance(&self) -> Option<f32> {

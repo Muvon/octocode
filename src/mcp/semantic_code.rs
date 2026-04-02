@@ -71,8 +71,8 @@ impl SemanticCodeProvider {
 					},
 					"mode": {
 						"type": "string",
-						"description": "Content type filter: 'code' (functions/classes), 'text' (plain text), 'docs' (markdown/README), 'all' (default)",
-						"enum": ["code", "text", "docs", "all"],
+						"description": "Content type filter: 'code' (functions/classes), 'text' (plain text), 'docs' (markdown/README), 'commits' (git commit history), 'all' (default, excludes commits)",
+						"enum": ["code", "text", "docs", "commits", "all"],
 						"default": "all"
 					},
 					"detail_level": {
@@ -203,10 +203,10 @@ impl SemanticCodeProvider {
 			.unwrap_or("all");
 
 		// Validate mode
-		if !["code", "text", "docs", "all"].contains(&mode) {
+		if !["code", "text", "docs", "commits", "all"].contains(&mode) {
 			return Err(McpError::invalid_params(
 				format!(
-					"Invalid mode '{}': must be one of 'code', 'text', 'docs', or 'all'",
+					"Invalid mode '{}': must be one of 'code', 'text', 'docs', 'commits', or 'all'",
 					mode
 				),
 				"semantic_search",

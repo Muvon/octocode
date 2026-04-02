@@ -264,603 +264,6 @@ pub async fn expand_symbols(
 	Ok(expanded_blocks)
 }
 
-// Enhanced search function for MCP server with detail level control - returns formatted markdown results
-pub async fn search_codebase_with_details(
-	query: &str,
-	mode: &str,
-	detail_level: &str,
-	max_results: usize,
-	config: &Config,
-) -> Result<String> {
-	// Initialize store
-	let store = Store::new().await?;
-
-	// Generate embeddings for the query using centralized logic
-	let search_embeddings =
-		crate::embedding::generate_search_embeddings(query, mode, config).await?;
-
-	// Fetch more candidates when reranker is enabled so it has a good pool to work with
-	let candidate_limit = if config.search.reranker.enabled {
-		config.search.reranker.top_k_candidates
-	} else {
-		max_results
-	};
-
-	// Raw query string for FTS if hybrid is enabled
-	let keywords = if config.search.hybrid.enabled {
-		Some(query.to_string())
-	} else {
-		None
-	};
-
-	let (mut code_blocks, mut text_blocks, mut doc_blocks) = match mode {
-		"code" => {
-			let embeddings = search_embeddings.code_embeddings.ok_or_else(|| {
-				anyhow::anyhow!("No code embeddings generated for code search mode")
-			})?;
-
-			let results = if config.search.hybrid.enabled {
-				let hybrid_query = crate::store::HybridSearchQuery {
-					vector_query: Some(embeddings),
-					keywords: keywords.clone(),
-					vector_weight: config.search.hybrid.default_vector_weight,
-					keyword_weight: config.search.hybrid.default_keyword_weight,
-					limit: candidate_limit,
-					min_relevance: Some(config.search.similarity_threshold),
-					language_filter: None,
-				};
-				store
-					.hybrid_search::<crate::store::CodeBlock>(&hybrid_query)
-					.await?
-			} else {
-				let distance_threshold = 1.0 - config.search.similarity_threshold;
-				store
-					.get_code_blocks_with_config(
-						embeddings,
-						Some(candidate_limit),
-						Some(distance_threshold),
-					)
-					.await?
-			};
-			(results, vec![], vec![])
-		}
-		"text" => {
-			let embeddings = search_embeddings.text_embeddings.ok_or_else(|| {
-				anyhow::anyhow!("No text embeddings generated for text search mode")
-			})?;
-
-			let results = if config.search.hybrid.enabled {
-				let hybrid_query = crate::store::HybridSearchQuery {
-					vector_query: Some(embeddings),
-					keywords: keywords.clone(),
-					vector_weight: config.search.hybrid.default_vector_weight,
-					keyword_weight: config.search.hybrid.default_keyword_weight,
-					limit: candidate_limit,
-					min_relevance: Some(config.search.similarity_threshold),
-					language_filter: None,
-				};
-				store
-					.hybrid_search::<crate::store::TextBlock>(&hybrid_query)
-					.await?
-			} else {
-				let distance_threshold = 1.0 - config.search.similarity_threshold;
-				store
-					.get_text_blocks_with_config(
-						embeddings,
-						Some(candidate_limit),
-						Some(distance_threshold),
-					)
-					.await?
-			};
-			(vec![], results, vec![])
-		}
-		"docs" => {
-			let embeddings = search_embeddings.text_embeddings.ok_or_else(|| {
-				anyhow::anyhow!("No text embeddings generated for docs search mode")
-			})?;
-
-			let results = if config.search.hybrid.enabled {
-				let hybrid_query = crate::store::HybridSearchQuery {
-					vector_query: Some(embeddings),
-					keywords: keywords.clone(),
-					vector_weight: config.search.hybrid.default_vector_weight,
-					keyword_weight: config.search.hybrid.default_keyword_weight,
-					limit: candidate_limit,
-					min_relevance: Some(config.search.similarity_threshold),
-					language_filter: None,
-				};
-				store
-					.hybrid_search::<crate::store::DocumentBlock>(&hybrid_query)
-					.await?
-			} else {
-				let distance_threshold = 1.0 - config.search.similarity_threshold;
-				store
-					.get_document_blocks_with_config(
-						embeddings,
-						Some(candidate_limit),
-						Some(distance_threshold),
-					)
-					.await?
-			};
-			(vec![], vec![], results)
-		}
-		"all" => {
-			let code_embeddings = search_embeddings.code_embeddings.ok_or_else(|| {
-				anyhow::anyhow!("No code embeddings generated for all search mode")
-			})?;
-			let text_embeddings = search_embeddings.text_embeddings.ok_or_else(|| {
-				anyhow::anyhow!("No text embeddings generated for all search mode")
-			})?;
-			let results_per_type = candidate_limit.div_ceil(3);
-
-			if config.search.hybrid.enabled {
-				let code_query = crate::store::HybridSearchQuery {
-					vector_query: Some(code_embeddings),
-					keywords: keywords.clone(),
-					vector_weight: config.search.hybrid.default_vector_weight,
-					keyword_weight: config.search.hybrid.default_keyword_weight,
-					limit: results_per_type,
-					min_relevance: Some(config.search.similarity_threshold),
-					language_filter: None,
-				};
-				let text_query = crate::store::HybridSearchQuery {
-					vector_query: Some(text_embeddings.clone()),
-					keywords: keywords.clone(),
-					vector_weight: config.search.hybrid.default_vector_weight,
-					keyword_weight: config.search.hybrid.default_keyword_weight,
-					limit: results_per_type,
-					min_relevance: Some(config.search.similarity_threshold),
-					language_filter: None,
-				};
-				let doc_query = crate::store::HybridSearchQuery {
-					vector_query: Some(text_embeddings),
-					keywords,
-					vector_weight: config.search.hybrid.default_vector_weight,
-					keyword_weight: config.search.hybrid.default_keyword_weight,
-					limit: results_per_type,
-					min_relevance: Some(config.search.similarity_threshold),
-					language_filter: None,
-				};
-
-				let (code_results, text_results, doc_results) = tokio::try_join!(
-					store.hybrid_search::<crate::store::CodeBlock>(&code_query),
-					store.hybrid_search::<crate::store::TextBlock>(&text_query),
-					store.hybrid_search::<crate::store::DocumentBlock>(&doc_query),
-				)?;
-				(code_results, text_results, doc_results)
-			} else {
-				let distance_threshold = 1.0 - config.search.similarity_threshold;
-				let (code_results, text_results, doc_results) = tokio::try_join!(
-					store.get_code_blocks_with_config(
-						code_embeddings,
-						Some(results_per_type),
-						Some(distance_threshold),
-					),
-					store.get_text_blocks_with_config(
-						text_embeddings.clone(),
-						Some(results_per_type),
-						Some(distance_threshold),
-					),
-					store.get_document_blocks_with_config(
-						text_embeddings,
-						Some(results_per_type),
-						Some(distance_threshold),
-					),
-				)?;
-				(code_results, text_results, doc_results)
-			}
-		}
-		_ => {
-			return Err(anyhow::anyhow!(
-				"Invalid search mode '{}'. Use 'all', 'code', 'docs', or 'text'.",
-				mode
-			))
-		}
-	};
-
-	// Apply octolib reranker if enabled, otherwise just truncate to requested limit
-	if config.search.reranker.enabled {
-		code_blocks = crate::reranker::rerank_code_blocks_with_octolib(
-			query,
-			code_blocks,
-			&config.search.reranker,
-		)
-		.await?;
-		text_blocks = crate::reranker::rerank_text_blocks_with_octolib(
-			query,
-			text_blocks,
-			&config.search.reranker,
-		)
-		.await?;
-		doc_blocks = crate::reranker::rerank_doc_blocks_with_octolib(
-			query,
-			doc_blocks,
-			&config.search.reranker,
-		)
-		.await?;
-	} else {
-		code_blocks.truncate(max_results);
-		text_blocks.truncate(max_results);
-		doc_blocks.truncate(max_results);
-	}
-
-	match mode {
-		"code" => Ok(format_code_search_results_with_detail(
-			&code_blocks,
-			detail_level,
-		)),
-		"text" => Ok(format_text_search_results_as_markdown(&text_blocks)),
-		"docs" => Ok(format_doc_search_results_as_markdown(&doc_blocks)),
-		"all" => Ok(format_combined_search_results_with_detail(
-			&code_blocks,
-			&text_blocks,
-			&doc_blocks,
-			detail_level,
-		)),
-		_ => Err(anyhow::anyhow!(
-			"Invalid search mode '{}'. Use 'all', 'code', 'docs', or 'text'.",
-			mode
-		)),
-	}
-}
-// Search function for MCP server - returns formatted markdown results
-pub async fn search_codebase(query: &str, mode: &str, config: &Config) -> Result<String> {
-	// Initialize store
-	let store = Store::new().await?;
-
-	// Generate embeddings for the query using centralized logic
-	let search_embeddings =
-		crate::embedding::generate_search_embeddings(query, mode, config).await?;
-
-	// Perform the search based on mode
-	match mode {
-		"code" => {
-			let embeddings = search_embeddings.code_embeddings.ok_or_else(|| {
-				anyhow::anyhow!("No code embeddings generated for code search mode")
-			})?;
-			let results = store
-				.get_code_blocks_with_config(
-					embeddings,
-					Some(config.search.max_results),
-					Some(config.search.similarity_threshold),
-				)
-				.await?;
-			Ok(format_code_search_results_as_markdown(&results))
-		}
-		"text" => {
-			let embeddings = search_embeddings.text_embeddings.ok_or_else(|| {
-				anyhow::anyhow!("No text embeddings generated for text search mode")
-			})?;
-			let results = store
-				.get_text_blocks_with_config(
-					embeddings,
-					Some(config.search.max_results),
-					Some(config.search.similarity_threshold),
-				)
-				.await?;
-			Ok(format_text_search_results_as_markdown(&results))
-		}
-		"docs" => {
-			let embeddings = search_embeddings.text_embeddings.ok_or_else(|| {
-				anyhow::anyhow!("No text embeddings generated for docs search mode")
-			})?;
-			let results = store
-				.get_document_blocks_with_config(
-					embeddings,
-					Some(config.search.max_results),
-					Some(config.search.similarity_threshold),
-				)
-				.await?;
-			Ok(format_doc_search_results_as_markdown(&results))
-		}
-		"all" => {
-			// "all" mode - search across all types with proper embeddings
-			let code_embeddings = search_embeddings.code_embeddings.ok_or_else(|| {
-				anyhow::anyhow!("No code embeddings generated for all search mode")
-			})?;
-			let text_embeddings = search_embeddings.text_embeddings.ok_or_else(|| {
-				anyhow::anyhow!("No text embeddings generated for all search mode")
-			})?;
-
-			let code_results = store
-				.get_code_blocks_with_config(
-					code_embeddings,
-					Some(config.search.max_results),
-					Some(config.search.similarity_threshold),
-				)
-				.await?;
-			let text_results = store
-				.get_text_blocks_with_config(
-					text_embeddings.clone(),
-					Some(config.search.max_results),
-					Some(config.search.similarity_threshold),
-				)
-				.await?;
-			let doc_results = store
-				.get_document_blocks_with_config(
-					text_embeddings,
-					Some(config.search.max_results),
-					Some(config.search.similarity_threshold),
-				)
-				.await?;
-
-			// Format combined results
-			Ok(format_combined_search_results_as_markdown(
-				&code_results,
-				&text_results,
-				&doc_results,
-			))
-		}
-		_ => Err(anyhow::anyhow!(
-			"Invalid search mode '{}'. Use 'all', 'code', 'docs', or 'text'.",
-			mode
-		)),
-	}
-}
-
-// Format code search results with detail level control as markdown for MCP
-fn format_code_search_results_with_detail(blocks: &[CodeBlock], detail_level: &str) -> String {
-	if blocks.is_empty() {
-		return "No code results found.".to_string();
-	}
-
-	let mut output = String::new();
-	output.push_str(&format!(
-		"# Code Search Results\n\nFound {} code blocks:\n\n",
-		blocks.len()
-	));
-
-	// Group blocks by file path for better organization
-	let mut blocks_by_file: std::collections::HashMap<String, Vec<&CodeBlock>> =
-		std::collections::HashMap::new();
-
-	for block in blocks {
-		// Ensure we display relative paths
-		let display_path = ensure_relative_path(&block.path);
-		blocks_by_file.entry(display_path).or_default().push(block);
-	}
-
-	// Format results organized by file
-	for (file_path, file_blocks) in blocks_by_file.iter() {
-		output.push_str(&format!("## File: {}\n\n", file_path));
-
-		for (idx, block) in file_blocks.iter().enumerate() {
-			output.push_str(&format!(
-				"### Block {} of {} in file\n\n",
-				idx + 1,
-				file_blocks.len()
-			));
-			output.push_str(&format!("- **Language**: {}\n", block.language));
-			output.push_str(&format!(
-				"- **Lines**: {}-{}\n",
-				block.start_line, block.end_line
-			));
-
-			// Show similarity score if available
-			if let Some(distance) = block.distance {
-				output.push_str(&format!("- **Similarity**: {:.4}\n", 1.0 - distance));
-			}
-
-			if !block.symbols.is_empty() {
-				let formatted = format_symbols_for_display(&block.symbols);
-				if !formatted.is_empty() {
-					output.push_str("- **Symbols**: ");
-					output.push_str(&formatted);
-				}
-				output.push('\n');
-			}
-
-			output.push_str("\n**Content:**\n\n");
-
-			// Apply detail level formatting
-			match detail_level {
-				"signatures" => {
-					// Show clean preview without comments and with key parts
-					let preview = get_code_preview(&block.content, &block.language);
-					output.push_str("```");
-					output.push_str(&block.language);
-					output.push('\n');
-					output.push_str(&preview);
-					output.push_str("\n```\n\n");
-				}
-				"full" => {
-					// Show complete content
-					output.push_str("```");
-					output.push_str(&block.language);
-					output.push('\n');
-					output.push_str(&block.content);
-					output.push_str("\n```\n\n");
-				}
-				_ => {
-					// "partial" - default smart truncation
-					output.push_str("```");
-					output.push_str(&block.language);
-					output.push('\n');
-					output.push_str(&block.content);
-					output.push_str("\n```\n\n");
-				}
-			}
-		}
-	}
-
-	output
-}
-
-// Format code search results as markdown for MCP
-fn format_code_search_results_as_markdown(blocks: &[CodeBlock]) -> String {
-	if blocks.is_empty() {
-		return "No code results found.".to_string();
-	}
-
-	let mut output = String::new();
-	output.push_str(&format!(
-		"# Code Search Results\n\nFound {} code blocks:\n\n",
-		blocks.len()
-	));
-
-	// Group blocks by file path for better organization
-	let mut blocks_by_file: std::collections::HashMap<String, Vec<&CodeBlock>> =
-		std::collections::HashMap::new();
-
-	for block in blocks {
-		blocks_by_file
-			.entry(block.path.clone())
-			.or_default()
-			.push(block);
-	}
-
-	// Format results organized by file
-	for (file_path, file_blocks) in blocks_by_file.iter() {
-		output.push_str(&format!("## File: {}\n\n", file_path));
-
-		for (idx, block) in file_blocks.iter().enumerate() {
-			output.push_str(&format!(
-				"### Block {} of {} in file\n\n",
-				idx + 1,
-				file_blocks.len()
-			));
-			output.push_str(&format!("- **Language**: {}\n", block.language));
-			output.push_str(&format!(
-				"- **Lines**: {}-{}\n",
-				block.start_line, block.end_line
-			));
-
-			// Show similarity score if available
-			if let Some(distance) = block.distance {
-				output.push_str(&format!("- **Similarity**: {:.4}\n", 1.0 - distance));
-			}
-
-			if !block.symbols.is_empty() {
-				let formatted = format_symbols_for_display(&block.symbols);
-				if !formatted.is_empty() {
-					output.push_str("- **Symbols**: ");
-					output.push_str(&formatted);
-				}
-				output.push('\n');
-			}
-
-			output.push_str("\n**Content:**\n\n");
-			output.push_str("```");
-			output.push_str(&block.language);
-			output.push('\n');
-			output.push_str(&block.content);
-			output.push_str("\n```\n\n");
-		}
-	}
-
-	output
-}
-
-// Format text search results as markdown for MCP
-fn format_text_search_results_as_markdown(blocks: &[crate::store::TextBlock]) -> String {
-	if blocks.is_empty() {
-		return "No text results found.".to_string();
-	}
-
-	let mut output = String::new();
-	output.push_str(&format!(
-		"# Text Search Results\n\nFound {} text blocks:\n\n",
-		blocks.len()
-	));
-
-	// Group blocks by file path for better organization
-	let mut blocks_by_file: std::collections::HashMap<String, Vec<&crate::store::TextBlock>> =
-		std::collections::HashMap::new();
-
-	for block in blocks {
-		blocks_by_file
-			.entry(block.path.clone())
-			.or_default()
-			.push(block);
-	}
-
-	// Format results organized by file
-	for (file_path, file_blocks) in blocks_by_file.iter() {
-		output.push_str(&format!("## File: {}\n\n", file_path));
-
-		for (idx, block) in file_blocks.iter().enumerate() {
-			output.push_str(&format!(
-				"### Block {} of {} in file\n\n",
-				idx + 1,
-				file_blocks.len()
-			));
-			output.push_str(&format!("- **Language**: {}\n", block.language));
-			output.push_str(&format!(
-				"- **Lines**: {}-{}\n",
-				block.start_line, block.end_line
-			));
-
-			// Show similarity score if available
-			if let Some(distance) = block.distance {
-				output.push_str(&format!("- **Similarity**: {:.4}\n", 1.0 - distance));
-			}
-
-			output.push_str("\n**Content:**\n\n");
-			output.push_str("```");
-			output.push_str(&block.language);
-			output.push('\n');
-			output.push_str(&block.content);
-			output.push_str("\n```\n\n");
-		}
-	}
-
-	output
-}
-
-// Format document search results as markdown for MCP
-fn format_doc_search_results_as_markdown(blocks: &[crate::store::DocumentBlock]) -> String {
-	if blocks.is_empty() {
-		return "No documentation results found.".to_string();
-	}
-
-	let mut output = String::new();
-	output.push_str(&format!(
-		"# Documentation Search Results\n\nFound {} documentation sections:\n\n",
-		blocks.len()
-	));
-
-	// Group blocks by file path for better organization
-	let mut blocks_by_file: std::collections::HashMap<String, Vec<&crate::store::DocumentBlock>> =
-		std::collections::HashMap::new();
-
-	for block in blocks {
-		blocks_by_file
-			.entry(block.path.clone())
-			.or_default()
-			.push(block);
-	}
-
-	// Format results organized by file
-	for (file_path, file_blocks) in blocks_by_file.iter() {
-		output.push_str(&format!("## File: {}\n\n", file_path));
-
-		for (idx, block) in file_blocks.iter().enumerate() {
-			output.push_str(&format!(
-				"### Section {} of {} in file\n\n",
-				idx + 1,
-				file_blocks.len()
-			));
-			output.push_str(&format!("- **Title**: {}\n", block.title));
-			output.push_str(&format!("- **Level**: {}\n", block.level));
-			output.push_str(&format!(
-				"- **Lines**: {}-{}\n",
-				block.start_line, block.end_line
-			));
-
-			// Show similarity score if available
-			if let Some(distance) = block.distance {
-				output.push_str(&format!("- **Similarity**: {:.4}\n", 1.0 - distance));
-			}
-
-			output.push_str("\n**Content:**\n\n");
-			output.push_str(&block.content);
-			output.push_str("\n\n");
-		}
-	}
-
-	output
-}
-
 // Token-efficient text formatting functions for MCP
 
 // Format code search results as text for MCP with detail level control
@@ -1056,6 +459,49 @@ pub fn format_doc_search_results_as_text(
 }
 
 // Format combined search results as text for MCP with detail level control
+pub fn format_commit_search_results_as_text(blocks: &[crate::store::CommitBlock]) -> String {
+	if blocks.is_empty() {
+		return "No commit results found.".to_string();
+	}
+
+	let mut output = String::new();
+	output.push_str(&format!("COMMIT RESULTS ({})\n", blocks.len()));
+
+	for (idx, block) in blocks.iter().enumerate() {
+		let short_hash = &block.hash[..8.min(block.hash.len())];
+		let date = chrono::DateTime::from_timestamp(block.date, 0)
+			.map(|dt| dt.format("%Y-%m-%d").to_string())
+			.unwrap_or_else(|| block.date.to_string());
+
+		output.push_str(&format!(
+			"{}. {} ({}) by {}\n",
+			idx + 1,
+			short_hash,
+			date,
+			block.author,
+		));
+
+		if let Some(distance) = block.distance {
+			output.push_str(&format!("   Similarity: {:.3}\n", 1.0 - distance));
+		}
+
+		output.push_str(&format!("   Message: {}\n", block.message));
+
+		let files: Vec<String> = serde_json::from_str(&block.files).unwrap_or_default();
+		if !files.is_empty() {
+			output.push_str(&format!("   Files: {}\n", files.join(", ")));
+		}
+
+		if !block.description.is_empty() {
+			output.push_str(&format!("   Description: {}\n", block.description));
+		}
+
+		output.push('\n');
+	}
+
+	output
+}
+
 pub fn format_combined_search_results_as_text(
 	code_blocks: &[CodeBlock],
 	text_blocks: &[crate::store::TextBlock],
@@ -1096,82 +542,6 @@ pub fn format_combined_search_results_as_text(
 	output
 }
 
-// Format combined search results as markdown for MCP with detail level control
-fn format_combined_search_results_with_detail(
-	code_blocks: &[CodeBlock],
-	text_blocks: &[crate::store::TextBlock],
-	doc_blocks: &[crate::store::DocumentBlock],
-	detail_level: &str,
-) -> String {
-	let mut output = String::new();
-	output.push_str("# Combined Search Results\n\n");
-
-	let total_results = code_blocks.len() + text_blocks.len() + doc_blocks.len();
-	if total_results == 0 {
-		return "No results found.".to_string();
-	}
-
-	output.push_str(&format!("Found {} total results:\n\n", total_results));
-
-	// Documentation Results
-	if !doc_blocks.is_empty() {
-		output.push_str(&format_doc_search_results_as_markdown(doc_blocks));
-		output.push('\n');
-	}
-
-	// Code Results with detail level
-	if !code_blocks.is_empty() {
-		output.push_str(&format_code_search_results_with_detail(
-			code_blocks,
-			detail_level,
-		));
-		output.push('\n');
-	}
-
-	// Text Results
-	if !text_blocks.is_empty() {
-		output.push_str(&format_text_search_results_as_markdown(text_blocks));
-	}
-
-	output
-}
-
-// Format combined search results as markdown for MCP
-fn format_combined_search_results_as_markdown(
-	code_blocks: &[CodeBlock],
-	text_blocks: &[crate::store::TextBlock],
-	doc_blocks: &[crate::store::DocumentBlock],
-) -> String {
-	let mut output = String::new();
-	output.push_str("# Combined Search Results\n\n");
-
-	let total_results = code_blocks.len() + text_blocks.len() + doc_blocks.len();
-	if total_results == 0 {
-		return "No results found.".to_string();
-	}
-
-	output.push_str(&format!("Found {} total results:\n\n", total_results));
-
-	// Documentation Results
-	if !doc_blocks.is_empty() {
-		output.push_str(&format_doc_search_results_as_markdown(doc_blocks));
-		output.push('\n');
-	}
-
-	// Code Results
-	if !code_blocks.is_empty() {
-		output.push_str(&format_code_search_results_as_markdown(code_blocks));
-		output.push('\n');
-	}
-
-	// Text Results
-	if !text_blocks.is_empty() {
-		output.push_str(&format_text_search_results_as_markdown(text_blocks));
-	}
-
-	output
-}
-
 // Enhanced search function for MCP server with detail level control - returns formatted text results (token-efficient)
 pub async fn search_codebase_with_details_text(
 	query: &str,
@@ -1200,7 +570,7 @@ pub async fn search_codebase_with_details_text(
 	};
 
 	// Perform the search based on mode
-	let (mut code_blocks, mut text_blocks, mut doc_blocks) = match mode {
+	let (mut code_blocks, mut text_blocks, mut doc_blocks, mut commit_blocks) = match mode {
 		"code" => {
 			let embeddings = search_embeddings.code_embeddings.ok_or_else(|| {
 				anyhow::anyhow!("No code embeddings generated for code search mode")
@@ -1213,7 +583,7 @@ pub async fn search_codebase_with_details_text(
 					language_filter,
 				)
 				.await?;
-			(results, vec![], vec![])
+			(results, vec![], vec![], vec![])
 		}
 		"text" => {
 			let embeddings = search_embeddings.text_embeddings.ok_or_else(|| {
@@ -1226,7 +596,7 @@ pub async fn search_codebase_with_details_text(
 					Some(distance_threshold),
 				)
 				.await?;
-			(vec![], results, vec![])
+			(vec![], results, vec![], vec![])
 		}
 		"docs" => {
 			let embeddings = search_embeddings.text_embeddings.ok_or_else(|| {
@@ -1239,7 +609,20 @@ pub async fn search_codebase_with_details_text(
 					Some(distance_threshold),
 				)
 				.await?;
-			(vec![], vec![], results)
+			(vec![], vec![], results, vec![])
+		}
+		"commits" => {
+			let embeddings = search_embeddings.text_embeddings.ok_or_else(|| {
+				anyhow::anyhow!("No text embeddings generated for commits search mode")
+			})?;
+			let results = store
+				.get_commit_blocks_with_config(
+					embeddings,
+					Some(candidate_limit),
+					Some(distance_threshold),
+				)
+				.await?;
+			(vec![], vec![], vec![], results)
 		}
 		"all" => {
 			let code_embeddings = search_embeddings.code_embeddings.ok_or_else(|| {
@@ -1272,11 +655,11 @@ pub async fn search_codebase_with_details_text(
 					Some(distance_threshold),
 				)
 				.await?;
-			(code_results, text_results, doc_results)
+			(code_results, text_results, doc_results, vec![])
 		}
 		_ => {
 			return Err(anyhow::anyhow!(
-				"Invalid search mode '{}'. Use 'all', 'code', 'docs', or 'text'.",
+				"Invalid search mode '{}'. Use 'all', 'code', 'docs', 'commits', or 'text'.",
 				mode
 			))
 		}
@@ -1302,10 +685,17 @@ pub async fn search_codebase_with_details_text(
 			&config.search.reranker,
 		)
 		.await?;
+		commit_blocks = crate::reranker::rerank_commit_blocks_with_octolib(
+			query,
+			commit_blocks,
+			&config.search.reranker,
+		)
+		.await?;
 	} else {
 		code_blocks.truncate(max_results);
 		text_blocks.truncate(max_results);
 		doc_blocks.truncate(max_results);
+		commit_blocks.truncate(max_results);
 	}
 
 	match mode {
@@ -1318,6 +708,7 @@ pub async fn search_codebase_with_details_text(
 			detail_level,
 		)),
 		"docs" => Ok(format_doc_search_results_as_text(&doc_blocks, detail_level)),
+		"commits" => Ok(format_commit_search_results_as_text(&commit_blocks)),
 		"all" => Ok(format_combined_search_results_as_text(
 			&code_blocks,
 			&text_blocks,
@@ -1325,7 +716,7 @@ pub async fn search_codebase_with_details_text(
 			detail_level,
 		)),
 		_ => Err(anyhow::anyhow!(
-			"Invalid search mode '{}'. Use 'all', 'code', 'docs', or 'text'.",
+			"Invalid search mode '{}'. Use 'all', 'code', 'docs', 'commits', or 'text'.",
 			mode
 		)),
 	}
@@ -1382,7 +773,7 @@ pub async fn search_codebase_with_details_multi_query_text(
 	.await?;
 
 	// Deduplicate and merge with multi-query bonuses
-	let (mut code_blocks, mut doc_blocks, mut text_blocks) =
+	let (mut code_blocks, mut doc_blocks, mut text_blocks, mut commit_blocks) =
 		deduplicate_and_merge_results(search_results, queries, distance_threshold);
 
 	// Apply reranker if enabled
@@ -1406,11 +797,18 @@ pub async fn search_codebase_with_details_multi_query_text(
 			&config.search.reranker,
 		)
 		.await?;
+		commit_blocks = crate::reranker::rerank_commit_blocks_with_octolib(
+			&query,
+			commit_blocks,
+			&config.search.reranker,
+		)
+		.await?;
 	} else {
 		// Apply global result limits (reranker already limits via final_top_k)
 		code_blocks.truncate(max_results);
 		doc_blocks.truncate(max_results);
 		text_blocks.truncate(max_results);
+		commit_blocks.truncate(max_results);
 	}
 
 	// Format results based on mode with detail level control
@@ -1424,6 +822,7 @@ pub async fn search_codebase_with_details_multi_query_text(
 			detail_level,
 		)),
 		"docs" => Ok(format_doc_search_results_as_text(&doc_blocks, detail_level)),
+		"commits" => Ok(format_commit_search_results_as_text(&commit_blocks)),
 		"all" => Ok(format_combined_search_results_as_text(
 			&code_blocks,
 			&text_blocks,
@@ -1431,82 +830,10 @@ pub async fn search_codebase_with_details_multi_query_text(
 			detail_level,
 		)),
 		_ => Err(anyhow::anyhow!(
-			"Invalid search mode '{}'. Use 'all', 'code', 'docs', or 'text'.",
+			"Invalid search mode '{}'. Use 'all', 'code', 'docs', 'commits', or 'text'.",
 			mode
 		)),
 	}
-}
-
-// Get a clean preview of code content by skipping comments and showing key parts
-fn get_code_preview(content: &str, _language: &str) -> String {
-	let lines: Vec<&str> = content.lines().collect();
-
-	// If content is short, just return it all
-	if lines.len() <= 10 {
-		return content.to_string();
-	}
-
-	// Skip leading comments and empty lines
-	let mut start_idx = 0;
-	for (i, line) in lines.iter().enumerate() {
-		let trimmed = line.trim();
-
-		// Skip empty lines
-		if trimmed.is_empty() {
-			continue;
-		}
-
-		// Skip common comment patterns across languages
-		if trimmed.starts_with("//") ||     // C-style, Rust, JS, etc.
-		   trimmed.starts_with("#") ||      // Python, Shell, Ruby, etc.
-		   trimmed.starts_with("/*") ||     // C-style block comments
-		   trimmed.starts_with("*") ||      // Continuation of block comments
-		   trimmed.starts_with("<!--") ||   // HTML comments
-		   trimmed.starts_with("--") ||     // SQL, Lua comments
-		   trimmed.starts_with("%") ||      // LaTeX, Erlang comments
-		   trimmed.starts_with(";") ||      // Lisp, assembly comments
-		   trimmed.starts_with("\"\"\"") ||  // Python docstrings
-		   trimmed.starts_with("'''")
-		{
-			// Python docstrings
-			continue;
-		}
-
-		// Found first non-comment line
-		start_idx = i;
-		break;
-	}
-
-	// Take first 3-4 lines of actual code
-	let preview_start = 4;
-	let preview_end = 3;
-
-	let mut result = Vec::new();
-
-	// Add first few lines
-	for line in lines.iter().skip(start_idx).take(preview_start) {
-		result.push(*line);
-	}
-
-	// If there's more content, add separator and last few lines
-	if start_idx + preview_start < lines.len() {
-		let remaining_lines = lines.len() - (start_idx + preview_start);
-		if remaining_lines > preview_end {
-			result.push("// ... [content omitted] ...");
-
-			// Add last few lines
-			for line in lines.iter().skip(lines.len() - preview_end) {
-				result.push(*line);
-			}
-		} else {
-			// Just add the remaining lines
-			for line in lines.iter().skip(start_idx + preview_start) {
-				result.push(*line);
-			}
-		}
-	}
-
-	result.join("\n")
 }
 
 // Get a clean preview of text content with line numbers and smart truncation
@@ -1713,494 +1040,6 @@ fn get_code_preview_with_lines(content: &str, start_line: usize, _language: &str
 	result.join("\n")
 }
 
-// Ensure path is relative to current working directory for display
-fn ensure_relative_path(path: &str) -> String {
-	if let Ok(current_dir) = std::env::current_dir() {
-		if let Ok(absolute_path) = std::path::Path::new(path).canonicalize() {
-			if let Ok(relative) = absolute_path.strip_prefix(&current_dir) {
-				return relative.to_string_lossy().to_string();
-			}
-		}
-	}
-
-	// If path is already relative or we can't determine relative path, return as-is
-	path.to_string()
-}
-
-// Enhanced search function for MCP server with multi-query support and detail level control
-pub async fn search_codebase_with_details_multi_query(
-	queries: &[String],
-	mode: &str,
-	detail_level: &str,
-	max_results: usize,
-	config: &Config,
-) -> Result<String> {
-	// Initialize store
-	let store = Store::new().await?;
-
-	// Validate queries (same as CLI)
-	if queries.is_empty() {
-		return Err(anyhow::anyhow!("At least one query is required"));
-	}
-	if queries.len() > octolib::embedding::constants::MAX_QUERIES {
-		return Err(anyhow::anyhow!(
-			"Maximum {} queries allowed, got {}. Use fewer, more specific terms.",
-			crate::constants::MAX_QUERIES,
-			queries.len()
-		));
-	}
-
-	// Generate batch embeddings for all queries
-	let embeddings = generate_batch_embeddings_for_queries_mcp(queries, mode, config).await?;
-
-	// Zip queries with embeddings
-	let query_embeddings: Vec<_> = queries
-		.iter()
-		.cloned()
-		.zip(embeddings.into_iter())
-		.collect();
-
-	// Execute parallel searches — fetch top_k_candidates per query when reranker is on
-	let search_results =
-		execute_parallel_searches_mcp(&store, query_embeddings, mode, max_results, config).await?;
-
-	// Convert similarity threshold (use default from config)
-	let distance_threshold = 1.0 - config.search.similarity_threshold;
-
-	// Deduplicate and merge with multi-query bonuses
-	let (mut code_blocks, mut doc_blocks, mut text_blocks) =
-		deduplicate_and_merge_results_mcp(search_results, queries, distance_threshold);
-
-	// Apply reranker if enabled
-	if config.search.reranker.enabled && !queries.is_empty() {
-		let query = queries.join(" ");
-		code_blocks = crate::reranker::rerank_code_blocks_with_octolib(
-			&query,
-			code_blocks,
-			&config.search.reranker,
-		)
-		.await?;
-		doc_blocks = crate::reranker::rerank_doc_blocks_with_octolib(
-			&query,
-			doc_blocks,
-			&config.search.reranker,
-		)
-		.await?;
-		text_blocks = crate::reranker::rerank_text_blocks_with_octolib(
-			&query,
-			text_blocks,
-			&config.search.reranker,
-		)
-		.await?;
-	} else {
-		// Apply global result limits (reranker already limits via final_top_k)
-		code_blocks.truncate(max_results);
-		doc_blocks.truncate(max_results);
-		text_blocks.truncate(max_results);
-	}
-
-	// Format results based on mode with detail level control
-	match mode {
-		"code" => Ok(format_code_search_results_with_detail(
-			&code_blocks,
-			detail_level,
-		)),
-		"text" => Ok(format_text_search_results_as_markdown(&text_blocks)),
-		"docs" => Ok(format_doc_search_results_as_markdown(&doc_blocks)),
-		"all" => Ok(format_combined_search_results_with_detail(
-			&code_blocks,
-			&text_blocks,
-			&doc_blocks,
-			detail_level,
-		)),
-		_ => Err(anyhow::anyhow!(
-			"Invalid search mode '{}'. Use 'all', 'code', 'docs', or 'text'.",
-			mode
-		)),
-	}
-}
-
-// Helper functions for MCP multi-query search
-async fn generate_batch_embeddings_for_queries_mcp(
-	queries: &[String],
-	mode: &str,
-	config: &Config,
-) -> Result<Vec<crate::embedding::SearchModeEmbeddings>> {
-	match mode {
-		"code" => {
-			let code_embeddings = crate::embedding::generate_embeddings_batch(
-				queries.to_vec(),
-				true,
-				config,
-				crate::embedding::types::InputType::None,
-			)
-			.await?;
-			Ok(code_embeddings
-				.into_iter()
-				.map(|emb| crate::embedding::SearchModeEmbeddings {
-					code_embeddings: Some(emb),
-					text_embeddings: None,
-				})
-				.collect())
-		}
-		"docs" | "text" => {
-			let text_embeddings = crate::embedding::generate_embeddings_batch(
-				queries.to_vec(),
-				false,
-				config,
-				crate::embedding::types::InputType::Query,
-			)
-			.await?;
-			Ok(text_embeddings
-				.into_iter()
-				.map(|emb| crate::embedding::SearchModeEmbeddings {
-					code_embeddings: None,
-					text_embeddings: Some(emb),
-				})
-				.collect())
-		}
-		"all" => {
-			let code_model = &config.embedding.code_model;
-			let text_model = &config.embedding.text_model;
-
-			if code_model == text_model {
-				let embeddings = crate::embedding::generate_embeddings_batch(
-					queries.to_vec(),
-					true,
-					config,
-					crate::embedding::types::InputType::None,
-				)
-				.await?;
-				Ok(embeddings
-					.into_iter()
-					.map(|emb| crate::embedding::SearchModeEmbeddings {
-						code_embeddings: Some(emb.clone()),
-						text_embeddings: Some(emb),
-					})
-					.collect())
-			} else {
-				let (code_embeddings, text_embeddings) = tokio::try_join!(
-					crate::embedding::generate_embeddings_batch(
-						queries.to_vec(),
-						true,
-						config,
-						crate::embedding::types::InputType::None
-					),
-					crate::embedding::generate_embeddings_batch(
-						queries.to_vec(),
-						false,
-						config,
-						crate::embedding::types::InputType::Query
-					)
-				)?;
-
-				Ok(code_embeddings
-					.into_iter()
-					.zip(text_embeddings.into_iter())
-					.map(
-						|(code_emb, text_emb)| crate::embedding::SearchModeEmbeddings {
-							code_embeddings: Some(code_emb),
-							text_embeddings: Some(text_emb),
-						},
-					)
-					.collect())
-			}
-		}
-		_ => Err(anyhow::anyhow!("Invalid search mode: {}", mode)),
-	}
-}
-
-#[derive(Debug)]
-struct QuerySearchResultMcp {
-	query_index: usize,
-	code_blocks: Vec<CodeBlock>,
-	doc_blocks: Vec<crate::store::DocumentBlock>,
-	text_blocks: Vec<crate::store::TextBlock>,
-}
-
-async fn execute_parallel_searches_mcp(
-	store: &Store,
-	query_embeddings: Vec<(String, crate::embedding::SearchModeEmbeddings)>,
-	mode: &str,
-	max_results: usize,
-	config: &Config,
-) -> Result<Vec<QuerySearchResultMcp>> {
-	let per_query_limit = if config.search.reranker.enabled {
-		config.search.reranker.top_k_candidates
-	} else {
-		(max_results * 2) / query_embeddings.len().max(1)
-	};
-
-	let search_futures: Vec<_> = query_embeddings
-		.into_iter()
-		.enumerate()
-		.map(|(index, (query, embeddings))| async move {
-			execute_single_search_with_embeddings_mcp(
-				store,
-				&query,
-				embeddings,
-				mode,
-				per_query_limit,
-				index,
-			)
-			.await
-		})
-		.collect();
-
-	futures::future::try_join_all(search_futures).await
-}
-
-async fn execute_single_search_with_embeddings_mcp(
-	store: &Store,
-	_query: &str,
-	embeddings: crate::embedding::SearchModeEmbeddings,
-	mode: &str,
-	limit: usize,
-	query_index: usize,
-) -> Result<QuerySearchResultMcp> {
-	let (code_blocks, doc_blocks, text_blocks) = match mode {
-		"code" => {
-			let code_embeddings = embeddings
-				.code_embeddings
-				.ok_or_else(|| anyhow::anyhow!("No code embeddings for code search"))?;
-			let blocks = store
-				.get_code_blocks_with_config(code_embeddings, Some(limit), Some(1.01))
-				.await?;
-			(blocks, vec![], vec![])
-		}
-		"docs" => {
-			let text_embeddings = embeddings
-				.text_embeddings
-				.ok_or_else(|| anyhow::anyhow!("No text embeddings for docs search"))?;
-			let blocks = store
-				.get_document_blocks_with_config(text_embeddings, Some(limit), Some(1.01))
-				.await?;
-			(vec![], blocks, vec![])
-		}
-		"text" => {
-			let text_embeddings = embeddings
-				.text_embeddings
-				.ok_or_else(|| anyhow::anyhow!("No text embeddings for text search"))?;
-			let blocks = store
-				.get_text_blocks_with_config(text_embeddings, Some(limit), Some(1.01))
-				.await?;
-			(vec![], vec![], blocks)
-		}
-		"all" => {
-			let code_embeddings = embeddings
-				.code_embeddings
-				.ok_or_else(|| anyhow::anyhow!("No code embeddings for all search"))?;
-			let text_embeddings = embeddings
-				.text_embeddings
-				.ok_or_else(|| anyhow::anyhow!("No text embeddings for all search"))?;
-
-			let (code_blocks, doc_blocks, text_blocks) = tokio::try_join!(
-				store.get_code_blocks_with_config(code_embeddings, Some(limit), Some(1.01)),
-				store.get_document_blocks_with_config(
-					text_embeddings.clone(),
-					Some(limit),
-					Some(1.01)
-				),
-				store.get_text_blocks_with_config(text_embeddings, Some(limit), Some(1.01))
-			)?;
-
-			(code_blocks, doc_blocks, text_blocks)
-		}
-		_ => unreachable!(),
-	};
-
-	Ok(QuerySearchResultMcp {
-		query_index,
-		code_blocks,
-		doc_blocks,
-		text_blocks,
-	})
-}
-
-fn deduplicate_and_merge_results_mcp(
-	search_results: Vec<QuerySearchResultMcp>,
-	queries: &[String],
-	distance_threshold: f32,
-) -> (
-	Vec<CodeBlock>,
-	Vec<crate::store::DocumentBlock>,
-	Vec<crate::store::TextBlock>,
-) {
-	use std::cmp::Ordering;
-	use std::collections::HashMap;
-
-	// Deduplicate code blocks
-	let mut code_map: HashMap<String, (CodeBlock, Vec<usize>)> = HashMap::new();
-
-	for result in &search_results {
-		for block in &result.code_blocks {
-			match code_map.entry(block.hash.clone()) {
-				std::collections::hash_map::Entry::Vacant(e) => {
-					e.insert((block.clone(), vec![result.query_index]));
-				}
-				std::collections::hash_map::Entry::Occupied(mut e) => {
-					let (existing_block, query_indices) = e.get_mut();
-					query_indices.push(result.query_index);
-					if block.distance < existing_block.distance {
-						*existing_block = block.clone();
-					}
-				}
-			}
-		}
-	}
-
-	// Similar logic for doc and text blocks...
-	let mut doc_map: HashMap<String, (crate::store::DocumentBlock, Vec<usize>)> = HashMap::new();
-	let mut text_map: HashMap<String, (crate::store::TextBlock, Vec<usize>)> = HashMap::new();
-
-	for result in &search_results {
-		for block in &result.doc_blocks {
-			match doc_map.entry(block.hash.clone()) {
-				std::collections::hash_map::Entry::Vacant(e) => {
-					e.insert((block.clone(), vec![result.query_index]));
-				}
-				std::collections::hash_map::Entry::Occupied(mut e) => {
-					let (existing_block, query_indices) = e.get_mut();
-					query_indices.push(result.query_index);
-					if block.distance < existing_block.distance {
-						*existing_block = block.clone();
-					}
-				}
-			}
-		}
-
-		for block in &result.text_blocks {
-			match text_map.entry(block.hash.clone()) {
-				std::collections::hash_map::Entry::Vacant(e) => {
-					e.insert((block.clone(), vec![result.query_index]));
-				}
-				std::collections::hash_map::Entry::Occupied(mut e) => {
-					let (existing_block, query_indices) = e.get_mut();
-					query_indices.push(result.query_index);
-					if block.distance < existing_block.distance {
-						*existing_block = block.clone();
-					}
-				}
-			}
-		}
-	}
-
-	// Apply multi-query bonuses and filter
-	let mut final_code_blocks: Vec<CodeBlock> = code_map
-		.into_values()
-		.map(|(mut block, query_indices)| {
-			apply_multi_query_bonus_code_mcp(&mut block, &query_indices, queries.len());
-			block
-		})
-		.filter(|block| {
-			if let Some(distance) = block.distance {
-				distance <= distance_threshold
-			} else {
-				true
-			}
-		})
-		.collect();
-
-	let mut final_doc_blocks: Vec<crate::store::DocumentBlock> = doc_map
-		.into_values()
-		.map(|(mut block, query_indices)| {
-			apply_multi_query_bonus_doc_mcp(&mut block, &query_indices, queries.len());
-			block
-		})
-		.filter(|block| {
-			if let Some(distance) = block.distance {
-				distance <= distance_threshold
-			} else {
-				true
-			}
-		})
-		.collect();
-
-	let mut final_text_blocks: Vec<crate::store::TextBlock> = text_map
-		.into_values()
-		.map(|(mut block, query_indices)| {
-			apply_multi_query_bonus_text_mcp(&mut block, &query_indices, queries.len());
-			block
-		})
-		.filter(|block| {
-			if let Some(distance) = block.distance {
-				distance <= distance_threshold
-			} else {
-				true
-			}
-		})
-		.collect();
-
-	// Sort by relevance
-	final_code_blocks.sort_by(|a, b| match (a.distance, b.distance) {
-		(Some(dist_a), Some(dist_b)) => dist_a.partial_cmp(&dist_b).unwrap_or(Ordering::Equal),
-		(Some(_), None) => Ordering::Less,
-		(None, Some(_)) => Ordering::Greater,
-		(None, None) => Ordering::Equal,
-	});
-
-	final_doc_blocks.sort_by(|a, b| match (a.distance, b.distance) {
-		(Some(dist_a), Some(dist_b)) => dist_a.partial_cmp(&dist_b).unwrap_or(Ordering::Equal),
-		(Some(_), None) => Ordering::Less,
-		(None, Some(_)) => Ordering::Greater,
-		(None, None) => Ordering::Equal,
-	});
-
-	final_text_blocks.sort_by(|a, b| match (a.distance, b.distance) {
-		(Some(dist_a), Some(dist_b)) => dist_a.partial_cmp(&dist_b).unwrap_or(Ordering::Equal),
-		(Some(_), None) => Ordering::Less,
-		(None, Some(_)) => Ordering::Greater,
-		(None, None) => Ordering::Equal,
-	});
-
-	(final_code_blocks, final_doc_blocks, final_text_blocks)
-}
-
-fn apply_multi_query_bonus_code_mcp(
-	block: &mut CodeBlock,
-	query_indices: &[usize],
-	total_queries: usize,
-) {
-	if query_indices.len() > 1 && total_queries > 1 {
-		let coverage_ratio = query_indices.len() as f32 / total_queries as f32;
-		let bonus_factor = 1.0 - (coverage_ratio * 0.1).min(0.2);
-
-		if let Some(distance) = block.distance {
-			block.distance = Some(distance * bonus_factor);
-		}
-	}
-}
-
-fn apply_multi_query_bonus_doc_mcp(
-	block: &mut crate::store::DocumentBlock,
-	query_indices: &[usize],
-	total_queries: usize,
-) {
-	if query_indices.len() > 1 && total_queries > 1 {
-		let coverage_ratio = query_indices.len() as f32 / total_queries as f32;
-		let bonus_factor = 1.0 - (coverage_ratio * 0.1).min(0.2);
-
-		if let Some(distance) = block.distance {
-			block.distance = Some(distance * bonus_factor);
-		}
-	}
-}
-
-fn apply_multi_query_bonus_text_mcp(
-	block: &mut crate::store::TextBlock,
-	query_indices: &[usize],
-	total_queries: usize,
-) {
-	if query_indices.len() > 1 && total_queries > 1 {
-		let coverage_ratio = query_indices.len() as f32 / total_queries as f32;
-		let bonus_factor = 1.0 - (coverage_ratio * 0.1).min(0.2);
-
-		if let Some(distance) = block.distance {
-			block.distance = Some(distance * bonus_factor);
-		}
-	}
-}
-
 // ============================================================================
 // SHARED MULTI-QUERY SEARCH FUNCTIONS (Used by both CLI and MCP)
 // ============================================================================
@@ -2211,6 +1050,7 @@ pub struct QuerySearchResult {
 	pub code_blocks: Vec<crate::store::CodeBlock>,
 	pub doc_blocks: Vec<crate::store::DocumentBlock>,
 	pub text_blocks: Vec<crate::store::TextBlock>,
+	pub commit_blocks: Vec<crate::store::CommitBlock>,
 }
 
 pub async fn generate_batch_embeddings_for_queries(
@@ -2236,7 +1076,7 @@ pub async fn generate_batch_embeddings_for_queries(
 				})
 				.collect())
 		}
-		"docs" | "text" => {
+		"docs" | "text" | "commits" => {
 			// Batch generate text embeddings for all queries
 			let text_embeddings = crate::embedding::generate_embeddings_batch(
 				queries.to_vec(),
@@ -2321,6 +1161,7 @@ pub async fn execute_single_search_with_embeddings(
 	let mut code_blocks = Vec::new();
 	let mut doc_blocks = Vec::new();
 	let mut text_blocks = Vec::new();
+	let mut commit_blocks = Vec::new();
 
 	match mode {
 		"code" => {
@@ -2350,6 +1191,17 @@ pub async fn execute_single_search_with_embeddings(
 			if let Some(text_emb) = embeddings.text_embeddings {
 				text_blocks = store
 					.get_text_blocks_with_config(
+						text_emb,
+						Some(per_query_limit),
+						Some(distance_threshold),
+					)
+					.await?;
+			}
+		}
+		"commits" => {
+			if let Some(text_emb) = embeddings.text_embeddings {
+				commit_blocks = store
+					.get_commit_blocks_with_config(
 						text_emb,
 						Some(per_query_limit),
 						Some(distance_threshold),
@@ -2399,6 +1251,7 @@ pub async fn execute_single_search_with_embeddings(
 		code_blocks,
 		doc_blocks,
 		text_blocks,
+		commit_blocks,
 	})
 }
 
@@ -2483,6 +1336,21 @@ pub fn apply_multi_query_bonus_text(
 	}
 }
 
+pub fn apply_multi_query_bonus_commit(
+	block: &mut crate::store::CommitBlock,
+	query_indices: &[usize],
+	total_queries: usize,
+) {
+	if query_indices.len() > 1 && total_queries > 1 {
+		let coverage_ratio = query_indices.len() as f32 / total_queries as f32;
+		let bonus_factor = 1.0 - (coverage_ratio * 0.1).min(0.2);
+
+		if let Some(distance) = block.distance {
+			block.distance = Some(distance * bonus_factor);
+		}
+	}
+}
+
 pub fn deduplicate_and_merge_results(
 	search_results: Vec<QuerySearchResult>,
 	queries: &[String],
@@ -2491,6 +1359,7 @@ pub fn deduplicate_and_merge_results(
 	Vec<crate::store::CodeBlock>,
 	Vec<crate::store::DocumentBlock>,
 	Vec<crate::store::TextBlock>,
+	Vec<crate::store::CommitBlock>,
 ) {
 	use std::cmp::Ordering;
 	use std::collections::HashMap;
@@ -2630,7 +1499,54 @@ pub fn deduplicate_and_merge_results(
 		(None, None) => Ordering::Equal,
 	});
 
-	(final_code_blocks, final_doc_blocks, final_text_blocks)
+	// Deduplicate commit blocks
+	let mut commit_map: HashMap<String, (crate::store::CommitBlock, Vec<usize>)> = HashMap::new();
+
+	for result in &search_results {
+		for block in &result.commit_blocks {
+			match commit_map.entry(block.hash.clone()) {
+				std::collections::hash_map::Entry::Vacant(e) => {
+					e.insert((block.clone(), vec![result.query_index]));
+				}
+				std::collections::hash_map::Entry::Occupied(mut e) => {
+					let (existing_block, query_indices) = e.get_mut();
+					query_indices.push(result.query_index);
+					if block.distance < existing_block.distance {
+						*existing_block = block.clone();
+					}
+				}
+			}
+		}
+	}
+
+	let mut final_commit_blocks: Vec<crate::store::CommitBlock> = commit_map
+		.into_values()
+		.map(|(mut block, query_indices)| {
+			apply_multi_query_bonus_commit(&mut block, &query_indices, queries.len());
+			block
+		})
+		.filter(|block| {
+			if let Some(distance) = block.distance {
+				distance <= distance_threshold
+			} else {
+				true
+			}
+		})
+		.collect();
+
+	final_commit_blocks.sort_by(|a, b| match (a.distance, b.distance) {
+		(Some(dist_a), Some(dist_b)) => dist_a.partial_cmp(&dist_b).unwrap_or(Ordering::Equal),
+		(Some(_), None) => Ordering::Less,
+		(None, Some(_)) => Ordering::Greater,
+		(None, None) => Ordering::Equal,
+	});
+
+	(
+		final_code_blocks,
+		final_doc_blocks,
+		final_text_blocks,
+		final_commit_blocks,
+	)
 }
 
 #[cfg(test)]
@@ -2694,5 +1610,57 @@ mod tests {
 		let result = format_symbols_for_display(&symbols);
 		// Should filter types with underscores and sort
 		assert_eq!(result, "AnotherFunc, SimpleFunc");
+	}
+
+	#[test]
+	fn test_format_commit_search_results_empty() {
+		let blocks: Vec<crate::store::CommitBlock> = vec![];
+		let result = format_commit_search_results_as_text(&blocks);
+		assert_eq!(result, "No commit results found.");
+	}
+
+	#[test]
+	fn test_format_commit_search_results() {
+		let blocks = vec![crate::store::CommitBlock {
+			hash: "abc12345deadbeef".to_string(),
+			author: "Alice".to_string(),
+			date: 1700000000, // 2023-11-14
+			message: "feat: add retry logic".to_string(),
+			content: "feat: add retry logic\n\nFiles: src/client.rs".to_string(),
+			files: r#"["src/client.rs","src/retry.rs"]"#.to_string(),
+			description: "Adds exponential backoff".to_string(),
+			distance: Some(0.15),
+		}];
+
+		let result = format_commit_search_results_as_text(&blocks);
+		assert!(result.contains("COMMIT RESULTS (1)"));
+		assert!(result.contains("abc12345"));
+		assert!(result.contains("Alice"));
+		assert!(result.contains("feat: add retry logic"));
+		assert!(result.contains("src/client.rs"));
+		assert!(result.contains("Adds exponential backoff"));
+		assert!(result.contains("Similarity"));
+	}
+
+	#[test]
+	fn test_apply_multi_query_bonus_commit() {
+		let mut block = crate::store::CommitBlock {
+			hash: "abc".to_string(),
+			author: "A".to_string(),
+			date: 0,
+			message: "m".to_string(),
+			content: "c".to_string(),
+			files: "[]".to_string(),
+			description: String::new(),
+			distance: Some(0.5),
+		};
+
+		// Single query match — no bonus
+		apply_multi_query_bonus_commit(&mut block, &[0], 3);
+		assert_eq!(block.distance, Some(0.5));
+
+		// Multi-query match — applies bonus
+		apply_multi_query_bonus_commit(&mut block, &[0, 1], 3);
+		assert!(block.distance.unwrap() < 0.5);
 	}
 }

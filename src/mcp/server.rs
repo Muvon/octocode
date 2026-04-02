@@ -70,9 +70,9 @@ pub struct SemanticSearchParams {
 	/// Filter code results by language (rust, python, typescript, go, etc.)
 	#[serde(default, skip_serializing_if = "Option::is_none")]
 	pub language: Option<String>,
-	/// Content type filter: 'code' (functions/classes), 'text' (plain text), 'docs' (markdown/README), 'all' (default)
+	/// Content type filter: 'code' (functions/classes), 'text' (plain text), 'docs' (markdown/README), 'commits' (git commit history), 'all' (default, excludes commits)
 	#[serde(default, skip_serializing_if = "Option::is_none")]
-	#[schemars(extend("enum" = ["code", "text", "docs", "all"]), extend("default" = "all"))]
+	#[schemars(extend("enum" = ["code", "text", "docs", "commits", "all"]), extend("default" = "all"))]
 	pub mode: Option<String>,
 	/// Similarity cutoff 0.0-1.0 (higher = stricter match)
 	#[serde(default, skip_serializing_if = "Option::is_none")]

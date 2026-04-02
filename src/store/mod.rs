@@ -89,6 +89,19 @@ pub struct DocumentBlock {
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub distance: Option<f32>,
 }
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct CommitBlock {
+	pub hash: String, // commit SHA (dedup key)
+	pub author: String,
+	pub date: i64,           // unix timestamp
+	pub message: String,     // original commit message
+	pub content: String,     // composite: message + files + AI desc (FTS + embedding source)
+	pub files: String,       // JSON array of changed paths
+	pub description: String, // AI-generated description (empty if no LLM)
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub distance: Option<f32>,
+}
 /// Hybrid search query combining vector and keyword signals
 #[derive(Debug, Clone)]
 pub struct HybridSearchQuery {
@@ -395,6 +408,15 @@ impl Store {
 			.await
 	}
 
+	pub async fn store_commit_blocks(
+		&self,
+		blocks: &[CommitBlock],
+		embeddings: &[Vec<f32>],
+	) -> Result<()> {
+		self.store_blocks(blocks, embeddings, self.text_vector_dim)
+			.await
+	}
+
 	// Search operations with distance conversion
 	pub async fn get_code_blocks(&self, embedding: Vec<f32>) -> Result<Vec<CodeBlock>> {
 		self.get_code_blocks_with_config(embedding, None, None)
@@ -461,6 +483,22 @@ impl Store {
 		limit: Option<usize>,
 		distance_threshold: Option<f32>,
 	) -> Result<Vec<DocumentBlock>> {
+		self.get_blocks_with_config(
+			embedding,
+			limit,
+			distance_threshold,
+			None,
+			self.text_vector_dim,
+		)
+		.await
+	}
+
+	pub async fn get_commit_blocks_with_config(
+		&self,
+		embedding: Vec<f32>,
+		limit: Option<usize>,
+		distance_threshold: Option<f32>,
+	) -> Result<Vec<CommitBlock>> {
 		self.get_blocks_with_config(
 			embedding,
 			limit,
@@ -712,6 +750,18 @@ impl Store {
 	pub async fn store_graphrag_commit_hash(&self, commit_hash: &str) -> Result<()> {
 		let metadata_ops = MetadataOperations::new(&self.db);
 		metadata_ops.store_graphrag_commit_hash(commit_hash).await
+	}
+
+	pub async fn get_commits_last_commit_hash(&self) -> Result<Option<String>> {
+		let metadata_ops = MetadataOperations::new(&self.db);
+		metadata_ops.get_commits_last_commit_hash().await
+	}
+
+	pub async fn store_commits_last_commit_hash(&self, commit_hash: &str) -> Result<()> {
+		let metadata_ops = MetadataOperations::new(&self.db);
+		metadata_ops
+			.store_commits_last_commit_hash(commit_hash)
+			.await
 	}
 
 	// GraphRAG operations
