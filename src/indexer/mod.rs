@@ -18,6 +18,7 @@
 pub mod batch_processor; // Batch processing utilities for embedding operations
 pub mod code_region_extractor; // Code region extraction and smart merging utilities
 pub mod commits; // Commit history indexing
+pub mod contextual; // Contextual chunk enrichment for improved semantic search
 pub mod differential_processor; // Differential processing utilities for incremental updates
 pub mod file_processor; // File processing utilities for text and markdown files
 pub mod graph_optimization;
@@ -567,6 +568,7 @@ pub async fn index_files_with_quiet(
 	let mut text_blocks_batch = Vec::new();
 	let mut document_blocks_batch = Vec::new();
 	let mut all_code_blocks = Vec::new(); // Store all code blocks for GraphRAG
+	let mut file_context_map = contextual::FileContextMap::new();
 
 	// Track file metadata for atomic storage after batch processing
 	let mut code_file_metadata = FileMetadataBatch::new();
@@ -868,6 +870,7 @@ pub async fn index_files_with_quiet(
 								&mut code_blocks_batch,
 								&mut text_blocks_batch, // Will remain empty for code files
 								&mut all_code_blocks,
+								&mut file_context_map,
 							)
 							.await?;
 							file_processed = true;
@@ -903,10 +906,12 @@ pub async fn index_files_with_quiet(
 								&code_blocks_batch,
 								config,
 								&code_file_metadata,
+								&file_context_map,
 							)
 							.await?;
 							code_blocks_batch.clear();
 							code_file_metadata.clear();
+							file_context_map.clear();
 							batches_processed += 1;
 							// Intelligent flush based on configuration
 							flush_if_needed(store, &mut batches_processed, config, false).await?;
@@ -1091,6 +1096,7 @@ pub async fn index_files_with_quiet(
 								&mut code_blocks_batch,
 								&mut text_blocks_batch, // Will remain empty for code files
 								&mut all_code_blocks,
+								&mut file_context_map,
 							)
 							.await?;
 							file_processed = true;
@@ -1126,10 +1132,12 @@ pub async fn index_files_with_quiet(
 								&code_blocks_batch,
 								config,
 								&code_file_metadata,
+								&file_context_map,
 							)
 							.await?;
 							code_blocks_batch.clear();
 							code_file_metadata.clear();
+							file_context_map.clear();
 							batches_processed += 1;
 							// Intelligent flush based on configuration
 							flush_if_needed(store, &mut batches_processed, config, false).await?;
@@ -1235,7 +1243,14 @@ pub async fn index_files_with_quiet(
 
 	// Process remaining batches
 	if !code_blocks_batch.is_empty() {
-		process_code_blocks_batch(store, &code_blocks_batch, config, &code_file_metadata).await?;
+		process_code_blocks_batch(
+			store,
+			&code_blocks_batch,
+			config,
+			&code_file_metadata,
+			&file_context_map,
+		)
+		.await?;
 		embedding_calls += code_blocks_batch.len();
 		batches_processed += 1;
 	}
@@ -1446,6 +1461,7 @@ pub async fn handle_file_change(store: &Store, file_path: &str, config: &Config)
 					let mut text_blocks_batch = Vec::new(); // Will remain empty for code files
 					let mut all_code_blocks = Vec::new(); // For GraphRAG
 					let mut code_file_metadata = FileMetadataBatch::new();
+					let mut file_context_map = contextual::FileContextMap::new();
 
 					let ctx = ProcessFileContext {
 						store,
@@ -1460,6 +1476,7 @@ pub async fn handle_file_change(store: &Store, file_path: &str, config: &Config)
 						&mut code_blocks_batch,
 						&mut text_blocks_batch,
 						&mut all_code_blocks,
+						&mut file_context_map,
 					)
 					.await?;
 
@@ -1474,6 +1491,7 @@ pub async fn handle_file_change(store: &Store, file_path: &str, config: &Config)
 							&code_blocks_batch,
 							config,
 							&code_file_metadata,
+							&file_context_map,
 						)
 						.await?;
 					}

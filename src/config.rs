@@ -103,6 +103,21 @@ pub struct IndexConfig {
 	/// When enabled, uses IVF_RQ (32x compression) instead of IVF_HNSW_SQ (4x compression)
 	/// RaBitQ provides better storage efficiency while maintaining good recall
 	pub quantization: bool,
+
+	/// Enable LLM-generated contextual descriptions for code chunks (default: false)
+	/// When enabled, uses the configured LLM to generate natural language descriptions
+	/// of code chunks at indexing time. These descriptions are prepended to chunk content
+	/// before embedding (not stored), improving search recall by ~35-67%.
+	/// Structural context (file path, language, symbols) is ALWAYS prepended regardless.
+	#[serde(default)]
+	pub contextual_descriptions: bool,
+
+	/// Model for contextual description generation in provider:model format
+	pub contextual_model: String,
+
+	/// Number of code chunks per LLM description batch (default: 10)
+	#[serde(default = "default_contextual_batch_size")]
+	pub contextual_batch_size: usize,
 }
 
 impl Default for IndexConfig {
@@ -115,6 +130,9 @@ impl Default for IndexConfig {
 			flush_frequency: 2,
 			require_git: true,
 			quantization: true,
+			contextual_descriptions: false,
+			contextual_model: "openrouter:openai/gpt-4o-mini".to_string(),
+			contextual_batch_size: 10,
 		}
 	}
 }
@@ -227,6 +245,10 @@ pub struct Config {
 
 fn default_version() -> u32 {
 	1
+}
+
+fn default_contextual_batch_size() -> usize {
+	10
 }
 
 impl Default for Config {

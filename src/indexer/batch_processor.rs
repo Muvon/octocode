@@ -19,6 +19,9 @@
 
 use crate::config::Config;
 use crate::embedding::count_tokens;
+use crate::indexer::contextual::{
+	build_enriched_embedding_input, generate_contextual_descriptions, FileContextMap,
+};
 use crate::mcp::logging::log_performance_metrics;
 use crate::store::{CodeBlock, DocumentBlock, Store, TextBlock};
 use anyhow::Result;
@@ -75,23 +78,26 @@ pub async fn process_code_blocks_batch(
 	blocks: &[CodeBlock],
 	config: &Config,
 	file_metadata: &FileMetadataBatch,
+	file_context: &FileContextMap,
 ) -> Result<()> {
 	let start_time = std::time::Instant::now();
 
-	// Prepare pure content for embeddings (minimal metadata noise)
+	// Step 1: Generate LLM contextual descriptions if enabled
+	let descriptions = if config.index.contextual_descriptions {
+		generate_contextual_descriptions(blocks, config, file_context).await?
+	} else {
+		HashMap::new()
+	};
+
+	// Step 2: Build enriched embedding input
+	// Always prepends structural context (file path, language, symbols).
+	// Optionally prepends LLM-generated natural language description.
+	// The stored content remains the original code - enrichment is for embedding only.
 	let contents: Vec<String> = blocks
 		.iter()
-		.map(|block| {
-			let mut parts = Vec::new();
-			// Add only block symbols (relevant context)
-			if !block.symbols.is_empty() {
-				for symbol in &block.symbols {
-					parts.push(symbol.clone());
-				}
-			}
-			// Add actual code content
-			parts.push(block.content.clone());
-			parts.join("\n")
+		.enumerate()
+		.map(|(i, block)| {
+			build_enriched_embedding_input(block, descriptions.get(&i).map(|s| s.as_str()))
 		})
 		.collect();
 
@@ -126,7 +132,11 @@ pub async fn process_text_blocks_batch(
 	file_metadata: &FileMetadataBatch,
 ) -> Result<()> {
 	let start_time = std::time::Instant::now();
-	let contents: Vec<String> = blocks.iter().map(|b| b.content.clone()).collect();
+	// Prepend file path context for text blocks (structural enrichment)
+	let contents: Vec<String> = blocks
+		.iter()
+		.map(|b| format!("# File: {}\n\n{}", b.path, b.content))
+		.collect();
 	let embeddings = crate::embedding::generate_embeddings_batch(
 		contents,
 		false,
@@ -157,11 +167,15 @@ pub async fn process_document_blocks_batch(
 	let contents: Vec<String> = blocks
 		.iter()
 		.map(|b| {
+			let mut parts = Vec::new();
+			// Always prepend file path for structural context
+			parts.push(format!("# File: {}", b.path));
 			if !b.context.is_empty() {
-				format!("{}\n\n{}", b.context.join("\n"), b.content)
-			} else {
-				b.content.clone()
+				parts.push(b.context.join("\n"));
 			}
+			parts.push(String::new());
+			parts.push(b.content.clone());
+			parts.join("\n")
 		})
 		.collect();
 	let embeddings = crate::embedding::generate_embeddings_batch(
@@ -211,8 +225,9 @@ mod tests {
 	use super::*;
 
 	#[test]
-	fn test_code_block_content_formatting() {
-		// Create a sample code block with symbols
+	fn test_code_block_enriched_formatting() {
+		use crate::indexer::contextual::build_enriched_embedding_input;
+
 		let block = CodeBlock {
 			path: "src/main.rs".to_string(),
 			language: "rust".to_string(),
@@ -224,24 +239,21 @@ mod tests {
 			distance: None,
 		};
 
-		// Test that symbols are included in content
-		let mut parts = Vec::new();
-		if !block.symbols.is_empty() {
-			for symbol in &block.symbols {
-				parts.push(symbol.clone());
-			}
-		}
-		parts.push(block.content.clone());
-		let formatted = parts.join("\n");
+		let formatted = build_enriched_embedding_input(&block, None);
 
-		assert!(formatted.contains("main"));
+		// Structural context is prepended
+		assert!(formatted.contains("# File: src/main.rs"));
+		assert!(formatted.contains("# Language: rust"));
+		assert!(formatted.contains("# Defines: main"));
+		// Code content is preserved
 		assert!(formatted.contains("fn main()"));
 		assert!(formatted.contains("Hello, world!"));
 	}
 
 	#[test]
-	fn test_code_block_without_symbols() {
-		// Create a code block without symbols
+	fn test_code_block_enriched_with_description() {
+		use crate::indexer::contextual::build_enriched_embedding_input;
+
 		let block = CodeBlock {
 			path: "src/utils.rs".to_string(),
 			language: "rust".to_string(),
@@ -253,17 +265,14 @@ mod tests {
 			distance: None,
 		};
 
-		let mut parts = Vec::new();
-		if !block.symbols.is_empty() {
-			for symbol in &block.symbols {
-				parts.push(symbol.clone());
-			}
-		}
-		parts.push(block.content.clone());
-		let formatted = parts.join("\n");
+		let formatted =
+			build_enriched_embedding_input(&block, Some("Application version constant"));
 
-		// Should only have code content
-		assert_eq!(formatted, block.content);
+		// Description comes first
+		assert!(formatted.starts_with("Application version constant"));
+		// Structural context present
+		assert!(formatted.contains("# File: src/utils.rs"));
+		// Code content preserved
 		assert!(formatted.contains("const VERSION"));
 	}
 }

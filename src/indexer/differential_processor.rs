@@ -21,6 +21,7 @@
 use crate::config::Config;
 use crate::embedding::{calculate_content_hash_with_lines, calculate_unique_content_hash};
 use crate::indexer::code_region_extractor::extract_meaningful_regions;
+use crate::indexer::contextual::{FileContext, FileContextMap};
 use crate::indexer::file_processor::chunk_text;
 use crate::indexer::languages;
 use crate::indexer::markdown_processor::parse_markdown_content;
@@ -46,6 +47,7 @@ pub async fn process_file_differential(
 	code_blocks_batch: &mut Vec<CodeBlock>,
 	_text_blocks_batch: &mut [TextBlock], // Unused for code files
 	all_code_blocks: &mut Vec<CodeBlock>,
+	file_context: &mut FileContextMap,
 ) -> Result<()> {
 	let mut parser = Parser::new();
 
@@ -71,6 +73,20 @@ pub async fn process_file_differential(
 		contents,
 		lang_impl.as_ref(),
 		&mut code_regions,
+	);
+
+	// Extract file-level imports for contextual description enrichment
+	let (imports, _exports) = lang_impl.extract_imports_exports(tree.root_node(), contents);
+	let all_symbols: Vec<String> = code_regions
+		.iter()
+		.flat_map(|r| r.symbols.iter().cloned())
+		.collect();
+	file_context.insert(
+		file_path.to_string(),
+		FileContext {
+			imports,
+			all_symbols,
+		},
 	);
 
 	// If not force reindexing, get existing hashes for this file to compare
@@ -290,6 +306,7 @@ pub async fn process_file(
 	code_blocks_batch: &mut Vec<CodeBlock>,
 	_text_blocks_batch: &mut [TextBlock], // Unused for code files - only used for unsupported files
 	all_code_blocks: &mut Vec<CodeBlock>,
+	file_context: &mut FileContextMap,
 ) -> Result<()> {
 	let mut parser = Parser::new();
 
@@ -315,6 +332,20 @@ pub async fn process_file(
 		contents,
 		lang_impl.as_ref(),
 		&mut code_regions,
+	);
+
+	// Extract file-level imports for contextual description enrichment
+	let (imports, _exports) = lang_impl.extract_imports_exports(tree.root_node(), contents);
+	let all_symbols: Vec<String> = code_regions
+		.iter()
+		.flat_map(|r| r.symbols.iter().cloned())
+		.collect();
+	file_context.insert(
+		file_path.to_string(),
+		FileContext {
+			imports,
+			all_symbols,
+		},
 	);
 
 	// Track the number of blocks we added to all_code_blocks for GraphRAG

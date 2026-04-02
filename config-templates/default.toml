@@ -20,6 +20,17 @@ embeddings_max_tokens_per_batch = 100000  # Keep existing token limit
 flush_frequency = 2  # Flush every 2 batches = every 32 files for coordinated persistence
 require_git = true  # Require git repository for indexing
 quantization = true  # Enable RaBitQ quantization (32x compression) vs IVF_HNSW_SQ (4x compression)
+# Contextual chunk enrichment: use LLM to generate natural language descriptions
+# of code chunks at indexing time. Descriptions are prepended to chunk content before
+# embedding (not stored), dramatically improving search recall by bridging the
+# vocabulary gap between natural language queries and code tokens.
+# Requires a configured LLM in [llm] section. Structural context (file path, language,
+# symbols) is ALWAYS prepended regardless of this setting.
+contextual_descriptions = false
+# Model for contextual descriptions in provider:model format
+contextual_model = "openrouter:openai/gpt-4o-mini"
+# Number of code chunks to send per LLM description batch
+contextual_batch_size = 10
 
 [search]
 max_results = 20
