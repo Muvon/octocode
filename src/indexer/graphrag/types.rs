@@ -60,6 +60,8 @@ pub enum RelationType {
 	StrategyPattern,
 	/// Adapter pattern (interface adaptation)
 	AdapterPattern,
+	/// Document cross-reference via markdown link
+	References,
 
 	// Low importance - Organizational relationships (weight: 0.3)
 	/// Files in the same directory
@@ -85,6 +87,7 @@ impl RelationType {
 			| Self::ObserverPattern
 			| Self::StrategyPattern
 			| Self::AdapterPattern => 0.8,
+			Self::References => 0.6,
 
 			// Low importance - organizational structure
 			Self::SiblingModule | Self::ParentModule | Self::ChildModule => 0.3,
@@ -105,6 +108,7 @@ impl RelationType {
 			Self::ObserverPattern => "observer_pattern",
 			Self::StrategyPattern => "strategy_pattern",
 			Self::AdapterPattern => "adapter_pattern",
+			Self::References => "references",
 			Self::SiblingModule => "sibling_module",
 			Self::ParentModule => "parent_module",
 			Self::ChildModule => "child_module",
@@ -129,6 +133,7 @@ impl FromStr for RelationType {
 			"observer_pattern" => Self::ObserverPattern,
 			"strategy_pattern" => Self::StrategyPattern,
 			"adapter_pattern" => Self::AdapterPattern,
+			"references" => Self::References,
 			"sibling_module" => Self::SiblingModule,
 			"parent_module" => Self::ParentModule,
 			"child_module" => Self::ChildModule,
@@ -264,6 +269,9 @@ mod tests {
 		assert_eq!(RelationType::Uses.importance_weight(), 0.7);
 		assert_eq!(RelationType::FactoryCreates.importance_weight(), 0.8);
 
+		// Document references (between structural and organizational)
+		assert_eq!(RelationType::References.importance_weight(), 0.6);
+
 		// Low importance relationships
 		assert_eq!(RelationType::SiblingModule.importance_weight(), 0.3);
 		assert_eq!(RelationType::ParentModule.importance_weight(), 0.3);
@@ -290,6 +298,16 @@ mod tests {
 			RelationType::Calls.importance_weight()
 				> RelationType::ParentModule.importance_weight()
 		);
+
+		// Verify references sit between structural imports and organizational
+		assert!(
+			RelationType::Imports.importance_weight()
+				> RelationType::References.importance_weight()
+		);
+		assert!(
+			RelationType::References.importance_weight()
+				> RelationType::SiblingModule.importance_weight()
+		);
 	}
 
 	#[test]
@@ -314,6 +332,10 @@ mod tests {
 		assert_eq!(
 			"sibling_module".parse::<RelationType>().unwrap(),
 			RelationType::SiblingModule
+		);
+		assert_eq!(
+			"references".parse::<RelationType>().unwrap(),
+			RelationType::References
 		);
 
 		// Test unknown type defaults to Imports
@@ -343,6 +365,7 @@ mod tests {
 			RelationType::Imports,
 			RelationType::Calls,
 			RelationType::Uses,
+			RelationType::References,
 			RelationType::SiblingModule,
 		];
 

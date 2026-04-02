@@ -192,22 +192,37 @@ impl<'a> DatabaseOperations<'a> {
 			let desc_array = extract_string_column(&rel_batch, "description")?;
 			let conf_array = extract_f32_column(&rel_batch, "confidence")?;
 
-			// Process each relationship
+			// Deduplicate relationships by (source, target, type) triple —
+			// batch writes can produce duplicates across incremental flushes
+			let mut seen = std::collections::HashSet::new();
+			let mut dedup_count = 0usize;
 			for i in 0..rel_batch.num_rows() {
+				let source = source_array.value(i);
+				let target = target_array.value(i);
+				let rel_type = type_array.value(i);
+				let key = (source.to_string(), target.to_string(), rel_type.to_string());
+				if !seen.insert(key) {
+					dedup_count += 1;
+					continue;
+				}
 				let relationship = CodeRelationship {
-					source: source_array.value(i).to_string(),
-					target: target_array.value(i).to_string(),
-					relation_type: type_array
-						.value(i)
+					source: source.to_string(),
+					target: target.to_string(),
+					relation_type: rel_type
 						.parse()
 						.unwrap_or(crate::indexer::graphrag::types::RelationType::Imports),
 					description: desc_array.value(i).to_string(),
 					confidence: conf_array.value(i),
-					weight: 1.0, // Default weight for legacy relationships
+					weight: 1.0,
 				};
-
-				// Add to graph
 				graph.relationships.push(relationship);
+			}
+			if dedup_count > 0 && !quiet {
+				println!(
+					"  Deduplicated {} → {} unique relationships",
+					rel_batch.num_rows(),
+					graph.relationships.len()
+				);
 			}
 		}
 
