@@ -205,7 +205,7 @@ impl GitUtils {
 		};
 
 		let output = Command::new("git")
-			.args(["log", "--format=%H|%an|%at|%s", "--reverse", &range])
+			.args(["log", "--format=%H|%an|%at|%B%x00", "--reverse", &range])
 			.current_dir(repo_path)
 			.output()?;
 
@@ -216,13 +216,15 @@ impl GitUtils {
 		let stdout = String::from_utf8(output.stdout)?;
 		let mut entries = Vec::new();
 
-		for line in stdout.lines() {
-			let line = line.trim();
-			if line.is_empty() {
+		// Records are separated by null bytes (%x00).
+		// Each record: HASH|AUTHOR|TIMESTAMP|FULL_MESSAGE (may contain newlines)
+		for record in stdout.split('\0') {
+			let record = record.trim();
+			if record.is_empty() {
 				continue;
 			}
 
-			let parts: Vec<&str> = line.splitn(4, '|').collect();
+			let parts: Vec<&str> = record.splitn(4, '|').collect();
 			if parts.len() < 4 {
 				continue;
 			}
@@ -231,7 +233,7 @@ impl GitUtils {
 				hash: parts[0].to_string(),
 				author: parts[1].to_string(),
 				date: parts[2].parse::<i64>().unwrap_or(0),
-				message: parts[3].to_string(),
+				message: parts[3].trim().to_string(),
 			});
 		}
 

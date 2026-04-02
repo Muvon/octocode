@@ -459,7 +459,10 @@ pub fn format_doc_search_results_as_text(
 }
 
 // Format combined search results as text for MCP with detail level control
-pub fn format_commit_search_results_as_text(blocks: &[crate::store::CommitBlock]) -> String {
+pub fn format_commit_search_results_as_text(
+	blocks: &[crate::store::CommitBlock],
+	detail_level: &str,
+) -> String {
 	if blocks.is_empty() {
 		return "No commit results found.".to_string();
 	}
@@ -485,15 +488,40 @@ pub fn format_commit_search_results_as_text(blocks: &[crate::store::CommitBlock]
 			output.push_str(&format!("   Similarity: {:.3}\n", 1.0 - distance));
 		}
 
-		output.push_str(&format!("   Message: {}\n", block.message));
+		// Subject line (first line of message)
+		let subject = block.message.lines().next().unwrap_or(&block.message);
 
-		let files: Vec<String> = serde_json::from_str(&block.files).unwrap_or_default();
-		if !files.is_empty() {
-			output.push_str(&format!("   Files: {}\n", files.join(", ")));
-		}
+		match detail_level {
+			"signatures" => {
+				// Compact: just subject line
+				output.push_str(&format!("   Message: {}\n", subject));
+			}
+			"full" => {
+				// Full: complete message body + files + description
+				output.push_str(&format!("   Message: {}\n", block.message));
 
-		if !block.description.is_empty() {
-			output.push_str(&format!("   Description: {}\n", block.description));
+				let files: Vec<String> = serde_json::from_str(&block.files).unwrap_or_default();
+				if !files.is_empty() {
+					output.push_str(&format!("   Files: {}\n", files.join(", ")));
+				}
+
+				if !block.description.is_empty() {
+					output.push_str(&format!("   Description: {}\n", block.description));
+				}
+			}
+			_ => {
+				// partial (default): subject + files
+				output.push_str(&format!("   Message: {}\n", subject));
+
+				let files: Vec<String> = serde_json::from_str(&block.files).unwrap_or_default();
+				if !files.is_empty() {
+					output.push_str(&format!("   Files: {}\n", files.join(", ")));
+				}
+
+				if !block.description.is_empty() {
+					output.push_str(&format!("   Description: {}\n", block.description));
+				}
+			}
 		}
 
 		output.push('\n');
@@ -708,7 +736,10 @@ pub async fn search_codebase_with_details_text(
 			detail_level,
 		)),
 		"docs" => Ok(format_doc_search_results_as_text(&doc_blocks, detail_level)),
-		"commits" => Ok(format_commit_search_results_as_text(&commit_blocks)),
+		"commits" => Ok(format_commit_search_results_as_text(
+			&commit_blocks,
+			detail_level,
+		)),
 		"all" => Ok(format_combined_search_results_as_text(
 			&code_blocks,
 			&text_blocks,
@@ -822,7 +853,10 @@ pub async fn search_codebase_with_details_multi_query_text(
 			detail_level,
 		)),
 		"docs" => Ok(format_doc_search_results_as_text(&doc_blocks, detail_level)),
-		"commits" => Ok(format_commit_search_results_as_text(&commit_blocks)),
+		"commits" => Ok(format_commit_search_results_as_text(
+			&commit_blocks,
+			detail_level,
+		)),
 		"all" => Ok(format_combined_search_results_as_text(
 			&code_blocks,
 			&text_blocks,
@@ -1615,7 +1649,7 @@ mod tests {
 	#[test]
 	fn test_format_commit_search_results_empty() {
 		let blocks: Vec<crate::store::CommitBlock> = vec![];
-		let result = format_commit_search_results_as_text(&blocks);
+		let result = format_commit_search_results_as_text(&blocks, "partial");
 		assert_eq!(result, "No commit results found.");
 	}
 
@@ -1625,21 +1659,33 @@ mod tests {
 			hash: "abc12345deadbeef".to_string(),
 			author: "Alice".to_string(),
 			date: 1700000000, // 2023-11-14
-			message: "feat: add retry logic".to_string(),
+			message: "feat: add retry logic\n\nDetailed body here".to_string(),
 			content: "feat: add retry logic\n\nFiles: src/client.rs".to_string(),
 			files: r#"["src/client.rs","src/retry.rs"]"#.to_string(),
 			description: "Adds exponential backoff".to_string(),
 			distance: Some(0.15),
 		}];
 
-		let result = format_commit_search_results_as_text(&blocks);
+		// Partial: shows subject + files + description, not full body
+		let result = format_commit_search_results_as_text(&blocks, "partial");
 		assert!(result.contains("COMMIT RESULTS (1)"));
 		assert!(result.contains("abc12345"));
 		assert!(result.contains("Alice"));
 		assert!(result.contains("feat: add retry logic"));
+		assert!(!result.contains("Detailed body here"));
 		assert!(result.contains("src/client.rs"));
 		assert!(result.contains("Adds exponential backoff"));
-		assert!(result.contains("Similarity"));
+
+		// Full: shows complete message body
+		let result_full = format_commit_search_results_as_text(&blocks, "full");
+		assert!(result_full.contains("Detailed body here"));
+		assert!(result_full.contains("src/client.rs"));
+
+		// Signatures: compact, just subject
+		let result_sig = format_commit_search_results_as_text(&blocks, "signatures");
+		assert!(result_sig.contains("feat: add retry logic"));
+		assert!(!result_sig.contains("Detailed body here"));
+		assert!(!result_sig.contains("src/client.rs"));
 	}
 
 	#[test]

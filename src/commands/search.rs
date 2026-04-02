@@ -297,7 +297,10 @@ pub async fn execute(
 			}
 		}
 		"commits" => {
-			let output = indexer::search::format_commit_search_results_as_text(&commit_blocks);
+			let output = indexer::search::format_commit_search_results_as_text(
+				&commit_blocks,
+				effective_detail_level,
+			);
 			if args.format.is_json() {
 				let json = serde_json::to_string_pretty(&commit_blocks)?;
 				println!("{}", json);
