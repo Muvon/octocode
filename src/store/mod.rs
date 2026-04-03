@@ -161,16 +161,23 @@ impl Drop for Store {
 }
 
 impl Store {
+	/// Create a new Store for the current project (default branch database).
 	pub async fn new() -> Result<Self> {
-		// Get current directory
 		let current_dir = std::env::current_dir()?;
-
-		// Get the project database path using the new storage system
 		let index_path = crate::storage::get_project_database_path(&current_dir)?;
-
-		// Ensure the directory exists
 		crate::storage::ensure_project_storage_exists(&current_dir)?;
+		Self::new_with_path(index_path).await
+	}
 
+	/// Create a new Store for a specific branch's delta database.
+	pub async fn new_for_branch(branch_name: &str) -> Result<Self> {
+		let current_dir = std::env::current_dir()?;
+		let index_path = crate::storage::get_branch_database_path(&current_dir, branch_name)?;
+		Self::new_with_path(index_path).await
+	}
+
+	/// Create a new Store backed by a LanceDB database at the given path.
+	pub async fn new_with_path(index_path: std::path::PathBuf) -> Result<Self> {
 		// Ensure the database directory exists
 		if !index_path.exists() {
 			std::fs::create_dir_all(&index_path)?;

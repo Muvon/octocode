@@ -102,26 +102,62 @@ pub async fn execute(
 	let state = state::create_shared_state();
 	state.write().current_directory = current_dir.clone();
 
-	// Acquire indexing lock before starting
-	let mut lock = IndexLock::new(&current_dir)?;
-	lock.acquire()?;
-	tracing::info!("Acquired indexing lock for {:?}", current_dir);
+	// Auto-detect branch context: if on a non-default branch, do delta indexing
+	let branch_context = if git_repo_root.is_some() {
+		indexer::branch::detect_branch_context(&current_dir)
+	} else {
+		None
+	};
 
-	// Spawn the progress display task
-	let progress_handle = tokio::spawn(display_indexing_progress(state.clone()));
+	if let Some(ref branch_name) = branch_context {
+		// Delta indexing for non-default branch
+		let git_root = git_repo_root.as_ref().unwrap();
+		println!("🔀 Detected branch '{}', indexing delta...", branch_name);
 
-	// Start indexing with git optimization
-	indexer::index_files(store, state.clone(), config, git_repo_root.as_deref()).await?;
+		let branch_store = octocode::store::Store::new_for_branch(branch_name).await?;
+		branch_store.initialize_collections().await?;
 
-	// Wait for the progress display to finish
-	let _ = progress_handle.await;
+		let mut lock = IndexLock::new(&current_dir)?;
+		lock.acquire()?;
 
-	// Flush index to disk
-	store.flush().await?;
+		let progress_handle = tokio::spawn(display_indexing_progress(state.clone()));
 
-	// Release the lock (also happens automatically on drop)
-	lock.release()?;
-	tracing::info!("Released indexing lock");
+		let manifest = indexer::index_branch_delta(
+			&branch_store,
+			state.clone(),
+			config,
+			git_root,
+			branch_name,
+			false,
+		)
+		.await?;
+
+		let _ = progress_handle.await;
+		branch_store.flush().await?;
+
+		lock.release()?;
+
+		println!(
+			"✓ Branch delta: {} changed, {} deleted files indexed",
+			manifest.changed_paths.len(),
+			manifest.deleted_paths.len(),
+		);
+	} else {
+		// Standard indexing for default branch (or no git)
+		let mut lock = IndexLock::new(&current_dir)?;
+		lock.acquire()?;
+		tracing::info!("Acquired indexing lock for {:?}", current_dir);
+
+		let progress_handle = tokio::spawn(display_indexing_progress(state.clone()));
+
+		indexer::index_files(store, state.clone(), config, git_repo_root.as_deref()).await?;
+
+		let _ = progress_handle.await;
+		store.flush().await?;
+
+		lock.release()?;
+		tracing::info!("Released indexing lock");
+	}
 
 	Ok(())
 }

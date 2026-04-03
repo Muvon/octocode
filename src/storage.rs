@@ -153,6 +153,26 @@ pub fn get_project_database_path(project_path: &Path) -> Result<PathBuf> {
 	Ok(project_storage.join("storage"))
 }
 
+/// Get the directory containing all branch delta indexes for a project.
+pub fn get_branches_dir(project_path: &Path) -> Result<PathBuf> {
+	let project_storage = get_project_storage_path(project_path)?;
+	Ok(project_storage.join("branches"))
+}
+
+/// Get the directory for a specific branch's delta index.
+/// Branch name is sanitized for filesystem safety (`/` → `--`).
+pub fn get_branch_dir(project_path: &Path, branch_name: &str) -> Result<PathBuf> {
+	let branches_dir = get_branches_dir(project_path)?;
+	let sanitized = crate::indexer::branch::sanitize_branch_name(branch_name);
+	Ok(branches_dir.join(sanitized))
+}
+
+/// Get the database path for a specific branch's delta index.
+pub fn get_branch_database_path(project_path: &Path, branch_name: &str) -> Result<PathBuf> {
+	let branch_dir = get_branch_dir(project_path, branch_name)?;
+	Ok(branch_dir.join("storage"))
+}
+
 /// Get the config path for a specific project (local to project)
 /// Config remains local to projects for project-specific settings
 pub fn get_project_config_path(project_path: &Path) -> Result<PathBuf> {

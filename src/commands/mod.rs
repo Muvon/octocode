@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+pub mod branch;
 pub mod clear;
 pub mod commit;
 pub mod config;
@@ -33,6 +34,7 @@ pub mod view;
 pub mod watch;
 
 // Re-export all the command structs and enums
+pub use branch::BranchArgs;
 pub use clear::ClearArgs;
 pub use commit::CommitArgs;
 pub use config::ConfigArgs;

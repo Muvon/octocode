@@ -15,9 +15,18 @@
 // Module for search functionality
 
 use crate::config::Config;
-use crate::store::{CodeBlock, Store};
+use crate::indexer::branch::BranchManifest;
+use crate::store::{CodeBlock, DocumentBlock, Store, TextBlock};
 use anyhow::Result;
 use std::collections::HashSet;
+
+/// Optional branch context for branch-aware search.
+/// When present, search queries both the main store and the branch delta store,
+/// merging results with branch priority.
+pub struct BranchSearchContext {
+	pub store: Store,
+	pub manifest: BranchManifest,
+}
 
 /// Helper function to format symbols for display without cloning
 /// Returns a formatted string with deduplicated, sorted, and filtered symbols
@@ -575,6 +584,20 @@ pub fn format_combined_search_results_as_text(
 }
 
 // Enhanced search function for MCP server with detail level control - returns formatted text results (token-efficient)
+/// Build a BranchSearchContext if the current checkout is on a non-default branch
+/// and a branch delta index exists. Used by MCP and other internal search paths.
+pub async fn detect_branch_search_context() -> Option<BranchSearchContext> {
+	let current_dir = std::env::current_dir().ok()?;
+	let branch_name = crate::indexer::branch::detect_branch_context(&current_dir)?;
+	let branch_dir = crate::storage::get_branch_dir(&current_dir, &branch_name).ok()?;
+	let manifest = crate::indexer::branch::load_manifest(&branch_dir).ok()??;
+	let branch_store = Store::new_for_branch(&branch_name).await.ok()?;
+	Some(BranchSearchContext {
+		store: branch_store,
+		manifest,
+	})
+}
+
 pub async fn search_codebase_with_details_text(
 	query: &str,
 	mode: &str,
@@ -586,6 +609,9 @@ pub async fn search_codebase_with_details_text(
 ) -> Result<String> {
 	// Initialize store
 	let store = Store::new().await?;
+
+	// Detect branch context for branch-aware search
+	let branch_ctx = detect_branch_search_context().await;
 
 	// Generate embeddings for the query using centralized logic
 	let search_embeddings =
@@ -606,48 +632,103 @@ pub async fn search_codebase_with_details_text(
 		max_results
 	};
 
+	// Over-fetch from main when branch is active
+	let main_limit = if branch_ctx.is_some() {
+		candidate_limit * 2
+	} else {
+		candidate_limit
+	};
+
 	// Perform the search based on mode
 	let (mut code_blocks, mut text_blocks, mut doc_blocks, mut commit_blocks) = match mode {
 		"code" => {
 			let embeddings = search_embeddings.code_embeddings.ok_or_else(|| {
 				anyhow::anyhow!("No code embeddings generated for code search mode")
 			})?;
-			let results = store
+			let mut results = store
 				.get_code_blocks_with_language_filter(
-					embeddings,
-					Some(candidate_limit),
+					embeddings.clone(),
+					Some(main_limit),
 					distance_threshold,
 					language_filter,
 				)
 				.await?;
+			if let Some(ref ctx) = branch_ctx {
+				let branch_results = ctx
+					.store
+					.get_code_blocks_with_language_filter(
+						embeddings,
+						Some(candidate_limit),
+						distance_threshold,
+						language_filter,
+					)
+					.await
+					.unwrap_or_default();
+				let overridden = ctx.manifest.overridden_paths();
+				results =
+					merge_branch_code_blocks(results, branch_results, &overridden, candidate_limit);
+			}
 			(results, vec![], vec![], vec![])
 		}
 		"text" => {
 			let embeddings = search_embeddings.text_embeddings.ok_or_else(|| {
 				anyhow::anyhow!("No text embeddings generated for text search mode")
 			})?;
-			let results = store
-				.get_text_blocks_with_config(embeddings, Some(candidate_limit), distance_threshold)
+			let mut results = store
+				.get_text_blocks_with_config(
+					embeddings.clone(),
+					Some(main_limit),
+					distance_threshold,
+				)
 				.await?;
+			if let Some(ref ctx) = branch_ctx {
+				let branch_results = ctx
+					.store
+					.get_text_blocks_with_config(
+						embeddings,
+						Some(candidate_limit),
+						distance_threshold,
+					)
+					.await
+					.unwrap_or_default();
+				let overridden = ctx.manifest.overridden_paths();
+				results =
+					merge_branch_text_blocks(results, branch_results, &overridden, candidate_limit);
+			}
 			(vec![], results, vec![], vec![])
 		}
 		"docs" => {
 			let embeddings = search_embeddings.text_embeddings.ok_or_else(|| {
 				anyhow::anyhow!("No text embeddings generated for docs search mode")
 			})?;
-			let results = store
+			let mut results = store
 				.get_document_blocks_with_config(
-					embeddings,
-					Some(candidate_limit),
+					embeddings.clone(),
+					Some(main_limit),
 					distance_threshold,
 				)
 				.await?;
+			if let Some(ref ctx) = branch_ctx {
+				let branch_results = ctx
+					.store
+					.get_document_blocks_with_config(
+						embeddings,
+						Some(candidate_limit),
+						distance_threshold,
+					)
+					.await
+					.unwrap_or_default();
+				let overridden = ctx.manifest.overridden_paths();
+				results =
+					merge_branch_doc_blocks(results, branch_results, &overridden, candidate_limit);
+			}
 			(vec![], vec![], results, vec![])
 		}
 		"commits" => {
 			let embeddings = search_embeddings.text_embeddings.ok_or_else(|| {
 				anyhow::anyhow!("No text embeddings generated for commits search mode")
 			})?;
+			// Commits are global — no branch merge needed
 			let results = store
 				.get_commit_blocks_with_config(
 					embeddings,
@@ -666,28 +747,73 @@ pub async fn search_codebase_with_details_text(
 			})?;
 
 			let results_per_type = candidate_limit.div_ceil(3);
-			let code_results = store
+			let main_rpt = if branch_ctx.is_some() {
+				results_per_type * 2
+			} else {
+				results_per_type
+			};
+
+			let mut code_results = store
 				.get_code_blocks_with_language_filter(
-					code_embeddings,
-					Some(results_per_type),
+					code_embeddings.clone(),
+					Some(main_rpt),
 					distance_threshold,
 					language_filter,
 				)
 				.await?;
-			let text_results = store
+			let mut text_results = store
 				.get_text_blocks_with_config(
 					text_embeddings.clone(),
-					Some(results_per_type),
+					Some(main_rpt),
 					distance_threshold,
 				)
 				.await?;
-			let doc_results = store
+			let mut doc_results = store
 				.get_document_blocks_with_config(
-					text_embeddings,
-					Some(results_per_type),
+					text_embeddings.clone(),
+					Some(main_rpt),
 					distance_threshold,
 				)
 				.await?;
+
+			if let Some(ref ctx) = branch_ctx {
+				let overridden = ctx.manifest.overridden_paths();
+				let bc = ctx
+					.store
+					.get_code_blocks_with_language_filter(
+						code_embeddings,
+						Some(results_per_type),
+						distance_threshold,
+						language_filter,
+					)
+					.await
+					.unwrap_or_default();
+				let bt = ctx
+					.store
+					.get_text_blocks_with_config(
+						text_embeddings.clone(),
+						Some(results_per_type),
+						distance_threshold,
+					)
+					.await
+					.unwrap_or_default();
+				let bd = ctx
+					.store
+					.get_document_blocks_with_config(
+						text_embeddings,
+						Some(results_per_type),
+						distance_threshold,
+					)
+					.await
+					.unwrap_or_default();
+				code_results =
+					merge_branch_code_blocks(code_results, bc, &overridden, results_per_type);
+				text_results =
+					merge_branch_text_blocks(text_results, bt, &overridden, results_per_type);
+				doc_results =
+					merge_branch_doc_blocks(doc_results, bd, &overridden, results_per_type);
+			}
+
 			(code_results, text_results, doc_results, vec![])
 		}
 		_ => {
@@ -778,6 +904,9 @@ pub async fn search_codebase_with_details_multi_query_text(
 	// Initialize store
 	let store = Store::new().await?;
 
+	// Detect branch context for branch-aware search
+	let branch_ctx = detect_branch_search_context().await;
+
 	// Validate queries (same as CLI)
 	if queries.is_empty() {
 		return Err(anyhow::anyhow!("At least one query is required"));
@@ -807,9 +936,10 @@ pub async fn search_codebase_with_details_multi_query_text(
 		Some(1.0 - similarity_threshold)
 	};
 
-	// Execute parallel searches
-	let search_results = execute_parallel_searches(
+	// Execute parallel searches with branch awareness
+	let search_results = execute_parallel_searches_with_branch(
 		&store,
+		branch_ctx.as_ref(),
 		query_embeddings,
 		mode,
 		max_results,
@@ -1318,10 +1448,40 @@ pub async fn execute_parallel_searches(
 	language_filter: Option<&str>,
 	config: &Config,
 ) -> Result<Vec<QuerySearchResult>> {
+	execute_parallel_searches_with_branch(
+		store,
+		None,
+		query_embeddings,
+		mode,
+		max_results,
+		similarity_threshold,
+		language_filter,
+		config,
+	)
+	.await
+}
+
+pub async fn execute_parallel_searches_with_branch(
+	store: &Store,
+	branch_ctx: Option<&BranchSearchContext>,
+	query_embeddings: Vec<(String, crate::embedding::SearchModeEmbeddings)>,
+	mode: &str,
+	max_results: usize,
+	similarity_threshold: f32,
+	language_filter: Option<&str>,
+	config: &Config,
+) -> Result<Vec<QuerySearchResult>> {
 	let per_query_limit = if config.search.reranker.enabled {
 		config.search.reranker.top_k_candidates
 	} else {
 		(max_results * 2) / query_embeddings.len().max(1)
+	};
+
+	// Over-fetch from main when branch is active (some results will be filtered out)
+	let main_limit = if branch_ctx.is_some() {
+		per_query_limit * 2
+	} else {
+		per_query_limit
 	};
 
 	// When reranker is enabled, skip distance pre-filter — let reranker decide relevance.
@@ -1332,25 +1492,67 @@ pub async fn execute_parallel_searches(
 		Some(1.0 - similarity_threshold)
 	};
 
-	let search_futures: Vec<_> = query_embeddings
-		.into_iter()
+	// Search main store
+	let main_futures: Vec<_> = query_embeddings
+		.iter()
 		.enumerate()
-		.map(|(index, (_, embeddings))| async move {
-			execute_single_search_with_embeddings(
-				store,
-				embeddings,
-				mode,
-				per_query_limit,
-				index,
-				distance_threshold,
-				language_filter,
-			)
-			.await
+		.map(|(index, (_, embeddings))| {
+			let emb = embeddings.clone();
+			async move {
+				execute_single_search_with_embeddings(
+					store,
+					emb,
+					mode,
+					main_limit,
+					index,
+					distance_threshold,
+					language_filter,
+				)
+				.await
+			}
 		})
 		.collect();
 
-	// Execute all searches concurrently
-	futures::future::try_join_all(search_futures).await
+	let mut main_results = futures::future::try_join_all(main_futures).await?;
+
+	// If no branch context, return main results directly
+	let Some(branch) = branch_ctx else {
+		return Ok(main_results);
+	};
+
+	// Search branch store
+	let branch_futures: Vec<_> = query_embeddings
+		.iter()
+		.enumerate()
+		.map(|(index, (_, embeddings))| {
+			let emb = embeddings.clone();
+			async move {
+				execute_single_search_with_embeddings(
+					&branch.store,
+					emb,
+					mode,
+					per_query_limit,
+					index,
+					distance_threshold,
+					language_filter,
+				)
+				.await
+			}
+		})
+		.collect();
+
+	let branch_results = futures::future::try_join_all(branch_futures).await?;
+
+	// Merge: branch results take priority over main for overridden paths
+	let merged: Vec<QuerySearchResult> = main_results
+		.drain(..)
+		.zip(branch_results)
+		.map(|(main, branch_r)| {
+			merge_branch_query_results(main, branch_r, &branch.manifest, per_query_limit)
+		})
+		.collect();
+
+	Ok(merged)
 }
 
 pub fn apply_multi_query_bonus_code(
@@ -1599,6 +1801,100 @@ pub fn deduplicate_and_merge_results(
 		final_text_blocks,
 		final_commit_blocks,
 	)
+}
+
+/// Merge search results from main and branch stores.
+/// Branch results take priority: for any path present in the branch delta,
+/// main results for that path are excluded.
+fn merge_branch_code_blocks(
+	main: Vec<CodeBlock>,
+	branch: Vec<CodeBlock>,
+	overridden: &HashSet<&str>,
+	limit: usize,
+) -> Vec<CodeBlock> {
+	let filtered_main = main
+		.into_iter()
+		.filter(|b| !overridden.contains(b.path.as_str()));
+	let mut combined: Vec<CodeBlock> = branch.into_iter().chain(filtered_main).collect();
+	combined.sort_by(|a, b| {
+		a.distance
+			.partial_cmp(&b.distance)
+			.unwrap_or(std::cmp::Ordering::Equal)
+	});
+	combined.truncate(limit);
+	combined
+}
+
+fn merge_branch_text_blocks(
+	main: Vec<TextBlock>,
+	branch: Vec<TextBlock>,
+	overridden: &HashSet<&str>,
+	limit: usize,
+) -> Vec<TextBlock> {
+	let filtered_main = main
+		.into_iter()
+		.filter(|b| !overridden.contains(b.path.as_str()));
+	let mut combined: Vec<TextBlock> = branch.into_iter().chain(filtered_main).collect();
+	combined.sort_by(|a, b| {
+		a.distance
+			.partial_cmp(&b.distance)
+			.unwrap_or(std::cmp::Ordering::Equal)
+	});
+	combined.truncate(limit);
+	combined
+}
+
+fn merge_branch_doc_blocks(
+	main: Vec<DocumentBlock>,
+	branch: Vec<DocumentBlock>,
+	overridden: &HashSet<&str>,
+	limit: usize,
+) -> Vec<DocumentBlock> {
+	let filtered_main = main
+		.into_iter()
+		.filter(|b| !overridden.contains(b.path.as_str()));
+	let mut combined: Vec<DocumentBlock> = branch.into_iter().chain(filtered_main).collect();
+	combined.sort_by(|a, b| {
+		a.distance
+			.partial_cmp(&b.distance)
+			.unwrap_or(std::cmp::Ordering::Equal)
+	});
+	combined.truncate(limit);
+	combined
+}
+
+/// Merge a QuerySearchResult from main and branch stores.
+fn merge_branch_query_results(
+	main: QuerySearchResult,
+	branch: QuerySearchResult,
+	manifest: &BranchManifest,
+	per_query_limit: usize,
+) -> QuerySearchResult {
+	let overridden = manifest.overridden_paths();
+
+	QuerySearchResult {
+		query_index: main.query_index,
+		code_blocks: merge_branch_code_blocks(
+			main.code_blocks,
+			branch.code_blocks,
+			&overridden,
+			per_query_limit,
+		),
+		doc_blocks: merge_branch_doc_blocks(
+			main.doc_blocks,
+			branch.doc_blocks,
+			&overridden,
+			per_query_limit,
+		),
+		text_blocks: merge_branch_text_blocks(
+			main.text_blocks,
+			branch.text_blocks,
+			&overridden,
+			per_query_limit,
+		),
+		// Commits are global — no branch override needed
+		commit_blocks: main.commit_blocks,
+	}
 }
 
 #[cfg(test)]

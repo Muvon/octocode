@@ -16,6 +16,7 @@
 // Handles code indexing, embedding, and search functionality
 
 pub mod batch_processor; // Batch processing utilities for embedding operations
+pub mod branch; // Branch-aware delta indexing
 pub mod code_region_extractor; // Code region extraction and smart merging utilities
 pub mod commits; // Commit history indexing
 pub mod contextual; // Contextual chunk enrichment for improved semantic search
@@ -554,6 +555,396 @@ pub async fn index_files(
 	git_repo_root: Option<&Path>,
 ) -> Result<()> {
 	index_files_with_quiet(store, state, config, git_repo_root, false).await
+}
+
+/// Index only the delta (changed files) for a non-default branch.
+///
+/// This creates or updates a lightweight branch database containing only
+/// files that differ from the default branch. The main index is untouched.
+pub async fn index_branch_delta(
+	branch_store: &Store,
+	state: SharedState,
+	config: &Config,
+	git_repo_root: &Path,
+	branch_name: &str,
+	quiet: bool,
+) -> Result<branch::BranchManifest> {
+	let default_branch = GitUtils::get_default_branch(git_repo_root)?;
+	let current_dir = state.read().current_directory.clone();
+
+	// Load existing manifest to check if we can do incremental update
+	let (branch_dir, existing_manifest) = branch::resolve_branch_state(&current_dir, branch_name)?;
+
+	// Check if base branch changed (e.g. default branch renamed) — rebuild from scratch
+	let force_rebuild = existing_manifest
+		.as_ref()
+		.map(|m| m.base_branch != default_branch)
+		.unwrap_or(false);
+
+	if force_rebuild && !quiet {
+		println!(
+			"⚠️  Base branch changed ({} → {}), rebuilding delta from scratch",
+			existing_manifest.as_ref().unwrap().base_branch,
+			default_branch
+		);
+	}
+
+	// Compute the full delta: files that differ between default branch and current HEAD
+	let (changed_files, deleted_files) =
+		branch::compute_branch_delta(git_repo_root, &default_branch)?;
+
+	if !quiet {
+		println!(
+			"🔀 Branch '{}' delta: {} changed, {} deleted files (vs '{}')",
+			branch_name,
+			changed_files.len(),
+			deleted_files.len(),
+			default_branch,
+		);
+	}
+
+	let branch_commit = branch::get_branch_commit(git_repo_root, "HEAD")?;
+	let base_commit = branch::get_branch_commit(git_repo_root, &default_branch)?;
+
+	// Check if we can skip (same branch commit, no working changes)
+	if !force_rebuild {
+		if let Some(ref manifest) = existing_manifest {
+			if manifest.branch_commit == branch_commit
+				&& changed_files.is_empty()
+				&& deleted_files.is_empty()
+			{
+				if !quiet {
+					println!("✅ Branch delta unchanged, skipping reindex");
+				}
+				return Ok(manifest.clone());
+			}
+		}
+	}
+
+	// Keep a copy for the manifest (the original may be consumed during processing)
+	let manifest_changed_paths = changed_files.clone();
+	let manifest_deleted_paths = deleted_files.clone();
+
+	// Determine which files to actually re-process
+	let files_to_process: std::collections::HashSet<String> = if !force_rebuild {
+		if let Some(ref manifest) = existing_manifest {
+			// Incremental: find what changed since last branch index
+			let old_changed: std::collections::HashSet<&str> =
+				manifest.changed_paths.iter().map(|s| s.as_str()).collect();
+			let new_changed: std::collections::HashSet<&str> =
+				changed_files.iter().map(|s| s.as_str()).collect();
+
+			// Files no longer in delta (reverted to match main) — remove from branch DB
+			for path in old_changed.difference(&new_changed) {
+				if let Err(e) = branch_store.remove_blocks_by_path(path).await {
+					tracing::warn!(path = %path, error = %e, "Failed to remove reverted file from branch DB");
+				}
+			}
+
+			// Files to process: new in delta OR changed since last branch index
+			if manifest.branch_commit != branch_commit {
+				// Commits changed — find files modified since last indexed branch commit
+				match git::get_changed_files_since_commit(git_repo_root, &manifest.branch_commit) {
+					Ok(since_last) => {
+						let since_set: std::collections::HashSet<String> =
+							since_last.into_iter().collect();
+						// Only re-process files that are in the delta AND changed since last index
+						changed_files
+							.into_iter()
+							.filter(|f| {
+								since_set.contains(f.as_str()) || !old_changed.contains(f.as_str())
+							})
+							.collect()
+					}
+					Err(_) => changed_files.into_iter().collect(),
+				}
+			} else {
+				// Same commit but working tree changes — process all changed files
+				changed_files.into_iter().collect()
+			}
+		} else {
+			// No existing manifest — process everything
+			changed_files.into_iter().collect()
+		}
+	} else {
+		// Force rebuild — process everything
+		changed_files.into_iter().collect()
+	};
+
+	if files_to_process.is_empty() && !force_rebuild {
+		if !quiet {
+			println!("✅ No files need re-processing in branch delta");
+		}
+	} else {
+		// Clean up existing data for files we're about to re-process
+		for file_path in &files_to_process {
+			if let Err(e) = branch_store.remove_blocks_by_path(file_path).await {
+				tracing::warn!(path = %file_path, error = %e, "Failed to clean up branch block");
+			}
+		}
+		if !files_to_process.is_empty() {
+			branch_store.flush().await?;
+		}
+
+		// Set up state for the indexing pipeline
+		{
+			let mut state_guard = state.write();
+			state_guard.total_files = files_to_process.len();
+			state_guard.counting_files = false;
+			state_guard.status_message = format!(
+				"Indexing branch delta ({} files)...",
+				files_to_process.len()
+			);
+			// Disable GraphRAG for branch deltas
+			state_guard.graphrag_enabled = false;
+		}
+
+		// Reuse the existing file processing pipeline with branch Store
+		// We create a modified config that disables GraphRAG and commits for branch indexing
+		let mut branch_config = config.clone();
+		branch_config.graphrag.enabled = false;
+
+		// Process files through the same pipeline, writing to branch_store
+		let mut code_blocks_batch = Vec::new();
+		let mut text_blocks_batch = Vec::new();
+		let mut document_blocks_batch = Vec::new();
+		let mut all_code_blocks = Vec::new();
+		let mut file_context_map = contextual::FileContextMap::new();
+		let mut code_file_metadata = FileMetadataBatch::new();
+		let mut text_file_metadata = FileMetadataBatch::new();
+		let mut document_file_metadata = FileMetadataBatch::new();
+		let mut embedding_calls = 0;
+		let mut batches_processed = 0;
+		let mut files_processed = 0;
+
+		for file_path in &files_to_process {
+			let full_path = current_dir.join(file_path);
+			if !full_path.is_file() {
+				continue;
+			}
+
+			if let Some(language) = detect_language(&full_path) {
+				match fs::read_to_string(&full_path) {
+					Ok(contents) => {
+						let ctx = ProcessFileContext {
+							store: branch_store,
+							config: &branch_config,
+							state: state.clone(),
+						};
+
+						if language == "markdown" {
+							process_markdown_file_differential(
+								branch_store,
+								&contents,
+								file_path,
+								&mut document_blocks_batch,
+								&branch_config,
+								state.clone(),
+							)
+							.await?;
+						} else {
+							process_file_differential(
+								&ctx,
+								&contents,
+								file_path,
+								language,
+								&mut code_blocks_batch,
+								&mut text_blocks_batch,
+								&mut all_code_blocks,
+								&mut file_context_map,
+							)
+							.await?;
+						}
+
+						if let Ok(actual_mtime) = get_file_mtime(&full_path) {
+							code_file_metadata.add(file_path, actual_mtime);
+						}
+
+						files_processed += 1;
+						state.write().indexed_files = files_processed;
+
+						// Process batches when ready
+						if should_process_batch(&code_blocks_batch, |b| &b.content, &branch_config)
+						{
+							embedding_calls += code_blocks_batch.len();
+							process_code_blocks_batch(
+								branch_store,
+								&code_blocks_batch,
+								&branch_config,
+								&code_file_metadata,
+								&file_context_map,
+							)
+							.await?;
+							code_blocks_batch.clear();
+							code_file_metadata.clear();
+							file_context_map.clear();
+							batches_processed += 1;
+							flush_if_needed(
+								branch_store,
+								&mut batches_processed,
+								&branch_config,
+								false,
+							)
+							.await?;
+						}
+						if should_process_batch(&text_blocks_batch, |b| &b.content, &branch_config)
+						{
+							embedding_calls += text_blocks_batch.len();
+							process_text_blocks_batch(
+								branch_store,
+								&text_blocks_batch,
+								&branch_config,
+								&text_file_metadata,
+							)
+							.await?;
+							text_blocks_batch.clear();
+							text_file_metadata.clear();
+							batches_processed += 1;
+							flush_if_needed(
+								branch_store,
+								&mut batches_processed,
+								&branch_config,
+								false,
+							)
+							.await?;
+						}
+						if should_process_batch(
+							&document_blocks_batch,
+							|b| &b.content,
+							&branch_config,
+						) {
+							embedding_calls += document_blocks_batch.len();
+							process_document_blocks_batch(
+								branch_store,
+								&document_blocks_batch,
+								&branch_config,
+								&document_file_metadata,
+							)
+							.await?;
+							document_blocks_batch.clear();
+							document_file_metadata.clear();
+							batches_processed += 1;
+							flush_if_needed(
+								branch_store,
+								&mut batches_processed,
+								&branch_config,
+								false,
+							)
+							.await?;
+						}
+					}
+					Err(e) => {
+						log_file_processing_error(file_path, "read_file", &e);
+					}
+				}
+			} else if is_allowed_text_extension(&full_path) && !is_markdown_file(&full_path) {
+				if let Ok(contents) = fs::read_to_string(&full_path) {
+					if is_text_file(&contents) {
+						process_text_file_differential(
+							branch_store,
+							&contents,
+							file_path,
+							&mut text_blocks_batch,
+							&branch_config,
+							state.clone(),
+						)
+						.await?;
+
+						if let Ok(actual_mtime) = get_file_mtime(&full_path) {
+							text_file_metadata.add(file_path, actual_mtime);
+						}
+
+						files_processed += 1;
+						state.write().indexed_files = files_processed;
+
+						if should_process_batch(&text_blocks_batch, |b| &b.content, &branch_config)
+						{
+							embedding_calls += text_blocks_batch.len();
+							process_text_blocks_batch(
+								branch_store,
+								&text_blocks_batch,
+								&branch_config,
+								&text_file_metadata,
+							)
+							.await?;
+							text_blocks_batch.clear();
+							text_file_metadata.clear();
+							batches_processed += 1;
+							flush_if_needed(
+								branch_store,
+								&mut batches_processed,
+								&branch_config,
+								false,
+							)
+							.await?;
+						}
+					}
+				}
+			}
+		}
+
+		// Process remaining batches
+		if !code_blocks_batch.is_empty() {
+			process_code_blocks_batch(
+				branch_store,
+				&code_blocks_batch,
+				&branch_config,
+				&code_file_metadata,
+				&file_context_map,
+			)
+			.await?;
+		}
+		if !text_blocks_batch.is_empty() {
+			process_text_blocks_batch(
+				branch_store,
+				&text_blocks_batch,
+				&branch_config,
+				&text_file_metadata,
+			)
+			.await?;
+		}
+		if !document_blocks_batch.is_empty() {
+			process_document_blocks_batch(
+				branch_store,
+				&document_blocks_batch,
+				&branch_config,
+				&document_file_metadata,
+			)
+			.await?;
+		}
+
+		// Final flush
+		branch_store.flush().await?;
+
+		if !quiet {
+			println!(
+				"✓ Branch delta indexed: {} files processed ({} embeddings)",
+				files_processed, embedding_calls
+			);
+		}
+	}
+
+	// Mark indexing complete
+	{
+		let mut state_guard = state.write();
+		state_guard.indexing_complete = true;
+	}
+
+	// Build and save manifest
+	let manifest = branch::BranchManifest {
+		version: 1,
+		branch_name: branch_name.to_string(),
+		base_branch: default_branch,
+		base_commit,
+		branch_commit,
+		changed_paths: manifest_changed_paths,
+		deleted_paths: manifest_deleted_paths,
+		indexed_at: chrono::Utc::now().timestamp(),
+	};
+
+	branch::save_manifest(&branch_dir, &manifest)?;
+
+	Ok(manifest)
 }
 
 pub async fn index_files_with_quiet(

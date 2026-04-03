@@ -106,7 +106,26 @@ pub async fn execute(
 		lock.acquire()?;
 		tracing::debug!("Watch mode: acquired indexing lock for initial scan");
 
-		indexer::index_files(store, state.clone(), config, git_repo_root.as_deref()).await?;
+		// Check if we're on a non-default branch for delta indexing
+		if let Some(branch_name) = git_repo_root
+			.as_ref()
+			.and_then(|r| indexer::branch::detect_branch_context(r))
+		{
+			let branch_store = Store::new_for_branch(&branch_name).await?;
+			branch_store.initialize_collections().await?;
+			indexer::index_branch_delta(
+				&branch_store,
+				state.clone(),
+				config,
+				git_repo_root.as_ref().unwrap(),
+				&branch_name,
+				true,
+			)
+			.await?;
+			branch_store.flush().await?;
+		} else {
+			indexer::index_files(store, state.clone(), config, git_repo_root.as_deref()).await?;
+		}
 
 		// Release lock after initial indexing
 		lock.release()?;
@@ -217,8 +236,32 @@ pub async fn execute(
 					lock.acquire()?;
 					tracing::debug!("Watch mode: acquired indexing lock for re-indexing");
 
-					indexer::index_files(store, state.clone(), &config, git_repo_root.as_deref())
+					// Check if we're on a non-default branch for delta indexing
+					if let Some(branch_name) = git_repo_root
+						.as_ref()
+						.and_then(|r| indexer::branch::detect_branch_context(r))
+					{
+						let branch_store = Store::new_for_branch(&branch_name).await?;
+						branch_store.initialize_collections().await?;
+						indexer::index_branch_delta(
+							&branch_store,
+							state.clone(),
+							&config,
+							git_repo_root.as_ref().unwrap(),
+							&branch_name,
+							true,
+						)
 						.await?;
+						branch_store.flush().await?;
+					} else {
+						indexer::index_files(
+							store,
+							state.clone(),
+							&config,
+							git_repo_root.as_deref(),
+						)
+						.await?;
+					}
 
 					// Release lock after re-indexing
 					lock.release()?;
