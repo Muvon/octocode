@@ -2,6 +2,54 @@
 
 ## AI-Powered Git Workflow
 
+### AI Diff Analysis
+
+```bash
+# Analyze working directory changes
+octocode diff
+
+# Analyze staged changes only
+octocode diff --staged
+
+# Analyze a specific commit
+octocode diff abc1234
+
+# Analyze a commit range
+octocode diff abc1234..def5678
+
+# Analyze changes on a branch
+octocode diff feature-branch
+```
+
+Returns a structured analysis with summary, risk assessment, and change cards for each logical group of changes.
+
+### AI Code Explanation
+
+```bash
+# Explain a file
+octocode explain src/auth/mod.rs
+
+# Explain a specific symbol
+octocode explain src/auth/mod.rs:authenticate_user
+
+# Explain by search query
+octocode explain "how authentication works"
+```
+
+Provides architectural explanation focused on purpose, design decisions, and system relationships — not line-by-line commentary.
+
+### Codebase Statistics
+
+```bash
+# Show index statistics
+octocode stats
+
+# JSON output for tooling
+octocode stats --format json
+```
+
+Shows indexed files, blocks by type, GraphRAG stats, index staleness, and contextual enrichment status.
+
 ### Smart Commit Messages
 
 ```bash
@@ -228,11 +276,9 @@ octocode mcp --path /path/to/your/project --with-lsp "typescript-language-server
 
 | Tool | Description | Parameters |
 |------|-------------|------------|
-| **semantic_search** | Semantic code search across the codebase (supports multi-query) | `query` (string or array), `mode` (string: all/code/docs/text), `detail_level` (string), `max_results` (integer) |
+| **semantic_search** | Semantic code search across the codebase (supports multi-query) | `query` (string or array), `mode` (string: all/code/docs/text/commits), `detail_level` (string), `max_results` (integer) |
+| **view_signatures** | View file signatures and code structure | `files` (array of file paths or glob patterns) |
 | **graphrag** | Advanced GraphRAG operations: search, get-node, get-relationships, find-path, overview | `operation` (string), `query` (string), `node_id` (string), `source_id` (string), `target_id` (string), `max_depth` (integer), `format` (string) |
-| **memorize** | Store important information for future reference | `title` (string), `content` (string), `tags` (array) |
-| **remember** | Retrieve stored information by query (supports multi-query) | `query` (string or array), `memory_types` (array), `tags` (array), `related_files` (array), `limit` (integer) |
-| **forget** | Remove stored information | `query` (string), `confirm` (boolean) |
 
 #### semantic_search Tool Details
 
@@ -271,10 +317,7 @@ octocode mcp --path /path/to/your/project --with-lsp "typescript-language-server
 ### Key Features
 
 - **Intelligent File Watching**: Reindexes code when files change with smart debouncing and ignore pattern support
-- **Memory Persistence**: Stores insights across sessions
-- **Multi-tool Integration**: Combines search and memory capabilities
 - **Debug Mode**: Enhanced logging for troubleshooting and performance monitoring
-- **Git Context**: Memory entries automatically tagged with commit info
 - **Process Management**: Prevents multiple concurrent indexing operations for optimal performance
 
 ## Advanced Search Techniques
@@ -286,7 +329,25 @@ octocode mcp --path /path/to/your/project --with-lsp "typescript-language-server
 octocode search "database schema" --mode code      # Only code
 octocode search "API documentation" --mode docs    # Only docs
 octocode search "configuration" --mode text        # Only text files
-octocode search "error handling" --mode all        # All content types
+octocode search "error handling" --mode all        # All content types (excludes commits)
+octocode search "mcp migration" --mode commits     # Git commit history
+```
+
+### Commit Search
+
+Search through git commit history semantically. Commits are lazily indexed on first search.
+
+```bash
+# Find commits related to a topic
+octocode search "authentication refactor" --mode commits
+
+# With detail levels
+octocode search "auth" --mode commits -d signatures  # Compact: hash, date, subject
+octocode search "auth" --mode commits -d partial     # Default: + files, AI description
+octocode search "auth" --mode commits -d full        # Complete: full hash, full message body
+
+# With threshold filtering
+octocode search "mcp server" --mode commits --threshold 0.7
 ```
 
 ### Multi-Query Search (NEW!)
@@ -407,39 +468,6 @@ The GraphRAG system includes an intelligent import resolver that maps import sta
 - **Cross-language support**: Handles mixed-language projects
 - **Intelligent path mapping**: Resolves relative and absolute imports
 - **File grouping**: Processes files by language for efficient resolution
-
-## Memory Management
-
-### Through MCP Server
-
-```bash
-# Start MCP server to access memory tools
-octocode mcp
-
-# Then use through AI assistants:
-# - Store architectural decisions
-# - Remember bug fixes and their solutions
-# - Track feature requirements and implementation notes
-# - Maintain development insights across sessions
-```
-
-### Memory Types and Organization
-
-The memory system supports different types of information:
-
-- **code**: Code snippets and implementations
-- **architecture**: System design decisions
-- **bug_fix**: Bug reports and solutions
-- **feature**: Feature requirements and specifications
-- **documentation**: Important documentation notes
-- **user_preference**: User-specific preferences
-- **decision**: Project decisions and rationale
-- **learning**: Insights and lessons learned
-- **configuration**: Setup and configuration notes
-- **testing**: Test strategies and results
-- **performance**: Performance optimizations
-- **security**: Security considerations
-- **insight**: General insights and observations
 
 ## Custom Model Configuration
 
@@ -629,8 +657,7 @@ octocode mcp --debug --path /path/to/project
 
 1. **Slow indexing**: Reduce chunk size or use faster embedding models
 2. **Poor search results**: Adjust similarity threshold or try different embedding models
-3. **Memory issues**: Reduce max_memories or clear old data
-4. **Git integration not working**: Ensure you're in a git repository and have staged changes
+3. **Git integration not working**: Ensure you're in a git repository and have staged changes
 
 ## Performance Optimization
 
@@ -640,7 +667,6 @@ Octocode automatically optimizes performance based on your dataset:
 
 - **Vector indexes**: Automatically created and optimized based on dataset size
 - **Search parameters**: Dynamically calculated for best recall/latency balance
-- **Memory management**: Intelligent caching and cleanup
 - **Batch processing**: Optimized batch sizes for embedding generation
 
 ### For Large Codebases
@@ -655,15 +681,14 @@ flush_frequency = 2      # How often to flush to disk
 max_results = 20         # Limit results for faster response
 similarity_threshold = 0.65  # Higher threshold for more relevant results
 
-[memory]
-max_memories = 50000     # Increase for large projects
 ```
 
-### Memory Usage Optimization
+### General Optimization Tips
 
 ```bash
-# Clear old data periodically
+# Clear old data and reindex periodically
 octocode clear
+octocode index
 
 # Use local embedding models to reduce API calls (requires features)
 octocode config --code-embedding-model "fastembed:all-MiniLM-L6-v2"

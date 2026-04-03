@@ -93,6 +93,9 @@ octocode search "authentication" "middleware" "session"
 
 # With filters
 octocode search "database connection pool" --lang rust
+
+# Search commit history
+octocode search "authentication refactor" --mode commits
 ```
 
 ### 5. Connect AI Assistants (MCP Server)
@@ -111,10 +114,9 @@ Octocode includes a **built-in MCP server** that exposes your codebase as tools 
 
 | Tool | What It Does |
 |------|--------------|
-| `search_code` | Semantic search across your entire codebase |
-| `get_file_context` | Retrieve specific files with surrounding context |
-| `query_graph` | Ask questions about code relationships and dependencies |
-| `get_symbols` | Find functions, structs, classes by name or purpose |
+| `semantic_search` | Semantic search across code, docs, text, and commits |
+| `view_signatures` | View file signatures and code structure by glob patterns |
+| `graphrag` | Query code relationships, dependencies, and architecture |
 
 **Works with:** Claude Desktop • Cursor • Any MCP-compatible client
 

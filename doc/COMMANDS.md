@@ -48,6 +48,7 @@ octocode search "database connection" --mode code
 octocode search "API documentation" --mode docs
 octocode search "configuration" --mode text
 octocode search "error handling" --mode all
+octocode search "mcp server" --mode commits
 
 # Control result details
 octocode search "auth" --detail-level signatures  # Function signatures only
@@ -66,10 +67,11 @@ octocode search "user authentication" --expand
 ```
 
 **Search modes:**
-- `all` - Search across all content types (default)
+- `all` - Search across all content types, excluding commits (default)
 - `code` - Search only in code blocks
 - `docs` - Search only in documentation files
 - `text` - Search only in plain text files
+- `commits` - Search git commit history (messages, files, AI descriptions)
 
 ### `octocode view`
 
@@ -147,10 +149,12 @@ octocode models info google:text-embedding-004
 - **Unified format**: Consistent output across all providers
 
 **Supported providers:**
-- `voyage` - Voyage AI models (8 models: voyage-code-3, voyage-3.5-lite, etc.)
+- `voyage` - Voyage AI models (voyage-code-3, voyage-3.5-lite, etc.)
 - `openai` - OpenAI embedding models (text-embedding-3-small, text-embedding-3-large, etc.)
-- `jina` - Jina AI models (9 models: jina-embeddings-v4, jina-clip-v2, etc.)
+- `jina` - Jina AI models (jina-embeddings-v4, jina-clip-v2, etc.)
 - `google` - Google AI models (text-embedding-004, gemini-embedding-001, etc.)
+- `octohub` - OctoHub models (dynamic discovery via API)
+- `together` - Together AI models (intfloat/multilingual-e5-large-instruct, etc.)
 - `fastembed` - Local FastEmbed models (macOS only)
 - `huggingface` - HuggingFace models (macOS only)
 
@@ -159,6 +163,83 @@ octocode models info google:text-embedding-004
 - **Fail-fast validation**: Instantly verify if a model is supported
 - **Dimension detection**: Get exact embedding dimensions for each model
 - **Feature-gated**: Shows only available providers based on build features
+
+### `octocode diff`
+
+AI-powered analysis of code changes with risk assessment.
+
+```bash
+# Analyze working directory changes
+octocode diff
+
+# Analyze only staged changes
+octocode diff --staged
+
+# Analyze a specific commit
+octocode diff abc1234
+
+# Analyze a commit range
+octocode diff abc1234..def5678
+
+# Analyze changes on a branch
+octocode diff feature-branch
+
+# Output formats
+octocode diff --format json
+octocode diff --format md
+```
+
+**What it does:**
+- Summarizes what changed and why
+- Assesses risk level for each change group
+- Produces structured change cards with impact analysis
+- Flags uncertain areas that may need closer review
+
+### `octocode explain`
+
+AI-powered code explanation focused on architecture, not line-by-line.
+
+```bash
+# Explain a file
+octocode explain src/auth/mod.rs
+
+# Explain a specific symbol in a file
+octocode explain src/auth/mod.rs:authenticate_user
+
+# Explain by search query (finds relevant code first)
+octocode explain "how authentication works"
+
+# Output formats
+octocode explain src/main.rs --format md
+octocode explain src/main.rs --format json
+```
+
+**What it does:**
+- Explains WHAT the code does, WHY it exists, and HOW it fits in the system
+- Focuses on purpose, design decisions, and relationships
+- Uses semantic search to resolve query-based targets
+
+### `octocode stats`
+
+Display codebase index statistics.
+
+```bash
+# Show stats
+octocode stats
+
+# JSON output
+octocode stats --format json
+
+# Plain text
+octocode stats --format text
+```
+
+**What it shows:**
+- Indexed files, code blocks, text blocks, document blocks
+- Commit blocks count
+- GraphRAG nodes and relationships (if enabled)
+- Index staleness (whether HEAD matches last indexed commit)
+- Contextual enrichment status (if enabled)
 
 ## AI-Powered Git Commands
 
@@ -272,11 +353,9 @@ octocode mcp --path /path/to/project --debug
 ```
 
 **Available MCP tools:**
-- `semantic_search` - Semantic code search (supports multi-query)
+- `semantic_search` - Semantic code search (supports multi-query, all modes including commits)
+- `view_signatures` - View file signatures and code structure by glob patterns
 - `graphrag` - Advanced GraphRAG operations (search, get-node, get-relationships, find-path, overview)
-- `memorize` - Store information for future reference
-- `remember` - Retrieve stored information (supports multi-query)
-- `forget` - Remove stored information
 - `lsp_*` - LSP integration tools (when --with-lsp is used)
 
 ### `octocode mcp-proxy`
@@ -324,71 +403,6 @@ octocode graphrag overview
 octocode graphrag overview --md > project-structure.md
 octocode graphrag search --query "auth" --json
 ```
-
-## Memory Management Commands
-
-### `octocode memory`
-
-Manage the memory system for storing insights and context.
-
-```bash
-# Store new information
-octocode memory memorize \
-  --title "Authentication Bug Fix" \
-  --content "Fixed JWT token validation race condition" \
-  --memory-type bug_fix \
-  --importance 0.8 \
-  --tags security,jwt,auth \
-  --files src/auth.rs,src/middleware/auth.rs
-
-# Search memories semantically
-octocode memory remember "JWT authentication issues"
-octocode memory remember "authentication" "security" "bugs"
-
-# Retrieve specific memory
-octocode memory get abc123
-
-# Update existing memory
-octocode memory update abc123 --add-tags performance
-
-# Filter memories
-octocode memory by-type bug_fix
-octocode memory by-tags security,auth
-octocode memory for-files src/auth.rs
-
-# List recent memories
-octocode memory recent --limit 10
-
-# Memory statistics
-octocode memory stats
-
-# Create relationships between memories
-octocode memory relate source-id target-id
-
-# Cleanup old memories
-octocode memory cleanup
-
-# Delete specific memory
-octocode memory forget --memory-id abc123
-
-# Delete all memories (careful!)
-octocode memory clear-all --yes
-```
-
-**Memory types:**
-- `code` - Code-related insights
-- `architecture` - Architectural decisions
-- `bug_fix` - Bug reports and solutions
-- `feature` - Feature implementations
-- `documentation` - Documentation notes
-- `user_preference` - User preferences
-- `decision` - Project decisions
-- `learning` - Insights and lessons
-- `configuration` - Setup notes
-- `testing` - Test strategies
-- `performance` - Performance optimizations
-- `security` - Security considerations
-- `insight` - General observations
 
 ## Utility Commands
 
@@ -446,6 +460,8 @@ octocode models list
 octocode models list jina
 octocode models list voyage
 octocode models list google
+octocode models list octohub
+octocode models list together
 octocode models list fastembed
 octocode models list huggingface
 
@@ -489,10 +505,10 @@ octocode watch --no-git
 
 ### `octocode clear`
 
-Clear database tables (preserves memory tables).
+Clear indexed database tables.
 
 ```bash
-# Clear all data (preserves memory tables)
+# Clear all data
 octocode clear --mode all
 
 # Clear specific data types
@@ -504,7 +520,6 @@ octocode clear --mode text
 octocode clear
 ```
 
-**Note**: The clear command now preserves memory-related tables to maintain your memory system data. Use `octocode memory clear-all` to clear memories specifically.
 
 ### `octocode completion`
 
@@ -581,20 +596,6 @@ octocode graphrag overview --md > docs/architecture.md
 
 # Create project structure overview
 octocode search "main components" --md > docs/components.md
-```
-
-### Batch Memory Operations
-
-```bash
-# Store multiple related memories
-octocode memory memorize --title "Auth System" --content "..." --tags auth,security
-octocode memory memorize --title "DB Layer" --content "..." --tags database,performance
-
-# Search across all memories
-octocode memory remember "system architecture"
-
-# Get statistics
-octocode memory stats
 ```
 
 For more detailed information about specific features, see:

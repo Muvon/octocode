@@ -170,11 +170,8 @@ flush_frequency = 2              # How often to flush to disk
 - **CPU Type**: Modern CPUs with AVX2 support perform better
 - **Recommended**: 4+ cores for optimal performance
 
-#### Memory Optimization
+#### Search Optimization
 ```toml
-[memory]
-max_memories = 10000             # Adjust based on available RAM
-
 [search]
 max_results = 30                 # Reduce for lower memory usage
 ```
@@ -293,10 +290,9 @@ octocode config --similarity-threshold 0.3
 **Symptoms**: Octocode uses excessive RAM
 
 **Solutions**:
-1. **Reduce max memories**: `max_memories = 5000`
-2. **Clear old data**: `octocode clear`
-3. **Use smaller embedding models**: Switch to 384-dim models
-4. **Limit search results**: `max_results = 20`
+1. **Clear old data**: `octocode clear`
+2. **Use smaller embedding models**: Switch to 384-dim models
+3. **Limit search results**: `max_results = 20`
 
 ```bash
 # Quick fix for memory issues
@@ -429,6 +425,4 @@ graphrag_enabled = true
 max_results = 30
 similarity_threshold = 0.2
 
-[memory]
-max_memories = 50000
 ```

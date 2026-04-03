@@ -97,6 +97,10 @@ embeddings_batch_size = 16
 embeddings_max_tokens_per_batch = 100000
 flush_frequency = 2
 require_git = true
+quantization = true                          # RaBitQ quantization for ~32x vector compression
+contextual_descriptions = false              # Contextual Retrieval: enrich chunks with AI context
+contextual_model = "openrouter:openai/gpt-4o-mini"  # Model for contextual descriptions
+contextual_batch_size = 10                   # Chunks per batch for contextual enrichment
 ```
 
 ## Embedding Providers
@@ -111,6 +115,8 @@ require_git = true
 | **Voyage AI** | `voyage:model-name` | ✅ Yes | ☁️ Cloud | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐ |
 | **Google** | `google:model-name` | ✅ Yes | ☁️ Cloud | ⭐⭐⭐⭐ | ⭐⭐⭐⭐ |
 | **OpenAI** | `openai:model-name` | ✅ Yes | ☁️ Cloud | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐ |
+| **OctoHub** | `octohub:model-name` | ✅ Yes | ☁️ Cloud | ⭐⭐⭐⭐ | ⭐⭐⭐⭐ |
+| **Together** | `together:model-name` | ✅ Yes | ☁️ Cloud | ⭐⭐⭐⭐ | ⭐⭐⭐⭐ |
 
 ### Model Recommendations
 
@@ -163,6 +169,8 @@ export JINA_API_KEY="your-jina-key"
 export VOYAGE_API_KEY="your-voyage-key"
 export GOOGLE_API_KEY="your-google-key"
 export OPENAI_API_KEY="your-openai-key"
+export OCTOHUB_API_KEY="your-octohub-key"
+export TOGETHER_API_KEY="your-together-key"
 ```
 
 **Note**: Environment variables always take priority over config file settings. API keys are sourced from environment variables only - they are not stored in the configuration file for security.
@@ -234,16 +242,17 @@ Search behavior configuration.
 
 ### [index]
 Indexing behavior settings.
-# Set LLM model
-octocode config --model "openrouter:openai/gpt-4o-mini"
 
-- `graphrag_enabled`: Enable GraphRAG during indexing
-
-### [memory]
-Memory system configuration.
-
-- `enabled`: Enable/disable memory features
-- `max_memories`: Maximum number of memories to store
+- `chunk_size`: Maximum characters per code chunk (default: 2000)
+- `chunk_overlap`: Overlap between chunks in characters (default: 100)
+- `embeddings_batch_size`: Batch size for embedding generation (default: 16)
+- `embeddings_max_tokens_per_batch`: Maximum tokens per embedding batch (default: 100000)
+- `flush_frequency`: How often to flush to disk during indexing (default: 2)
+- `require_git`: Require git repository for indexing (default: true)
+- `quantization`: Enable RaBitQ quantization for vector indexes, ~32x compression with minimal quality loss (default: true)
+- `contextual_descriptions`: Enable Anthropic's Contextual Retrieval technique — enriches each chunk with AI-generated context before embedding for improved search quality (default: false)
+- `contextual_model`: LLM model used for generating contextual descriptions (default: "openrouter:openai/gpt-4o-mini")
+- `contextual_batch_size`: Number of chunks processed per batch during contextual enrichment (default: 10)
 
 ## Command Line Configuration
 
@@ -416,6 +425,4 @@ embeddings_batch_size = 32
 max_results = 30
 similarity_threshold = 0.2
 
-[memory]
-max_memories = 50000
 ```

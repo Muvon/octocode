@@ -54,7 +54,6 @@ octocode/
 │   │   └── embeddings/      # Embedding providers
 │   ├── search/              # Search engine implementation
 │   ├── graphrag/            # Knowledge graph functionality
-│   ├── memory/              # Memory management system
 │   ├── git/                 # Git integration features
 │   ├── mcp/                 # MCP server implementation
 │   └── utils/               # Utility functions

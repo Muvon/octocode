@@ -14,7 +14,6 @@ The codebase is organized into the following core modules:
 - **`indexer`** - Tree-sitter based code parsing and semantic extraction
 - **`lock`** - Process synchronization and concurrent operation management
 - **`mcp`** - Model Context Protocol server implementation
-- **`memory`** - Persistent storage for insights and context
 - **`reranker`** - Search result ranking and optimization
 - **`state`** - Application state management
 - **`storage`** - Vector database operations and data persistence
@@ -32,7 +31,7 @@ The codebase is organized into the following core modules:
 - **Language-specific parsers** for 10+ programming languages
 
 ### 2. Embedding System (`src/embedding/`)
-- **Multiple providers**: FastEmbed (local), HuggingFace (local), Jina AI, Voyage AI, Google (cloud)
+- **Multiple providers**: FastEmbed (local), HuggingFace (local), Jina AI, Voyage AI, Google, OpenAI, OctoHub, Together (cloud)
 - **Dynamic model discovery** - No hardcoded model-dimension mappings
 - **Provider validation** - Fail-fast during provider creation for invalid models
 - **Batch processing** for efficient embedding generation
@@ -42,6 +41,7 @@ The codebase is organized into the following core modules:
 
 ### 3. Vector Database (`src/storage.rs`, `src/store/`)
 - **Lance columnar database** for fast similarity search
+- **RaBitQ quantization** - ~32x vector compression with minimal quality loss (configurable)
 - **Intelligent vector index optimization** - Automatic parameter tuning
 - **Growth-aware indexing** - Recreates indexes as datasets grow
 - **Efficient storage** (~10KB per file)
@@ -61,9 +61,16 @@ The codebase is organized into the following core modules:
 ### 5. Search Engine
 - **Semantic similarity search** using vector embeddings
 - **Keyword boosting** for exact matches
-- **Multi-mode search** (code, docs, text, all)
+- **Multi-mode search** (code, docs, text, commits, all)
 - **Configurable similarity thresholds**
 - **Result reranking** for improved relevance
+- **Contextual Retrieval** - Optional AI-enriched chunk context for improved search quality (`src/indexer/contextual.rs`)
+
+### 5a. Commit Search (`src/indexer/commits/`)
+- **Git commit indexing** with AI-generated descriptions
+- **Lazy loading** - Commits indexed on first search, not during `octocode index`
+- **Semantic search** over commit messages, changed files, and AI descriptions
+- **Detail levels** - Signatures (compact), partial (default), full (complete message + all files)
 
 ### 6. MCP Server (`src/mcp/`)
 - **Model Context Protocol** server implementation
@@ -74,21 +81,17 @@ The codebase is organized into the following core modules:
 - **Debug mode** with enhanced logging and performance monitoring
 - **MCP Proxy** for multi-repository management
 
-### 7. Memory System (`src/memory/`)
-- **Persistent storage** for insights and context
-- **Semantic memory search** using embeddings
-- **Git integration** with automatic commit tagging
-- **Memory types** (code, architecture, bug fixes, etc.)
-- **Intelligent vector index optimization** (same as main store)
-
-### 8. Git Integration
+### 7. Git Integration
 - **Smart commit message generation** using AI
 - **Staged changes analysis**
 - **Code review assistant** with best practices checking
+- **AI diff analysis** with risk assessment and structured change cards
+- **AI code explanation** with architectural focus
 - **Release management** with AI-powered version calculation
+- **Codebase statistics** with index health monitoring
 - **Multiple LLM support** via OpenRouter
 
-### 9. Code Formatting (`src/commands/format/`)
+### 8. Code Formatting (`src/commands/format/`)
 - **EditorConfig integration** for consistent formatting
 - **Multi-language support** with language-specific formatters
 - **Batch processing** for efficient formatting operations
@@ -128,11 +131,6 @@ Connections between nodes represent different types of relationships:
 2. **Search Phase**:
    ```
    Query → Embedding Generation → Vector Similarity Search → Result Ranking → Response
-   ```
-
-3. **Memory Phase**:
-   ```
-   Input → Semantic Processing → Vector Storage → Git Context Tagging → Persistence
    ```
 
 ## Supported Languages

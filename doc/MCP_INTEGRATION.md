@@ -4,7 +4,7 @@ Complete guide for integrating Octocode with AI assistants using the Model Conte
 
 ## Overview
 
-Octocode provides a built-in MCP server that enables AI assistants to interact with your codebase through semantic search, memory management, and LSP integration. The server supports both stdin/stdout mode (for direct AI assistant integration) and HTTP mode (for web-based integrations).
+Octocode provides a built-in MCP server that enables AI assistants to interact with your codebase through semantic search, code signatures, GraphRAG, and LSP integration. The server supports both stdin/stdout mode (for direct AI assistant integration) and HTTP mode (for web-based integrations).
 
 ## Quick Start
 
@@ -219,78 +219,6 @@ Advanced relationship-aware GraphRAG operations for code analysis. Supports mult
 }
 ```
 
-### memorize
-
-Store important information for future reference.
-
-**Parameters:**
-- `title` (string) - Short descriptive title
-- `content` (string) - Detailed content to remember
-- `memory_type` (string, optional) - Type of memory (code, bug_fix, feature, etc.)
-- `importance` (number, optional) - Importance score 0.0-1.0
-- `tags` (array, optional) - Tags for categorization
-- `related_files` (array, optional) - Related file paths
-
-**Example:**
-```json
-{
-  "title": "JWT Authentication Bug Fix",
-  "content": "Fixed race condition in token refresh logic by adding mutex lock around token validation",
-  "memory_type": "bug_fix",
-  "importance": 0.8,
-  "tags": ["security", "jwt", "race-condition"],
-  "related_files": ["src/auth/jwt.rs", "src/middleware/auth.rs"]
-}
-```
-
-### remember
-
-Retrieve stored information with semantic search.
-
-**Parameters:**
-- `query` (string or array) - Search query or multiple related queries
-- `memory_types` (array, optional) - Filter by memory types
-- `tags` (array, optional) - Filter by tags
-- `related_files` (array, optional) - Filter by related files
-- `limit` (integer, optional) - Maximum memories to return
-
-**Single Query Example:**
-```json
-{
-  "query": "JWT authentication issues",
-  "memory_types": ["bug_fix", "security"],
-  "limit": 5
-}
-```
-
-**Multi-Query Example:**
-```json
-{
-  "query": ["authentication", "security", "bugs"],
-  "tags": ["jwt", "security"],
-  "limit": 10
-}
-```
-
-### forget
-
-Remove stored information.
-
-**Parameters:**
-- `memory_id` (string, optional) - Specific memory ID to forget
-- `query` (string, optional) - Query to find memories to forget
-- `memory_types` (array, optional) - Filter by memory types when using query
-- `tags` (array, optional) - Filter by tags when using query
-- `confirm` (boolean) - Must be true to confirm deletion
-
-**Example:**
-```json
-{
-  "memory_id": "abc123-def456-789",
-  "confirm": true
-}
-```
-
 ## LSP Integration Tools
 
 When started with `--with-lsp`, additional tools become available:
@@ -417,24 +345,6 @@ octocode mcp-proxy --bind "127.0.0.1:8080" --path /path/to/parent/directory
 }
 ```
 
-### Memory Management
-
-**Ask Claude:**
-> "Remember this bug fix: We fixed the JWT token validation by adding proper error handling"
-
-**Claude uses:**
-```json
-{
-  "tool": "memorize",
-  "arguments": {
-    "title": "JWT Token Validation Bug Fix",
-    "content": "Fixed JWT token validation by adding proper error handling to prevent authentication bypass",
-    "memory_type": "bug_fix",
-    "tags": ["jwt", "security", "authentication"]
-  }
-}
-```
-
 ### Code Navigation
 
 **Ask Claude:**
@@ -547,19 +457,6 @@ octocode mcp \
 
 # Configure search limits
 octocode config --max-results 20 --similarity-threshold 0.3
-```
-
-### Memory Management
-
-```bash
-# Monitor memory usage
-octocode memory stats
-
-# Clean up old memories periodically
-octocode memory cleanup
-
-# Limit memory storage
-octocode config --max-memories 10000
 ```
 
 ## Troubleshooting

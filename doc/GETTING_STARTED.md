@@ -77,23 +77,6 @@ octocode commit  # Generates intelligent commit message
 octocode review --focus security
 ```
 
-### Working with Memory System
-
-```bash
-# Store important insights
-octocode memory memorize \
-  --title "Authentication Bug Fix" \
-  --content "Fixed JWT token validation race condition" \
-  --memory-type bug_fix \
-  --tags security,jwt
-
-# Search your memory
-octocode memory remember "JWT authentication issues"
-
-# Get memories by type
-octocode memory by-type bug_fix
-```
-
 ## Configuration Basics
 
 ### View Current Configuration
