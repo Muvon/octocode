@@ -101,12 +101,12 @@ pub async fn process_code_blocks_batch(
 		})
 		.collect();
 
-	// Generate embeddings with symmetric input type (None) for code-to-code search
+	// Generate embeddings with Document input type for indexing (asymmetric retrieval)
 	let embeddings = crate::embedding::generate_embeddings_batch(
 		contents,
 		true,
 		config,
-		crate::embedding::types::InputType::None,
+		crate::embedding::types::InputType::Document,
 	)
 	.await?;
 

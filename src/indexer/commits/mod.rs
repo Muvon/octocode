@@ -122,7 +122,7 @@ pub async fn index_commits(
 			text_chunk,
 			false, // text model, not code
 			config,
-			embedding::types::InputType::None,
+			embedding::types::InputType::Document,
 		)
 		.await?;
 

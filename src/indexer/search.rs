@@ -1113,12 +1113,12 @@ pub async fn generate_batch_embeddings_for_queries(
 ) -> Result<Vec<crate::embedding::SearchModeEmbeddings>> {
 	match mode {
 		"code" => {
-			// Batch generate code embeddings for all queries (symmetric: None for code-to-code)
+			// Batch generate code embeddings for all queries
 			let code_embeddings = crate::embedding::generate_embeddings_batch(
 				queries.to_vec(),
 				true,
 				config,
-				crate::embedding::types::InputType::None,
+				crate::embedding::types::InputType::Query,
 			)
 			.await?;
 			Ok(code_embeddings
@@ -1156,7 +1156,7 @@ pub async fn generate_batch_embeddings_for_queries(
 					queries.to_vec(),
 					true,
 					config,
-					crate::embedding::types::InputType::None,
+					crate::embedding::types::InputType::Query,
 				)
 				.await?;
 				Ok(embeddings
@@ -1167,13 +1167,13 @@ pub async fn generate_batch_embeddings_for_queries(
 					})
 					.collect())
 			} else {
-				// Different models - generate both types in parallel (code=None, text=Query)
+				// Different models - generate both types in parallel
 				let (code_embeddings, text_embeddings) = tokio::try_join!(
 					crate::embedding::generate_embeddings_batch(
 						queries.to_vec(),
 						true,
 						config,
-						crate::embedding::types::InputType::None
+						crate::embedding::types::InputType::Query
 					),
 					crate::embedding::generate_embeddings_batch(
 						queries.to_vec(),

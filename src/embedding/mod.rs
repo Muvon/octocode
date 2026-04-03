@@ -73,6 +73,7 @@ impl From<&Config> for EmbeddingGenerationConfig {
 }
 
 /// Generate embeddings based on configured provider (supports provider:model format)
+/// Uses Query input_type for search queries (asymmetric retrieval)
 /// Compatibility wrapper for octocode Config
 pub async fn generate_embeddings(
 	contents: &str,
@@ -95,7 +96,21 @@ pub async fn generate_embeddings(
 		return Err(anyhow::anyhow!("Invalid model format: {}", model_string));
 	};
 
-	octolib::embedding::generate_embeddings(contents, provider, model).await
+	// Use Query input_type — this function is used for search queries
+	let results = octolib::embedding::generate_embeddings_batch(
+		vec![contents.to_string()],
+		provider,
+		model,
+		InputType::Query,
+		1,
+		embedding_config.max_tokens_per_batch,
+	)
+	.await?;
+
+	results
+		.into_iter()
+		.next()
+		.ok_or_else(|| anyhow::anyhow!("No embeddings generated"))
 }
 
 /// Generate batch embeddings based on configured provider (supports provider:model format)
