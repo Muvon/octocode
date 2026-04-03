@@ -20,7 +20,8 @@ use std::sync::Arc;
 use std::time::Instant;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, Semaphore};
+use tokio::task::JoinHandle;
 use tokio::time::Duration;
 use tracing::debug;
 
@@ -99,11 +100,19 @@ pub struct McpProxyServer {
 	bind_addr: SocketAddr,
 	root_path: PathBuf,
 	debug: bool,
+	auto_index: bool,
 	instances: Arc<Mutex<HashMap<String, ProxyMcpInstance>>>,
+	/// Active indexing tasks per repo. Prevents concurrent indexing of the same repo.
+	indexing_tasks: Arc<Mutex<HashMap<String, JoinHandle<()>>>>,
 }
 
 impl McpProxyServer {
-	pub async fn new(bind_addr: SocketAddr, root_path: PathBuf, debug_mode: bool) -> Result<Self> {
+	pub async fn new(
+		bind_addr: SocketAddr,
+		root_path: PathBuf,
+		debug_mode: bool,
+		auto_index: bool,
+	) -> Result<Self> {
 		// Initialize logging for the proxy server
 		init_mcp_logging(root_path.clone(), debug_mode)?;
 
@@ -116,7 +125,9 @@ impl McpProxyServer {
 			bind_addr,
 			root_path,
 			debug: debug_mode,
+			auto_index,
 			instances: Arc::new(Mutex::new(HashMap::new())),
+			indexing_tasks: Arc::new(Mutex::new(HashMap::new())),
 		})
 	}
 
@@ -136,14 +147,59 @@ impl McpProxyServer {
 		// Discover and log available repositories
 		self.discover_and_log_repositories().await?;
 
+		// Startup auto-index queue: index all discovered repos with bounded concurrency
+		if self.auto_index {
+			let repositories = self.discover_repositories().await?;
+			if !repositories.is_empty() {
+				let cpu_count = std::thread::available_parallelism()
+					.map(|n| n.get())
+					.unwrap_or(4);
+				let semaphore = Arc::new(Semaphore::new(cpu_count));
+
+				println!(
+					"🔄 Auto-index: queuing {} repositories (concurrency: {})",
+					repositories.len(),
+					cpu_count
+				);
+
+				for repo_path in repositories {
+					let semaphore = semaphore.clone();
+					let debug = self.debug;
+					let relative_key = repo_path
+						.strip_prefix(&self.root_path)
+						.unwrap_or(&repo_path)
+						.to_string_lossy()
+						.to_string();
+					let handle = tokio::spawn(async move {
+						let _permit = match semaphore.acquire().await {
+							Ok(permit) => permit,
+							Err(_) => return,
+						};
+						if let Err(e) = run_indexing_for_repo(&repo_path, debug).await {
+							debug!(
+								"Startup auto-index failed for {}: {}",
+								repo_path.display(),
+								e
+							);
+						}
+					});
+					self.indexing_tasks
+						.lock()
+						.await
+						.insert(relative_key, handle);
+				}
+			}
+		}
+
 		// Start cleanup task for idle instances
 		let instances_for_cleanup = self.instances.clone();
+		let tasks_for_cleanup = self.indexing_tasks.clone();
 		tokio::spawn(async move {
 			let mut interval =
 				tokio::time::interval(Duration::from_millis(INSTANCE_CLEANUP_INTERVAL_MS));
 			loop {
 				interval.tick().await;
-				Self::cleanup_idle_instances(&instances_for_cleanup).await;
+				Self::cleanup_idle_instances(&instances_for_cleanup, &tasks_for_cleanup).await;
 			}
 		});
 
@@ -153,16 +209,26 @@ impl McpProxyServer {
 		);
 
 		// Accept connections
+		let auto_index = self.auto_index;
+		let indexing_tasks = self.indexing_tasks.clone();
 		loop {
 			match listener.accept().await {
 				Ok((stream, addr)) => {
 					let instances = self.instances.clone();
 					let root_path = self.root_path.clone();
 					let debug = self.debug;
+					let indexing_tasks = indexing_tasks.clone();
 
 					tokio::spawn(async move {
-						if let Err(e) =
-							Self::handle_connection(stream, instances, root_path, debug).await
+						if let Err(e) = Self::handle_connection(
+							stream,
+							instances,
+							root_path,
+							debug,
+							auto_index,
+							indexing_tasks,
+						)
+						.await
 						{
 							debug!("Connection error from {}: {}", addr, e);
 						}
@@ -255,6 +321,8 @@ impl McpProxyServer {
 		instances: Arc<Mutex<HashMap<String, ProxyMcpInstance>>>,
 		root_path: PathBuf,
 		debug: bool,
+		auto_index: bool,
+		indexing_tasks: Arc<Mutex<HashMap<String, JoinHandle<()>>>>,
 	) -> Result<()> {
 		let mut buffer = vec![0; 8192];
 		let bytes_read = stream.read(&mut buffer).await?;
@@ -370,20 +438,28 @@ impl McpProxyServer {
 		let request_method = request.method.clone();
 
 		// Get or create MCP instance for this repository
-		let instance =
-			match Self::get_or_create_instance(&instances, &repo_path, &root_path, debug).await {
-				Ok(instance) => instance,
-				Err(e) => {
-					debug!("Failed to get MCP instance for {}: {}", repo_path, e);
-					Self::send_http_error(
-						&mut stream,
-						404,
-						&format!("Repository not found: {}", repo_path),
-					)
-					.await?;
-					return Ok(());
-				}
-			};
+		let instance = match Self::get_or_create_instance(
+			&instances,
+			&repo_path,
+			&root_path,
+			debug,
+			auto_index,
+			&indexing_tasks,
+		)
+		.await
+		{
+			Ok(instance) => instance,
+			Err(e) => {
+				debug!("Failed to get MCP instance for {}: {}", repo_path, e);
+				Self::send_http_error(
+					&mut stream,
+					404,
+					&format!("Repository not found: {}", repo_path),
+				)
+				.await?;
+				return Ok(());
+			}
+		};
 
 		// Handle the request
 		let response = instance.handle_request(&request).await;
@@ -419,6 +495,8 @@ impl McpProxyServer {
 		repo_path: &str,
 		root_path: &Path,
 		debug: bool,
+		auto_index: bool,
+		indexing_tasks: &Arc<Mutex<HashMap<String, JoinHandle<()>>>>,
 	) -> Result<ProxyMcpInstance> {
 		let mut instances_guard = instances.lock().await;
 
@@ -452,10 +530,31 @@ impl McpProxyServer {
 		println!("   📂 Path: {}", full_path.display());
 
 		let config = Config::load()?;
-		let instance = ProxyMcpInstance::new(config, full_path, debug).await?;
+		let instance = ProxyMcpInstance::new(config, full_path.clone(), debug).await?;
 
 		// Store and return
 		instances_guard.insert(repo_path.to_string(), instance.clone());
+
+		// Spawn one-shot indexer on initialize — skip if startup queue is still running for this repo
+		if auto_index {
+			let mut tasks = indexing_tasks.lock().await;
+			let already_running = tasks.get(repo_path).map_or(false, |h| !h.is_finished());
+
+			if already_running {
+				debug!(
+					"Skipping on-connect indexer for {} — startup indexer still running",
+					repo_path
+				);
+			} else {
+				let repo_key = repo_path.to_string();
+				let handle = tokio::spawn(async move {
+					if let Err(e) = run_indexing_for_repo(&full_path, debug).await {
+						debug!("Auto-index failed for {}: {}", repo_key, e);
+					}
+				});
+				tasks.insert(repo_path.to_string(), handle);
+			}
+		}
 
 		if debug {
 			println!("✅ MCP instance ready for: {}", repo_path);
@@ -463,7 +562,10 @@ impl McpProxyServer {
 		Ok(instance)
 	}
 
-	async fn cleanup_idle_instances(instances: &Arc<Mutex<HashMap<String, ProxyMcpInstance>>>) {
+	async fn cleanup_idle_instances(
+		instances: &Arc<Mutex<HashMap<String, ProxyMcpInstance>>>,
+		indexing_tasks: &Arc<Mutex<HashMap<String, JoinHandle<()>>>>,
+	) {
 		let mut instances_guard = instances.lock().await;
 		let mut to_remove = Vec::new();
 
@@ -473,11 +575,24 @@ impl McpProxyServer {
 			}
 		}
 
-		// Note: cleanup logging removed to maintain protocol compliance
-		// Only log to structured logging, not console
+		for repo_path in &to_remove {
+			instances_guard.remove(repo_path);
+		}
 
-		for repo_path in to_remove {
-			instances_guard.remove(&repo_path);
+		// Drop instances lock before acquiring tasks lock
+		drop(instances_guard);
+
+		// Abort indexing tasks for removed instances
+		if !to_remove.is_empty() {
+			let mut tasks_guard = indexing_tasks.lock().await;
+			for repo_path in &to_remove {
+				if let Some(handle) = tasks_guard.remove(repo_path) {
+					if !handle.is_finished() {
+						handle.abort();
+						debug!("Aborted indexer for idle instance: {}", repo_path);
+					}
+				}
+			}
 		}
 	}
 
@@ -510,4 +625,20 @@ impl McpProxyServer {
 		stream.write_all(http_response.as_bytes()).await?;
 		Ok(())
 	}
+}
+
+/// Run indexing for a single repository. Safe for concurrent use across different repos.
+/// Run indexing for a single repository. Safe for concurrent use across different repos.
+async fn run_indexing_for_repo(repo_path: &Path, debug: bool) -> Result<()> {
+	if debug {
+		println!("📇 Auto-indexing: {}", repo_path.display());
+	}
+
+	let config = Config::load()?;
+	let index_path = crate::storage::get_project_database_path(repo_path)?;
+	crate::storage::ensure_project_storage_exists(repo_path)?;
+	let store = crate::store::Store::new_with_path(index_path).await?;
+	store.initialize_collections().await?;
+
+	super::server::perform_indexing(&store, &config, repo_path, false).await
 }

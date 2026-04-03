@@ -78,7 +78,7 @@ impl GraphRagProvider {
 	pub fn new(config: Config, working_directory: std::path::PathBuf) -> Option<Self> {
 		if config.graphrag.enabled {
 			Some(Self {
-				graphrag: GraphRAG::new(config),
+				graphrag: GraphRAG::new(config, working_directory.clone()),
 				working_directory,
 			})
 		} else {
@@ -286,9 +286,10 @@ impl GraphRagProvider {
 		}
 
 		// Initialize the GraphBuilder
-		let graph_builder = indexer::GraphBuilder::new_with_quiet(config.clone(), true)
-			.await
-			.map_err(|e| anyhow::anyhow!("Failed to initialize GraphRAG system: {}", e))?;
+		let graph_builder =
+			indexer::GraphBuilder::new_with_quiet(config.clone(), &self.working_directory, true)
+				.await
+				.map_err(|e| anyhow::anyhow!("Failed to initialize GraphRAG system: {}", e))?;
 
 		// Get the current graph
 		let graph = graph_builder

@@ -81,7 +81,8 @@ pub async fn execute(
 	}
 
 	// Initialize the GraphBuilder
-	let graph_builder = match indexer::GraphBuilder::new(config.clone()).await {
+	let current_dir = std::env::current_dir()?;
+	let graph_builder = match indexer::GraphBuilder::new(config.clone(), &current_dir).await {
 		Ok(builder) => builder,
 		Err(e) => {
 			eprintln!("Failed to initialize the GraphRAG system: {}", e);

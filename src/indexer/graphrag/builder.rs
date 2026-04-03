@@ -23,7 +23,9 @@ use crate::indexer::graphrag::ai::AIEnhancements;
 use crate::indexer::graphrag::database::DatabaseOperations;
 use crate::indexer::graphrag::relationships::RelationshipDiscovery;
 use crate::indexer::graphrag::types::{CodeGraph, CodeNode, CodeRelationship};
-use crate::indexer::graphrag::utils::{cosine_similarity, detect_project_root, to_relative_path};
+use crate::indexer::graphrag::utils::{
+	cosine_similarity, detect_project_root, detect_project_root_from, to_relative_path,
+};
 use crate::state::SharedState;
 use crate::store::{CodeBlock, Store};
 use anyhow::{Context, Result};
@@ -44,13 +46,15 @@ pub struct GraphBuilder {
 }
 
 impl GraphBuilder {
-	pub async fn new(config: Config) -> Result<Self> {
-		Self::new_with_quiet(config, false).await
+	pub async fn new(config: Config, working_dir: &Path) -> Result<Self> {
+		Self::new_with_quiet(config, working_dir, false).await
 	}
 
-	pub async fn new_with_quiet(config: Config, quiet: bool) -> Result<Self> {
-		// Detect project root (look for common indicators)
-		let project_root = detect_project_root()?;
+	pub async fn new_with_quiet(config: Config, working_dir: &Path, quiet: bool) -> Result<Self> {
+		// Use working_dir to detect project root, falling back to detect_project_root()
+		let project_root = detect_project_root_from(working_dir).unwrap_or_else(|_| {
+			detect_project_root().unwrap_or_else(|_| working_dir.to_path_buf())
+		});
 
 		// Initialize embedding provider from config (using text model for graph descriptions)
 		// GraphRAG uses text embeddings for file descriptions and relationships, not code embeddings
@@ -67,8 +71,10 @@ impl GraphBuilder {
 				.context("Failed to initialize embedding provider from config")?,
 		);
 
-		// Initialize the store for database access
-		let store = Store::new().await?;
+		// Initialize the store for the specific working directory
+		let index_path = crate::storage::get_project_database_path(working_dir)?;
+		crate::storage::ensure_project_storage_exists(working_dir)?;
+		let store = Store::new_with_path(index_path).await?;
 
 		// Load existing graph from database
 		let db_ops = DatabaseOperations::new(&store);
@@ -90,15 +96,6 @@ impl GraphBuilder {
 			ai_enhancements,
 			quiet,
 		})
-	}
-
-	// Legacy method for backward compatibility
-	pub async fn new_with_ai_enhancements(
-		config: Config,
-		_use_ai_enhancements: bool,
-	) -> Result<Self> {
-		// Note: _use_ai_enhancements parameter is ignored, using config.graphrag.use_llm instead
-		Self::new(config).await
 	}
 
 	// Check if LLM enhancements are enabled

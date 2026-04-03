@@ -1073,9 +1073,12 @@ pub async fn index_files_with_quiet(
 									println!("🔗 Building GraphRAG from existing database...");
 								}
 								log_indexing_progress("graphrag_build", 0, 0, None, 0);
-								let graph_builder =
-									graphrag::GraphBuilder::new_with_quiet(config.clone(), quiet)
-										.await?;
+								let graph_builder = graphrag::GraphBuilder::new_with_quiet(
+									config.clone(),
+									&current_dir,
+									quiet,
+								)
+								.await?;
 								graph_builder
 									.build_from_existing_database(Some(state.clone()))
 									.await?;
@@ -1713,7 +1716,7 @@ pub async fn index_files_with_quiet(
 
 			// Initialize GraphBuilder
 			let graph_builder =
-				graphrag::GraphBuilder::new_with_quiet(config.clone(), quiet).await?;
+				graphrag::GraphBuilder::new_with_quiet(config.clone(), &current_dir, quiet).await?;
 
 			if needs_graphrag_from_existing {
 				// Build GraphRAG from existing database (critical fix for the reported issue)
@@ -1890,7 +1893,8 @@ pub async fn handle_file_change(store: &Store, file_path: &str, config: &Config)
 
 					// Update GraphRAG if enabled and we have new blocks
 					if config.graphrag.enabled && !all_code_blocks.is_empty() {
-						let graph_builder = graphrag::GraphBuilder::new(config.clone()).await?;
+						let graph_builder =
+							graphrag::GraphBuilder::new(config.clone(), &current_dir).await?;
 						graph_builder
 							.process_code_blocks(&all_code_blocks, Some(state.clone()))
 							.await?;

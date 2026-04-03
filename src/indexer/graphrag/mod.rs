@@ -28,34 +28,42 @@ mod tests;
 pub use builder::GraphBuilder;
 pub use types::{CodeGraph, CodeNode, CodeRelationship, FunctionInfo};
 pub use utils::{
-	cosine_similarity, detect_project_root, find_node_id, graphrag_nodes_to_markdown,
-	graphrag_nodes_to_text, normalize_node_id, render_graphrag_nodes_json, to_relative_path,
+	cosine_similarity, detect_project_root, detect_project_root_from, find_node_id,
+	graphrag_nodes_to_markdown, graphrag_nodes_to_text, normalize_node_id,
+	render_graphrag_nodes_json, to_relative_path,
 };
 
 // GraphRAG implementation for all operations (backward compatibility + new operations)
 use crate::config::Config;
 use anyhow::Result;
+use std::path::PathBuf;
 
 #[derive(Clone)]
 pub struct GraphRAG {
 	config: Config,
+	working_dir: PathBuf,
 }
 
 impl GraphRAG {
-	pub fn new(config: Config) -> Self {
-		Self { config }
+	pub fn new(config: Config, working_dir: PathBuf) -> Self {
+		Self {
+			config,
+			working_dir,
+		}
 	}
 
 	/// Search for nodes (backward compatibility)
 	pub async fn search(&self, query: &str) -> Result<String> {
-		let builder = GraphBuilder::new_with_quiet(self.config.clone(), true).await?;
+		let builder =
+			GraphBuilder::new_with_quiet(self.config.clone(), &self.working_dir, true).await?;
 		let nodes = builder.search_nodes(query).await?;
 		Ok(graphrag_nodes_to_text(&nodes))
 	}
 
 	/// Get node details by ID
 	pub async fn get_node(&self, node_id: &str) -> Result<String> {
-		let builder = GraphBuilder::new_with_quiet(self.config.clone(), true).await?;
+		let builder =
+			GraphBuilder::new_with_quiet(self.config.clone(), &self.working_dir, true).await?;
 		let graph = builder.get_graph().await?;
 		match find_node_id(&graph, node_id) {
 			Some(resolved_id) => {
@@ -76,7 +84,8 @@ impl GraphRAG {
 
 	/// Get relationships for a node
 	pub async fn get_relationships(&self, node_id: &str) -> Result<String> {
-		let builder = GraphBuilder::new_with_quiet(self.config.clone(), true).await?;
+		let builder =
+			GraphBuilder::new_with_quiet(self.config.clone(), &self.working_dir, true).await?;
 		let graph = builder.get_graph().await?;
 
 		let resolved_id = find_node_id(&graph, node_id)
@@ -148,7 +157,8 @@ impl GraphRAG {
 		target_id: &str,
 		max_depth: usize,
 	) -> Result<String> {
-		let builder = GraphBuilder::new_with_quiet(self.config.clone(), true).await?;
+		let builder =
+			GraphBuilder::new_with_quiet(self.config.clone(), &self.working_dir, true).await?;
 		let graph = builder.get_graph().await?;
 
 		// Resolve node IDs with fuzzy matching
@@ -203,7 +213,8 @@ impl GraphRAG {
 
 	/// Get graph overview
 	pub async fn overview(&self) -> Result<String> {
-		let builder = GraphBuilder::new_with_quiet(self.config.clone(), true).await?;
+		let builder =
+			GraphBuilder::new_with_quiet(self.config.clone(), &self.working_dir, true).await?;
 		let graph = builder.get_graph().await?;
 
 		let node_count = graph.nodes.len();

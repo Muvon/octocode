@@ -751,7 +751,7 @@ async fn start_background_services(
 // Indexing helpers (preserved from original server.rs)
 // ---------------------------------------------------------------------------
 
-async fn perform_indexing(
+pub(crate) async fn perform_indexing(
 	store: &Store,
 	config: &Config,
 	working_directory: &std::path::Path,
@@ -761,7 +761,9 @@ async fn perform_indexing(
 	log_indexing_operation("direct_reindex_start", None, None, true);
 
 	let mut lock = IndexLock::new(working_directory)?;
-	lock.acquire()?;
+	lock.acquire_async()
+		.await
+		.map_err(|e| anyhow::anyhow!("Failed to acquire index lock: {}", e))?;
 	debug!("MCP server: acquired indexing lock");
 
 	let state = state::create_shared_state();

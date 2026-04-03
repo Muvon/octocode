@@ -30,6 +30,10 @@ pub struct McpProxyArgs {
 	/// Enable debug logging for MCP proxy server
 	#[arg(long)]
 	pub debug: bool,
+
+	/// Automatically index all discovered repositories on startup and on client connect
+	#[arg(long)]
+	pub auto_index: bool,
 }
 
 pub async fn run(args: McpProxyArgs) -> Result<()> {
@@ -62,8 +66,10 @@ pub async fn run(args: McpProxyArgs) -> Result<()> {
 	println!("📁 Root path: {}", root_path.display());
 	println!("🌐 Bind address: {}", bind_addr);
 	println!("🐛 Debug mode: {}", args.debug);
+	println!("🔄 Auto-index: {}", args.auto_index);
 
 	// Create and run the proxy server
-	let mut proxy_server = McpProxyServer::new(bind_addr, root_path, args.debug).await?;
+	let mut proxy_server =
+		McpProxyServer::new(bind_addr, root_path, args.debug, args.auto_index).await?;
 	proxy_server.run().await
 }
