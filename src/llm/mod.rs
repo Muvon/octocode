@@ -20,6 +20,7 @@
 use crate::config::Config;
 use anyhow::Result;
 use serde::de::DeserializeOwned;
+use std::time::Duration;
 
 // Re-export octolib types for convenience
 pub use octolib::llm::{
@@ -61,34 +62,59 @@ impl LlmClient {
 		})
 	}
 
-	/// Simple chat completion returning text response
+	/// Maximum number of retries for LLM calls with exponential backoff
+	const MAX_RETRIES: u32 = 3;
+
+	/// Simple chat completion returning text response (with retry)
 	pub async fn chat_completion(&self, messages: Vec<Message>) -> Result<String> {
-		let params = ChatCompletionParams::new(
-			&messages,
-			&self.model,
-			self.temperature,
-			1.0,                    // top_p
-			50,                     // min_tokens
-			self.max_tokens as u32, // max_tokens (convert usize to u32)
-		);
+		let mut last_error = None;
 
-		let response = self.provider.chat_completion(params).await?;
+		for attempt in 0..=Self::MAX_RETRIES {
+			if attempt > 0 {
+				let delay = Duration::from_secs(5 * (1 << (attempt - 1))); // 5s, 10s, 20s
+				tracing::warn!(
+					"LLM call failed (attempt {}/{}), retrying in {:?}...",
+					attempt,
+					Self::MAX_RETRIES + 1,
+					delay
+				);
+				tokio::time::sleep(delay).await;
+			}
 
-		// Log token usage if available from exchange
-		if let Some(usage) = &response.exchange.usage {
-			tracing::debug!(
-				"LLM tokens: input={}, output={}, total={}",
-				usage.input_tokens,
-				usage.output_tokens,
-				usage.total_tokens
+			let params = ChatCompletionParams::new(
+				&messages,
+				&self.model,
+				self.temperature,
+				1.0,                    // top_p
+				50,                     // min_tokens
+				self.max_tokens as u32, // max_tokens (convert usize to u32)
 			);
 
-			if let Some(cost) = usage.cost {
-				tracing::debug!("LLM cost: ${:.6}", cost);
+			match self.provider.chat_completion(params).await {
+				Ok(response) => {
+					// Log token usage if available from exchange
+					if let Some(usage) = &response.exchange.usage {
+						tracing::debug!(
+							"LLM tokens: input={}, output={}, total={}",
+							usage.input_tokens,
+							usage.output_tokens,
+							usage.total_tokens
+						);
+
+						if let Some(cost) = usage.cost {
+							tracing::debug!("LLM cost: ${:.6}", cost);
+						}
+					}
+
+					return Ok(response.content);
+				}
+				Err(e) => {
+					last_error = Some(e);
+				}
 			}
 		}
 
-		Ok(response.content)
+		Err(last_error.unwrap_or_else(|| anyhow::anyhow!("LLM call failed after retries")))
 	}
 
 	/// Chat completion with structured JSON output
@@ -187,86 +213,75 @@ impl LlmClient {
 	}
 
 	/// Chat completion with JSON output (tries structured output, falls back to markdown stripping)
-	///
-	/// This method first attempts to use structured output if the provider supports it.
-	/// If structured output is not available, it uses regular completion and strips
-	/// markdown code blocks to extract raw JSON.
-	///
-	/// # Returns
-	/// Parsed JSON value or an error
+	/// Includes retry with exponential backoff.
 	pub async fn chat_completion_json(&self, messages: Vec<Message>) -> Result<serde_json::Value> {
 		let supports_structured = self.provider.supports_structured_output(&self.model);
-		tracing::debug!(
-			"Provider {} supports structured output for model {}: {}",
-			self.provider.name(),
-			self.model,
-			supports_structured
-		);
 
 		if supports_structured {
-			// Try structured output first
-			let structured_request = StructuredOutputRequest::json();
-			let params = ChatCompletionParams::new(
-				&messages,
-				&self.model,
-				self.temperature,
-				1.0,
-				50,
-				self.max_tokens as u32,
-			)
-			.with_structured_output(structured_request);
+			let mut last_error = None;
 
-			let response = self.provider.chat_completion(params).await?;
+			for attempt in 0..=Self::MAX_RETRIES {
+				if attempt > 0 {
+					let delay = Duration::from_secs(5 * (1 << (attempt - 1))); // 5s, 10s, 20s
+					tracing::warn!(
+						"LLM JSON call failed (attempt {}/{}), retrying in {:?}...",
+						attempt,
+						Self::MAX_RETRIES + 1,
+						delay
+					);
+					tokio::time::sleep(delay).await;
+				}
 
-			// Log token usage
-			if let Some(usage) = &response.exchange.usage {
-				tracing::debug!(
-					"LLM tokens (structured): input={}, output={}, total={}",
-					usage.input_tokens,
-					usage.output_tokens,
-					usage.total_tokens
-				);
+				let structured_request = StructuredOutputRequest::json();
+				let params = ChatCompletionParams::new(
+					&messages,
+					&self.model,
+					self.temperature,
+					1.0,
+					50,
+					self.max_tokens as u32,
+				)
+				.with_structured_output(structured_request);
 
-				if let Some(cost) = usage.cost {
-					tracing::debug!("LLM cost: ${:.6}", cost);
+				match self.provider.chat_completion(params).await {
+					Ok(response) => {
+						if let Some(usage) = &response.exchange.usage {
+							tracing::debug!(
+								"LLM tokens (structured): input={}, output={}, total={}",
+								usage.input_tokens,
+								usage.output_tokens,
+								usage.total_tokens
+							);
+						}
+
+						if let Some(structured) = response.structured_output {
+							return Ok(structured);
+						}
+
+						// No structured output field — try parsing content as JSON
+						let json = Self::strip_json_from_markdown(&response.content);
+						if json.get("error").is_none() {
+							return Ok(json);
+						}
+						last_error = Some(anyhow::anyhow!(
+							"LLM returned unparseable JSON: {}",
+							response.content.chars().take(200).collect::<String>()
+						));
+					}
+					Err(e) => {
+						last_error = Some(e);
+					}
 				}
 			}
 
-			tracing::debug!(
-				"Response has structured_output: {}",
-				response.structured_output.is_some()
+			return Err(
+				last_error.unwrap_or_else(|| anyhow::anyhow!("LLM JSON call failed after retries"))
 			);
-			tracing::debug!("Response content length: {}", response.content.len());
-			tracing::debug!(
-				"Response content preview: {}",
-				response.content.chars().take(200).collect::<String>()
-			);
-
-			// Return structured output if available
-			if let Some(structured) = response.structured_output {
-				tracing::debug!("Using structured output from provider");
-				return Ok(structured);
-			}
-
-			// Fall through to try parsing content
-			tracing::debug!("No structured output, falling back to content parsing");
-		} else {
-			tracing::debug!("Provider does not support structured output, using markdown fallback");
 		}
 
-		// Fallback: use regular completion and strip markdown
+		// Provider doesn't support structured output — use regular completion with markdown stripping
 		let content = self.chat_completion(messages).await?;
-		tracing::debug!("Raw content length: {}", content.len());
-		tracing::debug!(
-			"Raw content preview: {}",
-			content.chars().take(200).collect::<String>()
-		);
-
 		let json = Self::strip_json_from_markdown(&content);
-		tracing::debug!(
-			"Parsed JSON has error field: {}",
-			json.get("error").is_some()
-		);
 
 		Ok(json)
 	}

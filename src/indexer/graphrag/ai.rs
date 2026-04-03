@@ -53,19 +53,25 @@ struct FileDescription {
 }
 
 impl AIEnhancements {
-	pub fn new(config: Config, quiet: bool) -> Self {
-		// Try to create LLM client if LLM is enabled
+	pub fn new(config: Config, quiet: bool) -> Result<Self> {
+		// When GraphRAG LLM is enabled, LLM is required — no silent fallback.
 		let llm_client = if config.graphrag.use_llm {
-			LlmClient::from_config(&config).ok()
+			Some(LlmClient::from_config(&config).map_err(|e| {
+				anyhow::anyhow!(
+					"LLM required for GraphRAG but unavailable: {}. \
+					 Disable graphrag.use_llm or fix LLM configuration.",
+					e
+				)
+			})?)
 		} else {
 			None
 		};
 
-		Self {
+		Ok(Self {
 			config,
 			llm_client,
 			quiet,
-		}
+		})
 	}
 
 	// Check if LLM enhancements are enabled
@@ -134,12 +140,10 @@ impl AIEnhancements {
 		// Process in small batches to avoid overwhelming the AI
 		let ai_batch_size = self.config.graphrag.llm.ai_batch_size;
 		for batch in complex_files.chunks(ai_batch_size) {
-			if let Ok(batch_relationships) = self
+			let batch_relationships = self
 				.analyze_architectural_relationships_batch(batch, all_nodes)
-				.await
-			{
-				ai_relationships.extend(batch_relationships);
-			}
+				.await?;
+			ai_relationships.extend(batch_relationships);
 		}
 
 		Ok(ai_relationships)
@@ -222,8 +226,8 @@ impl AIEnhancements {
 
 		batch_prompt.push_str("JSON Response:");
 
-		// Call AI with architectural analysis
-		match self
+		// Call AI with architectural analysis (includes retry with exponential backoff)
+		let response = self
 			.call_llm(
 				&self.config.graphrag.llm.relationship_model,
 				system_prompt,
@@ -231,33 +235,31 @@ impl AIEnhancements {
 				None,
 			)
 			.await
-		{
-			Ok(response) => {
-				// Parse AI response
-				if let Ok(ai_relationships) = self.parse_ai_architectural_relationships(&response) {
-					// Filter and validate relationships
-					let valid_relationships: Vec<CodeRelationship> = ai_relationships
-						.into_iter()
-						.filter(|rel| {
-							rel.confidence > self.config.graphrag.llm.confidence_threshold
-						}) // Only high-confidence architectural relationships
-						.filter(|rel| all_nodes.iter().any(|n| n.path == rel.target)) // Ensure target exists
-						.map(|mut rel| {
-							rel.weight = self.config.graphrag.llm.architectural_weight; // High weight for architectural relationships
-							rel
-						})
-						.collect();
+			.map_err(|e| {
+				anyhow::anyhow!(
+					"GraphRAG AI architectural analysis failed after retries: {}. \
+					 Stopping indexing to prevent storing data without LLM analysis.",
+					e
+				)
+			})?;
 
-					Ok(valid_relationships)
-				} else {
-					Ok(Vec::new())
-				}
-			}
-			Err(e) => {
-				eprintln!("Warning: AI architectural analysis failed: {}", e);
-				Ok(Vec::new())
-			}
-		}
+		// Parse AI response
+		let ai_relationships = self
+			.parse_ai_architectural_relationships(&response)
+			.unwrap_or_default();
+
+		// Filter and validate relationships
+		let valid_relationships: Vec<CodeRelationship> = ai_relationships
+			.into_iter()
+			.filter(|rel| rel.confidence > self.config.graphrag.llm.confidence_threshold)
+			.filter(|rel| all_nodes.iter().any(|n| n.path == rel.target))
+			.map(|mut rel| {
+				rel.weight = self.config.graphrag.llm.architectural_weight;
+				rel
+			})
+			.collect();
+
+		Ok(valid_relationships)
 	}
 
 	// Parse AI response for architectural relationships
@@ -369,7 +371,9 @@ impl AIEnhancements {
 		let json_schema = self.create_batch_response_schema();
 
 		// Single API call for multiple files
-		match self
+		// LLM call includes retry with exponential backoff (in LlmClient).
+		// If it still fails after retries, propagate error to stop indexing.
+		let response = self
 			.call_llm(
 				&self.config.graphrag.llm.description_model,
 				self.config.graphrag.llm.description_system_prompt.clone(),
@@ -377,28 +381,16 @@ impl AIEnhancements {
 				Some(json_schema),
 			)
 			.await
-		{
-			Ok(response) => self.parse_batch_response(&response, files),
-			Err(e) => {
-				if !self.quiet {
-					eprintln!(
-						"⚠️  Batch AI description failed for {} files: {}",
-						files.len(),
-						e
-					);
-				}
+			.map_err(|e| {
+				anyhow::anyhow!(
+					"GraphRAG AI description failed for {} files after retries: {}. \
+					 Stopping indexing to prevent storing data without LLM descriptions.",
+					files.len(),
+					e
+				)
+			})?;
 
-				// Fallback to individual calls if batch fails
-				if self.config.graphrag.llm.ai_batch_size > 1 {
-					if !self.quiet {
-						eprintln!("🔄 Falling back to individual AI calls...");
-					}
-					self.fallback_to_individual_calls(files).await
-				} else {
-					Err(e)
-				}
-			}
-		}
+		self.parse_batch_response(&response, files)
 	}
 
 	// Build user message for batch processing
@@ -502,41 +494,6 @@ impl AIEnhancements {
 				missing_files.len(),
 				missing_files
 			);
-		}
-
-		Ok(results)
-	}
-
-	// Fallback to individual calls when batch fails
-	async fn fallback_to_individual_calls(
-		&self,
-		files: &[FileForAI],
-	) -> Result<HashMap<String, String>> {
-		let mut results = HashMap::new();
-
-		for file in files {
-			match self
-				.extract_ai_description(
-					&file.content_sample,
-					&file.file_path,
-					&file.language,
-					&file.symbols,
-				)
-				.await
-			{
-				Ok(description) => {
-					results.insert(file.file_id.clone(), description);
-				}
-				Err(e) => {
-					if !self.quiet {
-						eprintln!(
-							"⚠️  Individual AI description failed for {}: {}",
-							file.file_id, e
-						);
-					}
-					// Continue with other files even if one fails
-				}
-			}
 		}
 
 		Ok(results)

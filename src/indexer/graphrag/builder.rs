@@ -74,9 +74,9 @@ impl GraphBuilder {
 		let db_ops = DatabaseOperations::new(&store);
 		let graph = Arc::new(RwLock::new(db_ops.load_graph(&project_root, quiet).await?));
 
-		// Initialize AI enhancements if enabled
+		// Initialize AI enhancements if enabled — fails if LLM is unavailable
 		let ai_enhancements = if config.graphrag.use_llm {
-			Some(AIEnhancements::new(config.clone(), quiet))
+			Some(AIEnhancements::new(config.clone(), quiet)?)
 		} else {
 			None
 		};

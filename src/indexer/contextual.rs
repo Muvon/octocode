@@ -94,17 +94,14 @@ pub async fn generate_contextual_descriptions(
 ) -> Result<HashMap<usize, String>> {
 	let mut descriptions = HashMap::new();
 
-	let client = match LlmClient::with_model(config, &config.index.contextual_model) {
-		Ok(c) => c,
-		Err(e) => {
-			tracing::warn!(
-				"LLM not available for contextual descriptions (model: {}): {}",
-				config.index.contextual_model,
-				e
-			);
-			return Ok(descriptions);
-		}
-	};
+	// When contextual descriptions are enabled, LLM is required — no silent fallback.
+	let client = LlmClient::with_model(config, &config.index.contextual_model).map_err(|e| {
+		anyhow::anyhow!(
+			"LLM required for contextual descriptions but unavailable (model: {}): {}",
+			config.index.contextual_model,
+			e
+		)
+	})?;
 
 	// Build per-file sibling symbols from blocks in this batch
 	// (complements file_context which has symbols from all regions in the file)
@@ -116,22 +113,21 @@ pub async fn generate_contextual_descriptions(
 		let chunk_end = (chunk_start + batch_size).min(blocks.len());
 		let batch = &blocks[chunk_start..chunk_end];
 
-		match generate_descriptions_batch(&client, batch, chunk_start, file_context, &siblings)
-			.await
-		{
-			Ok(batch_descriptions) => {
-				descriptions.extend(batch_descriptions);
-			}
-			Err(e) => {
-				tracing::warn!(
-					"Contextual description batch failed for chunks {}-{}: {}",
-					chunk_start,
-					chunk_end - 1,
-					e
-				);
-				// Continue with remaining batches - graceful degradation
-			}
-		}
+		// LLM call includes retry with exponential backoff (in LlmClient).
+		// If it still fails after retries, propagate error to stop indexing.
+		let batch_descriptions =
+			generate_descriptions_batch(&client, batch, chunk_start, file_context, &siblings)
+				.await
+				.map_err(|e| {
+					anyhow::anyhow!(
+						"Contextual description batch failed for chunks {}-{}: {}. \
+						 Stopping indexing to prevent storing data without LLM descriptions.",
+						chunk_start,
+						chunk_end - 1,
+						e
+					)
+				})?;
+		descriptions.extend(batch_descriptions);
 	}
 
 	Ok(descriptions)
