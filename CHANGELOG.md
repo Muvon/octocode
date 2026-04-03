@@ -1,5 +1,50 @@
 # Changelog
 
+## [0.13.0] - 2026-04-03
+
+### 📋 Release Summary
+
+This update overhauls commit search with advanced filtering and introduces new CLI commands for diffing, explaining, and codebase statistics (35017166, 8273af18, 62a79992, b09059bc, ede5c6a8). AI-powered indexing is significantly enhanced with contextual chunking, quantization support, and new embedding providers to improve retrieval accuracy and reliability (4ae6b516, 0a822970, 2f408409, 31c47638, db73bad1, 91490c54). System stability and integration are further improved through an updated MCP server and various fixes to Git operations and relationship mapping (068949b5, 05b8286b, 25ae71f7, 05373ed6).
+
+
+### 🚨 Breaking Changes
+
+⚠️ **Important**: This release contains breaking changes that may require code updates.
+
+- **search**: add detail levels for commit results `35017166`
+
+### ✨ New Features & Enhancements
+
+- **search**: add commit search and overhaul system `8273af18`
+- **search**: rerank and filter commit results `62a79992`
+- **cli**: add diff, explain, and stats commands `b09059bc`
+- **indexing**: improve LLM reliability and retries `4ae6b516`
+- **indexer**: add contextual chunk enrichment `0a822970`
+- **search**: add lazy-loaded commits search `ede5c6a8`
+- **store**: add RaBitQ quantization support `2f408409`
+- **graphrag**: enhance node resolution and path finding `31c47638`
+- **release**: Add Info.plist version update for macOS/iOS `32a18ab4`
+- **models**: add OctoHub and Together embedding providers `db73bad1`
+- **models**: add OctoHub embedding provider support `91490c54`
+
+### 🔧 Improvements & Optimizations
+
+- **mcp**: migrate to official rmcp SDK with stdio and HTTP transports `068949b5`
+- **release**: improve changelog categorization and noise reduction `878df5c7`
+- **commit**: improve AI message synthesis for large diffs `03474689`
+
+### 🐛 Bug Fixes & Stability
+
+- **git**: resolve root commit diffing and lints `05b8286b`
+- **embedding**: use asymmetric retrieval types `25ae71f7`
+- **search**: defer similarity filtering on rerank `a8584805`
+- **commit**: clarify user guidance role in prompt `cd704f62`
+- **graphrag**: correct relationship batch progress counter `05373ed6`
+
+### 🔄 Other Changes
+
+5 maintenance, dependency, and tooling updates not listed individually.
+
 ## [0.12.2] - 2026-03-22
 
 ### 📋 Release Summary
