@@ -390,7 +390,7 @@ fn print_cli(analysis: &DiffAnalysis, label: &str) {
 	println!("{}\n", analysis.summary);
 
 	// Triage table
-	println!("{:<4} {:<50} {}", "#", "Change", "Risk");
+	println!("{:<4} {:<50} Risk", "#", "Change");
 	println!("{}", "-".repeat(65));
 	for (i, card) in analysis.changes.iter().enumerate() {
 		let risk = match card.risk.as_str() {

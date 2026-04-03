@@ -227,7 +227,6 @@ async fn generate_descriptions(
 
 #[cfg(test)]
 mod tests {
-	use super::*;
 	use crate::indexer::git_utils::CommitEntry;
 	use crate::store::CommitBlock;
 
@@ -269,7 +268,7 @@ mod tests {
 	#[test]
 	fn test_commit_block_content_without_llm() {
 		let message = "fix: resolve null pointer".to_string();
-		let files = vec!["src/main.rs".to_string()];
+		let files = ["src/main.rs".to_string()];
 
 		let mut content = message.clone();
 		content.push_str("\n\nFiles: ");

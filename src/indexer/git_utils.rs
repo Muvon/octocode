@@ -243,7 +243,14 @@ impl GitUtils {
 	/// Get changed file paths for a specific commit
 	pub fn get_changed_files_for_commit(repo_path: &Path, hash: &str) -> Result<Vec<String>> {
 		let output = Command::new("git")
-			.args(["diff-tree", "--no-commit-id", "--name-only", "-r", hash])
+			.args([
+				"diff-tree",
+				"--no-commit-id",
+				"--name-only",
+				"-r",
+				"--root",
+				hash,
+			])
 			.current_dir(repo_path)
 			.output()?;
 
@@ -351,9 +358,20 @@ mod tests {
 	#[test]
 	fn test_get_changed_files_for_commit() {
 		let path = Path::new(env!("CARGO_MANIFEST_DIR"));
+
+		// Test with root commit (the bug case: diff-tree without --root returns empty)
+		let output = std::process::Command::new("git")
+			.args(["rev-list", "--max-parents=0", "HEAD"])
+			.current_dir(path)
+			.output()
+			.unwrap();
+		let root_hash = String::from_utf8(output.stdout).unwrap().trim().to_string();
+		let files = GitUtils::get_changed_files_for_commit(path, &root_hash).unwrap();
+		assert!(!files.is_empty(), "root commit should have changed files");
+
+		// Test with HEAD (non-root commit)
 		let hash = GitUtils::get_current_commit_hash(path).unwrap();
 		let files = GitUtils::get_changed_files_for_commit(path, &hash).unwrap();
-		// Current commit should have changed some files
-		assert!(!files.is_empty());
+		assert!(!files.is_empty(), "HEAD commit should have changed files");
 	}
 }

@@ -206,16 +206,10 @@ impl Default for SearchConfig {
 	}
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct CommitsConfig {
 	/// Use LLM to generate rich descriptions of commit diffs
 	pub use_llm: bool,
-}
-
-impl Default for CommitsConfig {
-	fn default() -> Self {
-		Self { use_llm: false }
-	}
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

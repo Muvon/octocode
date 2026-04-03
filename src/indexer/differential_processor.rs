@@ -39,6 +39,7 @@ pub struct ProcessFileContext<'a> {
 }
 
 /// Differential processing for code files - only updates changed blocks
+#[allow(clippy::too_many_arguments)]
 pub async fn process_file_differential(
 	ctx: &ProcessFileContext<'_>,
 	contents: &str,
@@ -298,6 +299,7 @@ pub async fn process_markdown_file_differential(
 
 /// Legacy processing for code files (non-differential)
 /// Processes a single file, extracting code blocks and adding them to the batch
+#[allow(clippy::too_many_arguments)]
 pub async fn process_file(
 	ctx: &ProcessFileContext<'_>,
 	contents: &str,
