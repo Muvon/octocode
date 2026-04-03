@@ -28,6 +28,16 @@ pub struct BranchSearchContext {
 	pub manifest: BranchManifest,
 }
 
+/// Bundles search parameters to avoid passing many individual arguments.
+pub struct SearchParams<'a> {
+	pub mode: &'a str,
+	pub max_results: usize,
+	pub similarity_threshold: f32,
+	pub language_filter: Option<&'a str>,
+	pub config: &'a Config,
+	pub branch_ctx: Option<&'a BranchSearchContext>,
+}
+
 /// Helper function to format symbols for display without cloning
 /// Returns a formatted string with deduplicated, sorted, and filtered symbols
 fn format_symbols_for_display(symbols: &[String]) -> String {
@@ -937,15 +947,17 @@ pub async fn search_codebase_with_details_multi_query_text(
 	};
 
 	// Execute parallel searches with branch awareness
-	let search_results = execute_parallel_searches_with_branch(
+	let search_results = execute_parallel_searches(
 		&store,
-		branch_ctx.as_ref(),
 		query_embeddings,
-		mode,
-		max_results,
-		similarity_threshold,
-		language_filter,
-		config,
+		&SearchParams {
+			mode,
+			max_results,
+			similarity_threshold,
+			language_filter,
+			config,
+			branch_ctx: branch_ctx.as_ref(),
+		},
 	)
 	.await?;
 
@@ -1442,43 +1454,16 @@ pub async fn execute_single_search_with_embeddings(
 pub async fn execute_parallel_searches(
 	store: &Store,
 	query_embeddings: Vec<(String, crate::embedding::SearchModeEmbeddings)>,
-	mode: &str,
-	max_results: usize,
-	similarity_threshold: f32,
-	language_filter: Option<&str>,
-	config: &Config,
+	params: &SearchParams<'_>,
 ) -> Result<Vec<QuerySearchResult>> {
-	execute_parallel_searches_with_branch(
-		store,
-		None,
-		query_embeddings,
-		mode,
-		max_results,
-		similarity_threshold,
-		language_filter,
-		config,
-	)
-	.await
-}
-
-pub async fn execute_parallel_searches_with_branch(
-	store: &Store,
-	branch_ctx: Option<&BranchSearchContext>,
-	query_embeddings: Vec<(String, crate::embedding::SearchModeEmbeddings)>,
-	mode: &str,
-	max_results: usize,
-	similarity_threshold: f32,
-	language_filter: Option<&str>,
-	config: &Config,
-) -> Result<Vec<QuerySearchResult>> {
-	let per_query_limit = if config.search.reranker.enabled {
-		config.search.reranker.top_k_candidates
+	let per_query_limit = if params.config.search.reranker.enabled {
+		params.config.search.reranker.top_k_candidates
 	} else {
-		(max_results * 2) / query_embeddings.len().max(1)
+		(params.max_results * 2) / query_embeddings.len().max(1)
 	};
 
 	// Over-fetch from main when branch is active (some results will be filtered out)
-	let main_limit = if branch_ctx.is_some() {
+	let main_limit = if params.branch_ctx.is_some() {
 		per_query_limit * 2
 	} else {
 		per_query_limit
@@ -1486,10 +1471,10 @@ pub async fn execute_parallel_searches_with_branch(
 
 	// When reranker is enabled, skip distance pre-filter — let reranker decide relevance.
 	// When disabled, apply similarity threshold as distance filter.
-	let distance_threshold = if config.search.reranker.enabled {
+	let distance_threshold = if params.config.search.reranker.enabled {
 		None
 	} else {
-		Some(1.0 - similarity_threshold)
+		Some(1.0 - params.similarity_threshold)
 	};
 
 	// Search main store
@@ -1502,11 +1487,11 @@ pub async fn execute_parallel_searches_with_branch(
 				execute_single_search_with_embeddings(
 					store,
 					emb,
-					mode,
+					params.mode,
 					main_limit,
 					index,
 					distance_threshold,
-					language_filter,
+					params.language_filter,
 				)
 				.await
 			}
@@ -1516,7 +1501,7 @@ pub async fn execute_parallel_searches_with_branch(
 	let mut main_results = futures::future::try_join_all(main_futures).await?;
 
 	// If no branch context, return main results directly
-	let Some(branch) = branch_ctx else {
+	let Some(branch) = params.branch_ctx else {
 		return Ok(main_results);
 	};
 
@@ -1530,11 +1515,11 @@ pub async fn execute_parallel_searches_with_branch(
 				execute_single_search_with_embeddings(
 					&branch.store,
 					emb,
-					mode,
+					params.mode,
 					per_query_limit,
 					index,
 					distance_threshold,
-					language_filter,
+					params.language_filter,
 				)
 				.await
 			}
@@ -2022,5 +2007,174 @@ mod tests {
 		// Multi-query match — applies bonus
 		apply_multi_query_bonus_commit(&mut block, &[0, 1], 3);
 		assert!(block.distance.unwrap() < 0.5);
+	}
+
+	fn make_code_block(path: &str, distance: f32) -> CodeBlock {
+		CodeBlock {
+			path: path.to_string(),
+			language: "rust".to_string(),
+			content: format!("// {}", path),
+			symbols: vec![],
+			start_line: 1,
+			end_line: 10,
+			hash: format!("hash_{}", path),
+			distance: Some(distance),
+		}
+	}
+
+	fn make_text_block(path: &str, distance: f32) -> TextBlock {
+		TextBlock {
+			path: path.to_string(),
+			language: "text".to_string(),
+			content: format!("text {}", path),
+			start_line: 1,
+			end_line: 5,
+			hash: format!("hash_{}", path),
+			distance: Some(distance),
+		}
+	}
+
+	fn make_doc_block(path: &str, distance: f32) -> DocumentBlock {
+		DocumentBlock {
+			path: path.to_string(),
+			title: "Test".to_string(),
+			content: format!("doc {}", path),
+			context: vec![],
+			level: 1,
+			start_line: 1,
+			end_line: 5,
+			hash: format!("hash_{}", path),
+			distance: Some(distance),
+		}
+	}
+
+	#[test]
+	fn test_merge_branch_code_blocks_filters_overridden() {
+		let main = vec![
+			make_code_block("src/a.rs", 0.1),
+			make_code_block("src/b.rs", 0.2),
+			make_code_block("src/c.rs", 0.3),
+		];
+		let branch = vec![make_code_block("src/b.rs", 0.15)];
+		let overridden: HashSet<&str> = ["src/b.rs"].into_iter().collect();
+
+		let result = merge_branch_code_blocks(main, branch, &overridden, 10);
+		assert_eq!(result.len(), 3); // a + branch_b + c
+		assert_eq!(result[0].path, "src/a.rs"); // 0.1
+		assert_eq!(result[1].path, "src/b.rs"); // 0.15 (branch version)
+		assert_eq!(result[2].path, "src/c.rs"); // 0.3
+	}
+
+	#[test]
+	fn test_merge_branch_code_blocks_deleted_files_excluded() {
+		let main = vec![
+			make_code_block("src/a.rs", 0.1),
+			make_code_block("src/deleted.rs", 0.2),
+		];
+		let branch: Vec<CodeBlock> = vec![];
+		let overridden: HashSet<&str> = ["src/deleted.rs"].into_iter().collect();
+
+		let result = merge_branch_code_blocks(main, branch, &overridden, 10);
+		assert_eq!(result.len(), 1);
+		assert_eq!(result[0].path, "src/a.rs");
+	}
+
+	#[test]
+	fn test_merge_branch_code_blocks_respects_limit() {
+		let main = vec![
+			make_code_block("src/a.rs", 0.1),
+			make_code_block("src/b.rs", 0.2),
+			make_code_block("src/c.rs", 0.3),
+		];
+		let branch = vec![make_code_block("src/d.rs", 0.05)];
+		let overridden: HashSet<&str> = ["src/d.rs"].into_iter().collect();
+
+		let result = merge_branch_code_blocks(main, branch, &overridden, 2);
+		assert_eq!(result.len(), 2);
+		assert_eq!(result[0].path, "src/d.rs"); // 0.05 — best
+		assert_eq!(result[1].path, "src/a.rs"); // 0.1
+	}
+
+	#[test]
+	fn test_merge_branch_code_blocks_empty_branch() {
+		let main = vec![
+			make_code_block("src/a.rs", 0.1),
+			make_code_block("src/b.rs", 0.2),
+		];
+		let branch: Vec<CodeBlock> = vec![];
+		let overridden: HashSet<&str> = HashSet::new();
+
+		let result = merge_branch_code_blocks(main, branch, &overridden, 10);
+		assert_eq!(result.len(), 2);
+	}
+
+	#[test]
+	fn test_merge_branch_text_blocks() {
+		let main = vec![make_text_block("docs/a.txt", 0.1)];
+		let branch = vec![make_text_block("docs/a.txt", 0.05)];
+		let overridden: HashSet<&str> = ["docs/a.txt"].into_iter().collect();
+
+		let result = merge_branch_text_blocks(main, branch, &overridden, 10);
+		assert_eq!(result.len(), 1);
+		assert_eq!(result[0].distance, Some(0.05)); // Branch version
+	}
+
+	#[test]
+	fn test_merge_branch_doc_blocks() {
+		let main = vec![
+			make_doc_block("README.md", 0.1),
+			make_doc_block("CHANGELOG.md", 0.3),
+		];
+		let branch = vec![make_doc_block("README.md", 0.2)];
+		let overridden: HashSet<&str> = ["README.md"].into_iter().collect();
+
+		let result = merge_branch_doc_blocks(main, branch, &overridden, 10);
+		assert_eq!(result.len(), 2);
+		// Branch README (0.2) + main CHANGELOG (0.3), sorted by distance
+		assert_eq!(result[0].path, "README.md");
+		assert_eq!(result[0].distance, Some(0.2));
+		assert_eq!(result[1].path, "CHANGELOG.md");
+	}
+
+	#[test]
+	fn test_merge_branch_query_results() {
+		let manifest = BranchManifest {
+			version: 1,
+			branch_name: "feat".to_string(),
+			base_branch: "main".to_string(),
+			base_commit: "aaa".to_string(),
+			branch_commit: "bbb".to_string(),
+			changed_paths: vec!["src/x.rs".to_string()],
+			deleted_paths: vec!["src/old.rs".to_string()],
+			indexed_at: 0,
+		};
+
+		let main = QuerySearchResult {
+			query_index: 0,
+			code_blocks: vec![
+				make_code_block("src/x.rs", 0.1),
+				make_code_block("src/y.rs", 0.2),
+				make_code_block("src/old.rs", 0.3),
+			],
+			doc_blocks: vec![],
+			text_blocks: vec![],
+			commit_blocks: vec![],
+		};
+
+		let branch = QuerySearchResult {
+			query_index: 0,
+			code_blocks: vec![make_code_block("src/x.rs", 0.15)],
+			doc_blocks: vec![],
+			text_blocks: vec![],
+			commit_blocks: vec![],
+		};
+
+		let merged = super::merge_branch_query_results(main, branch, &manifest, 10);
+		// src/x.rs from branch (0.15), src/y.rs from main (0.2)
+		// src/old.rs excluded (deleted on branch)
+		assert_eq!(merged.code_blocks.len(), 2);
+		assert_eq!(merged.code_blocks[0].path, "src/x.rs");
+		assert_eq!(merged.code_blocks[0].distance, Some(0.15));
+		assert_eq!(merged.code_blocks[1].path, "src/y.rs");
 	}
 }

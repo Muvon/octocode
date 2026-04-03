@@ -352,3 +352,97 @@ pub fn resolve_branch_state(
 	};
 	Ok((branch_dir, manifest))
 }
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn test_sanitize_branch_name() {
+		assert_eq!(sanitize_branch_name("feature/foo"), "feature--foo");
+		assert_eq!(sanitize_branch_name("main"), "main");
+		assert_eq!(sanitize_branch_name("fix/deep/nested"), "fix--deep--nested");
+		assert_eq!(sanitize_branch_name("no-slash"), "no-slash");
+	}
+
+	#[test]
+	fn test_desanitize_branch_name() {
+		assert_eq!(desanitize_branch_name("feature--foo"), "feature/foo");
+		assert_eq!(desanitize_branch_name("main"), "main");
+		assert_eq!(
+			desanitize_branch_name("fix--deep--nested"),
+			"fix/deep/nested"
+		);
+	}
+
+	#[test]
+	fn test_sanitize_desanitize_roundtrip() {
+		let names = ["feature/foo", "main", "fix/a/b/c", "simple"];
+		for name in names {
+			assert_eq!(desanitize_branch_name(&sanitize_branch_name(name)), name);
+		}
+	}
+
+	fn make_manifest(changed: Vec<&str>, deleted: Vec<&str>) -> BranchManifest {
+		BranchManifest {
+			version: 1,
+			branch_name: "test-branch".to_string(),
+			base_branch: "main".to_string(),
+			base_commit: "abc123".to_string(),
+			branch_commit: "def456".to_string(),
+			changed_paths: changed.into_iter().map(|s| s.to_string()).collect(),
+			deleted_paths: deleted.into_iter().map(|s| s.to_string()).collect(),
+			indexed_at: 1000,
+		}
+	}
+
+	#[test]
+	fn test_overridden_paths_combines_changed_and_deleted() {
+		let manifest = make_manifest(vec!["src/a.rs", "src/b.rs"], vec!["src/old.rs"]);
+		let overridden = manifest.overridden_paths();
+		assert_eq!(overridden.len(), 3);
+		assert!(overridden.contains("src/a.rs"));
+		assert!(overridden.contains("src/b.rs"));
+		assert!(overridden.contains("src/old.rs"));
+	}
+
+	#[test]
+	fn test_overridden_paths_empty() {
+		let manifest = make_manifest(vec![], vec![]);
+		assert!(manifest.overridden_paths().is_empty());
+	}
+
+	#[test]
+	fn test_manifest_save_load_roundtrip() {
+		let dir = std::env::temp_dir().join("octocode_test_manifest_roundtrip");
+		let _ = std::fs::remove_dir_all(&dir);
+		std::fs::create_dir_all(&dir).unwrap();
+
+		let manifest = make_manifest(vec!["src/foo.rs"], vec!["src/bar.rs"]);
+		save_manifest(&dir, &manifest).unwrap();
+
+		let loaded = load_manifest(&dir).unwrap().unwrap();
+		assert_eq!(loaded.branch_name, "test-branch");
+		assert_eq!(loaded.base_branch, "main");
+		assert_eq!(loaded.base_commit, "abc123");
+		assert_eq!(loaded.branch_commit, "def456");
+		assert_eq!(loaded.changed_paths, vec!["src/foo.rs"]);
+		assert_eq!(loaded.deleted_paths, vec!["src/bar.rs"]);
+		assert_eq!(loaded.version, 1);
+		assert_eq!(loaded.indexed_at, 1000);
+
+		let _ = std::fs::remove_dir_all(&dir);
+	}
+
+	#[test]
+	fn test_load_manifest_missing_dir() {
+		let dir = std::env::temp_dir().join("octocode_test_manifest_missing");
+		let _ = std::fs::remove_dir_all(&dir);
+		std::fs::create_dir_all(&dir).unwrap();
+
+		let loaded = load_manifest(&dir).unwrap();
+		assert!(loaded.is_none());
+
+		let _ = std::fs::remove_dir_all(&dir);
+	}
+}

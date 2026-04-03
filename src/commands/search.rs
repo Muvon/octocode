@@ -200,15 +200,17 @@ pub async fn execute(
 	};
 
 	// Execute parallel searches - pass similarity threshold directly (conversion happens inside)
-	let search_results = indexer::search::execute_parallel_searches_with_branch(
+	let search_results = indexer::search::execute_parallel_searches(
 		store,
-		branch_ctx.as_ref(),
 		query_embeddings,
-		search_mode,
-		config.search.max_results,
-		threshold,
-		args.language.as_deref(),
-		config,
+		&indexer::search::SearchParams {
+			mode: search_mode,
+			max_results: config.search.max_results,
+			similarity_threshold: threshold,
+			language_filter: args.language.as_deref(),
+			config,
+			branch_ctx: branch_ctx.as_ref(),
+		},
 	)
 	.await?;
 
