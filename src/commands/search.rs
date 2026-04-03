@@ -199,7 +199,7 @@ pub async fn execute(
 	};
 
 	// Deduplicate and merge with multi-query bonuses
-	let (mut code_blocks, mut doc_blocks, mut text_blocks, commit_blocks) =
+	let (mut code_blocks, mut doc_blocks, mut text_blocks, mut commit_blocks) =
 		indexer::search::deduplicate_and_merge_results(
 			search_results,
 			&args.queries,
@@ -227,17 +227,25 @@ pub async fn execute(
 			&config.search.reranker,
 		)
 		.await?;
+		commit_blocks = octocode::reranker::rerank_commit_blocks_with_octolib(
+			&query,
+			commit_blocks,
+			&config.search.reranker,
+		)
+		.await?;
 
 		// Apply similarity threshold to reranker scores (post-reranker filter)
 		let dist_thresh = 1.0 - threshold;
 		code_blocks.retain(|b| b.distance.is_none_or(|d| d <= dist_thresh));
 		doc_blocks.retain(|b| b.distance.is_none_or(|d| d <= dist_thresh));
 		text_blocks.retain(|b| b.distance.is_none_or(|d| d <= dist_thresh));
+		commit_blocks.retain(|b| b.distance.is_none_or(|d| d <= dist_thresh));
 	} else {
 		// Apply global result limits (reranker already limits via final_top_k)
 		code_blocks.truncate(config.search.max_results);
 		doc_blocks.truncate(config.search.max_results);
 		text_blocks.truncate(config.search.max_results);
+		commit_blocks.truncate(config.search.max_results);
 	}
 
 	// Symbol expansion if requested

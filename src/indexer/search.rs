@@ -471,7 +471,11 @@ pub fn format_commit_search_results_as_text(
 	output.push_str(&format!("COMMIT RESULTS ({})\n", blocks.len()));
 
 	for (idx, block) in blocks.iter().enumerate() {
-		let short_hash = &block.hash[..8.min(block.hash.len())];
+		let display_hash = if detail_level == "full" {
+			block.hash.as_str()
+		} else {
+			&block.hash[..8.min(block.hash.len())]
+		};
 		let date = chrono::DateTime::from_timestamp(block.date, 0)
 			.map(|dt| dt.format("%Y-%m-%d").to_string())
 			.unwrap_or_else(|| block.date.to_string());
@@ -479,7 +483,7 @@ pub fn format_commit_search_results_as_text(
 		output.push_str(&format!(
 			"{}. {} ({}) by {}\n",
 			idx + 1,
-			short_hash,
+			display_hash,
 			date,
 			block.author,
 		));
