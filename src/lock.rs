@@ -102,6 +102,61 @@ impl IndexLock {
 		}
 	}
 
+	/// Acquire the lock asynchronously, without blocking the tokio runtime.
+	/// Uses tokio::time::sleep instead of thread::sleep for waiting.
+	pub async fn acquire_async(&mut self) -> io::Result<()> {
+		if let Some(parent) = self.lock_file.parent() {
+			fs::create_dir_all(parent)?;
+		}
+
+		let my_pid = process::id();
+
+		loop {
+			match fs::read_to_string(&self.lock_file) {
+				Ok(contents) => {
+					if let Ok(pid) = contents.trim().parse::<u32>() {
+						if pid == my_pid {
+							self.acquired = true;
+							return Ok(());
+						}
+
+						if Self::is_process_alive(pid) {
+							debug!("Waiting for indexing lock held by PID {}", pid);
+							tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+							continue;
+						} else {
+							debug!("Cleaning stale lock from dead PID {}", pid);
+							let _ = fs::remove_file(&self.lock_file);
+						}
+					} else {
+						warn!("Invalid lock file content, removing");
+						let _ = fs::remove_file(&self.lock_file);
+					}
+				}
+				Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+				Err(e) => return Err(e),
+			}
+
+			match fs::OpenOptions::new()
+				.write(true)
+				.create_new(true)
+				.open(&self.lock_file)
+			{
+				Ok(mut file) => {
+					file.write_all(my_pid.to_string().as_bytes())?;
+					file.sync_all()?;
+					self.acquired = true;
+					debug!("Acquired indexing lock (PID {})", my_pid);
+					return Ok(());
+				}
+				Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {
+					tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+				}
+				Err(e) => return Err(e),
+			}
+		}
+	}
+
 	/// Release the lock if we own it
 	pub fn release(&mut self) -> io::Result<()> {
 		if self.acquired {

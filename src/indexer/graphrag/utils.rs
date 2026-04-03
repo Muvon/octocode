@@ -44,12 +44,10 @@ pub fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
 	dot_product / (a_norm * b_norm)
 }
 
-// Detect project root by looking for common indicators
-pub fn detect_project_root() -> Result<PathBuf> {
-	let current_dir = std::env::current_dir()?;
-	let mut dir = current_dir.as_path();
+// Detect project root by looking for common indicators starting from a given directory
+pub fn detect_project_root_from(start_dir: &Path) -> Result<PathBuf> {
+	let mut dir = start_dir;
 
-	// Look for common project root indicators
 	let indicators = [
 		"Cargo.toml",
 		"package.json",
@@ -74,8 +72,13 @@ pub fn detect_project_root() -> Result<PathBuf> {
 		}
 	}
 
-	// Fallback to current directory if no indicators found
-	Ok(current_dir)
+	Ok(start_dir.to_path_buf())
+}
+
+// Detect project root by looking for common indicators from current_dir
+pub fn detect_project_root() -> Result<PathBuf> {
+	let current_dir = std::env::current_dir()?;
+	detect_project_root_from(&current_dir)
 }
 
 // Convert absolute path to relative path from project root
