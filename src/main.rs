@@ -60,6 +60,15 @@ enum Commands {
 	#[command(name = "mcp-proxy")]
 	McpProxy(commands::McpProxyArgs),
 
+	/// Show index statistics and health
+	Stats(commands::StatsArgs),
+
+	/// Explain code using indexed context and AI
+	Explain(commands::ExplainArgs),
+
+	/// Analyze code changes with AI-powered behavioral summary
+	Diff(commands::DiffArgs),
+
 	/// Clear database tables (useful for debugging)
 	Clear(commands::ClearArgs),
 
@@ -172,6 +181,13 @@ async fn main() -> Result<(), anyhow::Error> {
 		Commands::GraphRAG(graphrag_args) => {
 			commands::graphrag::execute(&store, graphrag_args, &config).await?
 		}
+		Commands::Stats(stats_args) => {
+			commands::stats::execute(&store, stats_args, &config).await?
+		}
+		Commands::Explain(explain_args) => {
+			commands::explain::execute(&store, explain_args, &config).await?
+		}
+		Commands::Diff(diff_args) => commands::diff::execute(&store, diff_args, &config).await?,
 		Commands::Clear(clear_args) => commands::clear::execute(&store, clear_args).await?,
 		Commands::Config(_) => unreachable!(), // Already handled above
 		Commands::Mcp(_) => unreachable!(),    // Already handled above

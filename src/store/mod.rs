@@ -711,6 +711,16 @@ impl Store {
 		self.code_vector_dim
 	}
 
+	/// Get row count for a table. Returns 0 if table doesn't exist.
+	pub async fn get_table_row_count(&self, table_name: &str) -> Result<usize> {
+		let table_ops = TableOperations::new(&self.db);
+		if !table_ops.table_exists(table_name).await? {
+			return Ok(0);
+		}
+		let table = self.db.open_table(table_name).execute().await?;
+		Ok(table.count_rows(None).await?)
+	}
+
 	// Metadata operations
 	pub async fn store_git_metadata(&self, commit_hash: &str) -> Result<()> {
 		let metadata_ops = MetadataOperations::new(&self.db);
