@@ -587,8 +587,13 @@ pub async fn search_codebase_with_details_text(
 	let search_embeddings =
 		crate::embedding::generate_search_embeddings(query, mode, config).await?;
 
-	// Convert similarity threshold to distance threshold for store operations
-	let distance_threshold = 1.0 - similarity_threshold;
+	// When reranker is enabled, skip distance pre-filter — let reranker decide relevance.
+	// When disabled, apply similarity threshold as distance filter.
+	let distance_threshold = if config.search.reranker.enabled {
+		None
+	} else {
+		Some(1.0 - similarity_threshold)
+	};
 
 	// Determine candidate limit: fetch more when reranker is enabled
 	let candidate_limit = if config.search.reranker.enabled {
@@ -607,7 +612,7 @@ pub async fn search_codebase_with_details_text(
 				.get_code_blocks_with_language_filter(
 					embeddings,
 					Some(candidate_limit),
-					Some(distance_threshold),
+					distance_threshold,
 					language_filter,
 				)
 				.await?;
@@ -618,11 +623,7 @@ pub async fn search_codebase_with_details_text(
 				anyhow::anyhow!("No text embeddings generated for text search mode")
 			})?;
 			let results = store
-				.get_text_blocks_with_config(
-					embeddings,
-					Some(candidate_limit),
-					Some(distance_threshold),
-				)
+				.get_text_blocks_with_config(embeddings, Some(candidate_limit), distance_threshold)
 				.await?;
 			(vec![], results, vec![], vec![])
 		}
@@ -634,7 +635,7 @@ pub async fn search_codebase_with_details_text(
 				.get_document_blocks_with_config(
 					embeddings,
 					Some(candidate_limit),
-					Some(distance_threshold),
+					distance_threshold,
 				)
 				.await?;
 			(vec![], vec![], results, vec![])
@@ -647,7 +648,7 @@ pub async fn search_codebase_with_details_text(
 				.get_commit_blocks_with_config(
 					embeddings,
 					Some(candidate_limit),
-					Some(distance_threshold),
+					distance_threshold,
 				)
 				.await?;
 			(vec![], vec![], vec![], results)
@@ -665,7 +666,7 @@ pub async fn search_codebase_with_details_text(
 				.get_code_blocks_with_language_filter(
 					code_embeddings,
 					Some(results_per_type),
-					Some(distance_threshold),
+					distance_threshold,
 					language_filter,
 				)
 				.await?;
@@ -673,14 +674,14 @@ pub async fn search_codebase_with_details_text(
 				.get_text_blocks_with_config(
 					text_embeddings.clone(),
 					Some(results_per_type),
-					Some(distance_threshold),
+					distance_threshold,
 				)
 				.await?;
 			let doc_results = store
 				.get_document_blocks_with_config(
 					text_embeddings,
 					Some(results_per_type),
-					Some(distance_threshold),
+					distance_threshold,
 				)
 				.await?;
 			(code_results, text_results, doc_results, vec![])
@@ -693,7 +694,7 @@ pub async fn search_codebase_with_details_text(
 		}
 	};
 
-	// Apply reranker if enabled
+	// Apply reranker if enabled, then filter by similarity threshold
 	if config.search.reranker.enabled {
 		code_blocks = crate::reranker::rerank_code_blocks_with_octolib(
 			query,
@@ -719,6 +720,13 @@ pub async fn search_codebase_with_details_text(
 			&config.search.reranker,
 		)
 		.await?;
+
+		// Apply similarity threshold to reranker scores (post-reranker filter)
+		let dist_thresh = 1.0 - similarity_threshold;
+		code_blocks.retain(|b| b.distance.is_none_or(|d| d <= dist_thresh));
+		text_blocks.retain(|b| b.distance.is_none_or(|d| d <= dist_thresh));
+		doc_blocks.retain(|b| b.distance.is_none_or(|d| d <= dist_thresh));
+		commit_blocks.retain(|b| b.distance.is_none_or(|d| d <= dist_thresh));
 	} else {
 		code_blocks.truncate(max_results);
 		text_blocks.truncate(max_results);
@@ -788,10 +796,14 @@ pub async fn search_codebase_with_details_multi_query_text(
 		.zip(embeddings.into_iter())
 		.collect();
 
-	// Convert similarity threshold to distance threshold for store operations
-	let distance_threshold = 1.0 - similarity_threshold;
+	// When reranker is enabled, skip distance pre-filter — let reranker decide relevance.
+	let dedup_distance_threshold = if config.search.reranker.enabled {
+		None
+	} else {
+		Some(1.0 - similarity_threshold)
+	};
 
-	// Execute parallel searches - Pass original similarity_threshold, conversion happens inside
+	// Execute parallel searches
 	let search_results = execute_parallel_searches(
 		&store,
 		query_embeddings,
@@ -805,9 +817,9 @@ pub async fn search_codebase_with_details_multi_query_text(
 
 	// Deduplicate and merge with multi-query bonuses
 	let (mut code_blocks, mut doc_blocks, mut text_blocks, mut commit_blocks) =
-		deduplicate_and_merge_results(search_results, queries, distance_threshold);
+		deduplicate_and_merge_results(search_results, queries, dedup_distance_threshold);
 
-	// Apply reranker if enabled
+	// Apply reranker if enabled, then filter by similarity threshold
 	if config.search.reranker.enabled && !queries.is_empty() {
 		let query = queries.join(" ");
 		code_blocks = crate::reranker::rerank_code_blocks_with_octolib(
@@ -834,6 +846,13 @@ pub async fn search_codebase_with_details_multi_query_text(
 			&config.search.reranker,
 		)
 		.await?;
+
+		// Apply similarity threshold to reranker scores (post-reranker filter)
+		let dist_thresh = 1.0 - similarity_threshold;
+		code_blocks.retain(|b| b.distance.is_none_or(|d| d <= dist_thresh));
+		doc_blocks.retain(|b| b.distance.is_none_or(|d| d <= dist_thresh));
+		text_blocks.retain(|b| b.distance.is_none_or(|d| d <= dist_thresh));
+		commit_blocks.retain(|b| b.distance.is_none_or(|d| d <= dist_thresh));
 	} else {
 		// Apply global result limits (reranker already limits via final_top_k)
 		code_blocks.truncate(max_results);
@@ -1186,12 +1205,9 @@ pub async fn execute_single_search_with_embeddings(
 	mode: &str,
 	per_query_limit: usize,
 	query_index: usize,
-	similarity_threshold: f32,
+	distance_threshold: Option<f32>,
 	language_filter: Option<&str>,
 ) -> Result<QuerySearchResult> {
-	// Convert similarity threshold to distance threshold for store operations
-	let distance_threshold = 1.0 - similarity_threshold;
-
 	let mut code_blocks = Vec::new();
 	let mut doc_blocks = Vec::new();
 	let mut text_blocks = Vec::new();
@@ -1204,7 +1220,7 @@ pub async fn execute_single_search_with_embeddings(
 					.get_code_blocks_with_language_filter(
 						code_emb,
 						Some(per_query_limit),
-						Some(distance_threshold),
+						distance_threshold,
 						language_filter,
 					)
 					.await?;
@@ -1216,7 +1232,7 @@ pub async fn execute_single_search_with_embeddings(
 					.get_document_blocks_with_config(
 						text_emb,
 						Some(per_query_limit),
-						Some(distance_threshold),
+						distance_threshold,
 					)
 					.await?;
 			}
@@ -1227,7 +1243,7 @@ pub async fn execute_single_search_with_embeddings(
 					.get_text_blocks_with_config(
 						text_emb,
 						Some(per_query_limit),
-						Some(distance_threshold),
+						distance_threshold,
 					)
 					.await?;
 			}
@@ -1238,7 +1254,7 @@ pub async fn execute_single_search_with_embeddings(
 					.get_commit_blocks_with_config(
 						text_emb,
 						Some(per_query_limit),
-						Some(distance_threshold),
+						distance_threshold,
 					)
 					.await?;
 			}
@@ -1251,7 +1267,7 @@ pub async fn execute_single_search_with_embeddings(
 					.get_code_blocks_with_language_filter(
 						code_emb,
 						Some(results_per_type),
-						Some(distance_threshold),
+						distance_threshold,
 						language_filter,
 					)
 					.await?;
@@ -1264,12 +1280,12 @@ pub async fn execute_single_search_with_embeddings(
 					store.get_text_blocks_with_config(
 						text_emb,
 						Some(results_per_type),
-						Some(distance_threshold),
+						distance_threshold,
 					),
 					store.get_document_blocks_with_config(
 						text_emb_clone,
 						Some(results_per_type),
-						Some(distance_threshold),
+						distance_threshold,
 					)
 				)?;
 
@@ -1304,6 +1320,14 @@ pub async fn execute_parallel_searches(
 		(max_results * 2) / query_embeddings.len().max(1)
 	};
 
+	// When reranker is enabled, skip distance pre-filter — let reranker decide relevance.
+	// When disabled, apply similarity threshold as distance filter.
+	let distance_threshold = if config.search.reranker.enabled {
+		None
+	} else {
+		Some(1.0 - similarity_threshold)
+	};
+
 	let search_futures: Vec<_> = query_embeddings
 		.into_iter()
 		.enumerate()
@@ -1314,7 +1338,7 @@ pub async fn execute_parallel_searches(
 				mode,
 				per_query_limit,
 				index,
-				similarity_threshold,
+				distance_threshold,
 				language_filter,
 			)
 			.await
@@ -1388,7 +1412,7 @@ pub fn apply_multi_query_bonus_commit(
 pub fn deduplicate_and_merge_results(
 	search_results: Vec<QuerySearchResult>,
 	queries: &[String],
-	distance_threshold: f32,
+	distance_threshold: Option<f32>,
 ) -> (
 	Vec<crate::store::CodeBlock>,
 	Vec<crate::store::DocumentBlock>,
@@ -1465,7 +1489,7 @@ pub fn deduplicate_and_merge_results(
 		}
 	}
 
-	// Apply multi-query bonuses and filter
+	// Apply multi-query bonuses and optionally filter by distance threshold
 	let mut final_code_blocks: Vec<crate::store::CodeBlock> = code_map
 		.into_values()
 		.map(|(mut block, query_indices)| {
@@ -1473,10 +1497,9 @@ pub fn deduplicate_and_merge_results(
 			block
 		})
 		.filter(|block| {
-			if let Some(distance) = block.distance {
-				distance <= distance_threshold
-			} else {
-				true
+			match distance_threshold {
+				Some(thresh) => block.distance.is_none_or(|d| d <= thresh),
+				None => true, // No threshold when reranker will handle filtering
 			}
 		})
 		.collect();
@@ -1487,12 +1510,9 @@ pub fn deduplicate_and_merge_results(
 			apply_multi_query_bonus_doc(&mut block, &query_indices, queries.len());
 			block
 		})
-		.filter(|block| {
-			if let Some(distance) = block.distance {
-				distance <= distance_threshold
-			} else {
-				true
-			}
+		.filter(|block| match distance_threshold {
+			Some(thresh) => block.distance.is_none_or(|d| d <= thresh),
+			None => true,
 		})
 		.collect();
 
@@ -1502,12 +1522,9 @@ pub fn deduplicate_and_merge_results(
 			apply_multi_query_bonus_text(&mut block, &query_indices, queries.len());
 			block
 		})
-		.filter(|block| {
-			if let Some(distance) = block.distance {
-				distance <= distance_threshold
-			} else {
-				true
-			}
+		.filter(|block| match distance_threshold {
+			Some(thresh) => block.distance.is_none_or(|d| d <= thresh),
+			None => true,
 		})
 		.collect();
 
@@ -1559,12 +1576,9 @@ pub fn deduplicate_and_merge_results(
 			apply_multi_query_bonus_commit(&mut block, &query_indices, queries.len());
 			block
 		})
-		.filter(|block| {
-			if let Some(distance) = block.distance {
-				distance <= distance_threshold
-			} else {
-				true
-			}
+		.filter(|block| match distance_threshold {
+			Some(thresh) => block.distance.is_none_or(|d| d <= thresh),
+			None => true,
 		})
 		.collect();
 

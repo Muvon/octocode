@@ -191,18 +191,22 @@ pub async fn execute(
 	)
 	.await?;
 
-	// Convert similarity threshold to distance threshold for deduplication
-	let distance_threshold = 1.0 - threshold;
+	// When reranker is enabled, skip distance pre-filter — let reranker decide relevance.
+	let dedup_distance_threshold = if config.search.reranker.enabled {
+		None
+	} else {
+		Some(1.0 - threshold)
+	};
 
 	// Deduplicate and merge with multi-query bonuses
 	let (mut code_blocks, mut doc_blocks, mut text_blocks, commit_blocks) =
 		indexer::search::deduplicate_and_merge_results(
 			search_results,
 			&args.queries,
-			distance_threshold,
+			dedup_distance_threshold,
 		);
 
-	// Apply reranker if enabled (uses a single representative query)
+	// Apply reranker if enabled, then filter by similarity threshold
 	if config.search.reranker.enabled && !args.queries.is_empty() {
 		let query = args.queries.join(" ");
 		code_blocks = octocode::reranker::rerank_code_blocks_with_octolib(
@@ -223,6 +227,12 @@ pub async fn execute(
 			&config.search.reranker,
 		)
 		.await?;
+
+		// Apply similarity threshold to reranker scores (post-reranker filter)
+		let dist_thresh = 1.0 - threshold;
+		code_blocks.retain(|b| b.distance.is_none_or(|d| d <= dist_thresh));
+		doc_blocks.retain(|b| b.distance.is_none_or(|d| d <= dist_thresh));
+		text_blocks.retain(|b| b.distance.is_none_or(|d| d <= dist_thresh));
 	} else {
 		// Apply global result limits (reranker already limits via final_top_k)
 		code_blocks.truncate(config.search.max_results);
@@ -309,29 +319,6 @@ pub async fn execute(
 			}
 		}
 		"all" => {
-			// Filter final results by threshold again
-			code_blocks.retain(|block| {
-				if let Some(distance) = block.distance {
-					distance <= distance_threshold
-				} else {
-					true
-				}
-			});
-			doc_blocks.retain(|block| {
-				if let Some(distance) = block.distance {
-					distance <= distance_threshold
-				} else {
-					true
-				}
-			});
-			text_blocks.retain(|block| {
-				if let Some(distance) = block.distance {
-					distance <= distance_threshold
-				} else {
-					true
-				}
-			});
-
 			let mut final_code_results = code_blocks;
 			if args.expand {
 				println!("Expanding symbols...");
