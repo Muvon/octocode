@@ -72,6 +72,9 @@ enum Commands {
 	/// Clear database tables (useful for debugging)
 	Clear(commands::ClearArgs),
 
+	/// Manage branch delta indexes (list, info, delete, prune)
+	Branch(commands::BranchArgs),
+
 	/// Generate and create git commit with AI assistance
 	Commit(commands::CommitArgs),
 
@@ -139,6 +142,11 @@ async fn main() -> Result<(), anyhow::Error> {
 		return commands::release::execute(&config, release_args).await;
 	}
 
+	// Handle the Branch command separately (doesn't need store)
+	if let Commands::Branch(branch_args) = &args.command {
+		return commands::branch::execute(branch_args).await;
+	}
+
 	// Handle the Format command separately (doesn't need store)
 	if let Commands::Format(format_args) = &args.command {
 		return commands::format::execute(format_args).await;
@@ -189,6 +197,7 @@ async fn main() -> Result<(), anyhow::Error> {
 		}
 		Commands::Diff(diff_args) => commands::diff::execute(&store, diff_args, &config).await?,
 		Commands::Clear(clear_args) => commands::clear::execute(&store, clear_args).await?,
+		Commands::Branch(_) => unreachable!(), // Already handled above
 		Commands::Config(_) => unreachable!(), // Already handled above
 		Commands::Mcp(_) => unreachable!(),    // Already handled above
 		Commands::McpProxy(_) => unreachable!(), // Already handled above

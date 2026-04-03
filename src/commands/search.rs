@@ -179,9 +179,30 @@ pub async fn execute(
 		.zip(embeddings.into_iter())
 		.collect();
 
+	// Detect branch context for branch-aware search
+	let branch_ctx = {
+		if let Some(branch_name) = indexer::branch::detect_branch_context(&current_dir) {
+			let branch_dir = storage::get_branch_dir(&current_dir, &branch_name)?;
+			if let Ok(Some(manifest)) = indexer::branch::load_manifest(&branch_dir) {
+				match octocode::store::Store::new_for_branch(&branch_name).await {
+					Ok(branch_store) => Some(indexer::search::BranchSearchContext {
+						store: branch_store,
+						manifest,
+					}),
+					Err(_) => None,
+				}
+			} else {
+				None
+			}
+		} else {
+			None
+		}
+	};
+
 	// Execute parallel searches - pass similarity threshold directly (conversion happens inside)
-	let search_results = indexer::search::execute_parallel_searches(
+	let search_results = indexer::search::execute_parallel_searches_with_branch(
 		store,
+		branch_ctx.as_ref(),
 		query_embeddings,
 		search_mode,
 		config.search.max_results,
