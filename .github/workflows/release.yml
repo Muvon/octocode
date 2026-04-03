@@ -179,6 +179,15 @@ jobs:
           ${{ endsWith(matrix.target, '-unknown-linux-musl') && 'docker-alpine' || runner.os }}-${{ matrix.target }}-cargo-
           ${{ endsWith(matrix.target, '-unknown-linux-musl') && 'docker-alpine' || runner.os }}-cargo-
 
+    - name: Create swap space for memory-intensive builds
+      if: matrix.target == 'aarch64-unknown-linux-musl'
+      run: |
+        sudo fallocate -l 16G /swapfile
+        sudo chmod 600 /swapfile
+        sudo mkswap /swapfile
+        sudo swapon /swapfile
+        echo "Swap enabled: $(swapon --show)"
+
     - name: Build binary
       shell: sh
       run: |
