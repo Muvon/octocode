@@ -1,8 +1,6 @@
 <div align="center">
 
-<img src="https://raw.githubusercontent.com/Muvon/octocode/master/assets/logo.svg" width="120" alt="Octocode Logo">
-
-# Octocode
+# <img src="https://raw.githubusercontent.com/Muvon/octocode/master/icon.svg" width="36" alt="Octocode"> Octocode
 
 ### **AI-Powered Code Intelligence with Built-in MCP Server**
 
