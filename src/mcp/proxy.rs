@@ -538,7 +538,7 @@ impl McpProxyServer {
 		// Spawn one-shot indexer on initialize — skip if startup queue is still running for this repo
 		if auto_index {
 			let mut tasks = indexing_tasks.lock().await;
-			let already_running = tasks.get(repo_path).map_or(false, |h| !h.is_finished());
+			let already_running = tasks.get(repo_path).is_some_and(|h| !h.is_finished());
 
 			if already_running {
 				debug!(
