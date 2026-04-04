@@ -21,6 +21,7 @@ use anyhow::Result;
 use serde::Deserialize;
 use serde_json::json;
 use std::collections::HashMap;
+use std::time::Duration;
 
 pub struct AIEnhancements {
 	config: Config,
@@ -355,6 +356,9 @@ impl AIEnhancements {
 		sample
 	}
 
+	/// Maximum retries for batch AI operations (covers both LLM call and response parsing)
+	const MAX_BATCH_RETRIES: u32 = 3;
+
 	// Extract AI-powered descriptions for multiple files in a single batch call
 	pub async fn extract_ai_descriptions_batch(
 		&self,
@@ -364,33 +368,54 @@ impl AIEnhancements {
 			return Ok(HashMap::new());
 		}
 
-		// Build batch user message with all files
-		let user_message = self.build_batch_user_message(files);
-
-		// Create JSON schema for structured response
 		let json_schema = self.create_batch_response_schema();
+		let mut last_error = None;
 
-		// Single API call for multiple files
-		// LLM call includes retry with exponential backoff (in LlmClient).
-		// If it still fails after retries, propagate error to stop indexing.
-		let response = self
-			.call_llm(
-				&self.config.graphrag.llm.description_model,
-				self.config.graphrag.llm.description_system_prompt.clone(),
-				user_message,
-				Some(json_schema),
-			)
-			.await
-			.map_err(|e| {
-				anyhow::anyhow!(
-					"GraphRAG AI description failed for {} files after retries: {}. \
-					 Stopping indexing to prevent storing data without LLM descriptions.",
-					files.len(),
-					e
+		for attempt in 0..=Self::MAX_BATCH_RETRIES {
+			if attempt > 0 {
+				let delay = Duration::from_secs(5 * (1 << (attempt - 1))); // 5s, 10s, 20s
+				if !self.quiet {
+					eprintln!(
+						"⚠️  AI batch attempt {}/{} failed, retrying in {:?}...",
+						attempt,
+						Self::MAX_BATCH_RETRIES + 1,
+						delay
+					);
+				}
+				tokio::time::sleep(delay).await;
+			}
+
+			// Build fresh message each attempt
+			let user_message = self.build_batch_user_message(files);
+
+			match self
+				.call_llm(
+					&self.config.graphrag.llm.description_model,
+					self.config.graphrag.llm.description_system_prompt.clone(),
+					user_message,
+					Some(json_schema.clone()),
 				)
-			})?;
+				.await
+			{
+				Ok(response) => match self.parse_batch_response(&response, files) {
+					Ok(results) => return Ok(results),
+					Err(e) => {
+						last_error = Some(e);
+					}
+				},
+				Err(e) => {
+					last_error = Some(e);
+				}
+			}
+		}
 
-		self.parse_batch_response(&response, files)
+		Err(last_error.unwrap_or_else(|| {
+			anyhow::anyhow!(
+				"AI batch description failed for {} files after {} retries",
+				files.len(),
+				Self::MAX_BATCH_RETRIES
+			)
+		}))
 	}
 
 	// Build user message for batch processing

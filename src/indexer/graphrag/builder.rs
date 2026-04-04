@@ -324,8 +324,14 @@ impl GraphBuilder {
 								}
 								Err(e) => {
 									if !self.quiet {
-										eprintln!("⚠️  AI batch processing failed: {}", e);
+										eprintln!(
+											"⚠️  AI batch failed after retries: {}. Deferring {} files to next run.",
+											e, ai_batch_queue.len()
+										);
 									}
+									let failed_ids: HashSet<String> =
+										ai_batch_queue.iter().map(|f| f.file_id.clone()).collect();
+									new_nodes.retain(|n| !failed_ids.contains(&n.id));
 								}
 							}
 						}
@@ -455,8 +461,14 @@ impl GraphBuilder {
 					}
 					Err(e) => {
 						if !self.quiet {
-							eprintln!("⚠️  Final batch AI processing failed: {}", e);
+							eprintln!(
+								"⚠️  Final AI batch failed after retries: {}. Deferring {} files to next run.",
+								e, ai_batch_queue.len()
+							);
 						}
+						let failed_ids: HashSet<String> =
+							ai_batch_queue.iter().map(|f| f.file_id.clone()).collect();
+						new_nodes.retain(|n| !failed_ids.contains(&n.id));
 					}
 				}
 			}
