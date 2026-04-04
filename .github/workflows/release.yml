@@ -182,11 +182,28 @@ jobs:
     - name: Create swap space for memory-intensive builds
       if: matrix.target == 'aarch64-unknown-linux-musl'
       run: |
-        sudo fallocate -l 16G /swapfile
-        sudo chmod 600 /swapfile
-        sudo mkswap /swapfile
-        sudo swapon /swapfile
-        echo "Swap enabled: $(swapon --show)"
+        echo "=== Before ==="
+        free -h
+        swapon --show
+
+        # Deactivate and remove existing swap (it's ~2.2GB, too small)
+        EXISTING=$(swapon --noheadings --show=NAME | head -1 || true)
+        if [ -n "$EXISTING" ]; then
+          sudo swapoff "$EXISTING" || true
+          sudo rm -f "$EXISTING"
+        fi
+
+        # Create 16GB swap — use dd as fallback if fallocate fails (btrfs/xfs)
+        SWAP_PATH="/mnt/swapfile"
+        sudo fallocate -l 16G "$SWAP_PATH" 2>/dev/null || \
+          sudo dd if=/dev/zero of="$SWAP_PATH" bs=1M count=16384
+        sudo chmod 600 "$SWAP_PATH"
+        sudo mkswap "$SWAP_PATH"
+        sudo swapon "$SWAP_PATH"
+
+        echo "=== After ==="
+        free -h
+        swapon --show
 
     - name: Build binary
       shell: sh
