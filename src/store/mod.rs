@@ -541,6 +541,10 @@ impl Store {
 		graphrag_ops
 			.remove_graph_relationships_by_path(file_path)
 			.await?;
+		// Also remove file metadata to prevent stale mtime from causing skip-on-reindex
+		table_ops
+			.remove_blocks_by_path(file_path, "file_metadata")
+			.await?;
 		Ok(())
 	}
 

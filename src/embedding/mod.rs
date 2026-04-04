@@ -16,6 +16,7 @@
 
 use crate::config::Config;
 use anyhow::Result;
+use std::time::Duration;
 
 // Re-export core functionality from octolib::embedding
 pub use octolib::embedding::{
@@ -72,6 +73,9 @@ impl From<&Config> for EmbeddingGenerationConfig {
 	}
 }
 
+/// Maximum number of retries for embedding calls with exponential backoff
+const MAX_EMBEDDING_RETRIES: u32 = 3;
+
 /// Generate embeddings based on configured provider (supports provider:model format)
 /// Uses Query input_type for search queries (asymmetric retrieval)
 /// Compatibility wrapper for octocode Config
@@ -96,25 +100,44 @@ pub async fn generate_embeddings(
 		return Err(anyhow::anyhow!("Invalid model format: {}", model_string));
 	};
 
-	// Use Query input_type — this function is used for search queries
-	let results = octolib::embedding::generate_embeddings_batch(
-		vec![contents.to_string()],
-		provider,
-		model,
-		InputType::Query,
-		1,
-		embedding_config.max_tokens_per_batch,
-	)
-	.await?;
+	let mut last_error = None;
+	for attempt in 0..=MAX_EMBEDDING_RETRIES {
+		if attempt > 0 {
+			let delay = Duration::from_secs(5 * (1 << (attempt - 1)));
+			tracing::warn!(
+				"Embedding call failed (attempt {}/{}), retrying in {:?}...",
+				attempt,
+				MAX_EMBEDDING_RETRIES + 1,
+				delay
+			);
+			tokio::time::sleep(delay).await;
+		}
 
-	results
-		.into_iter()
-		.next()
-		.ok_or_else(|| anyhow::anyhow!("No embeddings generated"))
+		match octolib::embedding::generate_embeddings_batch(
+			vec![contents.to_string()],
+			provider,
+			model,
+			InputType::Query,
+			1,
+			embedding_config.max_tokens_per_batch,
+		)
+		.await
+		{
+			Ok(results) => {
+				return results
+					.into_iter()
+					.next()
+					.ok_or_else(|| anyhow::anyhow!("No embeddings generated"));
+			}
+			Err(e) => last_error = Some(e),
+		}
+	}
+
+	Err(last_error.unwrap_or_else(|| anyhow::anyhow!("Embedding generation failed after retries")))
 }
 
 /// Generate batch embeddings based on configured provider (supports provider:model format)
-/// Compatibility wrapper for octocode Config
+/// Compatibility wrapper for octocode Config with retry and exponential backoff
 pub async fn generate_embeddings_batch(
 	texts: Vec<String>,
 	is_code: bool,
@@ -137,15 +160,36 @@ pub async fn generate_embeddings_batch(
 		return Err(anyhow::anyhow!("Invalid model format: {}", model_string));
 	};
 
-	octolib::embedding::generate_embeddings_batch(
-		texts,
-		provider,
-		model,
-		input_type,
-		embedding_config.batch_size,
-		embedding_config.max_tokens_per_batch,
-	)
-	.await
+	let mut last_error = None;
+	for attempt in 0..=MAX_EMBEDDING_RETRIES {
+		if attempt > 0 {
+			let delay = Duration::from_secs(5 * (1 << (attempt - 1)));
+			tracing::warn!(
+				"Embedding batch failed (attempt {}/{}), retrying in {:?}...",
+				attempt,
+				MAX_EMBEDDING_RETRIES + 1,
+				delay
+			);
+			tokio::time::sleep(delay).await;
+		}
+
+		match octolib::embedding::generate_embeddings_batch(
+			texts.clone(),
+			provider,
+			model,
+			input_type.clone(),
+			embedding_config.batch_size,
+			embedding_config.max_tokens_per_batch,
+		)
+		.await
+		{
+			Ok(result) => return Ok(result),
+			Err(e) => last_error = Some(e),
+		}
+	}
+
+	Err(last_error
+		.unwrap_or_else(|| anyhow::anyhow!("Embedding batch generation failed after retries")))
 }
 
 /// Search mode embeddings result (octocode-specific)
