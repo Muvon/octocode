@@ -374,8 +374,11 @@ fn fast_count_indexable_files(
 	if let Some(changed_files) = git_changed_files {
 		for file_path in changed_files {
 			let full_path = current_dir.join(file_path);
-			// Quick extension check only - no language detection
-			if full_path.extension().is_some() {
+			if !full_path.is_file() {
+				continue;
+			}
+			// Match actual processing criteria: language detection or allowed text extension
+			if detect_language(&full_path).is_some() || is_allowed_text_extension(&full_path) {
 				count += 1;
 			}
 		}
@@ -767,46 +770,60 @@ pub async fn index_branch_delta(
 						if should_process_batch(&code_blocks_batch, |b| &b.content, &branch_config)
 						{
 							embedding_calls += code_blocks_batch.len();
-							process_code_blocks_batch(
+							match process_code_blocks_batch(
 								branch_store,
 								&code_blocks_batch,
 								&branch_config,
 								&code_file_metadata,
 								&file_context_map,
 							)
-							.await?;
+							.await
+							{
+								Ok(()) => {
+									batches_processed += 1;
+									flush_if_needed(
+										branch_store,
+										&mut batches_processed,
+										&branch_config,
+										false,
+									)
+									.await?;
+								}
+								Err(e) => {
+									tracing::error!("Failed to process code blocks batch: {}", e);
+								}
+							}
 							code_blocks_batch.clear();
 							code_file_metadata.clear();
 							file_context_map.clear();
-							batches_processed += 1;
-							flush_if_needed(
-								branch_store,
-								&mut batches_processed,
-								&branch_config,
-								false,
-							)
-							.await?;
 						}
 						if should_process_batch(&text_blocks_batch, |b| &b.content, &branch_config)
 						{
 							embedding_calls += text_blocks_batch.len();
-							process_text_blocks_batch(
+							match process_text_blocks_batch(
 								branch_store,
 								&text_blocks_batch,
 								&branch_config,
 								&text_file_metadata,
 							)
-							.await?;
+							.await
+							{
+								Ok(()) => {
+									batches_processed += 1;
+									flush_if_needed(
+										branch_store,
+										&mut batches_processed,
+										&branch_config,
+										false,
+									)
+									.await?;
+								}
+								Err(e) => {
+									tracing::error!("Failed to process text blocks batch: {}", e);
+								}
+							}
 							text_blocks_batch.clear();
 							text_file_metadata.clear();
-							batches_processed += 1;
-							flush_if_needed(
-								branch_store,
-								&mut batches_processed,
-								&branch_config,
-								false,
-							)
-							.await?;
 						}
 						if should_process_batch(
 							&document_blocks_batch,
@@ -814,23 +831,33 @@ pub async fn index_branch_delta(
 							&branch_config,
 						) {
 							embedding_calls += document_blocks_batch.len();
-							process_document_blocks_batch(
+							match process_document_blocks_batch(
 								branch_store,
 								&document_blocks_batch,
 								&branch_config,
 								&document_file_metadata,
 							)
-							.await?;
+							.await
+							{
+								Ok(()) => {
+									batches_processed += 1;
+									flush_if_needed(
+										branch_store,
+										&mut batches_processed,
+										&branch_config,
+										false,
+									)
+									.await?;
+								}
+								Err(e) => {
+									tracing::error!(
+										"Failed to process document blocks batch: {}",
+										e
+									);
+								}
+							}
 							document_blocks_batch.clear();
 							document_file_metadata.clear();
-							batches_processed += 1;
-							flush_if_needed(
-								branch_store,
-								&mut batches_processed,
-								&branch_config,
-								false,
-							)
-							.await?;
 						}
 					}
 					Err(e) => {
@@ -885,32 +912,41 @@ pub async fn index_branch_delta(
 
 		// Process remaining batches
 		if !code_blocks_batch.is_empty() {
-			process_code_blocks_batch(
+			if let Err(e) = process_code_blocks_batch(
 				branch_store,
 				&code_blocks_batch,
 				&branch_config,
 				&code_file_metadata,
 				&file_context_map,
 			)
-			.await?;
+			.await
+			{
+				tracing::error!("Failed to process remaining code blocks batch: {}", e);
+			}
 		}
 		if !text_blocks_batch.is_empty() {
-			process_text_blocks_batch(
+			if let Err(e) = process_text_blocks_batch(
 				branch_store,
 				&text_blocks_batch,
 				&branch_config,
 				&text_file_metadata,
 			)
-			.await?;
+			.await
+			{
+				tracing::error!("Failed to process remaining text blocks batch: {}", e);
+			}
 		}
 		if !document_blocks_batch.is_empty() {
-			process_document_blocks_batch(
+			if let Err(e) = process_document_blocks_batch(
 				branch_store,
 				&document_blocks_batch,
 				&branch_config,
 				&document_file_metadata,
 			)
-			.await?;
+			.await
+			{
+				tracing::error!("Failed to process remaining document blocks batch: {}", e);
+			}
 		}
 
 		// Final flush
@@ -1295,51 +1331,75 @@ pub async fn index_files_with_quiet(
 						// Process batches when they reach the batch size or token limit
 						if should_process_batch(&code_blocks_batch, |b| &b.content, config) {
 							embedding_calls += code_blocks_batch.len();
-							process_code_blocks_batch(
+							match process_code_blocks_batch(
 								store,
 								&code_blocks_batch,
 								config,
 								&code_file_metadata,
 								&file_context_map,
 							)
-							.await?;
+							.await
+							{
+								Ok(()) => {
+									batches_processed += 1;
+									flush_if_needed(store, &mut batches_processed, config, false)
+										.await?;
+								}
+								Err(e) => {
+									tracing::error!("Failed to process code blocks batch: {}", e);
+								}
+							}
 							code_blocks_batch.clear();
 							code_file_metadata.clear();
 							file_context_map.clear();
-							batches_processed += 1;
-							// Intelligent flush based on configuration
-							flush_if_needed(store, &mut batches_processed, config, false).await?;
 						}
 						// Only process text_blocks_batch if we have any (from unsupported files)
 						if should_process_batch(&text_blocks_batch, |b| &b.content, config) {
 							embedding_calls += text_blocks_batch.len();
-							process_text_blocks_batch(
+							match process_text_blocks_batch(
 								store,
 								&text_blocks_batch,
 								config,
 								&text_file_metadata,
 							)
-							.await?;
+							.await
+							{
+								Ok(()) => {
+									batches_processed += 1;
+									flush_if_needed(store, &mut batches_processed, config, false)
+										.await?;
+								}
+								Err(e) => {
+									tracing::error!("Failed to process text blocks batch: {}", e);
+								}
+							}
 							text_blocks_batch.clear();
 							text_file_metadata.clear();
-							batches_processed += 1;
-							// Intelligent flush based on configuration
-							flush_if_needed(store, &mut batches_processed, config, false).await?;
 						}
 						if should_process_batch(&document_blocks_batch, |b| &b.content, config) {
 							embedding_calls += document_blocks_batch.len();
-							process_document_blocks_batch(
+							match process_document_blocks_batch(
 								store,
 								&document_blocks_batch,
 								config,
 								&document_file_metadata,
 							)
-							.await?;
+							.await
+							{
+								Ok(()) => {
+									batches_processed += 1;
+									flush_if_needed(store, &mut batches_processed, config, false)
+										.await?;
+								}
+								Err(e) => {
+									tracing::error!(
+										"Failed to process document blocks batch: {}",
+										e
+									);
+								}
+							}
 							document_blocks_batch.clear();
 							document_file_metadata.clear();
-							batches_processed += 1;
-							// Intelligent flush based on configuration
-							flush_if_needed(store, &mut batches_processed, config, false).await?;
 						}
 					}
 					Err(e) => {
@@ -1388,19 +1448,33 @@ pub async fn index_files_with_quiet(
 							// Process batch when it reaches the batch size or token limit
 							if should_process_batch(&text_blocks_batch, |b| &b.content, config) {
 								embedding_calls += text_blocks_batch.len();
-								process_text_blocks_batch(
+								match process_text_blocks_batch(
 									store,
 									&text_blocks_batch,
 									config,
 									&text_file_metadata,
 								)
-								.await?;
+								.await
+								{
+									Ok(()) => {
+										batches_processed += 1;
+										flush_if_needed(
+											store,
+											&mut batches_processed,
+											config,
+											false,
+										)
+										.await?;
+									}
+									Err(e) => {
+										tracing::error!(
+											"Failed to process text blocks batch: {}",
+											e
+										);
+									}
+								}
 								text_blocks_batch.clear();
 								text_file_metadata.clear();
-								batches_processed += 1;
-								// Intelligent flush based on configuration
-								flush_if_needed(store, &mut batches_processed, config, false)
-									.await?;
 							}
 						}
 					}
@@ -1521,51 +1595,75 @@ pub async fn index_files_with_quiet(
 						// Process batches when they reach the batch size or token limit
 						if should_process_batch(&code_blocks_batch, |b| &b.content, config) {
 							embedding_calls += code_blocks_batch.len();
-							process_code_blocks_batch(
+							match process_code_blocks_batch(
 								store,
 								&code_blocks_batch,
 								config,
 								&code_file_metadata,
 								&file_context_map,
 							)
-							.await?;
+							.await
+							{
+								Ok(()) => {
+									batches_processed += 1;
+									flush_if_needed(store, &mut batches_processed, config, false)
+										.await?;
+								}
+								Err(e) => {
+									tracing::error!("Failed to process code blocks batch: {}", e);
+								}
+							}
 							code_blocks_batch.clear();
 							code_file_metadata.clear();
 							file_context_map.clear();
-							batches_processed += 1;
-							// Intelligent flush based on configuration
-							flush_if_needed(store, &mut batches_processed, config, false).await?;
 						}
 						// Only process text_blocks_batch if we have any (from unsupported files)
 						if should_process_batch(&text_blocks_batch, |b| &b.content, config) {
 							embedding_calls += text_blocks_batch.len();
-							process_text_blocks_batch(
+							match process_text_blocks_batch(
 								store,
 								&text_blocks_batch,
 								config,
 								&text_file_metadata,
 							)
-							.await?;
+							.await
+							{
+								Ok(()) => {
+									batches_processed += 1;
+									flush_if_needed(store, &mut batches_processed, config, false)
+										.await?;
+								}
+								Err(e) => {
+									tracing::error!("Failed to process text blocks batch: {}", e);
+								}
+							}
 							text_blocks_batch.clear();
 							text_file_metadata.clear();
-							batches_processed += 1;
-							// Intelligent flush based on configuration
-							flush_if_needed(store, &mut batches_processed, config, false).await?;
 						}
 						if should_process_batch(&document_blocks_batch, |b| &b.content, config) {
 							embedding_calls += document_blocks_batch.len();
-							process_document_blocks_batch(
+							match process_document_blocks_batch(
 								store,
 								&document_blocks_batch,
 								config,
 								&document_file_metadata,
 							)
-							.await?;
+							.await
+							{
+								Ok(()) => {
+									batches_processed += 1;
+									flush_if_needed(store, &mut batches_processed, config, false)
+										.await?;
+								}
+								Err(e) => {
+									tracing::error!(
+										"Failed to process document blocks batch: {}",
+										e
+									);
+								}
+							}
 							document_blocks_batch.clear();
 							document_file_metadata.clear();
-							batches_processed += 1;
-							// Intelligent flush based on configuration
-							flush_if_needed(store, &mut batches_processed, config, false).await?;
 						}
 					}
 					Err(e) => {
@@ -1614,19 +1712,33 @@ pub async fn index_files_with_quiet(
 							// Process batch when it reaches the batch size or token limit
 							if should_process_batch(&text_blocks_batch, |b| &b.content, config) {
 								embedding_calls += text_blocks_batch.len();
-								process_text_blocks_batch(
+								match process_text_blocks_batch(
 									store,
 									&text_blocks_batch,
 									config,
 									&text_file_metadata,
 								)
-								.await?;
+								.await
+								{
+									Ok(()) => {
+										batches_processed += 1;
+										flush_if_needed(
+											store,
+											&mut batches_processed,
+											config,
+											false,
+										)
+										.await?;
+									}
+									Err(e) => {
+										tracing::error!(
+											"Failed to process text blocks batch: {}",
+											e
+										);
+									}
+								}
 								text_blocks_batch.clear();
 								text_file_metadata.clear();
-								batches_processed += 1;
-								// Intelligent flush based on configuration
-								flush_if_needed(store, &mut batches_processed, config, false)
-									.await?;
 							}
 						}
 					}
@@ -1637,33 +1749,55 @@ pub async fn index_files_with_quiet(
 
 	// Process remaining batches
 	if !code_blocks_batch.is_empty() {
-		process_code_blocks_batch(
+		embedding_calls += code_blocks_batch.len();
+		match process_code_blocks_batch(
 			store,
 			&code_blocks_batch,
 			config,
 			&code_file_metadata,
 			&file_context_map,
 		)
-		.await?;
-		embedding_calls += code_blocks_batch.len();
-		batches_processed += 1;
+		.await
+		{
+			Ok(()) => {
+				batches_processed += 1;
+			}
+			Err(e) => {
+				tracing::error!("Failed to process remaining code blocks batch: {}", e);
+			}
+		}
 	}
 	// Only process text_blocks_batch if we have any (from unsupported files)
 	if !text_blocks_batch.is_empty() {
-		process_text_blocks_batch(store, &text_blocks_batch, config, &text_file_metadata).await?;
 		embedding_calls += text_blocks_batch.len();
-		batches_processed += 1;
+		match process_text_blocks_batch(store, &text_blocks_batch, config, &text_file_metadata)
+			.await
+		{
+			Ok(()) => {
+				batches_processed += 1;
+			}
+			Err(e) => {
+				tracing::error!("Failed to process remaining text blocks batch: {}", e);
+			}
+		}
 	}
 	if !document_blocks_batch.is_empty() {
-		process_document_blocks_batch(
+		embedding_calls += document_blocks_batch.len();
+		match process_document_blocks_batch(
 			store,
 			&document_blocks_batch,
 			config,
 			&document_file_metadata,
 		)
-		.await?;
-		embedding_calls += document_blocks_batch.len();
-		batches_processed += 1;
+		.await
+		{
+			Ok(()) => {
+				batches_processed += 1;
+			}
+			Err(e) => {
+				tracing::error!("Failed to process remaining document blocks batch: {}", e);
+			}
+		}
 	}
 
 	// Force flush any remaining data after processing all batches
