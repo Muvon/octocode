@@ -19,7 +19,6 @@ use crate::indexer::graphrag::types::{CodeNode, CodeRelationship};
 use crate::llm::{LlmClient, Message};
 use anyhow::Result;
 use serde::Deserialize;
-use serde_json::json;
 use std::collections::HashMap;
 use std::time::Duration;
 
@@ -229,11 +228,10 @@ impl AIEnhancements {
 
 		// Call AI with architectural analysis (includes retry with exponential backoff)
 		let response = self
-			.call_llm(
+			.call_llm_json(
 				&self.config.graphrag.llm.relationship_model,
 				system_prompt,
 				batch_prompt,
-				None,
 			)
 			.await
 			.map_err(|e| {
@@ -266,7 +264,7 @@ impl AIEnhancements {
 	// Parse AI response for architectural relationships
 	fn parse_ai_architectural_relationships(
 		&self,
-		response: &str,
+		response: &serde_json::Value,
 	) -> Result<Vec<CodeRelationship>> {
 		#[derive(Deserialize)]
 		struct AiRelationship {
@@ -278,7 +276,7 @@ impl AIEnhancements {
 		}
 
 		// Try to parse as JSON array
-		if let Ok(ai_rels) = serde_json::from_str::<Vec<AiRelationship>>(response) {
+		if let Ok(ai_rels) = serde_json::from_value::<Vec<AiRelationship>>(response.clone()) {
 			let relationships = ai_rels
 				.into_iter()
 				.map(|ai_rel| CodeRelationship {
@@ -368,7 +366,6 @@ impl AIEnhancements {
 			return Ok(HashMap::new());
 		}
 
-		let json_schema = self.create_batch_response_schema();
 		let mut last_error = None;
 
 		for attempt in 0..=Self::MAX_BATCH_RETRIES {
@@ -394,11 +391,10 @@ impl AIEnhancements {
 			let user_message = self.build_batch_user_message(files);
 
 			match self
-				.call_llm(
+				.call_llm_json(
 					&self.config.graphrag.llm.description_model,
 					self.config.graphrag.llm.description_system_prompt.clone(),
 					user_message,
-					Some(json_schema.clone()),
 				)
 				.await
 			{
@@ -454,42 +450,13 @@ impl AIEnhancements {
 		message
 	}
 
-	// Create JSON schema for batch response
-	fn create_batch_response_schema(&self) -> serde_json::Value {
-		json!({
-			"type": "object",
-			"properties": {
-				"descriptions": {
-					"type": "array",
-					"items": {
-						"type": "object",
-						"properties": {
-							"file_id": {
-								"type": "string",
-								"description": "The file ID exactly as provided in the request"
-							},
-							"description": {
-								"type": "string",
-								"description": "Architectural description of the file (max 300 chars)"
-							}
-						},
-						"required": ["file_id", "description"],
-						"additionalProperties": false
-					}
-				}
-			},
-			"required": ["descriptions"],
-			"additionalProperties": false
-		})
-	}
-
 	// Parse batch response back to individual file descriptions
 	fn parse_batch_response(
 		&self,
-		response: &str,
+		response: &serde_json::Value,
 		files: &[FileForAI],
 	) -> Result<HashMap<String, String>> {
-		let parsed: BatchDescriptionResponse = serde_json::from_str(response)
+		let parsed: BatchDescriptionResponse = serde_json::from_value(response.clone())
 			.map_err(|e| anyhow::anyhow!("Failed to parse batch response: {}", e))?;
 
 		let mut results = HashMap::new();
@@ -529,34 +496,31 @@ impl AIEnhancements {
 		Ok(results)
 	}
 
-	// Call LLM API using octolib
-	async fn call_llm(
+	// Call LLM API using octolib (plain text response)
+	async fn call_llm(&self, model_name: &str, system: String, prompt: String) -> Result<String> {
+		let client = self.create_llm_client(model_name)?;
+		let messages = vec![Message::system(&system), Message::user(&prompt)];
+		client.chat_completion(messages).await
+	}
+
+	// Call LLM API with JSON response (structured output + markdown stripping)
+	async fn call_llm_json(
 		&self,
 		model_name: &str,
 		system: String,
 		prompt: String,
-		_json_schema: Option<serde_json::Value>,
-	) -> Result<String> {
-		// Get LLM client or create one with custom model
-		let client = if let Some(ref client) = self.llm_client {
-			// Check if we need to use a different model
-			if client.model() != model_name {
-				LlmClient::with_model(&self.config, model_name)?
-			} else {
-				// Clone is not available, so we'll create a new client
-				LlmClient::with_model(&self.config, model_name)?
-			}
-		} else {
-			return Err(anyhow::anyhow!("LLM client not initialized"));
-		};
-
-		// Build messages
+	) -> Result<serde_json::Value> {
+		let client = self.create_llm_client(model_name)?;
 		let messages = vec![Message::system(&system), Message::user(&prompt)];
+		client.chat_completion_json(messages).await
+	}
 
-		// Call LLM
-		let response = client.chat_completion(messages).await?;
-
-		Ok(response)
+	fn create_llm_client(&self, model_name: &str) -> Result<LlmClient> {
+		if self.llm_client.is_some() {
+			LlmClient::with_model(&self.config, model_name)
+		} else {
+			Err(anyhow::anyhow!("LLM client not initialized"))
+		}
 	}
 
 	// Extract AI-powered description for complex files (legacy single-file method)
@@ -592,7 +556,6 @@ impl AIEnhancements {
 				&self.config.graphrag.llm.description_model,
 				self.config.graphrag.llm.description_system_prompt.clone(),
 				user_message,
-				None,
 			)
 			.await
 		{
