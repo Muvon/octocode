@@ -173,7 +173,7 @@ We measure semantic search quality using a hand-annotated ground truth dataset o
 Tested on commit [`b1771ba`](https://github.com/Muvon/octocode/commit/b1771ba) with [benchmark config](benchmark/config.toml) (contextual retrieval, Voyage reranker, RaBitQ quantization).
 
 <details>
-<summary><strong>Code search</strong> (<code>--mode code</code>) — Hit@10: 0.953, MRR: 0.776</summary>
+<summary><strong>Documentation search</strong> (<code>--mode docs</code>) — Hit@10: 0.953, MRR: 0.776</summary>
 
 | Metric | Score |
 |--------|-------|
@@ -198,7 +198,7 @@ Tested on commit [`b1771ba`](https://github.com/Muvon/octocode/commit/b1771ba) w
 </details>
 
 <details>
-<summary><strong>Documentation search</strong> (<code>--mode docs</code>) — Hit@10: 0.992, MRR: 0.895</summary>
+<summary><strong>Code search</strong> (<code>--mode code</code>) — Hit@10: 0.992, MRR: 0.895</summary>
 
 | Metric | Score |
 |--------|-------|
