@@ -1,18 +1,10 @@
-
-
-# Default configuration for Octocode
-# This file contains all default values and serves as the template for new installations
-# Version: 1 (for future migration support)
 version = 1
 
 [llm]
-# model = "ollama:gemini-3-flash-preview"
-model = "minimax:minimax-m2.7"
-# model = "anthropic:claude-haiku-4-5"
+model = "ollama:gemini-3-flash-preview"
 temperature = 1.0
 max_tokens = 4000
 timeout = 120
-# api_key = "" # Set via environment variable OPENROUTER_API_KEY
 
 [index]
 quantization = true
@@ -37,8 +29,6 @@ search_block_max_characters = 400  # Maximum characters to display per code/text
 
 [search.reranker]
 enabled = true
-# Reranker model in provider:model format
-# Supported providers: voyage (VOYAGE_API_KEY), cohere (COHERE_API_KEY), jina (JINA_API_KEY), fastembed (local)
 model = "voyage:rerank-2.5"
 # Number of candidates to fetch from vector search before reranking
 top_k_candidates = 50
@@ -48,8 +38,6 @@ final_top_k = 10
 [embedding]
 code_model = "voyage:voyage-4-large"
 text_model = "voyage:voyage-4"
-# API keys are sourced from environment variables:
-# JINA_API_KEY, VOYAGE_API_KEY, GOOGLE_API_KEY
 
 [graphrag]
 enabled = true
