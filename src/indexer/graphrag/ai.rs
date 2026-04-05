@@ -374,11 +374,16 @@ impl AIEnhancements {
 		for attempt in 0..=Self::MAX_BATCH_RETRIES {
 			if attempt > 0 {
 				let delay = Duration::from_secs(5 * (1 << (attempt - 1))); // 5s, 10s, 20s
+				let err_msg = last_error
+					.as_ref()
+					.map(|e: &anyhow::Error| e.to_string())
+					.unwrap_or_default();
 				if !self.quiet {
 					eprintln!(
-						"⚠️  AI batch attempt {}/{} failed, retrying in {:?}...",
+						"⚠️  AI batch attempt {}/{} failed ({}), retrying in {:?}...",
 						attempt,
 						Self::MAX_BATCH_RETRIES + 1,
+						err_msg,
 						delay
 					);
 				}
