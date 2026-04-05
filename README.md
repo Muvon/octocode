@@ -2,14 +2,14 @@
 
 <img src="https://raw.githubusercontent.com/Muvon/octocode/master/logo.svg" width="240" alt="Octocode">
 
-### **AI-Powered Code Intelligence with Built-in MCP Server**
+### **Structural Code Intelligence — AST Parsing + Knowledge Graph + MCP**
 
 [![GitHub stars](https://img.shields.io/github/stars/Muvon/octocode?style=social)](https://github.com/Muvon/octocode/stargazers)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Rust](https://img.shields.io/badge/Rust-1.82%2B-orange.svg)](https://www.rust-lang.org)
 [![Release](https://img.shields.io/github/v/release/Muvon/octocode)](https://github.com/Muvon/octocode/releases)
 
-**Transform your codebase into a queryable knowledge graph. Ask questions in plain English, get precise answers.**
+**Your codebase as a navigable knowledge graph. Not flat text search — structural understanding of functions, imports, and dependencies.**
 
 [🚀 Quick Start](#quick-start) • [📖 Documentation](#documentation) • [🔌 MCP Server](#mcp-server) • [🌐 Website](https://octocode.muvon.io)
 
@@ -23,28 +23,48 @@
 
 ## 🤔 Why Octocode?
 
-**You know that feeling** — staring at a 100k+ line codebase, trying to find where authentication is handled, or how the database layer connects to the API. Traditional search (`grep`, `ripgrep`) only finds exact matches. Octocode understands *meaning*.
+**Standard RAG treats your code as flat text chunks.** It finds similar-sounding snippets but has no idea that `auth_middleware.rs` imports `jwt.rs`, calls `user_store.rs`, and is wired into `router.rs`. Octocode understands *structure*.
 
-```bash
-# Instead of this:
-grep -r "auth" --include="*.rs" | head -20  # 847 results, mostly noise
+```
+# Semantic search finds the right code
+octocode search "authentication middleware"
+→ src/middleware/auth.rs | Similarity 0.923
 
-# Do this:
-octocode search "how is user authentication implemented"
-# → 3 relevant files with context and relationships
+# GraphRAG reveals the full dependency chain
+octocode graphrag get-relationships --node_id src/middleware/auth.rs
+Outgoing:
+  imports → jwt (src/auth/jwt.rs): token validation logic
+  calls   → user_store (src/db/user_store.rs): user lookup by token
+Incoming:
+  imports ← router (src/router.rs): wires auth into the request pipeline
 ```
 
-Octocode builds a **semantic knowledge graph** of your entire codebase using tree-sitter AST parsing and vector embeddings. It connects your code to AI assistants via the **Model Context Protocol (MCP)** — giving Claude, Cursor, and other AI tools deep contextual understanding of your project.
+Octocode uses **tree-sitter AST parsing** to extract real symbols (functions, imports, dependencies), builds a **GraphRAG knowledge graph** of relationships between files, and exposes everything via **MCP** — so Claude, Cursor, and other AI tools can *navigate* your project architecture, not just search it.
+
+## 🔬 How It Works
+
+```
+Source Code → Tree-sitter AST → Symbols & Relationships → Knowledge Graph
+                                        ↓
+                    Embeddings + Hybrid Search + Reranking → MCP Server
+```
+
+1. **AST Parsing** — tree-sitter extracts real code symbols (functions, classes, imports), not arbitrary text chunks
+2. **Knowledge Graph** — GraphRAG maps relationships between files: `imports`, `calls`, `implements`, `extends`, `configures`, and 9 more types — each with importance weighting
+3. **Hybrid Search** — semantic similarity + BM25 full-text search + reranking — not just vector embeddings
+4. **MCP Server** — exposes `semantic_search`, `view_signatures`, and `graphrag` tools to any MCP-compatible client
 
 ## ✨ What Makes It Different
 
-| Feature | Traditional Search | Octocode |
-|---------|-------------------|----------|
-| **Query style** | Exact keywords | Natural language |
-| **Results** | Text matches | Semantic meaning + relationships |
-| **Context** | Single file | Cross-file dependencies & imports |
-| **AI integration** | None | Native MCP server + LSP |
-| **Speed** | Instant | <2s indexing, instant queries |
+| | Standard RAG | Doc Lookup Tools | **Octocode** |
+|---|---|---|---|
+| **Indexes** | Text chunks | External library docs | Your codebase structure (AST) |
+| **Understands** | Similar text | API specs & usage | Functions, imports, dependencies |
+| **Cross-file** | No | No | Yes — navigates the dependency graph |
+| **Relationships** | No | No | `imports`, `calls`, `implements`, `extends`... |
+| **AI integration** | Varies | MCP | Native MCP server + LSP |
+
+> **Doc tools give AI the manual for libraries you use. Octocode gives AI the blueprint of how you put them together.**
 
 **Built with Rust** for performance. **Local-first** for privacy. **Open source** (Apache 2.0) for transparency.
 
