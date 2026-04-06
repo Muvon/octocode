@@ -17,6 +17,7 @@ use serde_json::{json, Value};
 use tracing::debug;
 
 use crate::config::Config;
+use crate::indexer::branch::BranchManifest;
 use crate::indexer::graphrag::find_node_id;
 use crate::indexer::{self, graphrag::GraphRAG};
 use crate::mcp::types::{McpError, McpTool};
@@ -72,14 +73,23 @@ pub struct GraphRAGArgs {
 pub struct GraphRagProvider {
 	graphrag: GraphRAG,
 	working_directory: std::path::PathBuf,
+	branch_manifest: Option<BranchManifest>,
 }
 
 impl GraphRagProvider {
 	pub fn new(config: Config, working_directory: std::path::PathBuf) -> Option<Self> {
 		if config.graphrag.enabled {
+			let branch_manifest = crate::indexer::branch::detect_branch_context(&working_directory)
+				.and_then(|branch_name| {
+					let branch_dir =
+						crate::storage::get_branch_dir(&working_directory, &branch_name).ok()?;
+					crate::indexer::branch::load_manifest(&branch_dir).ok()?
+				});
+
 			Some(Self {
 				graphrag: GraphRAG::new(config, working_directory.clone()),
 				working_directory,
+				branch_manifest,
 			})
 		} else {
 			None
@@ -290,6 +300,19 @@ impl GraphRagProvider {
 			indexer::GraphBuilder::new_with_quiet(config.clone(), &self.working_directory, true)
 				.await
 				.map_err(|e| anyhow::anyhow!("Failed to initialize GraphRAG system: {}", e))?;
+
+		// Branch-aware GraphRAG: filter main graph and merge branch data
+		if let Some(ref manifest) = self.branch_manifest {
+			let overridden = manifest.overridden_paths();
+			graph_builder.apply_branch_filter(&overridden).await;
+			if let Ok(branch_store) =
+				crate::store::Store::new_for_branch(&manifest.branch_name).await
+			{
+				if let Err(e) = graph_builder.merge_branch_graph(&branch_store).await {
+					tracing::warn!(error = %e, "Failed to merge branch GraphRAG data");
+				}
+			}
+		}
 
 		// Get the current graph
 		let graph = graph_builder

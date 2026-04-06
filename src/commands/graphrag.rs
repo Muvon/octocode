@@ -90,6 +90,22 @@ pub async fn execute(
 		}
 	};
 
+	// Branch-aware GraphRAG: filter main graph and merge branch data
+	if let Some(branch_name) = indexer::branch::detect_branch_context(&current_dir) {
+		if let Ok(branch_dir) = octocode::storage::get_branch_dir(&current_dir, &branch_name) {
+			if let Ok(Some(manifest)) = indexer::branch::load_manifest(&branch_dir) {
+				let overridden = manifest.overridden_paths();
+				graph_builder.apply_branch_filter(&overridden).await;
+				if let Ok(branch_store) = octocode::store::Store::new_for_branch(&branch_name).await
+				{
+					if let Err(e) = graph_builder.merge_branch_graph(&branch_store).await {
+						eprintln!("Warning: Failed to merge branch GraphRAG data: {}", e);
+					}
+				}
+			}
+		}
+	}
+
 	// Get the current graph from the builder (this will load from database in the future)
 	let graph = match graph_builder.get_graph().await {
 		Ok(g) => g,

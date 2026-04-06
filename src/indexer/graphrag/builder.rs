@@ -51,13 +51,23 @@ impl GraphBuilder {
 	}
 
 	pub async fn new_with_quiet(config: Config, working_dir: &Path, quiet: bool) -> Result<Self> {
-		// Use working_dir to detect project root, falling back to detect_project_root()
+		let index_path = crate::storage::get_project_database_path(working_dir)?;
+		crate::storage::ensure_project_storage_exists(working_dir)?;
+		let store = Store::new_with_path(index_path).await?;
+		Self::new_with_store(config, working_dir, store, quiet).await
+	}
+
+	/// Create a GraphBuilder with a pre-created Store (used for branch stores).
+	pub async fn new_with_store(
+		config: Config,
+		working_dir: &Path,
+		store: Store,
+		quiet: bool,
+	) -> Result<Self> {
 		let project_root = detect_project_root_from(working_dir).unwrap_or_else(|_| {
 			detect_project_root().unwrap_or_else(|_| working_dir.to_path_buf())
 		});
 
-		// Initialize embedding provider from config (using text model for graph descriptions)
-		// GraphRAG uses text embeddings for file descriptions and relationships, not code embeddings
 		let model_string = &config.embedding.text_model;
 		let Ok((provider_type, model)) = parse_provider_model(model_string) else {
 			return Err(anyhow::anyhow!(
@@ -71,16 +81,9 @@ impl GraphBuilder {
 				.context("Failed to initialize embedding provider from config")?,
 		);
 
-		// Initialize the store for the specific working directory
-		let index_path = crate::storage::get_project_database_path(working_dir)?;
-		crate::storage::ensure_project_storage_exists(working_dir)?;
-		let store = Store::new_with_path(index_path).await?;
-
-		// Load existing graph from database
 		let db_ops = DatabaseOperations::new(&store);
 		let graph = Arc::new(RwLock::new(db_ops.load_graph(&project_root, quiet).await?));
 
-		// Initialize AI enhancements if enabled — fails if LLM is unavailable
 		let ai_enhancements = if config.graphrag.use_llm {
 			Some(AIEnhancements::new(config.clone(), quiet)?)
 		} else {
@@ -140,16 +143,6 @@ impl GraphBuilder {
 		for (file_path, file_blocks) in files_to_blocks {
 			// Skip files that no longer exist on disk to avoid IO errors
 			if !std::path::Path::new(&file_path).exists() {
-				if !self.quiet {
-					eprintln!(
-						"Warning: Skipping deleted file in GraphRAG processing: {}",
-						file_path
-					);
-				}
-				tracing::debug!(
-					file = %file_path,
-					"Skipping deleted file in GraphRAG processing"
-				);
 				skipped_count += 1;
 				continue;
 			}
@@ -827,6 +820,40 @@ impl GraphBuilder {
 			);
 		}
 
+		Ok(())
+	}
+
+	/// Filter the in-memory graph to exclude nodes/relationships for overridden paths.
+	/// Used for branch-aware GraphRAG queries — removes nodes whose files were
+	/// changed or deleted on the current branch.
+	pub async fn apply_branch_filter(&self, overridden_paths: &std::collections::HashSet<&str>) {
+		if overridden_paths.is_empty() {
+			return;
+		}
+		let mut graph = self.graph.write().await;
+		graph
+			.nodes
+			.retain(|_id, node| !overridden_paths.contains(node.path.as_str()));
+		let remaining_ids: std::collections::HashSet<String> =
+			graph.nodes.keys().cloned().collect();
+		graph.relationships.retain(|rel| {
+			remaining_ids.contains(&rel.source) && remaining_ids.contains(&rel.target)
+		});
+	}
+
+	/// Merge a branch graph into the current (filtered) graph.
+	/// Branch nodes and relationships are added on top of the main graph.
+	pub async fn merge_branch_graph(&self, branch_store: &Store) -> Result<()> {
+		let db_ops = DatabaseOperations::new(branch_store);
+		let branch_graph = db_ops.load_graph(&self.project_root, self.quiet).await?;
+		if branch_graph.nodes.is_empty() {
+			return Ok(());
+		}
+		let mut graph = self.graph.write().await;
+		for (id, node) in branch_graph.nodes {
+			graph.nodes.insert(id, node);
+		}
+		graph.relationships.extend(branch_graph.relationships);
 		Ok(())
 	}
 

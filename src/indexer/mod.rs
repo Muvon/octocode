@@ -699,14 +699,11 @@ pub async fn index_branch_delta(
 				"Indexing branch delta ({} files)...",
 				files_to_process.len()
 			);
-			// Disable GraphRAG for branch deltas
-			state_guard.graphrag_enabled = false;
+			state_guard.graphrag_enabled = config.graphrag.enabled;
 		}
 
 		// Reuse the existing file processing pipeline with branch Store
-		// We create a modified config that disables GraphRAG and commits for branch indexing
-		let mut branch_config = config.clone();
-		branch_config.graphrag.enabled = false;
+		let branch_config = config.clone();
 
 		// Process files through the same pipeline, writing to branch_store
 		let mut code_blocks_batch = Vec::new();
@@ -952,6 +949,26 @@ pub async fn index_branch_delta(
 
 		// Final flush
 		branch_store.flush().await?;
+
+		// Build GraphRAG for branch delta if enabled
+		if config.graphrag.enabled && !all_code_blocks.is_empty() {
+			if !quiet {
+				println!("🔗 Building GraphRAG for branch delta...");
+			}
+
+			let graph_store = Store::new_for_branch(branch_name).await?;
+			let graph_builder = graphrag::GraphBuilder::new_with_store(
+				config.clone(),
+				&current_dir,
+				graph_store,
+				quiet,
+			)
+			.await?;
+			graph_builder
+				.process_code_blocks(&all_code_blocks, Some(state.clone()))
+				.await?;
+			branch_store.flush().await?;
+		}
 
 		if !quiet {
 			println!(
