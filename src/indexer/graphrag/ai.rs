@@ -19,6 +19,7 @@ use crate::indexer::graphrag::types::{CodeNode, CodeRelationship};
 use crate::llm::{LlmClient, Message};
 use anyhow::Result;
 use serde::Deserialize;
+use serde_json::json;
 use std::collections::HashMap;
 use std::time::Duration;
 
@@ -232,6 +233,7 @@ impl AIEnhancements {
 				&self.config.graphrag.llm.relationship_model,
 				system_prompt,
 				batch_prompt,
+				None,
 			)
 			.await
 			.map_err(|e| {
@@ -366,6 +368,7 @@ impl AIEnhancements {
 			return Ok(HashMap::new());
 		}
 
+		let json_schema = self.create_batch_response_schema();
 		let mut last_error = None;
 
 		for attempt in 0..=Self::MAX_BATCH_RETRIES {
@@ -395,6 +398,7 @@ impl AIEnhancements {
 					&self.config.graphrag.llm.description_model,
 					self.config.graphrag.llm.description_system_prompt.clone(),
 					user_message,
+					Some(json_schema.clone()),
 				)
 				.await
 			{
@@ -448,6 +452,35 @@ impl AIEnhancements {
 
 		message.push_str("Provide a JSON response with descriptions for each file.");
 		message
+	}
+
+	// JSON schema for batch description response — enforces structure across providers
+	fn create_batch_response_schema(&self) -> serde_json::Value {
+		json!({
+			"type": "object",
+			"properties": {
+				"descriptions": {
+					"type": "array",
+					"items": {
+						"type": "object",
+						"properties": {
+							"file_id": {
+								"type": "string",
+								"description": "The file ID exactly as provided in the request"
+							},
+							"description": {
+								"type": "string",
+								"description": "Architectural description of the file (max 300 chars)"
+							}
+						},
+						"required": ["file_id", "description"],
+						"additionalProperties": false
+					}
+				}
+			},
+			"required": ["descriptions"],
+			"additionalProperties": false
+		})
 	}
 
 	// Parse batch response back to individual file descriptions
@@ -509,10 +542,14 @@ impl AIEnhancements {
 		model_name: &str,
 		system: String,
 		prompt: String,
+		schema: Option<serde_json::Value>,
 	) -> Result<serde_json::Value> {
 		let client = self.create_llm_client(model_name)?;
 		let messages = vec![Message::system(&system), Message::user(&prompt)];
-		client.chat_completion_json(messages).await
+		match schema {
+			Some(s) => client.chat_completion_json_with_schema(messages, s).await,
+			None => client.chat_completion_json(messages).await,
+		}
 	}
 
 	fn create_llm_client(&self, model_name: &str) -> Result<LlmClient> {

@@ -215,6 +215,26 @@ impl LlmClient {
 	/// Chat completion with JSON output (tries structured output, falls back to markdown stripping)
 	/// Includes retry with exponential backoff.
 	pub async fn chat_completion_json(&self, messages: Vec<Message>) -> Result<serde_json::Value> {
+		self.chat_completion_json_inner(messages, None).await
+	}
+
+	/// Chat completion with JSON output constrained by a JSON schema.
+	/// The schema is passed to providers that support structured output.
+	pub async fn chat_completion_json_with_schema(
+		&self,
+		messages: Vec<Message>,
+		schema: serde_json::Value,
+	) -> Result<serde_json::Value> {
+		self.chat_completion_json_inner(messages, Some(schema))
+			.await
+	}
+
+	/// Shared implementation for JSON completion with optional schema.
+	async fn chat_completion_json_inner(
+		&self,
+		messages: Vec<Message>,
+		schema: Option<serde_json::Value>,
+	) -> Result<serde_json::Value> {
 		let supports_structured = self.provider.supports_structured_output(&self.model);
 
 		if supports_structured {
@@ -232,7 +252,10 @@ impl LlmClient {
 					tokio::time::sleep(delay).await;
 				}
 
-				let structured_request = StructuredOutputRequest::json();
+				let structured_request = match &schema {
+					Some(s) => StructuredOutputRequest::json_schema(s.clone()),
+					None => StructuredOutputRequest::json(),
+				};
 				let params = ChatCompletionParams::new(
 					&messages,
 					&self.model,

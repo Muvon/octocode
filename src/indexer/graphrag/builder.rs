@@ -138,6 +138,22 @@ impl GraphBuilder {
 
 		// Process each file
 		for (file_path, file_blocks) in files_to_blocks {
+			// Skip files that no longer exist on disk to avoid IO errors
+			if !std::path::Path::new(&file_path).exists() {
+				if !self.quiet {
+					eprintln!(
+						"Warning: Skipping deleted file in GraphRAG processing: {}",
+						file_path
+					);
+				}
+				tracing::debug!(
+					file = %file_path,
+					"Skipping deleted file in GraphRAG processing"
+				);
+				skipped_count += 1;
+				continue;
+			}
+
 			// Convert to relative path
 			let relative_path = match self.to_relative_path(&file_path) {
 				Ok(path) => path,

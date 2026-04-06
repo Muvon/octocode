@@ -1091,6 +1091,25 @@ pub async fn index_files_with_quiet(
 							println!("✅ No commit changes since last index, skipping reindex");
 						}
 
+						// Clean up files that were deleted from disk even when commit hasn't changed
+						// This prevents stale entries from causing errors in GraphRAG processing
+						{
+							let mut state_guard = state.write();
+							state_guard.status_message =
+								"Checking for deleted files...".to_string();
+						}
+						if let Err(e) =
+							cleanup_deleted_files_optimized(store, &current_dir, quiet).await
+						{
+							if !quiet {
+								eprintln!("Warning: Failed to clean up deleted files: {}", e);
+							}
+							tracing::warn!(
+								error = %e,
+								"Failed to clean up deleted files during same-commit path"
+							);
+						}
+
 						// Check if GraphRAG needs to be built from existing database even when no files changed
 						if config.graphrag.enabled {
 							let needs_graphrag_from_existing =
