@@ -253,7 +253,7 @@ impl LlmClient {
 				}
 
 				let structured_request = match &schema {
-					Some(s) => StructuredOutputRequest::json_schema(s.clone()),
+					Some(s) => StructuredOutputRequest::json_schema(s.clone()).with_strict_mode(),
 					None => StructuredOutputRequest::json(),
 				};
 				let params = ChatCompletionParams::new(
