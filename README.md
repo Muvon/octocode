@@ -11,7 +11,7 @@
 
 **Your codebase as a navigable knowledge graph. Not flat text search — structural understanding of functions, imports, and dependencies.**
 
-[🚀 Quick Start](#quick-start) • [📖 Documentation](#documentation) • [🔌 MCP Server](#mcp-server) • [🌐 Website](https://octocode.muvon.io)
+[🚀 Quick Start](#-quick-start) • [📖 Documentation](#-documentation) • [🔌 MCP Server](#-mcp-server-integration) • [🌐 Website](https://octocode.muvon.io)
 
 <a href="https://glama.ai/mcp/servers/Muvon/octocode">
   <img width="300" src="https://glama.ai/mcp/servers/Muvon/octocode/badge" alt="Octocode MCP server" />
