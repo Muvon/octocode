@@ -57,26 +57,13 @@ impl AIEnhancements {
 	pub fn new(config: Config, quiet: bool) -> Result<Self> {
 		// When GraphRAG LLM is enabled, LLM is required — no silent fallback.
 		let llm_client = if config.graphrag.use_llm {
-			let client = LlmClient::from_config(&config).map_err(|e| {
+			Some(LlmClient::from_config(&config).map_err(|e| {
 				anyhow::anyhow!(
 					"LLM required for GraphRAG but unavailable: {}. \
 					 Disable graphrag.use_llm or fix LLM configuration.",
 					e
 				)
-			})?;
-
-			// Validate that the description model supports structured output (required for schema enforcement)
-			let desc_client =
-				LlmClient::with_model(&config, &config.graphrag.llm.description_model)?;
-			if !desc_client.supports_structured_output() {
-				return Err(anyhow::anyhow!(
-					"GraphRAG description model '{}' does not support structured output. \
-					 Choose a model that supports JSON schema (e.g. openai/gpt-4o-mini, gemini-2.0-flash).",
-					config.graphrag.llm.description_model
-				));
-			}
-
-			Some(client)
+			})?)
 		} else {
 			None
 		};

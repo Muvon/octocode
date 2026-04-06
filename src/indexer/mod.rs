@@ -60,6 +60,7 @@ use self::file_utils::FileUtils;
 // Re-export for external use
 pub use self::git_utils::GitUtils;
 pub use self::path_utils::PathUtils;
+use crate::llm::LlmClient;
 use std::fs;
 // We're using ignore::WalkBuilder instead of walkdir::WalkDir
 use anyhow::Result;
@@ -983,6 +984,48 @@ pub async fn index_branch_delta(
 	Ok(manifest)
 }
 
+/// Validate that all configured LLM models support structured output before indexing.
+/// Fails fast with a clear error instead of discovering the problem mid-indexing.
+fn validate_llm_structured_output(config: &Config, quiet: bool) -> Result<()> {
+	let mut models_to_check: Vec<(&str, &str)> = Vec::new();
+
+	if config.graphrag.enabled && config.graphrag.use_llm {
+		models_to_check.push((
+			&config.graphrag.llm.description_model,
+			"graphrag.llm.description_model",
+		));
+	}
+
+	if config.index.contextual_descriptions {
+		models_to_check.push((&config.index.contextual_model, "index.contextual_model"));
+	}
+
+	for (model_str, config_key) in models_to_check {
+		match LlmClient::with_model(config, model_str) {
+			Ok(client) => {
+				if !client.supports_structured_output() {
+					return Err(anyhow::anyhow!(
+						"Model '{}' ({}) does not support structured output. \
+						 Choose a model that supports JSON schema (e.g. openai/gpt-4o-mini, gemini-2.0-flash).",
+						model_str,
+						config_key
+					));
+				}
+			}
+			Err(e) => {
+				if !quiet {
+					eprintln!(
+						"Warning: Could not validate model '{}' ({}): {}",
+						model_str, config_key, e
+					);
+				}
+			}
+		}
+	}
+
+	Ok(())
+}
+
 pub async fn index_files_with_quiet(
 	store: &Store,
 	state: SharedState,
@@ -1013,6 +1056,9 @@ pub async fn index_files_with_quiet(
 		Some(&current_dir.display().to_string()),
 		0,
 	);
+
+	// Validate LLM models support structured output before starting any work
+	validate_llm_structured_output(config, quiet)?;
 
 	// Initialize GraphRAG state if enabled
 	{
