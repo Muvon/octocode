@@ -146,6 +146,24 @@ impl Language for Ruby {
 		(imports, exports)
 	}
 
+	fn extract_function_calls(&self, node: Node, contents: &str) -> Vec<String> {
+		if node.kind() == "call" {
+			// Skip require/require_relative/load — those are imports
+			for child in node.children(&mut node.walk()) {
+				if child.kind() == "identifier" || child.kind() == "constant" {
+					if let Ok(text) = child.utf8_text(contents.as_bytes()) {
+						let name = text.trim();
+						if name == "require" || name == "require_relative" || name == "load" {
+							return Vec::new();
+						}
+						return super::extract_callee_identifiers(name);
+					}
+				}
+			}
+		}
+		Vec::new()
+	}
+
 	fn resolve_import(
 		&self,
 		import_path: &str,

@@ -134,6 +134,22 @@ impl Language for Bash {
 		(imports, exports)
 	}
 
+	fn extract_function_calls(&self, node: Node, contents: &str) -> Vec<String> {
+		if node.kind() == "command" {
+			// First child is the command name — skip "source" and "." (imports)
+			if let Some(cmd_node) = node.child(0) {
+				if let Ok(text) = cmd_node.utf8_text(contents.as_bytes()) {
+					let name = text.trim();
+					if name == "source" || name == "." {
+						return Vec::new();
+					}
+					return vec![name.to_string()];
+				}
+			}
+		}
+		Vec::new()
+	}
+
 	fn resolve_import(
 		&self,
 		import_path: &str,

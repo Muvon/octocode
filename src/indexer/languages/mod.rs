@@ -78,6 +78,14 @@ pub trait Language: Send + Sync {
 		(Vec::new(), Vec::new())
 	}
 
+	/// Extract function/method call names from a node.
+	/// Returns callee names if this node represents a function call.
+	/// The recursive walk and line tracking is handled by the caller.
+	fn extract_function_calls(&self, node: Node, contents: &str) -> Vec<String> {
+		let _ = (node, contents);
+		Vec::new()
+	}
+
 	/// Check if two node types are semantically equivalent for grouping
 	/// This allows each language to define its own semantic relationships
 	fn are_node_types_equivalent(&self, type1: &str, type2: &str) -> bool {
@@ -254,6 +262,28 @@ pub fn extract_symbol_by_kind(node: Node, contents: &str, target_kind: &str) -> 
 		}
 	}
 	None
+}
+
+/// Extract callee name(s) from a call expression's function child.
+/// Splits compound names (e.g. `Foo::bar`, `obj.method`) into individual identifiers
+/// for matching against exported symbols.
+pub fn extract_callee_identifiers(text: &str) -> Vec<String> {
+	let trimmed = text.trim();
+	if trimmed.is_empty() {
+		return Vec::new();
+	}
+
+	let mut results = Vec::new();
+
+	// Split on :: and . to get individual segments
+	for segment in trimmed.split(|c| c == '.' || c == ':') {
+		let seg = segment.trim();
+		if !seg.is_empty() && seg != "self" && seg != "Self" && seg != "this" && seg != "super" {
+			results.push(seg.to_string());
+		}
+	}
+
+	results
 }
 
 /// Extract a symbol from a node by finding a child matching any of multiple kinds

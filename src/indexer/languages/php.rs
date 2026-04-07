@@ -158,6 +158,33 @@ impl Language for Php {
 		(imports, exports)
 	}
 
+	fn extract_function_calls(&self, node: Node, contents: &str) -> Vec<String> {
+		match node.kind() {
+			"function_call_expression" => {
+				// First child is the function name
+				if let Some(func_node) = node.child(0) {
+					if let Ok(text) = func_node.utf8_text(contents.as_bytes()) {
+						return super::extract_callee_identifiers(text);
+					}
+				}
+				Vec::new()
+			}
+			"member_call_expression" | "scoped_call_expression" => {
+				// $obj->method() or ClassName::method()
+				let mut result = Vec::new();
+				for child in node.children(&mut node.walk()) {
+					if child.kind() == "name" {
+						if let Ok(text) = child.utf8_text(contents.as_bytes()) {
+							result.push(text.to_string());
+						}
+					}
+				}
+				result
+			}
+			_ => Vec::new(),
+		}
+	}
+
 	fn resolve_import(
 		&self,
 		import_path: &str,

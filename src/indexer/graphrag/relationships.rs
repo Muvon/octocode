@@ -94,6 +94,27 @@ impl RelationshipDiscovery {
 				all_nodes,
 				&mut relationships,
 			);
+
+			// 4. Function call relationships from extracted call sites
+			for function in &source_file.functions {
+				for callee in &function.calls {
+					if let Some(target_ids) = symbol_index.get(callee) {
+						for &target_id in target_ids {
+							if target_id != source_file.id {
+								relationships.push(CodeRelationship {
+									source: source_file.id.clone(),
+									target: target_id.to_string(),
+									relation_type:
+										crate::indexer::graphrag::types::RelationType::Calls,
+									description: format!("{} calls {}", function.name, callee),
+									confidence: 0.85,
+									weight: 0.8,
+								});
+							}
+						}
+					}
+				}
+			}
 		}
 
 		// Deduplicate relationships

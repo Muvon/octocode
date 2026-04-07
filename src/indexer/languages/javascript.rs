@@ -161,6 +161,30 @@ impl Language for JavaScript {
 		(imports, exports)
 	}
 
+	fn extract_function_calls(&self, node: Node, contents: &str) -> Vec<String> {
+		match node.kind() {
+			"call_expression" => {
+				// First child is the function being called
+				if let Some(func_node) = node.child(0) {
+					if let Ok(text) = func_node.utf8_text(contents.as_bytes()) {
+						return super::extract_callee_identifiers(text);
+					}
+				}
+				Vec::new()
+			}
+			"new_expression" => {
+				// child(0) = "new" keyword, child(1) = constructor
+				if let Some(ctor) = node.child(1) {
+					if let Ok(text) = ctor.utf8_text(contents.as_bytes()) {
+						return super::extract_callee_identifiers(text);
+					}
+				}
+				Vec::new()
+			}
+			_ => Vec::new(),
+		}
+	}
+
 	fn resolve_import(
 		&self,
 		import_path: &str,

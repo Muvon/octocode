@@ -270,6 +270,23 @@ impl GraphBuilder {
 					}
 				}
 
+				// Extract function calls and assign to FunctionInfo entries by line range
+				if let Ok(file_calls) = self
+					.extract_function_calls_from_file(&file_path, &language)
+					.await
+				{
+					for func in &mut all_functions {
+						func.calls = file_calls
+							.iter()
+							.filter(|(line, _)| *line >= func.start_line && *line <= func.end_line)
+							.map(|(_, callee)| callee.clone())
+							.collect();
+						// Deduplicate
+						func.calls.sort();
+						func.calls.dedup();
+					}
+				}
+
 				// Generate description - collect for batch AI processing when enabled
 				let description = if self.llm_enabled()
 					&& self.should_use_ai_for_description(&symbols, total_lines as u32, &language)
@@ -1176,6 +1193,61 @@ impl GraphBuilder {
 		);
 
 		Ok((all_imports, all_exports))
+	}
+
+	/// Extract function calls from a file using language-specific AST parsing.
+	/// Returns (line_number, callee_name) pairs.
+	pub async fn extract_function_calls_from_file(
+		&self,
+		file_path: &str,
+		language: &str,
+	) -> Result<Vec<(u32, String)>> {
+		use crate::indexer::languages;
+		use std::fs;
+		use tree_sitter::Parser;
+
+		let lang_impl = languages::get_language(language).ok_or_else(|| {
+			anyhow::anyhow!("Failed to get language implementation for: {}", language)
+		})?;
+
+		let contents = fs::read_to_string(file_path)?;
+
+		let mut parser = Parser::new();
+		parser.set_language(&lang_impl.get_ts_language())?;
+		let tree = parser
+			.parse(&contents, None)
+			.ok_or_else(|| anyhow::anyhow!("Failed to parse file"))?;
+
+		let mut calls = Vec::new();
+		extract_function_calls_recursive(
+			tree.walk().node(),
+			&contents,
+			lang_impl.as_ref(),
+			&mut calls,
+		);
+
+		Ok(calls)
+	}
+}
+
+// Recursively extract function calls from AST nodes
+fn extract_function_calls_recursive(
+	node: tree_sitter::Node,
+	contents: &str,
+	lang_impl: &dyn crate::indexer::languages::Language,
+	calls: &mut Vec<(u32, String)>,
+) {
+	let callees = lang_impl.extract_function_calls(node, contents);
+	if !callees.is_empty() {
+		let line = node.start_position().row as u32; // 0-based to match FunctionInfo
+		for callee in callees {
+			calls.push((line, callee));
+		}
+	}
+
+	let mut cursor = node.walk();
+	for child in node.children(&mut cursor) {
+		extract_function_calls_recursive(child, contents, lang_impl, calls);
 	}
 }
 

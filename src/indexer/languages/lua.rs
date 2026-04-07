@@ -178,6 +178,22 @@ impl Language for Lua {
 		vec!["lua"]
 	}
 
+	fn extract_function_calls(&self, node: Node, contents: &str) -> Vec<String> {
+		if node.kind() == "function_call" {
+			// First child is the function name — skip "require" (that's an import)
+			if let Some(func_node) = node.child(0) {
+				if let Ok(text) = func_node.utf8_text(contents.as_bytes()) {
+					let name = text.trim();
+					if name == "require" {
+						return Vec::new();
+					}
+					return super::extract_callee_identifiers(name);
+				}
+			}
+		}
+		Vec::new()
+	}
+
 	fn resolve_import(
 		&self,
 		import_path: &str,

@@ -144,6 +144,18 @@ impl Language for Python {
 		(imports, exports)
 	}
 
+	fn extract_function_calls(&self, node: Node, contents: &str) -> Vec<String> {
+		if node.kind() == "call" {
+			// First child is the function being called
+			if let Some(func_node) = node.child(0) {
+				if let Ok(text) = func_node.utf8_text(contents.as_bytes()) {
+					return super::extract_callee_identifiers(text);
+				}
+			}
+		}
+		Vec::new()
+	}
+
 	fn resolve_import(
 		&self,
 		import_path: &str,

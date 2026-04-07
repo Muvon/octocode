@@ -238,6 +238,35 @@ impl Language for Java {
 		});
 	}
 
+	fn extract_function_calls(&self, node: Node, contents: &str) -> Vec<String> {
+		match node.kind() {
+			"method_invocation" => {
+				// Extract method name and object identifiers
+				let mut result = Vec::new();
+				for child in node.children(&mut node.walk()) {
+					if child.kind() == "identifier" {
+						if let Ok(text) = child.utf8_text(contents.as_bytes()) {
+							result.push(text.to_string());
+						}
+					}
+				}
+				result
+			}
+			"object_creation_expression" => {
+				// new Foo() → extract type name
+				for child in node.children(&mut node.walk()) {
+					if child.kind() == "type_identifier" || child.kind() == "generic_type" {
+						if let Ok(text) = child.utf8_text(contents.as_bytes()) {
+							return super::extract_callee_identifiers(text);
+						}
+					}
+				}
+				Vec::new()
+			}
+			_ => Vec::new(),
+		}
+	}
+
 	fn resolve_import(
 		&self,
 		import_path: &str,

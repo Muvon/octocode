@@ -192,6 +192,33 @@ impl Language for Rust {
 		(imports, exports)
 	}
 
+	fn extract_function_calls(&self, node: Node, contents: &str) -> Vec<String> {
+		match node.kind() {
+			"call_expression" => {
+				// First child is the function being called
+				if let Some(func_node) = node.child(0) {
+					if let Ok(text) = func_node.utf8_text(contents.as_bytes()) {
+						return super::extract_callee_identifiers(text);
+					}
+				}
+				Vec::new()
+			}
+			"macro_invocation" => {
+				// First child is the macro name (e.g. "vec", "println")
+				if let Some(macro_node) = node.child(0) {
+					if let Ok(text) = macro_node.utf8_text(contents.as_bytes()) {
+						let name = text.trim().trim_end_matches('!');
+						if !name.is_empty() {
+							return vec![name.to_string()];
+						}
+					}
+				}
+				Vec::new()
+			}
+			_ => Vec::new(),
+		}
+	}
+
 	fn resolve_import(
 		&self,
 		import_path: &str,
