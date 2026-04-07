@@ -115,6 +115,25 @@ pub struct GraphRagParams {
 }
 
 #[derive(Debug, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct StructuralSearchParams {
+	/// AST pattern using ast-grep syntax (e.g. '$FUNC.unwrap()', 'if err != nil { $$$ }')
+	pub pattern: String,
+	/// Language to search (required: rust, javascript, typescript, python, go, java, cpp, php, ruby, lua, bash, css, json)
+	pub language: String,
+	/// File paths or glob patterns to search (default: current directory)
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub paths: Option<Vec<String>>,
+	/// Number of context lines around matches
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	#[schemars(range(min = 0, max = 10))]
+	pub context: Option<usize>,
+	/// Max results to return (default: 50)
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	#[schemars(range(min = 1, max = 200), extend("default" = 50))]
+	pub max_results: Option<usize>,
+}
+
+#[derive(Debug, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct LspPositionParams {
 	/// Relative file path
 	pub file_path: String,
@@ -372,6 +391,107 @@ impl McpServer {
 			.execute_completion(&args)
 			.await
 			.map_err(|e| e.to_string())
+	}
+
+	// --- Structural search tool ---
+
+	#[tool(
+		description = "Search code by AST structure using ast-grep pattern syntax. Finds code matching structural patterns like '$FUNC.unwrap()', 'if let Some($X) = $Y { $$$ }'. Complements semantic_search: use this for structural/syntactic patterns, semantic_search for meaning-based queries."
+	)]
+	async fn structural_search(
+		&self,
+		Parameters(params): Parameters<StructuralSearchParams>,
+	) -> Result<String, String> {
+		debug!(
+			"Executing structural_search with pattern: {} lang: {}",
+			params.pattern, params.language
+		);
+
+		let current_dir = std::env::current_dir().map_err(|e| e.to_string())?;
+		let max_results = params.max_results.unwrap_or(50);
+		let context = params.context.unwrap_or(0);
+
+		// Collect files to search
+		let walker = ignore::WalkBuilder::new(&current_dir)
+			.git_ignore(true)
+			.git_global(true)
+			.git_exclude(true)
+			.hidden(true)
+			.build();
+
+		let mut all_matches = Vec::new();
+		let mut source_map = std::collections::HashMap::new();
+
+		for entry in walker.flatten() {
+			if all_matches.len() >= max_results {
+				break;
+			}
+			if !entry.file_type().is_some_and(|ft| ft.is_file()) {
+				continue;
+			}
+			let path = entry.path();
+
+			// Filter by language
+			if crate::grep::language_from_extension(path) != Some(params.language.as_str()) {
+				continue;
+			}
+
+			// Optional path filter
+			if let Some(ref filter_paths) = params.paths {
+				let rel = path
+					.strip_prefix(&current_dir)
+					.unwrap_or(path)
+					.to_string_lossy();
+				if !filter_paths.iter().any(|p| rel.contains(p)) {
+					continue;
+				}
+			}
+
+			let source = match std::fs::read_to_string(path) {
+				Ok(s) => s,
+				Err(_) => continue,
+			};
+
+			let display_path = path
+				.strip_prefix(&current_dir)
+				.unwrap_or(path)
+				.to_string_lossy()
+				.to_string();
+
+			match crate::grep::search_file(
+				&display_path,
+				&source,
+				&params.pattern,
+				&params.language,
+			) {
+				Ok(matches) => {
+					if context > 0 && !matches.is_empty() {
+						source_map.insert(display_path.clone(), source);
+					}
+					all_matches.extend(matches);
+				}
+				Err(_) => continue,
+			}
+		}
+
+		if all_matches.is_empty() {
+			return Ok("No matches found.".to_string());
+		}
+
+		// Truncate to max_results
+		all_matches.truncate(max_results);
+
+		let output = if context > 0 {
+			crate::grep::format_matches_with_context(&all_matches, &source_map, context)
+		} else {
+			crate::grep::format_matches_grouped(&all_matches)
+		};
+
+		Ok(format!(
+			"{}\n\n{} matches found.",
+			output,
+			all_matches.len()
+		))
 	}
 }
 

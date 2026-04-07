@@ -16,6 +16,7 @@
 pub mod config;
 pub mod constants;
 pub mod embedding;
+pub mod grep;
 pub mod indexer;
 pub mod llm;
 pub mod lock;

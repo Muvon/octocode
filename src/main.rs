@@ -49,6 +49,9 @@ enum Commands {
 	/// Generate a default configuration file
 	Config(commands::ConfigArgs),
 
+	/// Structural code search using AST patterns (ast-grep syntax)
+	Grep(commands::GrepArgs),
+
 	/// Query and explore the code relationship graph (GraphRAG)
 	#[command(name = "graphrag")]
 	GraphRAG(commands::GraphRAGArgs),
@@ -147,6 +150,11 @@ async fn main() -> Result<(), anyhow::Error> {
 		return commands::branch::execute(branch_args).await;
 	}
 
+	// Handle the Grep command separately (doesn't need store)
+	if let Commands::Grep(grep_args) = &args.command {
+		return commands::grep::execute(grep_args).await;
+	}
+
 	// Handle the Format command separately (doesn't need store)
 	if let Commands::Format(format_args) = &args.command {
 		return commands::format::execute(format_args).await;
@@ -204,6 +212,7 @@ async fn main() -> Result<(), anyhow::Error> {
 		Commands::Commit(_) => unreachable!(), // Already handled above
 		Commands::Review(_) => unreachable!(), // Already handled above
 		Commands::Release(_) => unreachable!(), // Already handled above
+		Commands::Grep(_) => unreachable!(),   // Already handled above
 		Commands::Format(_) => unreachable!(), // Already handled above
 		Commands::Logs(_) => unreachable!(),   // Already handled above
 		Commands::Models { .. } => unreachable!(), // Already handled above
