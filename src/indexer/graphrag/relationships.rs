@@ -157,6 +157,21 @@ impl RelationshipDiscovery {
 			}
 		}
 
+		// Try last segment of path-based imports (e.g. "crate::config::Config" → "Config")
+		// This handles Rust (::), Python (.), Go (/) path separators
+		if results.is_empty() {
+			let last_segment = import
+				.rsplit([':', '.', '/'])
+				.next()
+				.unwrap_or(import)
+				.trim();
+			if !last_segment.is_empty() && last_segment != import {
+				if let Some(ids) = symbol_index.get(last_segment) {
+					results.extend(ids.iter().copied());
+				}
+			}
+		}
+
 		// Deduplicate
 		results.sort_unstable();
 		results.dedup();

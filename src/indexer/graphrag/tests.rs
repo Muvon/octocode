@@ -935,6 +935,565 @@ def _private_function():
 		assert!(resolved.is_none(), "Should handle very long import paths");
 	}
 
+	// ==========================================================================
+	// Function call extraction tests
+	// ==========================================================================
+
+	/// Helper to extract function calls recursively from AST
+	fn extract_function_calls_recursive(
+		node: tree_sitter::Node,
+		contents: &str,
+		lang_impl: &dyn Language,
+		calls: &mut Vec<(u32, String)>,
+	) {
+		let callees = lang_impl.extract_function_calls(node, contents);
+		if !callees.is_empty() {
+			let line = node.start_position().row as u32;
+			for callee in callees {
+				calls.push((line, callee));
+			}
+		}
+		let mut cursor = node.walk();
+		for child in node.children(&mut cursor) {
+			extract_function_calls_recursive(child, contents, lang_impl, calls);
+		}
+	}
+
+	#[test]
+	fn test_rust_function_call_extraction() {
+		let rust_code = r#"
+use crate::config::Config;
+
+pub fn main() {
+    let config = Config::new();
+    let result = helper_function(42);
+    println!("Hello, world!");
+    config.run();
+}
+
+fn helper_function(x: i32) -> i32 {
+    other_module::process(x)
+}
+"#;
+
+		let lang = get_language("rust").unwrap();
+		let mut parser = Parser::new();
+		parser.set_language(&lang.get_ts_language()).unwrap();
+		let tree = parser.parse(rust_code, None).unwrap();
+
+		let mut calls = Vec::new();
+		extract_function_calls_recursive(tree.root_node(), rust_code, lang.as_ref(), &mut calls);
+
+		let callee_names: Vec<&str> = calls.iter().map(|(_, name)| name.as_str()).collect();
+		println!("Rust calls: {:?}", callee_names);
+
+		assert!(
+			callee_names.contains(&"new"),
+			"Should extract Config::new() call"
+		);
+		assert!(
+			callee_names.contains(&"Config"),
+			"Should extract Config from Config::new()"
+		);
+		assert!(
+			callee_names.contains(&"helper_function"),
+			"Should extract helper_function() call"
+		);
+		assert!(
+			callee_names.contains(&"println"),
+			"Should extract println! macro call"
+		);
+		assert!(
+			callee_names.contains(&"run"),
+			"Should extract config.run() method call"
+		);
+		assert!(
+			callee_names.contains(&"process"),
+			"Should extract other_module::process() call"
+		);
+	}
+
+	#[test]
+	fn test_python_function_call_extraction() {
+		let python_code = r#"
+import os
+
+def main():
+    result = helper(42)
+    os.path.join("a", "b")
+    print("done")
+
+def helper(x):
+    return process_data(x)
+"#;
+
+		let lang = get_language("python").unwrap();
+		let mut parser = Parser::new();
+		parser.set_language(&lang.get_ts_language()).unwrap();
+		let tree = parser.parse(python_code, None).unwrap();
+
+		let mut calls = Vec::new();
+		extract_function_calls_recursive(tree.root_node(), python_code, lang.as_ref(), &mut calls);
+
+		let callee_names: Vec<&str> = calls.iter().map(|(_, name)| name.as_str()).collect();
+		println!("Python calls: {:?}", callee_names);
+
+		assert!(
+			callee_names.contains(&"helper"),
+			"Should extract helper() call"
+		);
+		assert!(
+			callee_names.contains(&"print"),
+			"Should extract print() call"
+		);
+		assert!(
+			callee_names.contains(&"process_data"),
+			"Should extract process_data() call"
+		);
+	}
+
+	#[test]
+	fn test_javascript_function_call_extraction() {
+		let js_code = r#"
+import { helper } from './utils';
+
+function main() {
+    const result = helper(42);
+    console.log("done");
+    const obj = new MyClass();
+}
+"#;
+
+		let lang = get_language("javascript").unwrap();
+		let mut parser = Parser::new();
+		parser.set_language(&lang.get_ts_language()).unwrap();
+		let tree = parser.parse(js_code, None).unwrap();
+
+		let mut calls = Vec::new();
+		extract_function_calls_recursive(tree.root_node(), js_code, lang.as_ref(), &mut calls);
+
+		let callee_names: Vec<&str> = calls.iter().map(|(_, name)| name.as_str()).collect();
+		println!("JavaScript calls: {:?}", callee_names);
+
+		assert!(
+			callee_names.contains(&"helper"),
+			"Should extract helper() call"
+		);
+		assert!(
+			callee_names.contains(&"log"),
+			"Should extract console.log() call"
+		);
+		assert!(
+			callee_names.contains(&"MyClass"),
+			"Should extract new MyClass() constructor"
+		);
+	}
+
+	#[test]
+	fn test_go_function_call_extraction() {
+		let go_code = r#"
+package main
+
+import "fmt"
+
+func main() {
+	result := helper(42)
+	fmt.Println("done")
+}
+
+func helper(x int) int {
+	return process(x)
+}
+"#;
+
+		let lang = get_language("go").unwrap();
+		let mut parser = Parser::new();
+		parser.set_language(&lang.get_ts_language()).unwrap();
+		let tree = parser.parse(go_code, None).unwrap();
+
+		let mut calls = Vec::new();
+		extract_function_calls_recursive(tree.root_node(), go_code, lang.as_ref(), &mut calls);
+
+		let callee_names: Vec<&str> = calls.iter().map(|(_, name)| name.as_str()).collect();
+		println!("Go calls: {:?}", callee_names);
+
+		assert!(
+			callee_names.contains(&"helper"),
+			"Should extract helper() call"
+		);
+		assert!(
+			callee_names.contains(&"Println"),
+			"Should extract fmt.Println() call"
+		);
+		assert!(
+			callee_names.contains(&"process"),
+			"Should extract process() call"
+		);
+	}
+
+	#[test]
+	fn test_calls_relationship_creation() {
+		// Test that function calls create Calls relationships via symbol index matching
+		let node_a = CodeNode {
+			id: "src/main.rs".to_string(),
+			name: "main".to_string(),
+			kind: "file".to_string(),
+			path: "src/main.rs".to_string(),
+			description: "Main entry point".to_string(),
+			symbols: vec!["main".to_string()],
+			hash: "hash_a".to_string(),
+			embedding: Vec::new(),
+			imports: vec!["crate::config::Config".to_string()],
+			exports: vec!["main".to_string()],
+			functions: vec![crate::indexer::graphrag::types::FunctionInfo {
+				name: "main".to_string(),
+				signature: "fn main()".to_string(),
+				start_line: 0,
+				end_line: 10,
+				calls: vec!["Config".to_string(), "run".to_string()],
+				called_by: Vec::new(),
+				parameters: Vec::new(),
+				return_type: None,
+			}],
+			size_lines: 10,
+			language: "rust".to_string(),
+		};
+
+		let node_b = CodeNode {
+			id: "src/config.rs".to_string(),
+			name: "config".to_string(),
+			kind: "file".to_string(),
+			path: "src/config.rs".to_string(),
+			description: "Configuration module".to_string(),
+			symbols: vec!["Config".to_string(), "run".to_string()],
+			hash: "hash_b".to_string(),
+			embedding: Vec::new(),
+			imports: Vec::new(),
+			exports: vec!["Config".to_string(), "run".to_string()],
+			functions: Vec::new(),
+			size_lines: 20,
+			language: "rust".to_string(),
+		};
+
+		let rt = tokio::runtime::Runtime::new().unwrap();
+		let relationships = rt.block_on(async {
+			RelationshipDiscovery::discover_relationships_efficiently(
+				&[node_a.clone()],
+				&[node_a.clone(), node_b.clone()],
+			)
+			.await
+			.unwrap()
+		});
+
+		println!(
+			"Relationships: {:?}",
+			relationships
+				.iter()
+				.map(|r| (&r.source, &r.target, &r.relation_type))
+				.collect::<Vec<_>>()
+		);
+
+		// Should have Calls relationship from main.rs → config.rs
+		let calls_rels: Vec<_> = relationships
+			.iter()
+			.filter(|r| r.relation_type == crate::indexer::graphrag::types::RelationType::Calls)
+			.collect();
+
+		assert!(
+			!calls_rels.is_empty(),
+			"Should create Calls relationships from function calls"
+		);
+		assert!(
+			calls_rels
+				.iter()
+				.any(|r| r.source == "src/main.rs" && r.target == "src/config.rs"),
+			"Should create Calls edge from main.rs to config.rs"
+		);
+
+		// Should also have Imports relationship (via last-segment matching)
+		let import_rels: Vec<_> = relationships
+			.iter()
+			.filter(|r| r.relation_type == crate::indexer::graphrag::types::RelationType::Imports)
+			.collect();
+
+		assert!(
+			!import_rels.is_empty(),
+			"Should create Imports relationships from import matching"
+		);
+	}
+
+	#[test]
+	fn test_import_last_segment_matching() {
+		// Test that "crate::config::Config" matches against export "Config"
+		let node_a = CodeNode {
+			id: "src/main.rs".to_string(),
+			name: "main".to_string(),
+			kind: "file".to_string(),
+			path: "src/main.rs".to_string(),
+			description: "".to_string(),
+			symbols: vec![],
+			hash: "a".to_string(),
+			embedding: Vec::new(),
+			imports: vec!["crate::config::Config".to_string()],
+			exports: Vec::new(),
+			functions: Vec::new(),
+			size_lines: 5,
+			language: "rust".to_string(),
+		};
+
+		let node_b = CodeNode {
+			id: "src/config.rs".to_string(),
+			name: "config".to_string(),
+			kind: "file".to_string(),
+			path: "src/config.rs".to_string(),
+			description: "".to_string(),
+			symbols: vec!["Config".to_string()],
+			hash: "b".to_string(),
+			embedding: Vec::new(),
+			imports: Vec::new(),
+			exports: vec!["Config".to_string()],
+			functions: Vec::new(),
+			size_lines: 10,
+			language: "rust".to_string(),
+		};
+
+		let rt = tokio::runtime::Runtime::new().unwrap();
+		let relationships = rt.block_on(async {
+			RelationshipDiscovery::discover_relationships_efficiently(
+				&[node_a.clone()],
+				&[node_a, node_b],
+			)
+			.await
+			.unwrap()
+		});
+
+		let import_rels: Vec<_> = relationships
+			.iter()
+			.filter(|r| r.relation_type == crate::indexer::graphrag::types::RelationType::Imports)
+			.collect();
+
+		assert!(
+			import_rels
+				.iter()
+				.any(|r| r.source == "src/main.rs" && r.target == "src/config.rs"),
+			"crate::config::Config should match export Config via last-segment matching"
+		);
+	}
+
+	// --- Remaining language call extraction tests ---
+
+	#[test]
+	fn test_java_function_call_extraction() {
+		let java_code = r#"
+public class Main {
+    public void run() {
+        helper();
+        System.out.println("hello");
+        MyClass obj = new MyClass();
+    }
+}
+"#;
+		let lang = get_language("java").unwrap();
+		let mut parser = Parser::new();
+		parser.set_language(&lang.get_ts_language()).unwrap();
+		let tree = parser.parse(java_code, None).unwrap();
+
+		let mut calls = Vec::new();
+		extract_function_calls_recursive(tree.root_node(), java_code, lang.as_ref(), &mut calls);
+		let callee_names: Vec<&str> = calls.iter().map(|(_, name)| name.as_str()).collect();
+		println!("Java calls: {:?}", callee_names);
+
+		assert!(
+			callee_names.contains(&"helper"),
+			"Should extract helper() call"
+		);
+		assert!(
+			callee_names.contains(&"println"),
+			"Should extract println call"
+		);
+		assert!(
+			callee_names.contains(&"MyClass"),
+			"Should extract new MyClass()"
+		);
+	}
+
+	#[test]
+	fn test_cpp_function_call_extraction() {
+		let cpp_code = r#"
+#include <iostream>
+void foo() {
+    bar(42);
+    std::cout << "hello";
+    baz(1, 2);
+}
+"#;
+		let lang = get_language("cpp").unwrap();
+		let mut parser = Parser::new();
+		parser.set_language(&lang.get_ts_language()).unwrap();
+		let tree = parser.parse(cpp_code, None).unwrap();
+
+		let mut calls = Vec::new();
+		extract_function_calls_recursive(tree.root_node(), cpp_code, lang.as_ref(), &mut calls);
+		let callee_names: Vec<&str> = calls.iter().map(|(_, name)| name.as_str()).collect();
+		println!("C++ calls: {:?}", callee_names);
+
+		assert!(callee_names.contains(&"bar"), "Should extract bar() call");
+		assert!(callee_names.contains(&"baz"), "Should extract baz() call");
+	}
+
+	#[test]
+	fn test_php_function_call_extraction() {
+		let php_code = r#"<?php
+function main() {
+    helper(42);
+    $obj->method();
+    ClassName::staticMethod();
+}
+?>"#;
+		let lang = get_language("php").unwrap();
+		let mut parser = Parser::new();
+		parser.set_language(&lang.get_ts_language()).unwrap();
+		let tree = parser.parse(php_code, None).unwrap();
+
+		let mut calls = Vec::new();
+		extract_function_calls_recursive(tree.root_node(), php_code, lang.as_ref(), &mut calls);
+		let callee_names: Vec<&str> = calls.iter().map(|(_, name)| name.as_str()).collect();
+		println!("PHP calls: {:?}", callee_names);
+
+		assert!(
+			callee_names.contains(&"helper"),
+			"Should extract helper() call"
+		);
+	}
+
+	#[test]
+	fn test_ruby_function_call_extraction() {
+		let ruby_code = r#"
+def main
+  helper(42)
+  obj.method
+  puts "hello"
+end
+"#;
+		let lang = get_language("ruby").unwrap();
+		let mut parser = Parser::new();
+		parser.set_language(&lang.get_ts_language()).unwrap();
+		let tree = parser.parse(ruby_code, None).unwrap();
+
+		let mut calls = Vec::new();
+		extract_function_calls_recursive(tree.root_node(), ruby_code, lang.as_ref(), &mut calls);
+		let callee_names: Vec<&str> = calls.iter().map(|(_, name)| name.as_str()).collect();
+		println!("Ruby calls: {:?}", callee_names);
+
+		// Should have some calls, but not require/require_relative (filtered)
+		assert!(
+			!callee_names.is_empty(),
+			"Should extract at least some Ruby calls"
+		);
+		assert!(
+			!callee_names.contains(&"require"),
+			"Should filter out require"
+		);
+	}
+
+	#[test]
+	fn test_lua_function_call_extraction() {
+		let lua_code = r#"
+local function main()
+    helper(42)
+    other.method()
+    print("hello")
+end
+"#;
+		let lang = get_language("lua").unwrap();
+		let mut parser = Parser::new();
+		parser.set_language(&lang.get_ts_language()).unwrap();
+		let tree = parser.parse(lua_code, None).unwrap();
+
+		let mut calls = Vec::new();
+		extract_function_calls_recursive(tree.root_node(), lua_code, lang.as_ref(), &mut calls);
+		let callee_names: Vec<&str> = calls.iter().map(|(_, name)| name.as_str()).collect();
+		println!("Lua calls: {:?}", callee_names);
+
+		assert!(
+			callee_names.contains(&"helper"),
+			"Should extract helper() call"
+		);
+		assert!(
+			callee_names.contains(&"print"),
+			"Should extract print() call"
+		);
+		// require should be filtered
+		assert!(
+			!callee_names.contains(&"require"),
+			"Should filter out require"
+		);
+	}
+
+	#[test]
+	fn test_bash_function_call_extraction() {
+		let bash_code = r#"#!/bin/bash
+my_function() {
+    echo "hello"
+    other_func arg1 arg2
+}
+"#;
+		let lang = get_language("bash").unwrap();
+		let mut parser = Parser::new();
+		parser.set_language(&lang.get_ts_language()).unwrap();
+		let tree = parser.parse(bash_code, None).unwrap();
+
+		let mut calls = Vec::new();
+		extract_function_calls_recursive(tree.root_node(), bash_code, lang.as_ref(), &mut calls);
+		let callee_names: Vec<&str> = calls.iter().map(|(_, name)| name.as_str()).collect();
+		println!("Bash calls: {:?}", callee_names);
+
+		assert!(
+			callee_names.contains(&"echo"),
+			"Should extract echo command"
+		);
+		assert!(
+			callee_names.contains(&"other_func"),
+			"Should extract other_func command"
+		);
+		// source/. should be filtered
+		assert!(
+			!callee_names.contains(&"source"),
+			"Should filter out source"
+		);
+	}
+
+	#[test]
+	fn test_typescript_function_call_extraction() {
+		let ts_code = r#"
+import { helper } from './utils';
+
+function main(): void {
+    const result = helper(42);
+    console.log("done");
+    const obj = new MyClass<string>();
+}
+"#;
+		let lang = get_language("typescript").unwrap();
+		let mut parser = Parser::new();
+		parser.set_language(&lang.get_ts_language()).unwrap();
+		let tree = parser.parse(ts_code, None).unwrap();
+
+		let mut calls = Vec::new();
+		extract_function_calls_recursive(tree.root_node(), ts_code, lang.as_ref(), &mut calls);
+		let callee_names: Vec<&str> = calls.iter().map(|(_, name)| name.as_str()).collect();
+		println!("TypeScript calls: {:?}", callee_names);
+
+		assert!(
+			callee_names.contains(&"helper"),
+			"Should extract helper() call"
+		);
+		assert!(
+			callee_names.contains(&"log"),
+			"Should extract console.log() call"
+		);
+	}
+
 	/// Helper function to extract imports/exports recursively (same as in builder.rs)
 	fn extract_imports_exports_recursive(
 		node: tree_sitter::Node,

@@ -276,7 +276,7 @@ pub fn extract_callee_identifiers(text: &str) -> Vec<String> {
 	let mut results = Vec::new();
 
 	// Split on :: and . to get individual segments
-	for segment in trimmed.split(|c| c == '.' || c == ':') {
+	for segment in trimmed.split(['.', ':']) {
 		let seg = segment.trim();
 		if !seg.is_empty() && seg != "self" && seg != "Self" && seg != "this" && seg != "super" {
 			results.push(seg.to_string());
