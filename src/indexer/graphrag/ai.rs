@@ -171,12 +171,13 @@ impl AIEnhancements {
 			"You are an expert software architect. Analyze these code files and identify ARCHITECTURAL relationships.\n\
 				Focus on design patterns, dependency injection, factory patterns, observer patterns, etc.\n\
 				Look for relationships that go beyond simple imports - identify architectural significance.\n\n\
-				Respond with a JSON array of relationships. For each relationship, include:\n\
-				- source_path: relative path of source file\n\
-				- target_path: relative path of target file\n\
+				For each relationship, provide:\n\
+				- source_path: relative path of the source file\n\
+				- target_path: relative path of the target file\n\
 				- relation_type: one of 'implements_pattern', 'dependency_injection', 'factory_creates', 'observer_pattern', 'strategy_pattern', 'adapter_pattern', 'decorator_pattern', 'architectural_dependency'\n\
 				- description: brief explanation of the architectural relationship\n\
-				- confidence: 0.0-1.0 confidence score\n\n"
+				- confidence: 0.0-1.0 confidence score\n\n\
+				Respond with JSON: {\"relationships\": [{\"source_path\": \"...\", \"target_path\": \"...\", \"relation_type\": \"...\", \"description\": \"...\", \"confidence\": 0.0}]}\n\n"
 		);
 		let mut batch_prompt = String::from("");
 
