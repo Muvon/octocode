@@ -18,6 +18,7 @@
 use anyhow::{bail, Result};
 use ast_grep_core::language::Language as AstGrepLanguage;
 use ast_grep_core::matcher::PatternBuilder;
+use ast_grep_core::source::Edit as AstEdit;
 use ast_grep_core::tree_sitter::{LanguageExt, StrDoc};
 use ast_grep_core::{Pattern, PatternError};
 use std::path::Path;
@@ -157,6 +158,105 @@ pub fn search_file(
 			text,
 		})
 		.collect())
+}
+
+/// Result of rewriting matches in a single file.
+pub struct RewriteResult {
+	pub file: String,
+	pub replacements: usize,
+	pub original_source: String,
+	pub rewritten_source: String,
+}
+
+/// Rewrite matches in a single file using a replacement template.
+/// Returns None if no matches found. The template supports metavariables
+/// captured by the search pattern (e.g. `$VAR`, `$$$ARGS`).
+fn rewrite_file_with_lang<L: LanguageExt + AstGrepLanguage>(
+	lang: L,
+	source: &str,
+	pattern_str: &str,
+	rewrite_str: &str,
+) -> Result<Option<(usize, String)>> {
+	let grep = lang.ast_grep(source);
+	let pattern = Pattern::new(pattern_str, lang);
+	let edits = grep.root().replace_all(&pattern, rewrite_str);
+	if edits.is_empty() {
+		return Ok(None);
+	}
+	let count = edits.len();
+	let rewritten = apply_edits(source, edits);
+	Ok(Some((count, rewritten)))
+}
+
+/// Apply edits to source in reverse position order to preserve byte offsets.
+fn apply_edits(source: &str, edits: Vec<AstEdit<String>>) -> String {
+	let mut bytes = source.as_bytes().to_vec();
+	// Edits from replace_all are sorted by position ascending.
+	// Apply in reverse so earlier positions remain valid.
+	for edit in edits.into_iter().rev() {
+		bytes.splice(
+			edit.position..edit.position + edit.deleted_length,
+			edit.inserted_text,
+		);
+	}
+	String::from_utf8(bytes).expect("rewritten source should be valid UTF-8")
+}
+
+/// Rewrite matches in a file. Returns None if no matches found.
+pub fn rewrite_file(
+	file_path: &str,
+	source: &str,
+	pattern: &str,
+	rewrite: &str,
+	language: &str,
+) -> Result<Option<RewriteResult>> {
+	let result = match language {
+		"rust" => rewrite_file_with_lang(AstRust, source, pattern, rewrite),
+		"javascript" => rewrite_file_with_lang(AstJavaScript, source, pattern, rewrite),
+		"typescript" => rewrite_file_with_lang(AstTypeScript, source, pattern, rewrite),
+		"python" => rewrite_file_with_lang(AstPython, source, pattern, rewrite),
+		"go" => rewrite_file_with_lang(AstGo, source, pattern, rewrite),
+		"java" => rewrite_file_with_lang(AstJava, source, pattern, rewrite),
+		"cpp" => rewrite_file_with_lang(AstCpp, source, pattern, rewrite),
+		"php" => rewrite_file_with_lang(AstPhp, source, pattern, rewrite),
+		"ruby" => rewrite_file_with_lang(AstRuby, source, pattern, rewrite),
+		"lua" => rewrite_file_with_lang(AstLua, source, pattern, rewrite),
+		"bash" => rewrite_file_with_lang(AstBash, source, pattern, rewrite),
+		"css" => rewrite_file_with_lang(AstCss, source, pattern, rewrite),
+		"json" => rewrite_file_with_lang(AstJson, source, pattern, rewrite),
+		_ => bail!("Unsupported language: {}", language),
+	}?;
+
+	Ok(
+		result.map(|(replacements, rewritten_source)| RewriteResult {
+			file: file_path.to_string(),
+			replacements,
+			original_source: source.to_string(),
+			rewritten_source,
+		}),
+	)
+}
+
+/// Generate a unified-diff-style preview of rewrite changes.
+pub fn format_rewrite_diff(result: &RewriteResult) -> String {
+	let old_lines: Vec<&str> = result.original_source.lines().collect();
+	let new_lines: Vec<&str> = result.rewritten_source.lines().collect();
+
+	let mut output = format!("--- {}\n+++ {}\n", result.file, result.file);
+	let max_len = old_lines.len().max(new_lines.len());
+
+	let mut i = 0;
+	while i < max_len {
+		let old_line = old_lines.get(i).copied().unwrap_or("");
+		let new_line = new_lines.get(i).copied().unwrap_or("");
+		if old_line != new_line {
+			output.push_str(&format!("-{}:  {}\n", i + 1, old_line));
+			output.push_str(&format!("+{}:  {}\n", i + 1, new_line));
+		}
+		i += 1;
+	}
+
+	output.trim_end().to_string()
 }
 
 /// Format matches grouped by file (token-efficient output).
@@ -454,5 +554,99 @@ func bar() error {
 		let a_pos = output.find("src/a.rs").unwrap();
 		let b_pos = output.find("src/b.rs").unwrap();
 		assert!(a_pos < b_pos, "Files should be sorted");
+	}
+
+	// --- Rewrite tests ---
+
+	#[test]
+	fn test_rust_rewrite() {
+		let source = r#"
+fn main() {
+    let x = foo.unwrap();
+    let y = bar.unwrap();
+    let z = baz.expect("msg");
+}
+"#;
+		let result = rewrite_file(
+			"test.rs",
+			source,
+			"$VAR.unwrap()",
+			r#"$VAR.expect("reason")"#,
+			"rust",
+		)
+		.unwrap();
+		assert!(result.is_some(), "Should have matches to rewrite");
+		let result = result.unwrap();
+		assert_eq!(result.replacements, 2);
+		assert!(result.rewritten_source.contains(r#"foo.expect("reason")"#));
+		assert!(result.rewritten_source.contains(r#"bar.expect("reason")"#));
+		// Unmatched code should be preserved
+		assert!(result.rewritten_source.contains(r#"baz.expect("msg")"#));
+	}
+
+	#[test]
+	fn test_rewrite_no_match() {
+		let source = "fn main() { let x = 1; }";
+		let result = rewrite_file(
+			"test.rs",
+			source,
+			"$VAR.unwrap()",
+			"$VAR.expect(\"r\")",
+			"rust",
+		)
+		.unwrap();
+		assert!(result.is_none(), "Should return None when no matches");
+	}
+
+	#[test]
+	fn test_javascript_rewrite() {
+		let source = "console.log('hello');\nconsole.log('world');\n";
+		let result = rewrite_file(
+			"test.js",
+			source,
+			"console.log($ARG)",
+			"logger.info($ARG)",
+			"javascript",
+		)
+		.unwrap();
+		assert!(result.is_some());
+		let result = result.unwrap();
+		assert_eq!(result.replacements, 2);
+		assert!(result.rewritten_source.contains("logger.info('hello')"));
+		assert!(result.rewritten_source.contains("logger.info('world')"));
+	}
+
+	#[test]
+	fn test_rewrite_preserves_unmatched() {
+		let source = "let a = 1;\nlet b = foo.unwrap();\nlet c = 3;\n";
+		let result = rewrite_file(
+			"test.rs",
+			source,
+			"$VAR.unwrap()",
+			r#"$VAR.expect("x")"#,
+			"rust",
+		)
+		.unwrap()
+		.unwrap();
+		assert_eq!(result.replacements, 1);
+		assert!(result.rewritten_source.contains("let a = 1;"));
+		assert!(result.rewritten_source.contains("let c = 3;"));
+	}
+
+	#[test]
+	fn test_format_rewrite_diff() {
+		let result = RewriteResult {
+			file: "test.rs".to_string(),
+			replacements: 1,
+			original_source: "let x = foo.unwrap();\nlet y = 1;\n".to_string(),
+			rewritten_source: "let x = foo.expect(\"r\");\nlet y = 1;\n".to_string(),
+		};
+		let diff = format_rewrite_diff(&result);
+		assert!(diff.contains("--- test.rs"));
+		assert!(diff.contains("+++ test.rs"));
+		assert!(diff.contains("-1:"));
+		assert!(diff.contains("+1:"));
+		// Unchanged line should not appear
+		assert!(!diff.contains("let y = 1"));
 	}
 }

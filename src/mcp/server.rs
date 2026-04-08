@@ -131,6 +131,12 @@ pub struct StructuralSearchParams {
 	#[serde(default, skip_serializing_if = "Option::is_none")]
 	#[schemars(range(min = 1, max = 200), extend("default" = 50))]
 	pub max_results: Option<usize>,
+	/// Rewrite template with metavariable substitution (e.g. '$VAR.expect("reason")'). When provided, matched code is rewritten.
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub rewrite: Option<String>,
+	/// Apply rewrites to files in-place. When false or absent, returns a diff preview. Requires rewrite parameter.
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub update_all: Option<bool>,
 }
 
 #[derive(Debug, Serialize, Deserialize, schemars::JsonSchema)]
@@ -396,7 +402,7 @@ impl McpServer {
 	// --- Structural search tool ---
 
 	#[tool(
-		description = "Search code by AST structure using ast-grep pattern syntax. Finds code matching structural patterns like '$FUNC.unwrap()', 'if let Some($X) = $Y { $$$ }'. Complements semantic_search: use this for structural/syntactic patterns, semantic_search for meaning-based queries."
+		description = "Search or rewrite code by AST structure using ast-grep pattern syntax. Finds code matching structural patterns like '$FUNC.unwrap()', 'if let Some($X) = $Y { $$$ }'. Optionally rewrite matches using a template with metavariable substitution. Complements semantic_search: use this for structural/syntactic patterns, semantic_search for meaning-based queries."
 	)]
 	async fn structural_search(
 		&self,
@@ -411,7 +417,7 @@ impl McpServer {
 		let max_results = params.max_results.unwrap_or(50);
 		let context = params.context.unwrap_or(0);
 
-		// Collect files to search
+		// Collect matching files
 		let walker = ignore::WalkBuilder::new(&current_dir)
 			.git_ignore(true)
 			.git_global(true)
@@ -419,24 +425,15 @@ impl McpServer {
 			.hidden(true)
 			.build();
 
-		let mut all_matches = Vec::new();
-		let mut source_map = std::collections::HashMap::new();
-
+		let mut files = Vec::new();
 		for entry in walker.flatten() {
-			if all_matches.len() >= max_results {
-				break;
-			}
 			if !entry.file_type().is_some_and(|ft| ft.is_file()) {
 				continue;
 			}
 			let path = entry.path();
-
-			// Filter by language
 			if crate::grep::language_from_extension(path) != Some(params.language.as_str()) {
 				continue;
 			}
-
-			// Optional path filter
 			if let Some(ref filter_paths) = params.paths {
 				let rel = path
 					.strip_prefix(&current_dir)
@@ -446,18 +443,37 @@ impl McpServer {
 					continue;
 				}
 			}
+			files.push(path.to_path_buf());
+		}
 
+		// Branch: rewrite mode vs search mode
+		if let Some(ref rewrite_template) = params.rewrite {
+			return self.structural_rewrite(
+				&files,
+				&current_dir,
+				&params.pattern,
+				rewrite_template,
+				&params.language,
+				params.update_all.unwrap_or(false),
+			);
+		}
+
+		let mut all_matches = Vec::new();
+		let mut source_map = std::collections::HashMap::new();
+
+		for path in &files {
+			if all_matches.len() >= max_results {
+				break;
+			}
 			let source = match std::fs::read_to_string(path) {
 				Ok(s) => s,
 				Err(_) => continue,
 			};
-
 			let display_path = path
 				.strip_prefix(&current_dir)
 				.unwrap_or(path)
 				.to_string_lossy()
 				.to_string();
-
 			match crate::grep::search_file(
 				&display_path,
 				&source,
@@ -478,7 +494,6 @@ impl McpServer {
 			return Ok("No matches found.".to_string());
 		}
 
-		// Truncate to max_results
 		all_matches.truncate(max_results);
 
 		let output = if context > 0 {
@@ -516,6 +531,77 @@ impl ServerHandler for McpServer {
 }
 
 impl McpServer {
+	fn structural_rewrite(
+		&self,
+		files: &[std::path::PathBuf],
+		current_dir: &std::path::Path,
+		pattern: &str,
+		rewrite_template: &str,
+		language: &str,
+		update_all: bool,
+	) -> Result<String, String> {
+		let mut results = Vec::new();
+		let mut total_replacements = 0;
+
+		for path in files {
+			let source = match std::fs::read_to_string(path) {
+				Ok(s) => s,
+				Err(_) => continue,
+			};
+			let display_path = path
+				.strip_prefix(current_dir)
+				.unwrap_or(path)
+				.to_string_lossy()
+				.to_string();
+
+			match crate::grep::rewrite_file(
+				&display_path,
+				&source,
+				pattern,
+				rewrite_template,
+				language,
+			) {
+				Ok(Some(result)) => {
+					total_replacements += result.replacements;
+					results.push((path.clone(), result));
+				}
+				Ok(None) => {}
+				Err(e) => {
+					debug!("Error rewriting {}: {}", display_path, e);
+				}
+			}
+		}
+
+		if results.is_empty() {
+			return Ok("No matches found.".to_string());
+		}
+
+		if update_all {
+			for (path, result) in &results {
+				if let Err(e) = std::fs::write(path, &result.rewritten_source) {
+					return Err(format!("Failed to write {}: {}", result.file, e));
+				}
+			}
+			Ok(format!(
+				"Applied {} replacements across {} files.",
+				total_replacements,
+				results.len()
+			))
+		} else {
+			let mut output = String::new();
+			for (_, result) in &results {
+				output.push_str(&crate::grep::format_rewrite_diff(result));
+				output.push_str("\n\n");
+			}
+			output.push_str(&format!(
+				"{} replacements across {} files (preview, set update_all=true to apply).",
+				total_replacements,
+				results.len()
+			));
+			Ok(output)
+		}
+	}
+
 	/// Create a new MCP server instance.
 	///
 	/// Initialises the store, logging, providers, and optionally spawns LSP background init.

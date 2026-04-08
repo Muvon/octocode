@@ -34,6 +34,14 @@ pub struct GrepArgs {
 	#[arg(short = 'C', long, default_value = "0")]
 	pub context: usize,
 
+	/// Rewrite template using metavariables from the pattern (e.g. '$VAR.expect("reason")')
+	#[arg(short, long)]
+	pub rewrite: Option<String>,
+
+	/// Apply rewrites to all matching files in-place (requires --rewrite)
+	#[arg(long, requires = "rewrite")]
+	pub update_all: bool,
+
 	/// Output as JSON
 	#[arg(long)]
 	pub json: bool,
@@ -48,6 +56,11 @@ pub async fn execute(args: &GrepArgs) -> Result<(), anyhow::Error> {
 	if files.is_empty() {
 		eprintln!("No files found matching the specified criteria.");
 		return Ok(());
+	}
+
+	// Branch: rewrite mode vs search mode
+	if let Some(ref rewrite_template) = args.rewrite {
+		return execute_rewrite(args, &current_dir, &files, rewrite_template);
 	}
 
 	let mut all_matches = Vec::new();
@@ -116,6 +129,94 @@ pub async fn execute(args: &GrepArgs) -> Result<(), anyhow::Error> {
 	}
 
 	eprintln!("\n{} matches found.", all_matches.len());
+	Ok(())
+}
+
+fn execute_rewrite(
+	args: &GrepArgs,
+	current_dir: &Path,
+	files: &[String],
+	rewrite_template: &str,
+) -> Result<(), anyhow::Error> {
+	let mut results = Vec::new();
+	let mut total_replacements = 0;
+
+	for file_path in files {
+		let path = Path::new(file_path);
+		let language = if let Some(ref lang) = args.lang {
+			lang.as_str()
+		} else if let Some(lang) = grep::language_from_extension(path) {
+			lang
+		} else {
+			continue;
+		};
+
+		let source = match std::fs::read_to_string(path) {
+			Ok(s) => s,
+			Err(_) => continue,
+		};
+
+		let display_path = path
+			.strip_prefix(current_dir)
+			.unwrap_or(path)
+			.to_string_lossy()
+			.to_string();
+
+		match grep::rewrite_file(
+			&display_path,
+			&source,
+			&args.pattern,
+			rewrite_template,
+			language,
+		) {
+			Ok(Some(result)) => {
+				total_replacements += result.replacements;
+				results.push((file_path.clone(), result));
+			}
+			Ok(None) => {}
+			Err(e) => {
+				eprintln!("Error rewriting {}: {}", display_path, e);
+			}
+		}
+	}
+
+	if results.is_empty() {
+		println!("No matches found.");
+		return Ok(());
+	}
+
+	if args.update_all {
+		for (file_path, result) in &results {
+			std::fs::write(file_path, &result.rewritten_source)?;
+		}
+		eprintln!(
+			"Applied {} replacements across {} files.",
+			total_replacements,
+			results.len()
+		);
+	} else if args.json {
+		let json_results: Vec<serde_json::Value> = results
+			.iter()
+			.map(|(_, r)| {
+				serde_json::json!({
+					"file": r.file,
+					"replacements": r.replacements,
+					"diff": grep::format_rewrite_diff(r),
+				})
+			})
+			.collect();
+		println!("{}", serde_json::to_string_pretty(&json_results)?);
+	} else {
+		for (_, result) in &results {
+			println!("{}\n", grep::format_rewrite_diff(result));
+		}
+		eprintln!(
+			"{} replacements across {} files (dry run, use --update-all to apply).",
+			total_replacements,
+			results.len()
+		);
+	}
+
 	Ok(())
 }
 
