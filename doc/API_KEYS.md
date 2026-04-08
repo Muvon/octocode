@@ -249,21 +249,18 @@ source ~/.bashrc  # or ~/.zshrc
 
 ### Configuration File
 
-API keys are stored in `~/.local/share/octocode/config.toml`:
+Models are configured in `~/.local/share/octocode/config.toml`:
 
 ```toml
-[embedding.voyage]
-api_key = "your-voyage-api-key"
-
-[embedding.jina]
-api_key = "your-jina-api-key"
-
-[embedding.google]
-api_key = "your-google-api-key"
+[embedding]
+code_model = "voyage:voyage-code-3"
+text_model = "voyage:voyage-3.5-lite"
 
 [llm]
 model = "openrouter:openai/gpt-4o-mini"
 ```
+
+**Note**: API keys are NOT stored in the config file. Use environment variables only.
 
 ### Command Line Configuration
 
@@ -275,8 +272,8 @@ octocode config --show
 octocode config --code-embedding-model "voyage:voyage-code-3"
 octocode config --text-embedding-model "voyage:voyage-3.5-lite"
 
-# Set LLM model
-octocode config --model "anthropic/claude-3.5-sonnet"
+# Set LLM model (provider:model format)
+octocode config --model "anthropic:claude-3-5-sonnet-20241022"
 ```
 
 ## Model Recommendations
@@ -318,7 +315,7 @@ octocode config \
 
 # Optional: Add OpenRouter for AI features
 export OPENROUTER_API_KEY="your-openrouter-api-key"
-octocode config --model "openai/gpt-4.1-mini"
+octocode config --model "openrouter:openai/gpt-4o-mini"
 ```
 
 ### Local-Only Setup (macOS)
@@ -342,7 +339,7 @@ export OPENROUTER_API_KEY="your-openrouter-api-key"
 octocode config \
   --code-embedding-model "jina:jina-embeddings-v2-base-code" \
   --text-embedding-model "jina:jina-embeddings-v4" \
-  --model "anthropic/claude-3.5-sonnet"
+  --model "anthropic:claude-3-5-sonnet-20241022"
 ```
 
 ## Verification
@@ -362,7 +359,7 @@ octocode index
 ```bash
 # Test AI features (requires staged changes)
 git add .
-octocode commit --dry-run
+octocode commit --yes
 
 # If successful, LLM is working
 # If errors, check LLM provider API key (OPENAI_API_KEY, ANTHROPIC_API_KEY, etc.)

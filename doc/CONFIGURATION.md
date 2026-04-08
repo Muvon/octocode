@@ -56,11 +56,11 @@ octocode config \
 ```toml
 version = 1
 
-[openrouter]
-model = "openai/gpt-4.1-mini"
-base_url = "https://openrouter.ai/api/v1"
+[llm]
+model = "openrouter:openai/gpt-4o-mini"
 timeout = 120
-# api_key = "" # Set via environment variable OPENROUTER_API_KEY
+temperature = 0.7
+max_tokens = 4000
 
 [embedding]
 # Current defaults - provider auto-detected from prefix
@@ -72,8 +72,8 @@ enabled = false
 use_llm = false
 
 [graphrag.llm]
-description_model = "openai/gpt-4.1-mini"
-relationship_model = "openai/gpt-4.1-mini"
+description_model = "openrouter:openai/gpt-4o-mini"
+relationship_model = "openrouter:openai/gpt-4o-mini"
 ai_batch_size = 8
 max_batch_tokens = 16384
 batch_timeout_seconds = 60
@@ -264,8 +264,8 @@ octocode config --show
 octocode config --code-embedding-model "fastembed:all-MiniLM-L6-v2"
 octocode config --text-embedding-model "fastembed:multilingual-e5-small"
 
-# Set OpenRouter model
-octocode config --model "anthropic/claude-3.5-sonnet"
+# Set LLM model (provider:model format)
+octocode config --model "anthropic:claude-3-5-sonnet-20241022"
 
 # Enable/disable GraphRAG
 octocode config --graphrag-enabled true
@@ -315,10 +315,11 @@ The MCP server uses command-line arguments rather than configuration file settin
 # Octocode configuration (config-templates/default.toml)
 version = 1
 
-[openrouter]
-model = "openai/gpt-4.1-mini"
-base_url = "https://openrouter.ai/api/v1"
+[llm]
+model = "openrouter:openai/gpt-4o-mini"
 timeout = 120
+temperature = 0.7
+max_tokens = 4000
 
 [index]
 chunk_size = 2000

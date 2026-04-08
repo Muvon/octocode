@@ -205,11 +205,6 @@ octocode release --yes
 # Force specific version (bypasses AI calculation)
 octocode release --force-version "2.0.0"
 octocode release --force-version "1.5.0-beta.1"
-
-# Specify version type manually
-octocode release --version-type major
-octocode release --version-type minor
-octocode release --version-type patch
 ```
 
 ### Changelog Options
@@ -218,23 +213,6 @@ octocode release --version-type patch
 # Use custom changelog file
 octocode release --changelog "HISTORY.md"
 octocode release --changelog "docs/RELEASES.md"
-
-# Skip changelog generation
-octocode release --no-changelog
-```
-
-### Git Options
-
-```bash
-# Custom commit message
-octocode release --commit-message "Release v{version}"
-
-# Custom tag format
-octocode release --tag-format "v{version}"
-octocode release --tag-format "release-{version}"
-
-# Skip git tag creation
-octocode release --no-tag
 ```
 
 ## Example Workflows
@@ -343,16 +321,6 @@ octocode release  # AI determines minor bump (e.g., 1.0.0 → 1.1.0)
 ...
 ```
 
-### Customizing Changelog Format
-
-```bash
-# Use custom changelog template
-octocode release --changelog-template "templates/release.md"
-
-# Custom section headers
-octocode config --changelog-sections "Features,Fixes,Changes"
-```
-
 ## Integration with CI/CD
 
 ### GitHub Actions
@@ -433,64 +401,18 @@ fi
 
 ## Configuration
 
-### Release Configuration
+### Configuration
 
-```bash
-# Set default changelog file
-octocode config --changelog-file "RELEASES.md"
-
-# Set default commit message format
-octocode config --release-commit-format "chore: release v{version}"
-
-# Set default tag format
-octocode config --release-tag-format "v{version}"
-```
-
-### Configuration File
+The release command uses the LLM model configured in `[llm]` section:
 
 ```toml
-[release]
-changelog_file = "CHANGELOG.md"
-commit_message = "chore: release v{version}"
-tag_format = "v{version}"
-auto_push = false
-require_conventional_commits = true
-
-[openrouter]
-model = "openai/gpt-4o-mini"  # Model for version calculation
+[llm]
+model = "openrouter:openai/gpt-4o-mini"  # Used for version calculation
 ```
 
-## Advanced Features
-
-### Pre-release Hooks
-
+Change the model with:
 ```bash
-# Run tests before release
-octocode release --pre-hook "cargo test"
-octocode release --pre-hook "npm run test"
-
-# Multiple hooks
-octocode release --pre-hook "cargo test" --pre-hook "cargo clippy"
-```
-
-### Post-release Hooks
-
-```bash
-# Deploy after release
-octocode release --post-hook "deploy.sh"
-
-# Notify team
-octocode release --post-hook "notify-team.sh"
-```
-
-### Custom Version Calculation
-
-```bash
-# Use different model for version calculation
-octocode config --release-model "anthropic/claude-3.5-sonnet"
-
-# Custom version calculation prompt
-octocode release --version-prompt "Calculate version based on semantic changes"
+octocode config --model "openrouter:openai/gpt-4o-mini"
 ```
 
 ## Troubleshooting

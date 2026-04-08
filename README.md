@@ -83,14 +83,14 @@ cargo install --git https://github.com/Muvon/octocode
 ### 2. Configure API Keys (1 minute)
 
 ```bash
-# Required: Voyage AI (200M free tokens/month)
+# Default embedding provider: Voyage AI (200M free tokens/month)
 export VOYAGE_API_KEY="your-voyage-api-key"
 
-# Optional: OpenRouter (for AI commit messages, code review)
+# Optional: LLM provider for AI commit messages, code review
 export OPENROUTER_API_KEY="your-openrouter-api-key"
 ```
 
-[Get Voyage AI key](https://www.voyageai.com/) • [Get OpenRouter key](https://openrouter.ai/)
+Voyage AI is the default — [get your key here](https://www.voyageai.com/). You can also use OpenAI, Jina, Google, or other embedding providers. For LLM features, OpenAI, Anthropic, Google, and DeepSeek are also supported. See the [API Keys guide](doc/API_KEYS.md) for all options.
 
 ### 3. Index Your Codebase (2-5 minutes)
 
@@ -115,6 +115,13 @@ octocode search "database connection pool" --lang rust
 # Search commit history
 octocode search "authentication refactor" --mode commits
 ```
+
+> **Tip:** Octocode uses `provider:model` format for all models. Switch providers anytime:
+> ```bash
+> octocode config --model "anthropic:claude-3-5-haiku-20241022"
+> octocode config --code-embedding-model "openai:text-embedding-3-small"
+> ```
+> See [Configuration](doc/CONFIGURATION.md) for all providers and models.
 
 ### 5. Structural Code Search
 
@@ -189,7 +196,7 @@ See [MCP Integration Guide](doc/MCP_INTEGRATION.md) for setup instructions.
 
 ## 🔒 Privacy & Security
 
-- **🏠 Local-first** — FastEmbed runs entirely offline (macOS)
+- **🏠 Local-first** — local embedding models available on supported platforms (macOS ARM default builds); cloud providers on all platforms
 - **🔐 Secure** — API keys stored locally, env vars supported
 - **🚫 Respects .gitignore** — Never indexes sensitive files
 - **🛡️ MCP security** — Local-only server, no external network for search

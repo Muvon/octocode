@@ -154,8 +154,8 @@ octocode config --show
 octocode config --code-embedding-model "voyage:voyage-code-3"
 octocode config --text-embedding-model "voyage:voyage-3.5-lite"
 
-# Set LLM model
-octocode config --model "anthropic/claude-3.5-sonnet"
+# Set LLM model (provider:model format)
+octocode config --model "anthropic:claude-3-5-sonnet-20241022"
 
 # Search settings
 octocode config --max-results 20
@@ -167,7 +167,6 @@ octocode config --graphrag-enabled false
 
 # Performance tuning
 octocode config --chunk-size 2000
-octocode config --embeddings-batch-size 16
 ```
 
 ### `octocode models`
@@ -314,8 +313,6 @@ octocode commit --all --yes
 # Skip pre-commit hooks
 octocode commit --no-verify
 
-# Dry run (show what would be committed)
-octocode commit --dry-run
 ```
 
 **Pre-commit Integration:**

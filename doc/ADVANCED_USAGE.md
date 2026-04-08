@@ -552,21 +552,21 @@ The GraphRAG system includes an intelligent import resolver that maps import sta
 
 ```bash
 # Use Claude for better code understanding
-octocode config --model "anthropic/claude-3.5-sonnet"
+octocode config --model "anthropic:claude-3-5-sonnet-20241022"
 
-# Use local models via OpenRouter
-octocode config --model "local/llama-3.2-70b"
+# Use OpenRouter for access to multiple providers
+octocode config --model "openrouter:meta-llama/llama-3.1-70b-instruct"
 ```
 
 ### Per-Task Model Configuration
 
 ```toml
-[graphrag]
-description_model = "openai/gpt-4o"
-relationship_model = "anthropic/claude-3.5-sonnet"
+[graphrag.llm]
+description_model = "openrouter:openai/gpt-4o"
+relationship_model = "openrouter:anthropic/claude-3.5-sonnet"
 
-[openrouter]
-model = "openai/gpt-4o-mini"  # Default for other tasks
+[llm]
+model = "openrouter:openai/gpt-4o-mini"  # Default for other tasks
 ```
 
 ## File Signature Analysis
