@@ -1178,7 +1178,7 @@ func helper(x int) int {
 		let rt = tokio::runtime::Runtime::new().unwrap();
 		let relationships = rt.block_on(async {
 			RelationshipDiscovery::discover_relationships_efficiently(
-				&[node_a.clone()],
+				std::slice::from_ref(&node_a),
 				&[node_a.clone(), node_b.clone()],
 			)
 			.await
@@ -1260,8 +1260,8 @@ func helper(x int) int {
 		let rt = tokio::runtime::Runtime::new().unwrap();
 		let relationships = rt.block_on(async {
 			RelationshipDiscovery::discover_relationships_efficiently(
-				&[node_a.clone()],
-				&[node_a, node_b],
+				std::slice::from_ref(&node_a),
+				&[node_a.clone(), node_b],
 			)
 			.await
 			.unwrap()

@@ -181,6 +181,46 @@ pub fn format_matches_grouped(matches: &[GrepMatch]) -> String {
 	output.trim_end().to_string()
 }
 
+/// Format matches with context lines.
+pub fn format_matches_with_context(
+	matches: &[GrepMatch],
+	source_map: &std::collections::HashMap<String, String>,
+	context: usize,
+) -> String {
+	use std::collections::BTreeMap;
+
+	let mut by_file: BTreeMap<&str, Vec<&GrepMatch>> = BTreeMap::new();
+	for m in matches {
+		by_file.entry(&m.file).or_default().push(m);
+	}
+
+	let mut output = String::new();
+	for (file, file_matches) in &by_file {
+		output.push_str(file);
+		output.push('\n');
+
+		if let Some(source) = source_map.get(*file) {
+			let lines: Vec<&str> = source.lines().collect();
+			for m in file_matches {
+				let start = m.line.saturating_sub(context + 1);
+				let end = (m.line + context).min(lines.len());
+				for (i, line) in lines.iter().enumerate().take(end).skip(start) {
+					let prefix = if i + 1 == m.line { ">" } else { " " };
+					output.push_str(&format!("{} {}:  {}\n", prefix, i + 1, line));
+				}
+				output.push_str("---\n");
+			}
+		} else {
+			for m in file_matches {
+				output.push_str(&format!("{}:{}:  {}\n", m.line, m.column, m.text));
+			}
+		}
+		output.push('\n');
+	}
+
+	output.trim_end().to_string()
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
@@ -415,44 +455,4 @@ func bar() error {
 		let b_pos = output.find("src/b.rs").unwrap();
 		assert!(a_pos < b_pos, "Files should be sorted");
 	}
-}
-
-/// Format matches with context lines.
-pub fn format_matches_with_context(
-	matches: &[GrepMatch],
-	source_map: &std::collections::HashMap<String, String>,
-	context: usize,
-) -> String {
-	use std::collections::BTreeMap;
-
-	let mut by_file: BTreeMap<&str, Vec<&GrepMatch>> = BTreeMap::new();
-	for m in matches {
-		by_file.entry(&m.file).or_default().push(m);
-	}
-
-	let mut output = String::new();
-	for (file, file_matches) in &by_file {
-		output.push_str(file);
-		output.push('\n');
-
-		if let Some(source) = source_map.get(*file) {
-			let lines: Vec<&str> = source.lines().collect();
-			for m in file_matches {
-				let start = m.line.saturating_sub(context + 1);
-				let end = (m.line + context).min(lines.len());
-				for (i, line) in lines.iter().enumerate().take(end).skip(start) {
-					let prefix = if i + 1 == m.line { ">" } else { " " };
-					output.push_str(&format!("{} {}:  {}\n", prefix, i + 1, line));
-				}
-				output.push_str("---\n");
-			}
-		} else {
-			for m in file_matches {
-				output.push_str(&format!("{}:{}:  {}\n", m.line, m.column, m.text));
-			}
-		}
-		output.push('\n');
-	}
-
-	output.trim_end().to_string()
 }
