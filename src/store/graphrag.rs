@@ -432,8 +432,12 @@ impl<'a> GraphRagOperations<'a> {
 		let nodes_count = nodes_table.count_rows(None).await?;
 		let relationships_count = relationships_table.count_rows(None).await?;
 
-		if nodes_count == 0 && relationships_count == 0 {
-			return Ok(true); // Tables are empty, need indexing
+		if nodes_count == 0 {
+			return Ok(true); // No nodes at all, need full indexing
+		}
+
+		if relationships_count == 0 {
+			return Ok(true); // Nodes exist but no relationships — previous run may have failed at relationship stage
 		}
 
 		Ok(false) // GraphRAG is already indexed
