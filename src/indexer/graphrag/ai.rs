@@ -450,7 +450,10 @@ impl AIEnhancements {
 			message.push_str(&format!("Code sample:\n{}\n\n", file.content_sample));
 		}
 
-		message.push_str("Provide a JSON response with descriptions for each file.");
+		message.push_str(
+			"Respond with JSON: {\"descriptions\": [{\"file_id\": \"<ID>\", \"description\": \"<2-3 sentence description>\"}]}\n\
+			 Include one entry per file using the exact ID provided.",
+		);
 		message
 	}
 
@@ -465,21 +468,17 @@ impl AIEnhancements {
 						"type": "object",
 						"properties": {
 							"file_id": {
-								"type": "string",
-								"description": "The file ID exactly as provided in the request"
+								"type": "string"
 							},
 							"description": {
-								"type": "string",
-								"description": "Architectural description of the file (max 300 chars)"
+								"type": "string"
 							}
 						},
-						"required": ["file_id", "description"],
-						"additionalProperties": false
+						"required": ["file_id", "description"]
 					}
 				}
 			},
-			"required": ["descriptions"],
-			"additionalProperties": false
+			"required": ["descriptions"]
 		})
 	}
 
