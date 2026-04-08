@@ -4,7 +4,9 @@ Complete guide for integrating Octocode with AI assistants using the Model Conte
 
 ## Overview
 
-Octocode provides a built-in MCP server that enables AI assistants to interact with your codebase through semantic search, code signatures, GraphRAG, and LSP integration. The server supports both stdin/stdout mode (for direct AI assistant integration) and HTTP mode (for web-based integrations).
+Octocode provides a built-in MCP server that enables AI assistants to interact with your codebase through semantic search, code signatures, GraphRAG, and structural pattern matching. The server supports both stdin/stdout mode (for direct AI assistant integration) and HTTP mode (for web-based integrations).
+
+**📖 For client-specific setup instructions, see [MCP Client Setup Guide](MCP_CLIENTS.md).**
 
 ## Quick Start
 
@@ -95,13 +97,15 @@ Add to your Claude Desktop configuration file:
 
 ## Available MCP Tools
 
+Octocode provides 4 core tools for code intelligence:
+
 ### semantic_search
 
 Semantic search across your codebase with multi-query support.
 
 **Parameters:**
 - `query` (string or array) - Search query or multiple queries
-- `mode` (string, optional) - Search scope: "all", "code", "docs", "text"
+- `mode` (string, optional) - Search scope: "all", "code", "docs", "text", "commits"
 - `detail_level` (string, optional) - Detail level: "signatures", "partial", "full"
 - `max_results` (integer, optional) - Maximum results to return (1-20)
 - `threshold` (number, optional) - Similarity threshold (0.0-1.0)
@@ -170,7 +174,6 @@ Advanced relationship-aware GraphRAG operations for code analysis. Supports mult
 - `target_id` (string, optional) - Target node identifier for 'find-path' operation
 - `max_depth` (integer, optional) - Maximum path depth for 'find-path' operation (default: 3)
 - `format` (string, optional) - Output format: "text", "json", "markdown" (default: "text")
-- `max_tokens` (integer, optional) - Maximum tokens in output (default: 2000)
 
 **Operation Examples:**
 
@@ -221,7 +224,7 @@ Advanced relationship-aware GraphRAG operations for code analysis. Supports mult
 
 ### structural_search
 
-Search code by AST structure using ast-grep pattern syntax. Complements `semantic_search`: use this for structural/syntactic patterns, `semantic_search` for meaning-based queries.
+Search or rewrite code by AST structure using ast-grep pattern syntax. Complements `semantic_search`: use this for structural/syntactic patterns, `semantic_search` for meaning-based queries.
 
 **Parameters:**
 - `pattern` (string, required) - AST pattern to search for (e.g. `$FUNC.unwrap()`, `if let Some($X) = $Y { $$$ }`)
@@ -274,70 +277,6 @@ Search code by AST structure using ast-grep pattern syntax. Complements `semanti
 }
 ```
 
-## LSP Integration Tools
-
-When started with `--with-lsp`, additional tools become available:
-
-### lsp_goto_definition
-
-Navigate to symbol definition.
-
-**Parameters:**
-- `file_path` (string) - Relative path to file
-- `line` (integer) - Line number (1-indexed)
-- `symbol` (string) - Symbol name
-
-**Example:**
-```json
-{
-  "file_path": "src/main.rs",
-  "line": 15,
-  "symbol": "authenticate_user"
-}
-```
-
-### lsp_hover
-
-Get symbol information and documentation.
-
-**Parameters:**
-- `file_path` (string) - Relative path to file
-- `line` (integer) - Line number (1-indexed)
-- `symbol` (string) - Symbol name
-
-### lsp_find_references
-
-Find all references to a symbol.
-
-**Parameters:**
-- `file_path` (string) - Relative path to file
-- `line` (integer) - Line number (1-indexed)
-- `symbol` (string) - Symbol name
-- `include_declaration` (boolean, optional) - Include declaration in results
-
-### lsp_completion
-
-Get code completion suggestions.
-
-**Parameters:**
-- `file_path` (string) - Relative path to file
-- `line` (integer) - Line number (1-indexed)
-- `symbol` (string) - Partial symbol to complete
-
-### lsp_document_symbols
-
-List all symbols in a document.
-
-**Parameters:**
-- `file_path` (string) - Relative path to file
-
-### lsp_workspace_symbols
-
-Search symbols across workspace.
-
-**Parameters:**
-- `query` (string) - Symbol search query
-
 ## MCP Proxy Server
 
 For managing multiple repositories, use the MCP proxy server:
@@ -369,10 +308,10 @@ octocode mcp-proxy --bind "127.0.0.1:8080" --path /path/to/parent/directory
 
 ### Code Exploration
 
-**Ask Claude:**
+**Ask your AI:**
 > "Can you search for authentication-related code in my project?"
 
-**Claude uses:**
+**AI uses:**
 ```json
 {
   "tool": "semantic_search",
@@ -386,10 +325,10 @@ octocode mcp-proxy --bind "127.0.0.1:8080" --path /path/to/parent/directory
 
 ### Architecture Understanding
 
-**Ask Claude:**
+**Ask your AI:**
 > "How are the database components connected in this system?"
 
-**Claude uses:**
+**AI uses:**
 ```json
 {
   "tool": "graphrag",
@@ -400,34 +339,48 @@ octocode mcp-proxy --bind "127.0.0.1:8080" --path /path/to/parent/directory
 }
 ```
 
-### Code Navigation
+### Code Pattern Search
 
-**Ask Claude:**
-> "Show me the definition of the authenticate_user function in src/auth.rs line 42"
+**Ask your AI:**
+> "Find all places where we use .unwrap() in the codebase"
 
-**Claude uses:**
+**AI uses:**
 ```json
 {
-  "tool": "lsp_goto_definition",
+  "tool": "structural_search",
   "arguments": {
-    "file_path": "src/auth.rs",
-    "line": 42,
-    "symbol": "authenticate_user"
+    "pattern": "$VAR.unwrap()",
+    "language": "rust",
+    "max_results": 50
   }
 }
 ```
 
-## Advanced Configuration
+### File Structure Analysis
 
-### Custom MCP Server Settings
+**Ask your AI:**
+> "Show me the structure of the authentication module"
 
-```bash
+**AI uses:**
+```json
+{
+  "tool": "view_signatures",
+  "arguments": {
+    "files": ["src/auth/**/*.rs"]
+  }
+}
+```
+
+## Next Steps
+
+- **[MCP Client Setup Guide](MCP_CLIENTS.md)** — Detailed setup for 15+ clients
+- **[Commands Reference](COMMANDS.md)** — Learn all Octocode CLI commands
+- **[Configuration](CONFIGURATION.md)** — Customize indexing and search behavior
+- **[Advanced Usage](ADVANCED_USAGE.md)** — Advanced configuration and optimization
 # Start with custom settings
 octocode mcp \
   --path /path/to/project \
-  --port 3001 \
-  --debug \
-  --with-lsp "rust-analyzer"
+  --debug
 
 # HTTP mode with custom binding
 octocode mcp \
@@ -436,26 +389,23 @@ octocode mcp \
   --debug
 ```
 
-### Multiple Language Servers
+### Multiple Projects
 
-For projects with multiple languages, start separate MCP servers:
+For projects with multiple codebases, start separate MCP servers:
 
 ```bash
-# Terminal 1: Rust project
-octocode mcp --path /rust/project --with-lsp "rust-analyzer" --port 3001
+# Terminal 1: Work project
+octocode mcp --path /work/project --bind "127.0.0.1:8081"
 
-# Terminal 2: Python project
-octocode mcp --path /python/project --with-lsp "pylsp" --port 3002
-
-# Terminal 3: TypeScript project
-octocode mcp --path /ts/project --with-lsp "typescript-language-server --stdio" --port 3003
+# Terminal 2: Personal project
+octocode mcp --path /personal/project --bind "127.0.0.1:8082"
 ```
 
 ### Environment-Specific Configuration
 
 ```bash
 # Development environment
-octocode mcp --path . --debug --with-lsp "rust-analyzer"
+octocode mcp --path . --debug
 
 # Production environment
 octocode mcp --path /app --bind "127.0.0.1:8080" --quiet
@@ -486,13 +436,21 @@ When using HTTP mode, you can integrate with web applications:
 
 ```javascript
 // JavaScript example
-const response = await fetch('http://localhost:8080/tools/semantic_search', {
+const response = await fetch('http://localhost:8080', {
   method: 'POST',
   headers: { 'Content-Type': 'application/json' },
   body: JSON.stringify({
-    query: ["authentication", "middleware"],
-    mode: "code",
-    max_results: 5
+    jsonrpc: "2.0",
+    id: 1,
+    method: "tools/call",
+    params: {
+      name: "semantic_search",
+      arguments: {
+        query: ["authentication", "middleware"],
+        mode: "code",
+        max_results: 5
+      }
+    }
   })
 });
 
@@ -507,8 +465,50 @@ const results = await response.json();
 # Optimize for large projects
 octocode mcp \
   --path /large/project \
-  --with-lsp "rust-analyzer" \
   --debug
+```
+
+### Memory Management
+
+Octocode automatically manages memory for large codebases:
+- Efficient vector storage with LanceDB
+- Smart caching of frequently accessed data
+- Incremental updates for changed files
+
+## Troubleshooting
+
+### Common Issues
+
+**MCP server not appearing in client:**
+- Ensure Octocode is in your PATH: `which octocode`
+- Use absolute paths in MCP config
+- Restart your MCP client after config changes
+
+**Tools returning errors:**
+- Ensure your project is indexed: `octocode index`
+- Check API keys are set: `echo $VOYAGE_API_KEY`
+- Verify the project path in MCP config matches your indexed project
+
+**Permission errors:**
+- Check file permissions: `ls -la $(which octocode)`
+- Use absolute path in config: `"command": "/usr/local/bin/octocode"`
+
+### Debug Mode
+
+Enable debug logging to troubleshoot issues:
+
+```bash
+octocode mcp --path /your/project --debug
+```
+
+This logs all MCP requests and responses to help diagnose problems.
+
+## Next Steps
+
+- **[MCP Client Setup Guide](MCP_CLIENTS.md)** — Detailed setup for 15+ clients
+- **[Commands Reference](COMMANDS.md)** — Learn all Octocode CLI commands
+- **[Configuration](CONFIGURATION.md)** — Customize indexing and search behavior
+- **[Advanced Usage](ADVANCED_USAGE.md)** — Advanced configuration and optimization
 
 # Configure search limits
 octocode config --max-results 20 --similarity-threshold 0.3

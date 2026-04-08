@@ -2,16 +2,16 @@
 
 <img src="https://raw.githubusercontent.com/Muvon/octocode/master/logo.svg" width="240" alt="Octocode">
 
-### **Structural Code Intelligence — AST Parsing + Knowledge Graph + MCP**
+### **Structural Code Intelligence for AI Agents — MCP Server + Knowledge Graph + Semantic Search**
 
 [![GitHub stars](https://img.shields.io/github/stars/Muvon/octocode?style=social)](https://github.com/Muvon/octocode/stargazers)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Rust](https://img.shields.io/badge/Rust-1.82%2B-orange.svg)](https://www.rust-lang.org)
 [![Release](https://img.shields.io/github/v/release/Muvon/octocode)](https://github.com/Muvon/octocode/releases)
 
-**Your codebase as a navigable knowledge graph. Not flat text search — structural understanding of functions, imports, and dependencies.**
+**Give your AI assistant a brain for your codebase.** Octocode transforms your project into a navigable knowledge graph that Claude, Cursor, and other AI agents can search, understand, and navigate.
 
-[🚀 Quick Start](#-quick-start) • [📖 Documentation](#-documentation) • [🔌 MCP Server](#-mcp-server-integration) • [🌐 Website](https://octocode.muvon.io)
+[🚀 Quick Start](#-quick-start) • [🤖 MCP Integration](#-mcp-server-integration) • [📖 Documentation](#-documentation) • [🌐 Website](https://octocode.muvon.io)
 
 <a href="https://glama.ai/mcp/servers/Muvon/octocode">
   <img width="300" src="https://glama.ai/mcp/servers/Muvon/octocode/badge" alt="Octocode MCP server" />
@@ -20,6 +20,45 @@
 </div>
 
 ---
+
+## 🤖 Built for AI Agents
+
+**The Problem:** AI assistants are blind to your codebase. They can't search your files, understand dependencies, or remember context across sessions.
+
+**The Solution:** Octocode's MCP server gives AI agents:
+- 🔍 **Semantic search** — Find code by meaning, not keywords
+- 🕸️ **Knowledge graph** — Navigate imports, calls, and dependencies
+- 📝 **Code signatures** — View structure without reading entire files
+- 🧠 **Persistent memory** — Remember decisions across conversations
+
+**Works with:** Claude Desktop • Cursor • Windsurf • Any MCP-compatible AI
+
+```json
+// Add to your AI assistant config
+{
+  "mcpServers": {
+    "octocode": {
+      "command": "octocode",
+      "args": ["mcp", "--path", "/your/project"]
+    }
+  }
+}
+```
+
+Now your AI assistant can:
+```
+You: "Where is authentication handled?"
+AI: *searches your codebase* "Authentication is in src/middleware/auth.rs,
+    which imports jwt.rs for token validation and calls user_store.rs for lookup."
+
+You: "What files depend on the payment module?"
+AI: *queries knowledge graph* "src/api/handlers/payment.rs imports payment/mod.rs,
+    which is also used by src/workers/refund.rs and src/cron/billing.rs"
+
+You: "Remember this bug fix for future reference"
+AI: *stores in memory* "Got it. I'll remember this authentication bypass fix
+    and apply similar patterns when reviewing security code."
+```
 
 ## 🤔 Why Octocode?
 
@@ -39,7 +78,7 @@ Incoming:
   imports ← router (src/router.rs): wires auth into the request pipeline
 ```
 
-Octocode uses **tree-sitter AST parsing** to extract real symbols (functions, imports, dependencies), builds a **GraphRAG knowledge graph** of relationships between files, and exposes everything via **MCP** — so Claude, Cursor, and other AI tools can *navigate* your project architecture, not just search it.
+Octocode uses **tree-sitter AST parsing** to extract real symbols (functions, imports, dependencies), builds a **GraphRAG knowledge graph** of relationships between files, and exposes everything via **MCP** — so AI tools can *navigate* your project architecture, not just search it.
 
 ## 🔬 How It Works
 
@@ -70,29 +109,65 @@ Source Code → Tree-sitter AST → Symbols & Relationships → Knowledge Graph
 
 ## 🚀 Quick Start
 
-### 1. Install (30 seconds)
+### 1. Install
 
 ```bash
 # Universal installer (Linux, macOS, Windows)
 curl -fsSL https://raw.githubusercontent.com/Muvon/octocode/master/install.sh | sh
 
-# Or with Cargo
-cargo install --git https://github.com/Muvon/octocode
+# macOS with Homebrew
+brew install muvon/tap/octocode
 ```
 
-### 2. Configure API Keys (1 minute)
+<details>
+<summary><strong>Other installation methods</strong></summary>
 
 ```bash
-# Default embedding provider: Voyage AI (200M free tokens/month)
+# Cargo (build from source)
+cargo install --git https://github.com/Muvon/octocode
+
+# Download binary from releases
+# https://github.com/Muvon/octocode/releases
+```
+
+See [Installation Guide](INSTALL.md) for platform-specific instructions.
+</details>
+
+### 2. Set Up API Keys
+
+```bash
+# Required: Embedding provider (Voyage AI has 200M free tokens/month)
 export VOYAGE_API_KEY="your-voyage-api-key"
 
-# Optional: LLM provider for AI commit messages, code review
+# Optional: LLM for commit messages, code review
 export OPENROUTER_API_KEY="your-openrouter-api-key"
 ```
 
-Voyage AI is the default — [get your key here](https://www.voyageai.com/). You can also use OpenAI, Jina, Google, or other embedding providers. For LLM features, OpenAI, Anthropic, Google, and DeepSeek are also supported. See the [API Keys guide](doc/API_KEYS.md) for all options.
+**Get your Voyage API key:** [voyageai.com](https://www.voyageai.com/) (free tier available)
 
-### 3. Index Your Codebase (2-5 minutes)
+<details>
+<summary><strong>Other embedding providers</strong></summary>
+
+Octocode supports multiple embedding providers:
+
+```bash
+# OpenAI
+export OPENAI_API_KEY="your-key"
+octocode config --code-embedding-model "openai:text-embedding-3-small"
+
+# Jina AI
+export JINA_API_KEY="your-key"
+octocode config --code-embedding-model "jina:jina-embeddings-v3"
+
+# Google
+export GOOGLE_API_KEY="your-key"
+octocode config --code-embedding-model "google:text-embedding-005"
+```
+
+See [API Keys guide](doc/API_KEYS.md) for all supported providers.
+</details>
+
+### 3. Index Your Codebase
 
 ```bash
 cd /your/project
@@ -100,70 +175,143 @@ octocode index
 # → Indexed 12,847 blocks across 342 files
 ```
 
-### 4. Search with Natural Language
+### 4. Search Your Code
 
 ```bash
-# Single query
-octocode search "HTTP middleware pattern"
+# Natural language search
+octocode search "authentication middleware"
 
-# Multi-query for comprehensive results
-octocode search "authentication" "middleware" "session"
+# Multi-query for broader results
+octocode search "auth" "middleware" "session"
 
-# With filters
+# Filter by language
 octocode search "database connection pool" --lang rust
 
 # Search commit history
 octocode search "authentication refactor" --mode commits
 ```
 
-> **Tip:** Octocode uses `provider:model` format for all models. Switch providers anytime:
-> ```bash
-> octocode config --model "anthropic:claude-3-5-haiku-20241022"
-> octocode config --code-embedding-model "openai:text-embedding-3-small"
-> ```
-> See [Configuration](doc/CONFIGURATION.md) for all providers and models.
+### 5. Connect Your AI Assistant
 
-### 5. Structural Code Search
+Add to your MCP client config (Claude Desktop, Cursor, Windsurf):
 
-```bash
-# Find patterns by AST structure (not text)
-octocode grep '$FUNC.unwrap()' --lang rust
-octocode grep 'new $CLASS($$$ARGS)' --lang javascript
-octocode grep 'System.out.println($ARG)' --lang java
+```json
+{
+  "mcpServers": {
+    "octocode": {
+      "command": "octocode",
+      "args": ["mcp", "--path", "/your/project"]
+    }
+  }
+}
 ```
 
-### 6. Connect AI Assistants (MCP Server)
-
-```bash
-# Start MCP server for Claude Desktop, Cursor, etc.
-octocode mcp --path /your/project
-
-# Or HTTP mode for custom integrations
-octocode mcp --bind 0.0.0.0:12345
-```
+Done! Your AI assistant now understands your codebase structure.
 
 ## 🔌 MCP Server Integration
 
-Octocode includes a **built-in MCP server** that exposes your codebase as tools to AI assistants:
+Octocode includes a **built-in MCP server** that exposes your codebase as tools to AI assistants. This is the primary way to use Octocode — give your AI assistant direct access to search and navigate your code.
+
+### Available Tools
 
 | Tool | What It Does |
 |------|--------------|
-| `semantic_search` | Semantic search across code, docs, text, and commits |
-| `view_signatures` | View file signatures and code structure by glob patterns |
-| `graphrag` | Query code relationships, dependencies, and architecture |
-| `structural_search` | AST-based structural code search using ast-grep patterns |
+| `semantic_search` | Find code by meaning — "authentication flow", "error handling", "database queries" |
+| `view_signatures` | View file structure — function signatures, class definitions, imports |
+| `graphrag` | Query relationships — "what calls this function?", "what does this module import?" |
+| `structural_search` | AST pattern matching — find `.unwrap()` calls, `new` instantiations, specific patterns |
 
-**Works with:** Claude Desktop • Cursor • Any MCP-compatible client
+### Conversational AI Examples
 
-See [MCP Integration Guide](doc/MCP_INTEGRATION.md) for setup instructions.
+Once connected, your AI assistant can answer questions about your codebase:
 
-## 🎯 Use Cases
+```
+You: "Where is user authentication implemented?"
+AI: *uses semantic_search* "Found in src/auth/login.rs. The authenticate() function
+    validates credentials against the database, generates a JWT token, and stores
+    the session in Redis."
 
-- **🆕 Onboarding** — "How does the auth system work?" → Get the full picture in seconds
-- **🔍 Code Archaeology** — Find legacy code patterns without knowing exact names
-- **🤖 AI Pair Programming** — Give your AI assistant complete codebase context
-- **📝 Refactoring** — Understand dependencies before making changes
-- **🔎 Code Review** — "Show me all error handling in the API layer"
+You: "What files depend on the payment module?"
+AI: *uses graphrag* "src/api/handlers/payment.rs imports payment/mod.rs, which is also
+    used by src/workers/refund.rs and src/cron/billing.rs. The payment module exports
+    process_payment() and validate_transaction() functions."
+
+You: "Show me all error handling in the API layer"
+AI: *uses structural_search* "Found 23 error handling patterns in src/api/:
+    - 15 use Result<T, ApiError> with explicit error types
+    - 8 use .unwrap() (potential panics in handlers/user.rs:42, handlers/auth.rs:87)
+    - 3 use .expect() with custom messages"
+```
+
+### Quick Setup
+
+**Octomind (Recommended)** — Zero setup, Octocode pre-configured:
+```bash
+curl -fsSL https://raw.githubusercontent.com/muvon/octomind/master/install.sh | bash
+octomind run developer:rust
+```
+
+**Claude Code (CLI)** — Command-line setup:
+```bash
+claude mcp add octocode -- octocode mcp --path /path/to/your/project
+```
+
+**Claude Desktop / Cursor / Windsurf** — Add to config:
+```json
+{
+  "mcpServers": {
+    "octocode": {
+      "command": "octocode",
+      "args": ["mcp", "--path", "/path/to/your/project"]
+    }
+  }
+}
+```
+
+**Config locations:**
+- Claude Desktop: `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS)
+- Cursor: `~/.cursor/mcp.json` or Settings → MCP Servers
+- Windsurf: Settings → MCP
+
+📖 **[Complete MCP Client Setup Guide](doc/MCP_CLIENTS.md)** — Detailed instructions for 15+ clients including VS Code (Cline/Continue), Zed, Replit, and more.
+
+## 🎯 What Can You Do With It?
+
+**New developer onboarding:**
+```
+You: "How does the authentication system work?"
+AI: *searches and navigates* "Authentication starts in src/middleware/auth.rs which
+    validates JWT tokens. It calls src/auth/jwt.rs for token verification, which uses
+    the public key from config. Failed auth returns 401 via src/errors/auth_error.rs.
+    Sessions are stored in Redis via src/cache/session.rs."
+```
+
+**Code archaeology:**
+```
+You: "Find all places we handle database errors"
+AI: *structural search* "Found 47 error handling patterns:
+    - 32 use Result<T, DbError> with proper error types
+    - 15 use .unwrap() (potential issues in src/db/user.rs:23, src/db/order.rs:156)
+    - Recommend adding proper error handling to those locations"
+```
+
+**Refactoring with confidence:**
+```
+You: "What depends on the PaymentProcessor trait?"
+AI: *queries graph* "src/api/handlers/checkout.rs, src/workers/refund_worker.rs,
+    and src/cron/billing.rs all depend on PaymentProcessor. The trait is defined
+    in src/domain/payment.rs and implemented by src/infrastructure/stripe.rs
+    and src/infrastructure/paypal.rs."
+```
+
+**Code review assistance:**
+```
+You: "Review this PR for security issues"
+AI: *analyzes changes* "The PR adds password hashing in src/auth/hash.rs. However,
+    it uses SHA256 which is fast and vulnerable to brute force. Recommend using
+    bcrypt or argon2 instead. Also found 3 instances of .unwrap() that could panic
+    in production."
+```
 
 ## 🌐 Supported Languages
 
@@ -187,7 +335,8 @@ See [MCP Integration Guide](doc/MCP_INTEGRATION.md) for setup instructions.
 
 - **[Getting Started](doc/GETTING_STARTED.md)** — First steps and basic workflow
 - **[Installation Guide](INSTALL.md)** — Detailed methods and building from source
-- **[MCP Integration](doc/MCP_INTEGRATION.md)** — Connect to Claude, Cursor, etc.
+- **[MCP Client Setup](doc/MCP_CLIENTS.md)** — Connect to Claude, Cursor, Windsurf, and 15+ clients
+- **[MCP Integration](doc/MCP_INTEGRATION.md)** — MCP server details and advanced configuration
 - **[Commands Reference](doc/COMMANDS.md)** — Complete CLI reference
 - **[Configuration](doc/CONFIGURATION.md)** — Templates and customization
 - **[API Keys](doc/API_KEYS.md)** — Provider setup guide
