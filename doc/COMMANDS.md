@@ -119,10 +119,24 @@ octocode grep 'puts $ARG' --lang ruby --json
 - `$$$ARGS` — matches zero or more function arguments
 - Literal code — matches exact structure (e.g. `return 0`, `x = 1`)
 
+**Rewrite (refactoring):**
+```bash
+# Preview rewrites (dry run)
+octocode grep '$FUNC.unwrap()' --lang rust --rewrite '$FUNC.expect("reason")'
+
+# Apply rewrites in-place
+octocode grep '$FUNC.unwrap()' --lang rust --rewrite '$FUNC.expect("reason")' --update-all
+
+# Rewrite with path filter
+octocode grep 'console.log($ARG)' --lang javascript --rewrite 'logger.info($ARG)' --paths 'src/**/*.js' --update-all
+```
+
 **Options:**
 - `--lang <language>` — Language to search (auto-detected from extensions if omitted)
 - `--paths <glob>` — File paths or glob patterns to search
 - `-C, --context <n>` — Number of context lines around matches
+- `--rewrite <template>` — Rewrite template with metavariable substitution
+- `--update-all` — Apply rewrites to files in-place (requires --rewrite)
 - `--json` — Output as JSON
 
 **Supported languages:**

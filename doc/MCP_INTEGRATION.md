@@ -229,8 +229,10 @@ Search code by AST structure using ast-grep pattern syntax. Complements `semanti
 - `paths` (array, optional) - File path substrings to filter results
 - `context` (integer, optional) - Number of context lines around matches (default: 0)
 - `max_results` (integer, optional) - Maximum number of matches to return (default: 50)
+- `rewrite` (string, optional) - Rewrite template with metavariable substitution (e.g. `$VAR.expect("reason")`)
+- `update_all` (boolean, optional) - When true, apply rewrites to files in-place. When false/absent, returns a diff preview
 
-**Examples:**
+**Search Examples:**
 
 **Find all unwrap() calls in Rust:**
 ```json
@@ -250,12 +252,25 @@ Search code by AST structure using ast-grep pattern syntax. Complements `semanti
 }
 ```
 
-**Find return nil in Go:**
+**Rewrite Examples:**
+
+**Preview rewrite (dry run):**
 ```json
 {
-  "pattern": "return nil",
-  "language": "go",
-  "max_results": 20
+  "pattern": "$VAR.unwrap()",
+  "language": "rust",
+  "rewrite": "$VAR.expect(\"added context\")"
+}
+```
+
+**Apply rewrite in-place:**
+```json
+{
+  "pattern": "console.log($ARG)",
+  "language": "javascript",
+  "rewrite": "logger.info($ARG)",
+  "update_all": true,
+  "paths": ["src/"]
 }
 ```
 

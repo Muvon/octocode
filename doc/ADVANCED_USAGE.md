@@ -427,6 +427,32 @@ The `structural_search` MCP tool provides the same capability to AI assistants:
 | `$$$ARGS` | Matches function arguments | `new $CLASS($$$ARGS)` |
 | Literal code | Matches exact structure | `return 0`, `x = 1` |
 
+#### Structural Rewrite (Refactoring)
+
+Rewrite matched code using a template with metavariable substitution. Captured variables (`$VAR`, `$$$ARGS`) from the search pattern are substituted into the rewrite template.
+
+**CLI:**
+```bash
+# Preview rewrites (dry run — shows diff)
+octocode grep '$FUNC.unwrap()' --lang rust --rewrite '$FUNC.expect("reason")'
+
+# Apply rewrites in-place
+octocode grep '$FUNC.unwrap()' --lang rust --rewrite '$FUNC.expect("reason")' --update-all
+
+# Rewrite across specific paths
+octocode grep 'console.log($ARG)' --lang javascript --rewrite 'logger.info($ARG)' --paths 'src/**/*.js' --update-all
+```
+
+**MCP:**
+```json
+{
+  "pattern": "$VAR.unwrap()",
+  "language": "rust",
+  "rewrite": "$VAR.expect(\"added context\")",
+  "update_all": true
+}
+```
+
 #### Supported Languages
 
 Rust, JavaScript, TypeScript, Python, Go, Java, C/C++, PHP, Ruby, Lua, Bash, CSS, JSON
