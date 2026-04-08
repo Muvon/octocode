@@ -152,6 +152,15 @@ octocode graphrag overview --md > architecture.md
 octocode search "error handling" --expand
 ```
 
+### Structural Code Search
+
+```bash
+# Find code patterns by AST structure
+octocode grep '$FUNC.unwrap()' --lang rust
+octocode grep 'new $CLASS($$$ARGS)' --lang javascript
+octocode grep 'return nil' --lang go
+```
+
 ### Debugging and Maintenance
 
 ```bash

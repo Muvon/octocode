@@ -92,6 +92,42 @@ octocode view --md                # Markdown format
 octocode view "src/**/*.rs" --md  # Specific files in markdown
 ```
 
+### `octocode grep`
+
+Structural code search using ast-grep patterns. Finds code by AST structure, not text.
+
+```bash
+# Find all .unwrap() calls in Rust
+octocode grep '$FUNC.unwrap()' --lang rust
+
+# Find all `new` expressions in JavaScript
+octocode grep 'new $CLASS($$$ARGS)' --lang javascript
+
+# Find println calls in Java
+octocode grep 'System.out.println($ARG)' --lang java
+
+# Search specific paths with context lines
+octocode grep 'return nil' --lang go --paths 'src/**/*.go' -C 2
+
+# JSON output
+octocode grep 'puts $ARG' --lang ruby --json
+```
+
+**Pattern syntax (ast-grep):**
+- `$VAR` — matches any single AST node
+- `$$REST` — matches zero or more nodes in a sequence
+- `$$$ARGS` — matches zero or more function arguments
+- Literal code — matches exact structure (e.g. `return 0`, `x = 1`)
+
+**Options:**
+- `--lang <language>` — Language to search (auto-detected from extensions if omitted)
+- `--paths <glob>` — File paths or glob patterns to search
+- `-C, --context <n>` — Number of context lines around matches
+- `--json` — Output as JSON
+
+**Supported languages:**
+Rust, JavaScript, TypeScript, Python, Go, Java, C/C++, PHP, Ruby, Lua, Bash, CSS, JSON
+
 ### `octocode config`
 
 Manage configuration settings.
@@ -356,6 +392,7 @@ octocode mcp --path /path/to/project --debug
 - `semantic_search` - Semantic code search (supports multi-query, all modes including commits)
 - `view_signatures` - View file signatures and code structure by glob patterns
 - `graphrag` - Advanced GraphRAG operations (search, get-node, get-relationships, find-path, overview)
+- `structural_search` - AST-based structural code search using ast-grep patterns
 - `lsp_*` - LSP integration tools (when --with-lsp is used)
 
 ### `octocode mcp-proxy`

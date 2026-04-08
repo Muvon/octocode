@@ -279,6 +279,7 @@ octocode mcp --path /path/to/your/project --with-lsp "typescript-language-server
 | **semantic_search** | Semantic code search across the codebase (supports multi-query) | `query` (string or array), `mode` (string: all/code/docs/text/commits), `detail_level` (string), `max_results` (integer) |
 | **view_signatures** | View file signatures and code structure | `files` (array of file paths or glob patterns) |
 | **graphrag** | Advanced GraphRAG operations: search, get-node, get-relationships, find-path, overview | `operation` (string), `query` (string), `node_id` (string), `source_id` (string), `target_id` (string), `max_depth` (integer), `format` (string) |
+| **structural_search** | AST-based structural code search using ast-grep patterns | `pattern` (string), `language` (string), `paths` (array), `context` (integer), `max_results` (integer) |
 
 #### semantic_search Tool Details
 
@@ -379,6 +380,56 @@ octocode search "auth" "security" --json
 - Combine concepts: `"authentication" "middleware"` for auth middleware code
 - Use specific terms: `"database" "connection"` instead of vague terms
 - Limit to 3 queries: More queries don't necessarily improve results
+
+### Structural Code Search
+
+Search code by AST structure using ast-grep patterns. Unlike text search, structural search understands syntax — `$FUNC.unwrap()` matches `foo.unwrap()` and `bar.baz.unwrap()` but not the word "unwrap" in comments.
+
+#### CLI Usage
+
+```bash
+# Find all .unwrap() calls in Rust
+octocode grep '$FUNC.unwrap()' --lang rust
+
+# Find new expressions in JavaScript
+octocode grep 'new $CLASS($$$ARGS)' --lang javascript
+
+# Find println calls in Java with context
+octocode grep 'System.out.println($ARG)' --lang java -C 2
+
+# Search specific paths
+octocode grep 'return nil' --lang go --paths 'src/**/*.go'
+
+# JSON output for tooling
+octocode grep 'puts $ARG' --lang ruby --json
+```
+
+#### MCP Tool Usage
+
+The `structural_search` MCP tool provides the same capability to AI assistants:
+
+```json
+{
+  "pattern": "$VAR.unwrap()",
+  "language": "rust",
+  "paths": ["src/"],
+  "context": 2,
+  "max_results": 20
+}
+```
+
+#### Pattern Syntax (ast-grep)
+
+| Pattern | Meaning | Example |
+|---------|---------|---------|
+| `$VAR` | Matches any single AST node | `$FUNC.unwrap()` matches `foo.unwrap()` |
+| `$$REST` | Matches zero or more nodes | `fn $NAME($$PARAMS)` |
+| `$$$ARGS` | Matches function arguments | `new $CLASS($$$ARGS)` |
+| Literal code | Matches exact structure | `return 0`, `x = 1` |
+
+#### Supported Languages
+
+Rust, JavaScript, TypeScript, Python, Go, Java, C/C++, PHP, Ruby, Lua, Bash, CSS, JSON
 
 ### Similarity Thresholds
 

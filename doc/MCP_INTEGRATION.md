@@ -219,6 +219,46 @@ Advanced relationship-aware GraphRAG operations for code analysis. Supports mult
 }
 ```
 
+### structural_search
+
+Search code by AST structure using ast-grep pattern syntax. Complements `semantic_search`: use this for structural/syntactic patterns, `semantic_search` for meaning-based queries.
+
+**Parameters:**
+- `pattern` (string, required) - AST pattern to search for (e.g. `$FUNC.unwrap()`, `if let Some($X) = $Y { $$$ }`)
+- `language` (string, required) - Language to search: rust, javascript, typescript, python, go, java, cpp, php, ruby, lua, bash, css, json
+- `paths` (array, optional) - File path substrings to filter results
+- `context` (integer, optional) - Number of context lines around matches (default: 0)
+- `max_results` (integer, optional) - Maximum number of matches to return (default: 50)
+
+**Examples:**
+
+**Find all unwrap() calls in Rust:**
+```json
+{
+  "pattern": "$VAR.unwrap()",
+  "language": "rust"
+}
+```
+
+**Find new expressions in JavaScript with path filter:**
+```json
+{
+  "pattern": "new $CLASS($$$ARGS)",
+  "language": "javascript",
+  "paths": ["src/"],
+  "context": 2
+}
+```
+
+**Find return nil in Go:**
+```json
+{
+  "pattern": "return nil",
+  "language": "go",
+  "max_results": 20
+}
+```
+
 ## LSP Integration Tools
 
 When started with `--with-lsp`, additional tools become available:

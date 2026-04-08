@@ -116,7 +116,16 @@ octocode search "database connection pool" --lang rust
 octocode search "authentication refactor" --mode commits
 ```
 
-### 5. Connect AI Assistants (MCP Server)
+### 5. Structural Code Search
+
+```bash
+# Find patterns by AST structure (not text)
+octocode grep '$FUNC.unwrap()' --lang rust
+octocode grep 'new $CLASS($$$ARGS)' --lang javascript
+octocode grep 'System.out.println($ARG)' --lang java
+```
+
+### 6. Connect AI Assistants (MCP Server)
 
 ```bash
 # Start MCP server for Claude Desktop, Cursor, etc.
@@ -135,6 +144,7 @@ Octocode includes a **built-in MCP server** that exposes your codebase as tools 
 | `semantic_search` | Semantic search across code, docs, text, and commits |
 | `view_signatures` | View file signatures and code structure by glob patterns |
 | `graphrag` | Query code relationships, dependencies, and architecture |
+| `structural_search` | AST-based structural code search using ast-grep patterns |
 
 **Works with:** Claude Desktop • Cursor • Any MCP-compatible client
 

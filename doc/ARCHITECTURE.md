@@ -19,6 +19,7 @@ The codebase is organized into the following core modules:
 - **`storage`** - Vector database operations and data persistence
 - **`store`** - High-level storage abstractions and batch operations
 - **`utils`** - Shared utilities and helper functions
+- **`grep`** - Structural code search using ast-grep patterns (AST-aware pattern matching)
 - **`watcher_config`** - File watching configuration and patterns
 
 ### 1. Indexer Engine (`src/indexer/`)
@@ -109,6 +110,7 @@ Each file/module in the codebase becomes a node with:
 ### Relationships
 Connections between nodes represent different types of relationships:
 - **`imports`**: Direct import dependencies between files
+- **`calls`**: Function/method call relationships between files
 - **`sibling_module`**: Files in the same directory
 - **`parent_module`** / **`child_module`**: Hierarchical relationships
 
