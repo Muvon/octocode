@@ -230,7 +230,7 @@ async fn generate_descriptions_batch(
 		Message::user(&prompt),
 	];
 
-	let json = client.chat_completion_json(messages).await?;
+	let json = client.chat_completion_json(messages, None).await?;
 
 	if let Some(obj) = json.as_object() {
 		for (i, _block) in batch.iter().enumerate() {

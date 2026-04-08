@@ -560,15 +560,30 @@ fn should_show_issue(issue_severity: &str, filter: &str) -> bool {
 async fn call_llm_for_review(prompt: &str, config: &Config) -> Result<serde_json::Value> {
 	use octocode::llm::{LlmClient, Message};
 
-	// Create LLM client from config
 	let client = LlmClient::from_config(config)?;
-
-	// Build messages - the prompt already includes JSON schema instructions
 	let messages = vec![Message::user(prompt)];
 
-	// Call LLM using chat_completion_json which tries structured output first
-	// and falls back to markdown stripping if needed
-	let response = client.chat_completion_json(messages).await?;
+	let schema = serde_json::json!({
+		"type": "object",
+		"properties": {
+			"summary": {"type": "object", "properties": {
+				"total_files": {"type": "integer"},
+				"total_issues": {"type": "integer"},
+				"overall_score": {"type": "integer"}
+			}, "required": ["total_files", "total_issues", "overall_score"]},
+			"issues": {"type": "array", "items": {"type": "object", "properties": {
+				"severity": {"type": "string"},
+				"category": {"type": "string"},
+				"title": {"type": "string"},
+				"description": {"type": "string"},
+				"file_path": {"type": "string"},
+				"line_number": {"type": "integer"}
+			}, "required": ["severity", "category", "title", "description"]}},
+			"recommendations": {"type": "array", "items": {"type": "string"}}
+		},
+		"required": ["summary", "issues", "recommendations"]
+	});
+	let response = client.chat_completion_json(messages, Some(schema)).await?;
 
 	Ok(response)
 }

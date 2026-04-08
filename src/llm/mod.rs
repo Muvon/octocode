@@ -212,25 +212,10 @@ impl LlmClient {
 		self.provider.supports_structured_output(&self.model)
 	}
 
-	/// Chat completion with JSON output (tries structured output, falls back to markdown stripping)
+	/// Chat completion with JSON output. Pass a schema to enforce structure via provider.
+	/// Schema must use only basic JSON Schema keywords: type, properties, required, items.
 	/// Includes retry with exponential backoff.
-	pub async fn chat_completion_json(&self, messages: Vec<Message>) -> Result<serde_json::Value> {
-		self.chat_completion_json_inner(messages, None).await
-	}
-
-	/// Chat completion with JSON output constrained by a JSON schema.
-	/// The schema is passed to providers that support structured output.
-	pub async fn chat_completion_json_with_schema(
-		&self,
-		messages: Vec<Message>,
-		schema: serde_json::Value,
-	) -> Result<serde_json::Value> {
-		self.chat_completion_json_inner(messages, Some(schema))
-			.await
-	}
-
-	/// Shared implementation for JSON completion with optional schema.
-	async fn chat_completion_json_inner(
+	pub async fn chat_completion_json(
 		&self,
 		messages: Vec<Message>,
 		schema: Option<serde_json::Value>,

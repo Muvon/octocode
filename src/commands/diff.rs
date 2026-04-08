@@ -366,7 +366,22 @@ async fn analyze_single_diff(
 		Message::user(&user_prompt),
 	];
 
-	let json = client.chat_completion_json(messages).await?;
+	let schema = serde_json::json!({
+		"type": "object",
+		"properties": {
+			"summary": {"type": "string"},
+			"risk": {"type": "string"},
+			"changes": {"type": "array", "items": {"type": "object", "properties": {
+				"title": {"type": "string"},
+				"risk": {"type": "string"},
+				"what_changed": {"type": "array", "items": {"type": "string"}},
+				"impact": {"type": "string"},
+				"uncertain": {"type": "string"}
+			}, "required": ["title", "risk", "what_changed", "impact"]}}
+		},
+		"required": ["summary", "risk", "changes"]
+	});
+	let json = client.chat_completion_json(messages, Some(schema)).await?;
 
 	let analysis: DiffAnalysis = serde_json::from_value(json)
 		.map_err(|e| anyhow::anyhow!("Failed to parse LLM response as DiffAnalysis: {}", e))?;

@@ -194,7 +194,7 @@ async fn generate_descriptions(
 			Message::user(&prompt),
 		];
 
-		match client.chat_completion_json(messages).await {
+		match client.chat_completion_json(messages, None).await {
 			Ok(json) => {
 				if let Some(obj) = json.as_object() {
 					for entry in chunk {

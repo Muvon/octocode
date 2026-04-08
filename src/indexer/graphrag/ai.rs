@@ -227,13 +227,27 @@ impl AIEnhancements {
 
 		batch_prompt.push_str("JSON Response:");
 
+		let relationship_schema = json!({
+			"type": "object",
+			"properties": {
+				"relationships": {"type": "array", "items": {"type": "object", "properties": {
+					"source_path": {"type": "string"},
+					"target_path": {"type": "string"},
+					"relation_type": {"type": "string"},
+					"description": {"type": "string"},
+					"confidence": {"type": "number"}
+				}, "required": ["source_path", "target_path", "relation_type", "description", "confidence"]}}
+			},
+			"required": ["relationships"]
+		});
+
 		// Call AI with architectural analysis (includes retry with exponential backoff)
 		let response = self
 			.call_llm_json(
 				&self.config.graphrag.llm.relationship_model,
 				system_prompt,
 				batch_prompt,
-				None,
+				Some(relationship_schema),
 			)
 			.await
 			.map_err(|e| {
@@ -277,8 +291,12 @@ impl AIEnhancements {
 			confidence: f32,
 		}
 
-		// Try to parse as JSON array
-		if let Ok(ai_rels) = serde_json::from_value::<Vec<AiRelationship>>(response.clone()) {
+		// Try to parse from "relationships" key first, then as direct array
+		let rels_value = response
+			.get("relationships")
+			.cloned()
+			.unwrap_or_else(|| response.clone());
+		if let Ok(ai_rels) = serde_json::from_value::<Vec<AiRelationship>>(rels_value) {
 			let relationships = ai_rels
 				.into_iter()
 				.map(|ai_rel| CodeRelationship {
@@ -535,7 +553,7 @@ impl AIEnhancements {
 		client.chat_completion(messages).await
 	}
 
-	// Call LLM API with JSON response (structured output + markdown stripping)
+	// Call LLM API with JSON response and optional schema enforcement
 	async fn call_llm_json(
 		&self,
 		model_name: &str,
@@ -545,10 +563,7 @@ impl AIEnhancements {
 	) -> Result<serde_json::Value> {
 		let client = self.create_llm_client(model_name)?;
 		let messages = vec![Message::system(&system), Message::user(&prompt)];
-		match schema {
-			Some(s) => client.chat_completion_json_with_schema(messages, s).await,
-			None => client.chat_completion_json(messages).await,
-		}
+		client.chat_completion_json(messages, schema).await
 	}
 
 	fn create_llm_client(&self, model_name: &str) -> Result<LlmClient> {
