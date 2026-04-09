@@ -718,6 +718,21 @@ impl Store {
 		table_ops.clear_table("text_blocks").await
 	}
 
+	pub async fn clear_commits_table(&self) -> Result<()> {
+		let table_ops = TableOperations::new(&self.db);
+		table_ops.clear_table("commit_blocks").await
+	}
+
+	pub async fn clear_commits_git_metadata(&self) -> Result<()> {
+		let table_ops = TableOperations::new(&self.db);
+		table_ops.clear_table("commits_git_metadata").await
+	}
+
+	pub async fn clear_graphrag_git_metadata(&self) -> Result<()> {
+		let table_ops = TableOperations::new(&self.db);
+		table_ops.clear_table("graphrag_git_metadata").await
+	}
+
 	pub fn get_code_vector_dim(&self) -> usize {
 		self.code_vector_dim
 	}

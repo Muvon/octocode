@@ -17,7 +17,7 @@ use octocode::store::Store;
 
 #[derive(Args, Debug)]
 pub struct ClearArgs {
-	/// Clear mode: all (default), code, docs, or text
+	/// Clear mode: all (default), code, docs, text, commits, or graphrag
 	#[arg(long, default_value = "all")]
 	pub mode: String,
 }
@@ -54,9 +54,24 @@ pub async fn execute(store: &Store, args: &ClearArgs) -> Result<(), anyhow::Erro
 			println!("Successfully cleared text blocks table and git metadata.");
 			println!("Note: Text content will be re-indexed on next indexing operation.");
 		}
+		"commits" => {
+			println!("Clearing commit blocks table...");
+			store.clear_commits_table().await?;
+			store.clear_commits_git_metadata().await?;
+			println!("Successfully cleared commit blocks table and commits git metadata.");
+			println!("Note: Commits will be re-indexed on next indexing operation.");
+		}
+		"graphrag" => {
+			println!("Clearing GraphRAG tables...");
+			store.clear_graph_nodes().await?;
+			store.clear_graph_relationships().await?;
+			store.clear_graphrag_git_metadata().await?;
+			println!("Successfully cleared GraphRAG nodes, relationships, and git metadata.");
+			println!("Note: GraphRAG will be rebuilt on next indexing operation.");
+		}
 		_ => {
 			return Err(anyhow::anyhow!(
-				"Invalid mode '{}'. Valid modes are: all, code, docs, text",
+				"Invalid mode '{}'. Valid modes are: all, code, docs, text, commits, graphrag",
 				args.mode
 			));
 		}
