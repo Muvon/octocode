@@ -94,17 +94,17 @@ octocode config \
 # HuggingFace (highest quality, requires huggingface feature)
 octocode config \
   --code-embedding-model "huggingface:microsoft/codebert-base" \
-  --text-embedding-model "huggingface:sentence-transformers/all-mpnet-base-v2"
+  --text-embedding-model "huggingface:sentence-transformers/all-MiniLM-L6-v2"
 ```
 
 **Supported Architectures:**
 - **BERT**: Standard BERT models (e.g., `sentence-transformers/all-MiniLM-L6-v2`)
+- **RoBERTa**: RoBERTa/XLM-RoBERTa models (e.g., `microsoft/codebert-base`)
 - **JinaBERT**: Jina's BERT variants (e.g., `jinaai/jina-embeddings-v2-base-code`)
-- **RoBERTa**: RoBERTa-style models with BPE tokenization
+- **Qwen2/Qwen3**: Qwen decoder models for embeddings
 
 **Popular Models:**
 - `sentence-transformers/all-MiniLM-L6-v2` - 384 dimensions, fast and efficient
-- `sentence-transformers/all-mpnet-base-v2` - 768 dimensions, high quality
 - `microsoft/codebert-base` - 768 dimensions, code-specialized
 - `jinaai/jina-embeddings-v2-base-code` - 768 dimensions, code-optimized
 
@@ -292,7 +292,7 @@ octocode config --model "anthropic:claude-3-5-sonnet-20241022"
 ### For Text/Documentation (text_model)
 
 **Best Quality:**
-- `huggingface:sentence-transformers/all-mpnet-base-v2` (768 dim, local)
+- `huggingface:sentence-transformers/all-MiniLM-L6-v2` (384 dim, local)
 - `jina:jina-embeddings-v4` (2048 dim, cloud)
 - `voyage:voyage-3.5-lite` (1024 dim, cloud)
 - `openai:text-embedding-3-large` (3072 dim, cloud)
