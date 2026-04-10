@@ -193,3 +193,35 @@ jobs:
       with:
         file: ./cobertura.xml
         fail_ci_if_error: false
+
+  brief:
+    name: PR Brief
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Generate PR Brief (New PR)
+      if: github.event.action == 'opened'
+      uses: muvon/octomind-action@master
+      with:
+        role: developer:brief
+        model: ollama:glm-5.1
+        prompt: "Compare branch '${{ github.head_ref }}' to '${{ github.base_ref }}' and provide a brief summary of all changes"
+        comment: 'full'
+      env:
+        OLLAMA_API_KEY: ${{ secrets.OLLAMA_API_KEY }}
+
+    - name: Generate PR Brief (Push to existing PR)
+      if: github.event.action == 'synchronize'
+      uses: muvon/octomind-action@master
+      with:
+        role: developer:brief
+        model: ollama:glm-5.1
+        prompt: "Analyze changes from commit ${{ github.event.before }} to ${{ github.event.after }} and provide a brief summary of incremental changes"
+        comment: 'full'
+      env:
+        OLLAMA_API_KEY: ${{ secrets.OLLAMA_API_KEY }}
