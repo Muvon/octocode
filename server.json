@@ -26,7 +26,7 @@
   "tools": [
     {
       "name": "semantic_search",
-      "description": "Search codebase using semantic search to find relevant code snippets, functions, classes, documentation, or text content. This tool finds code by understanding what it does, not by exact symbol names. Use descriptive phrases about functionality and behavior, not function names or single words.",
+      "description": "Search codebase by meaning — finds code by what it does, not exact symbol names. Prefer an array of related terms over a single query for broader coverage.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -34,57 +34,166 @@
             "oneOf": [
               {
                 "type": "string",
-                "description": "Single search query - use for specific conceptual searches"
+                "description": "Descriptive phrase about what the code does (not a symbol name)",
+                "minLength": 10,
+                "maxLength": 500
               },
               {
                 "type": "array",
                 "items": {
-                  "type": "string"
+                  "type": "string",
+                  "minLength": 10,
+                  "maxLength": 500
                 },
-                "description": "Array of related search terms for comprehensive results"
+                "minItems": 1,
+                "maxItems": 5,
+                "description": "Array of related search terms — finds all related code in one call"
               }
             ],
-            "description": "Search query(s) - prefer array of related terms for better results"
+            "description": "String or array of strings describing functionality to find. Array preferred for comprehensive results."
           },
           "mode": {
             "type": "string",
-            "enum": ["code", "text", "docs", "all"],
+            "enum": ["code", "text", "docs", "commits", "all"],
             "default": "all",
-            "description": "Scope of search to limit results to specific content types"
+            "description": "Content type filter: 'code' (functions/classes), 'text' (plain text), 'docs' (markdown/README), 'commits' (git commit history), 'all' (default, excludes commits)"
           },
           "detail_level": {
             "type": "string",
             "enum": ["signatures", "partial", "full"],
             "default": "partial",
-            "description": "Level of detail in results"
+            "description": "Result verbosity: 'signatures' (declarations only), 'partial' (truncated, default), 'full' (complete bodies)"
           },
           "max_results": {
             "type": "integer",
-            "default": 3,
+            "description": "Max results to return (default: 3)",
             "minimum": 1,
             "maximum": 20,
-            "description": "Maximum number of results to return"
+            "default": 3
+          },
+          "threshold": {
+            "type": "number",
+            "description": "Similarity cutoff 0.0–1.0 (higher = stricter match)",
+            "minimum": 0.0,
+            "maximum": 1.0
+          },
+          "language": {
+            "type": "string",
+            "description": "Filter code results by language (rust, python, typescript, go, etc.)"
           }
         },
-        "required": ["query"]
+        "required": ["query"],
+        "additionalProperties": false
       }
     },
     {
       "name": "view_signatures",
-      "description": "Extract and view function signatures, class definitions, and other meaningful code structures from files.",
+      "description": "Extract function signatures, class definitions, and declarations from files without implementation bodies. Supports Rust, JS/TS, Python, Go, C++, PHP, Ruby, Bash, JSON, CSS, Svelte, Markdown.",
       "inputSchema": {
         "type": "object",
         "properties": {
-          "file_path": {
-            "type": "string",
-            "description": "Path to the file to analyze for signatures"
-          },
-          "filter": {
-            "type": "string",
-            "description": "Optional filter to narrow down results (e.g., function name, class name)"
+          "files": {
+            "type": "array",
+            "description": "File paths or glob patterns (e.g. 'src/main.rs', '**/*.py', 'src/**/*.ts')",
+            "items": { "type": "string" },
+            "minItems": 1,
+            "maxItems": 100
           }
         },
-        "required": ["file_path"]
+        "required": ["files"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "structural_search",
+      "description": "Search or rewrite code by AST structure using ast-grep pattern syntax. Finds code matching structural patterns like '$FUNC.unwrap()', 'if let Some($X) = $Y { $$$ }'. Optionally rewrite matches using a template with metavariable substitution. Complements semantic_search: use this for structural/syntactic patterns, semantic_search for meaning-based queries.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "pattern": {
+            "type": "string",
+            "description": "AST pattern using ast-grep syntax (e.g. '$FUNC.unwrap()', 'if err != nil { $$$ }')"
+          },
+          "language": {
+            "type": "string",
+            "description": "Language to search (required: rust, javascript, typescript, python, go, java, cpp, php, ruby, lua, bash, css, json)"
+          },
+          "paths": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "File paths or glob patterns to search (default: current directory)"
+          },
+          "context": {
+            "type": "integer",
+            "description": "Number of context lines around matches",
+            "minimum": 0,
+            "maximum": 10
+          },
+          "max_results": {
+            "type": "integer",
+            "description": "Max results to return (default: 50)",
+            "minimum": 1,
+            "maximum": 200,
+            "default": 50
+          },
+          "rewrite": {
+            "type": "string",
+            "description": "Rewrite template with metavariable substitution (e.g. '$VAR.expect(\"reason\")'). When provided, matched code is rewritten."
+          },
+          "update_all": {
+            "type": "boolean",
+            "description": "Apply rewrites to files in-place. When false or absent, returns a diff preview. Requires rewrite parameter."
+          }
+        },
+        "required": ["pattern", "language"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "graphrag",
+      "description": "Knowledge graph operations over the indexed codebase. Use for architectural queries: component relationships, dependency chains, data flows. For simple code lookup use semantic_search instead.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "operation": {
+            "type": "string",
+            "enum": ["search", "get-node", "get-relationships", "find-path", "overview"],
+            "description": "'search' (semantic node search), 'get-node' (node details), 'get-relationships' (node connections), 'find-path' (path between two nodes), 'overview' (graph stats)"
+          },
+          "query": {
+            "type": "string",
+            "description": "Search query for 'search' operation",
+            "minLength": 10,
+            "maxLength": 1000
+          },
+          "node_id": {
+            "type": "string",
+            "description": "Node ID for 'get-node'/'get-relationships' (format: 'path/to/file', e.g. 'src/main.rs')"
+          },
+          "source_id": {
+            "type": "string",
+            "description": "Source node ID for 'find-path'"
+          },
+          "target_id": {
+            "type": "string",
+            "description": "Target node ID for 'find-path'"
+          },
+          "max_depth": {
+            "type": "integer",
+            "description": "Max path depth for 'find-path' (default: 3)",
+            "minimum": 1,
+            "maximum": 10,
+            "default": 3
+          },
+          "format": {
+            "type": "string",
+            "enum": ["text", "json", "markdown"],
+            "description": "Output format (default: 'text')",
+            "default": "text"
+          }
+        },
+        "required": ["operation"],
+        "additionalProperties": false
       }
     }
   ],
