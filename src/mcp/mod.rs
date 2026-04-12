@@ -20,7 +20,6 @@
 //! The server automatically enables available tools based on configuration.
 
 pub mod graphrag;
-pub mod handlers;
 pub mod logging;
 pub mod lsp;
 pub mod proxy;

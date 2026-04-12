@@ -602,6 +602,42 @@ impl McpServer {
 		}
 	}
 
+	/// Lightweight constructor for proxy mode.
+	///
+	/// Creates only the providers and tool router — no store, no LSP, no
+	/// background services, no `set_current_dir`.  The proxy manages its own
+	/// lifecycle (indexing, cleanup, logging).
+	pub fn new_for_proxy(config: Config, working_directory: std::path::PathBuf) -> Result<Self> {
+		let semantic_code = SemanticCodeProvider::new(config.clone(), working_directory.clone());
+		let graphrag = GraphRagProvider::new(config, working_directory);
+
+		let mut tool_router = Self::tool_router();
+
+		// Proxy never has LSP — remove LSP tools
+		for name in [
+			"lsp_goto_definition",
+			"lsp_hover",
+			"lsp_find_references",
+			"lsp_document_symbols",
+			"lsp_workspace_symbols",
+			"lsp_completion",
+		] {
+			tool_router.remove_route(name);
+		}
+
+		if graphrag.is_none() {
+			tool_router.remove_route("graphrag");
+		}
+
+		Ok(Self {
+			semantic_code,
+			graphrag,
+			lsp: None,
+			indexer_enabled: false,
+			tool_router,
+		})
+	}
+
 	/// Create a new MCP server instance.
 	///
 	/// Initialises the store, logging, providers, and optionally spawns LSP background init.

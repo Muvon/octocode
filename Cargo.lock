@@ -4656,6 +4656,7 @@ dependencies = [
  "ec4rs",
  "futures",
  "globset",
+ "http-body-util",
  "hyper",
  "hyper-util",
  "ignore",

@@ -105,6 +105,7 @@ rmcp = { version = "1.3.0", features = ["server", "macros", "transport-io", "tra
 schemars = "1"  # Required for rmcp schema generation (must match rmcp's version)
 hyper = { version = "1", features = ["server", "http1"] }  # Required for HTTP mode connection handling
 hyper-util = { version = "0.1", features = ["server", "tokio", "service"] }  # Required for HTTP mode connection handling
+http-body-util = "0.1"  # Required for proxy HTTP body types (matches rmcp's version)
 
 [profile.dev]
 opt-level = 1          # Basic optimizations without slowing compilation too much

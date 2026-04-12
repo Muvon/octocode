@@ -12,81 +12,67 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! MCP Proxy Server — multi-repo router using rmcp transport.
+//!
+//! Routes HTTP requests by URL path (`/org/repo`) to per-repository
+//! `McpServer` instances, each served via rmcp's `StreamableHttpService`.
+
 use anyhow::Result;
+use http_body_util::{BodyExt, Full};
+use hyper::body::{Bytes, Incoming};
+use hyper::{Request, Response};
+use hyper_util::rt::TokioIo;
+use rmcp::transport::streamable_http_server::{
+	session::local::LocalSessionManager, StreamableHttpService,
+};
 use std::collections::HashMap;
+use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{Mutex, Semaphore};
 use tokio::task::JoinHandle;
 use tokio::time::Duration;
 use tracing::debug;
 
 use crate::config::Config;
-use crate::mcp::graphrag::GraphRagProvider;
-use crate::mcp::logging::{
-	init_mcp_logging, log_critical_anyhow_error, log_mcp_request, log_mcp_response,
-};
-use crate::mcp::semantic_code::SemanticCodeProvider;
-use crate::mcp::types::{JsonRpcError, JsonRpcRequest, JsonRpcResponse};
+use crate::mcp::logging::{init_mcp_logging, log_critical_anyhow_error};
+use crate::mcp::server::McpServer;
 
-// Reuse constants from server.rs for consistency
 const INSTANCE_CLEANUP_INTERVAL_MS: u64 = 300_000; // 5 minutes
 const INSTANCE_IDLE_TIMEOUT_MS: u64 = 1_800_000; // 30 minutes
 
-/// Lightweight MCP instance for a single repository
-/// Reuses all the provider logic from the main MCP server
+// ---------------------------------------------------------------------------
+// Per-repo instance: wraps a StreamableHttpService backed by McpServer
+// ---------------------------------------------------------------------------
+
+type McpHttpService = StreamableHttpService<McpServer, LocalSessionManager>;
+
 #[derive(Clone)]
 struct ProxyMcpInstance {
-	semantic_code: SemanticCodeProvider,
-	graphrag: Option<GraphRagProvider>,
+	service: McpHttpService,
 	last_accessed: Arc<Mutex<Instant>>,
 }
 
 impl ProxyMcpInstance {
-	async fn new(config: Config, working_directory: PathBuf, _debug: bool) -> Result<Self> {
-		// Skip logging initialization in proxy mode since the main proxy server handles logging
-		// Individual repository instances don't need separate logging as they're part of the same process
-		// The `MCP_LOG_DIR` OnceLock can only be set once per process, so subsequent calls would fail
+	fn new(config: Config, working_directory: PathBuf) -> Result<Self> {
+		let server = McpServer::new_for_proxy(config, working_directory)?;
 
-		// Reuse exact same provider initialization as McpServer::new
-		let semantic_code = SemanticCodeProvider::new(config.clone(), working_directory.clone());
-		let graphrag = GraphRagProvider::new(config.clone(), working_directory.clone());
+		let service = StreamableHttpService::new(
+			move || Ok(server.clone()),
+			Arc::new(LocalSessionManager::default()),
+			Default::default(),
+		);
 
 		Ok(Self {
-			semantic_code,
-			graphrag,
+			service,
 			last_accessed: Arc::new(Mutex::new(Instant::now())),
 		})
 	}
-	async fn handle_request(&self, request: &JsonRpcRequest) -> JsonRpcResponse {
-		// Update last accessed time
-		*self.last_accessed.lock().await = Instant::now();
 
-		// Use shared handlers from handlers module
-		match request.method.as_str() {
-			"initialize" => super::handlers::handle_initialize(
-				request,
-				"octocode-mcp-proxy",
-				"This proxy provides MCP tools for multiple repositories. Access via URL path: /org/repo for repository at {root}/org/repo."
-			),
-			"tools/list" => super::handlers::handle_tools_list(request, &self.semantic_code, &self.graphrag),
-			"tools/call" => super::handlers::handle_tools_call(request, &self.semantic_code, &self.graphrag).await,
-			"ping" => super::handlers::handle_ping(request),
-			_ => JsonRpcResponse {
-				jsonrpc: "2.0".to_string(),
-				id: request.id.clone(),
-				result: None,
-				error: Some(JsonRpcError {
-					code: -32601,
-					message: "Method not found".to_string(),
-					data: None,
-				}),
-			},
-		}
+	async fn touch(&self) {
+		*self.last_accessed.lock().await = Instant::now();
 	}
 
 	async fn is_idle(&self) -> bool {
@@ -95,7 +81,11 @@ impl ProxyMcpInstance {
 	}
 }
 
-/// MCP Proxy Server - manages multiple MCP instances for different repositories
+// ---------------------------------------------------------------------------
+// McpProxyServer
+// ---------------------------------------------------------------------------
+
+/// MCP Proxy Server — manages per-repo MCP instances behind a single HTTP endpoint.
 pub struct McpProxyServer {
 	bind_addr: SocketAddr,
 	root_path: PathBuf,
@@ -113,10 +103,8 @@ impl McpProxyServer {
 		debug_mode: bool,
 		auto_index: bool,
 	) -> Result<Self> {
-		// Initialize logging for the proxy server
 		init_mcp_logging(root_path.clone(), debug_mode)?;
 
-		// Console output only in debug mode to maintain protocol compliance
 		if debug_mode {
 			println!("🔍 Initializing MCP Proxy Server...");
 		}
@@ -132,7 +120,7 @@ impl McpProxyServer {
 	}
 
 	pub async fn run(&mut self) -> Result<()> {
-		let listener = TcpListener::bind(&self.bind_addr)
+		let listener = tokio::net::TcpListener::bind(&self.bind_addr)
 			.await
 			.map_err(|e| anyhow::anyhow!("Failed to bind to {}: {}", self.bind_addr, e))?;
 
@@ -144,10 +132,9 @@ impl McpProxyServer {
 			);
 		}
 
-		// Discover and log available repositories
 		self.discover_and_log_repositories().await?;
 
-		// Startup auto-index queue: index all discovered repos with bounded concurrency
+		// Startup auto-index queue
 		if self.auto_index {
 			let repositories = self.discover_repositories().await?;
 			if !repositories.is_empty() {
@@ -191,7 +178,7 @@ impl McpProxyServer {
 			}
 		}
 
-		// Start cleanup task for idle instances
+		// Idle instance cleanup task
 		let instances_for_cleanup = self.instances.clone();
 		let tasks_for_cleanup = self.indexing_tasks.clone();
 		tokio::spawn(async move {
@@ -199,7 +186,7 @@ impl McpProxyServer {
 				tokio::time::interval(Duration::from_millis(INSTANCE_CLEANUP_INTERVAL_MS));
 			loop {
 				interval.tick().await;
-				Self::cleanup_idle_instances(&instances_for_cleanup, &tasks_for_cleanup).await;
+				cleanup_idle_instances(&instances_for_cleanup, &tasks_for_cleanup).await;
 			}
 		});
 
@@ -208,29 +195,49 @@ impl McpProxyServer {
 			self.bind_addr
 		);
 
-		// Accept connections
+		// Shared state for the connection handler
+		let instances = self.instances.clone();
+		let root_path = self.root_path.clone();
+		let debug = self.debug;
 		let auto_index = self.auto_index;
 		let indexing_tasks = self.indexing_tasks.clone();
+
 		loop {
 			match listener.accept().await {
-				Ok((stream, addr)) => {
-					let instances = self.instances.clone();
-					let root_path = self.root_path.clone();
-					let debug = self.debug;
+				Ok((stream, remote_addr)) => {
+					let instances = instances.clone();
+					let root_path = root_path.clone();
 					let indexing_tasks = indexing_tasks.clone();
 
 					tokio::spawn(async move {
-						if let Err(e) = Self::handle_connection(
-							stream,
-							instances,
-							root_path,
-							debug,
-							auto_index,
-							indexing_tasks,
-						)
-						.await
+						let io = TokioIo::new(stream);
+
+						let instances = instances.clone();
+						let root_path = root_path.clone();
+						let indexing_tasks = indexing_tasks.clone();
+
+						let service = hyper::service::service_fn(move |req: Request<Incoming>| {
+							let instances = instances.clone();
+							let root_path = root_path.clone();
+							let indexing_tasks = indexing_tasks.clone();
+							async move {
+								handle_request(
+									req,
+									instances,
+									root_path,
+									debug,
+									auto_index,
+									indexing_tasks,
+								)
+								.await
+							}
+						});
+
+						if let Err(e) = hyper::server::conn::http1::Builder::new()
+							.serve_connection(io, service)
+							.await
 						{
-							debug!("Connection error from {}: {}", addr, e);
+							debug!("Connection error from {}: {}", remote_addr, e);
 						}
 					});
 				}
@@ -279,355 +286,245 @@ impl McpProxyServer {
 
 	async fn discover_repositories(&self) -> Result<Vec<PathBuf>> {
 		let mut repositories = Vec::new();
-
-		// Use std::fs for sync operations since we're doing simple directory traversal
-		Self::find_git_repos_recursive(&self.root_path, &mut repositories)?;
-
+		find_git_repos_recursive(&self.root_path, &mut repositories)?;
 		repositories.sort();
 		Ok(repositories)
 	}
+}
 
-	fn find_git_repos_recursive(dir: &Path, repositories: &mut Vec<PathBuf>) -> Result<()> {
-		// Check if current directory is a git repo
-		if dir.join(".git").exists() {
-			repositories.push(dir.to_path_buf());
-			return Ok(()); // Don't recurse into git repos
-		}
+// ---------------------------------------------------------------------------
+// Request handling — routes by URL path to per-repo StreamableHttpService
+// ---------------------------------------------------------------------------
 
-		// Recursively check subdirectories
-		if let Ok(read_dir) = std::fs::read_dir(dir) {
-			for entry in read_dir.flatten() {
-				let path = entry.path();
-				if path.is_dir() {
-					// Skip hidden directories and common non-repo directories
-					if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-						if name.starts_with('.')
-							|| name == "node_modules"
-							|| name == "target" || name == "build"
-						{
-							continue;
-						}
-					}
-					Self::find_git_repos_recursive(&path, repositories)?;
-				}
-			}
-		}
-
-		Ok(())
+async fn handle_request(
+	req: Request<Incoming>,
+	instances: Arc<Mutex<HashMap<String, ProxyMcpInstance>>>,
+	root_path: PathBuf,
+	debug: bool,
+	auto_index: bool,
+	indexing_tasks: Arc<Mutex<HashMap<String, JoinHandle<()>>>>,
+) -> Result<Response<http_body_util::combinators::BoxBody<Bytes, Infallible>>, Infallible> {
+	// CORS preflight
+	if req.method() == hyper::Method::OPTIONS {
+		return Ok(cors_response(
+			Response::builder()
+				.status(204)
+				.body(Full::new(Bytes::new()).boxed())
+				.expect("valid response"),
+		));
 	}
 
-	async fn handle_connection(
-		mut stream: TcpStream,
-		instances: Arc<Mutex<HashMap<String, ProxyMcpInstance>>>,
-		root_path: PathBuf,
-		debug: bool,
-		auto_index: bool,
-		indexing_tasks: Arc<Mutex<HashMap<String, JoinHandle<()>>>>,
-	) -> Result<()> {
-		let mut buffer = vec![0; 8192];
-		let bytes_read = stream.read(&mut buffer).await?;
+	// Extract repo path from URL (e.g. "/org/repo" → "org/repo")
+	let url_path = req.uri().path();
+	let repo_key = url_path.trim_start_matches('/');
 
-		if bytes_read == 0 {
-			return Ok(());
+	if repo_key.is_empty() {
+		return Ok(error_response(
+			404,
+			"Repository path not found in URL. Use format: POST /org/repo",
+		));
+	}
+
+	if debug {
+		debug!("Routing request to repository: {}", repo_key);
+	}
+
+	// Get or create the per-repo MCP service
+	let instance = match get_or_create_instance(
+		&instances,
+		repo_key,
+		&root_path,
+		debug,
+		auto_index,
+		&indexing_tasks,
+	)
+	.await
+	{
+		Ok(inst) => inst,
+		Err(e) => {
+			debug!("Failed to get MCP instance for {}: {}", repo_key, e);
+			return Ok(error_response(
+				404,
+				&format!("Repository not found: {}", repo_key),
+			));
 		}
+	};
 
-		let request_str = String::from_utf8_lossy(&buffer[..bytes_read]);
+	instance.touch().await;
 
-		if debug {
-			println!("📥 Raw HTTP request:\n{}", request_str);
-		}
+	// Forward the request to rmcp's StreamableHttpService
+	let response = instance.service.clone().handle(req).await;
+	Ok(cors_response(response))
+}
 
-		// Parse HTTP request
-		let mut lines = request_str.lines();
-		let request_line = lines.next().unwrap_or("");
+fn cors_response<B>(mut response: Response<B>) -> Response<B> {
+	let headers = response.headers_mut();
+	headers.insert(
+		hyper::header::ACCESS_CONTROL_ALLOW_ORIGIN,
+		"*".parse().unwrap(),
+	);
+	headers.insert(
+		hyper::header::ACCESS_CONTROL_ALLOW_METHODS,
+		"GET, POST, DELETE, OPTIONS".parse().unwrap(),
+	);
+	headers.insert(
+		hyper::header::ACCESS_CONTROL_ALLOW_HEADERS,
+		"Content-Type, Accept, Mcp-Session-Id, Last-Event-ID, Mcp-Protocol-Version"
+			.parse()
+			.unwrap(),
+	);
+	headers.insert(
+		hyper::header::ACCESS_CONTROL_EXPOSE_HEADERS,
+		"Mcp-Session-Id".parse().unwrap(),
+	);
+	response
+}
 
-		// Extract repository path from URL
-		let repo_path = match Self::extract_repo_path(request_line) {
-			Some(path) => {
-				if debug {
-					println!("🔀 Routing request to repository: {}", path);
-				}
-				path
-			}
-			None => {
-				if debug {
-					println!(
-						"❌ Invalid request - no repository path found in: {}",
-						request_line
-					);
-				}
-				Self::send_http_error(
-					&mut stream,
-					404,
-					"Repository path not found in URL. Use format: POST /org/repo",
-				)
-				.await?;
-				return Ok(());
-			}
-		};
+fn error_response(
+	status: u16,
+	message: &str,
+) -> Response<http_body_util::combinators::BoxBody<Bytes, Infallible>> {
+	cors_response(
+		Response::builder()
+			.status(status)
+			.header(hyper::header::CONTENT_TYPE, "text/plain")
+			.body(Full::new(Bytes::from(message.to_string())).boxed())
+			.expect("valid response"),
+	)
+}
 
-		// Find content length and extract JSON body
-		let mut content_length = 0;
-		let mut body_start = 0;
-		let mut header_end_found = false;
+// ---------------------------------------------------------------------------
+// Instance management
+// ---------------------------------------------------------------------------
 
-		// Find headers and body boundary
-		let header_body_split = request_str
-			.find("\r\n\r\n")
-			.or_else(|| request_str.find("\n\n"));
+async fn get_or_create_instance(
+	instances: &Arc<Mutex<HashMap<String, ProxyMcpInstance>>>,
+	repo_key: &str,
+	root_path: &Path,
+	debug: bool,
+	auto_index: bool,
+	indexing_tasks: &Arc<Mutex<HashMap<String, JoinHandle<()>>>>,
+) -> Result<ProxyMcpInstance> {
+	let mut guard = instances.lock().await;
 
-		if let Some(split_pos) = header_body_split {
-			// Parse headers to find content-length
-			let headers_part = &request_str[..split_pos];
-			for line in headers_part.lines() {
-				if line.to_lowercase().starts_with("content-length:") {
-					if let Some(len_str) = line.split(':').nth(1) {
-						content_length = len_str.trim().parse().unwrap_or(0);
-					}
-				}
-			}
+	if let Some(instance) = guard.get(repo_key) {
+		debug!("Reusing existing MCP instance for: {}", repo_key);
+		return Ok(instance.clone());
+	}
 
-			// Calculate body start position in bytes
-			if request_str.contains("\r\n\r\n") {
-				body_start = split_pos + 4; // Skip \r\n\r\n
-			} else {
-				body_start = split_pos + 2; // Skip \n\n
-			}
-			header_end_found = true;
-		}
+	// Validate repository path
+	let full_path = root_path.join(repo_key);
+	if !full_path.is_dir() {
+		return Err(anyhow::anyhow!(
+			"Directory not found: {}",
+			full_path.display()
+		));
+	}
+	if !full_path.join(".git").exists() {
+		return Err(anyhow::anyhow!(
+			"Not a git repository: {}",
+			full_path.display()
+		));
+	}
 
-		if !header_end_found {
-			Self::send_http_error(&mut stream, 400, "Invalid HTTP request format").await?;
-			return Ok(());
-		}
+	println!("🚀 Bootstrapping MCP instance for repository: {}", repo_key);
+	println!("   📂 Path: {}", full_path.display());
 
-		let json_body = if content_length > 0 && body_start < bytes_read {
-			let body_bytes =
-				&buffer[body_start..std::cmp::min(body_start + content_length, bytes_read)];
-			String::from_utf8_lossy(body_bytes).to_string()
+	let config = Config::load()?;
+	let instance = ProxyMcpInstance::new(config, full_path.clone())?;
+
+	guard.insert(repo_key.to_string(), instance.clone());
+
+	// Spawn one-shot indexer — skip if startup queue is still running for this repo
+	if auto_index {
+		let mut tasks = indexing_tasks.lock().await;
+		let already_running = tasks.get(repo_key).is_some_and(|h| !h.is_finished());
+
+		if already_running {
+			debug!(
+				"Skipping on-connect indexer for {} — startup indexer still running",
+				repo_key
+			);
 		} else {
-			Self::send_http_error(&mut stream, 400, "Missing or invalid request body").await?;
-			return Ok(());
-		};
-
-		if debug {
-			println!("📄 Extracted JSON body: {}", json_body);
-		}
-
-		// Parse JSON-RPC request
-		let request: JsonRpcRequest = match serde_json::from_str(&json_body) {
-			Ok(req) => req,
-			Err(e) => {
-				if debug {
-					println!("❌ Failed to parse JSON-RPC request: {}", e);
+			let repo_key_owned = repo_key.to_string();
+			let handle = tokio::spawn(async move {
+				if let Err(e) = run_indexing_for_repo(&full_path, debug).await {
+					debug!("Auto-index failed for {}: {}", repo_key_owned, e);
 				}
-				Self::send_http_error(&mut stream, 400, "Invalid JSON-RPC request").await?;
-				return Ok(());
-			}
-		};
-
-		// Log the request
-		log_mcp_request(
-			&request.method,
-			request.params.as_ref(),
-			request.id.as_ref(),
-		);
-
-		let start_time = std::time::Instant::now();
-		let request_id = request.id.clone();
-		let request_method = request.method.clone();
-
-		// Get or create MCP instance for this repository
-		let instance = match Self::get_or_create_instance(
-			&instances,
-			&repo_path,
-			&root_path,
-			debug,
-			auto_index,
-			&indexing_tasks,
-		)
-		.await
-		{
-			Ok(instance) => instance,
-			Err(e) => {
-				debug!("Failed to get MCP instance for {}: {}", repo_path, e);
-				Self::send_http_error(
-					&mut stream,
-					404,
-					&format!("Repository not found: {}", repo_path),
-				)
-				.await?;
-				return Ok(());
-			}
-		};
-
-		// Handle the request
-		let response = instance.handle_request(&request).await;
-
-		// Log the response
-		let duration_ms = start_time.elapsed().as_millis() as u64;
-		log_mcp_response(
-			&request_method,
-			response.error.is_none(),
-			request_id.as_ref(),
-			Some(duration_ms),
-		);
-
-		// Send HTTP response
-		Self::send_http_response(&mut stream, &response).await
+			});
+			tasks.insert(repo_key.to_string(), handle);
+		}
 	}
 
-	fn extract_repo_path(request_line: &str) -> Option<String> {
-		// Extract path from "POST /org/repo HTTP/1.1" or "POST /org/repo/subpath HTTP/1.1"
-		let parts: Vec<&str> = request_line.split_whitespace().collect();
-		if parts.len() >= 2 && parts[0] == "POST" {
-			let url_path = parts[1];
-			if url_path.starts_with('/') && url_path.len() > 1 {
-				// Remove leading slash and return the repository path
-				return Some(url_path[1..].to_string());
-			}
+	if debug {
+		println!("✅ MCP instance ready for: {}", repo_key);
+	}
+	Ok(instance)
+}
+
+async fn cleanup_idle_instances(
+	instances: &Arc<Mutex<HashMap<String, ProxyMcpInstance>>>,
+	indexing_tasks: &Arc<Mutex<HashMap<String, JoinHandle<()>>>>,
+) {
+	let mut instances_guard = instances.lock().await;
+	let mut to_remove = Vec::new();
+
+	for (repo_path, instance) in instances_guard.iter() {
+		if instance.is_idle().await {
+			to_remove.push(repo_path.clone());
 		}
-		None
 	}
 
-	async fn get_or_create_instance(
-		instances: &Arc<Mutex<HashMap<String, ProxyMcpInstance>>>,
-		repo_path: &str,
-		root_path: &Path,
-		debug: bool,
-		auto_index: bool,
-		indexing_tasks: &Arc<Mutex<HashMap<String, JoinHandle<()>>>>,
-	) -> Result<ProxyMcpInstance> {
-		let mut instances_guard = instances.lock().await;
-
-		// Return existing instance if found
-		if let Some(instance) = instances_guard.get(repo_path) {
-			debug!("Reusing existing MCP instance for: {}", repo_path);
-			return Ok(instance.clone());
-		}
-
-		// Validate repository path
-		let full_path = root_path.join(repo_path);
-		if !full_path.is_dir() {
-			return Err(anyhow::anyhow!(
-				"Directory not found: {}",
-				full_path.display()
-			));
-		}
-
-		if !full_path.join(".git").exists() {
-			return Err(anyhow::anyhow!(
-				"Not a git repository: {}",
-				full_path.display()
-			));
-		}
-
-		// Create new instance
-		println!(
-			"🚀 Bootstrapping MCP instance for repository: {}",
-			repo_path
-		);
-		println!("   📂 Path: {}", full_path.display());
-
-		let config = Config::load()?;
-		let instance = ProxyMcpInstance::new(config, full_path.clone(), debug).await?;
-
-		// Store and return
-		instances_guard.insert(repo_path.to_string(), instance.clone());
-
-		// Spawn one-shot indexer on initialize — skip if startup queue is still running for this repo
-		if auto_index {
-			let mut tasks = indexing_tasks.lock().await;
-			let already_running = tasks.get(repo_path).is_some_and(|h| !h.is_finished());
-
-			if already_running {
-				debug!(
-					"Skipping on-connect indexer for {} — startup indexer still running",
-					repo_path
-				);
-			} else {
-				let repo_key = repo_path.to_string();
-				let handle = tokio::spawn(async move {
-					if let Err(e) = run_indexing_for_repo(&full_path, debug).await {
-						debug!("Auto-index failed for {}: {}", repo_key, e);
-					}
-				});
-				tasks.insert(repo_path.to_string(), handle);
-			}
-		}
-
-		if debug {
-			println!("✅ MCP instance ready for: {}", repo_path);
-		}
-		Ok(instance)
+	for repo_path in &to_remove {
+		instances_guard.remove(repo_path);
 	}
 
-	async fn cleanup_idle_instances(
-		instances: &Arc<Mutex<HashMap<String, ProxyMcpInstance>>>,
-		indexing_tasks: &Arc<Mutex<HashMap<String, JoinHandle<()>>>>,
-	) {
-		let mut instances_guard = instances.lock().await;
-		let mut to_remove = Vec::new();
+	drop(instances_guard);
 
-		for (repo_path, instance) in instances_guard.iter() {
-			if instance.is_idle().await {
-				to_remove.push(repo_path.clone());
-			}
-		}
-
+	if !to_remove.is_empty() {
+		let mut tasks_guard = indexing_tasks.lock().await;
 		for repo_path in &to_remove {
-			instances_guard.remove(repo_path);
-		}
-
-		// Drop instances lock before acquiring tasks lock
-		drop(instances_guard);
-
-		// Abort indexing tasks for removed instances
-		if !to_remove.is_empty() {
-			let mut tasks_guard = indexing_tasks.lock().await;
-			for repo_path in &to_remove {
-				if let Some(handle) = tasks_guard.remove(repo_path) {
-					if !handle.is_finished() {
-						handle.abort();
-						debug!("Aborted indexer for idle instance: {}", repo_path);
-					}
+			if let Some(handle) = tasks_guard.remove(repo_path) {
+				if !handle.is_finished() {
+					handle.abort();
+					debug!("Aborted indexer for idle instance: {}", repo_path);
 				}
 			}
 		}
-	}
-
-	async fn send_http_error(stream: &mut TcpStream, status: u16, message: &str) -> Result<()> {
-		let status_text = match status {
-			400 => "Bad Request",
-			404 => "Not Found",
-			500 => "Internal Server Error",
-			_ => "Error",
-		};
-
-		let response = format!(
-			"HTTP/1.1 {} {}\r\nContent-Type: text/plain\r\nContent-Length: {}\r\nAccess-Control-Allow-Origin: *\r\n\r\n{}",
-			status, status_text, message.len(), message
-		);
-
-		stream.write_all(response.as_bytes()).await?;
-		Ok(())
-	}
-
-	async fn send_http_response(stream: &mut TcpStream, response: &JsonRpcResponse) -> Result<()> {
-		let json_response = serde_json::to_string(response)?;
-
-		let http_response = format!(
-			"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: POST, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type\r\n\r\n{}",
-			json_response.len(),
-			json_response
-		);
-
-		stream.write_all(http_response.as_bytes()).await?;
-		Ok(())
 	}
 }
 
-/// Run indexing for a single repository. Safe for concurrent use across different repos.
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+fn find_git_repos_recursive(dir: &Path, repositories: &mut Vec<PathBuf>) -> Result<()> {
+	if dir.join(".git").exists() {
+		repositories.push(dir.to_path_buf());
+		return Ok(());
+	}
+
+	if let Ok(read_dir) = std::fs::read_dir(dir) {
+		for entry in read_dir.flatten() {
+			let path = entry.path();
+			if path.is_dir() {
+				if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+					if name.starts_with('.')
+						|| name == "node_modules"
+						|| name == "target"
+						|| name == "build"
+					{
+						continue;
+					}
+				}
+				find_git_repos_recursive(&path, repositories)?;
+			}
+		}
+	}
+
+	Ok(())
+}
+
 /// Run indexing for a single repository. Safe for concurrent use across different repos.
 async fn run_indexing_for_repo(repo_path: &Path, debug: bool) -> Result<()> {
 	if debug {

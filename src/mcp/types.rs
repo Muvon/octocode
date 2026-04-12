@@ -1,4 +1,4 @@
-// Copyright 2025 Muvon Un Limited
+// Copyright 2026 Muvon Un Limited
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,34 +13,7 @@
 // limitations under the License.
 
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
-
-/// MCP Protocol types
-#[derive(Debug, Serialize, Deserialize)]
-pub struct JsonRpcRequest {
-	pub jsonrpc: String,
-	pub id: Option<Value>,
-	pub method: String,
-	pub params: Option<Value>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct JsonRpcResponse {
-	pub jsonrpc: String,
-	pub id: Option<Value>,
-	#[serde(skip_serializing_if = "Option::is_none")]
-	pub result: Option<Value>,
-	#[serde(skip_serializing_if = "Option::is_none")]
-	pub error: Option<JsonRpcError>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct JsonRpcError {
-	pub code: i32,
-	pub message: String,
-	#[serde(skip_serializing_if = "Option::is_none")]
-	pub data: Option<Value>,
-}
+use serde_json::Value;
 
 /// MCP-compliant error builder for consistent error handling
 #[derive(Debug, Clone)]
@@ -66,36 +39,6 @@ impl McpError {
 	pub fn with_details(mut self, details: impl Into<String>) -> Self {
 		self.details = Some(details.into());
 		self
-	}
-
-	/// Convert to anyhow::Error for Result<T> compatibility
-	pub fn into_anyhow(self) -> anyhow::Error {
-		anyhow::anyhow!(
-			"MCP_ERROR:{}:{}:{}:{}",
-			self.code,
-			self.message,
-			self.operation,
-			self.details.unwrap_or_default()
-		)
-	}
-
-	/// Convert to JsonRpcError for direct response
-	pub fn into_jsonrpc(self) -> JsonRpcError {
-		JsonRpcError {
-			code: self.code,
-			message: self.message.clone(),
-			data: Some(json!({
-				"operation": self.operation,
-				"details": self.details.unwrap_or_default(),
-				"error_type": match self.code {
-					-32602 => "invalid_params",
-					-32601 => "method_not_found",
-					-32603 => "internal_error",
-					-32600 => "invalid_request",
-					_ => "application_error"
-				}
-			})),
-		}
 	}
 
 	/// Common error types for convenience
@@ -125,36 +68,6 @@ impl std::fmt::Display for McpError {
 }
 
 impl std::error::Error for McpError {}
-
-/// Parse MCP error from anyhow error string
-pub fn parse_mcp_error(error_str: &str) -> Option<JsonRpcError> {
-	if let Some(mcp_part) = error_str.strip_prefix("MCP_ERROR:") {
-		let parts: Vec<&str> = mcp_part.splitn(4, ':').collect();
-		if parts.len() >= 3 {
-			if let Ok(code) = parts[0].parse::<i32>() {
-				let operation = parts[2];
-				let details = parts.get(3).unwrap_or(&"");
-
-				return Some(JsonRpcError {
-					code,
-					message: parts[1].to_string(),
-					data: Some(json!({
-						"operation": operation,
-						"details": details,
-						"error_type": match code {
-							-32602 => "invalid_params",
-							-32601 => "method_not_found",
-							-32603 => "internal_error",
-							-32600 => "invalid_request",
-							_ => "application_error"
-						}
-					})),
-				});
-			}
-		}
-	}
-	None
-}
 
 /// MCP Tool definitions
 #[derive(Debug, Serialize, Deserialize)]
