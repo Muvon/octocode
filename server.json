@@ -4,7 +4,7 @@
   "description": "AI-powered code indexer with semantic search and knowledge graphs",
   "name_for_human": "Octocode",
   "name_for_model": "octocode",
-  "version": "0.13.0",
+  "version": "0.14.0",
   "repositories": [
     {
       "type": "github",

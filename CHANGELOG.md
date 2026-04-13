@@ -1,5 +1,71 @@
 # Changelog
 
+## [0.14.0] - 2026-04-13
+
+### 📋 Release Summary
+
+This release introduces a unified search architecture alongside powerful AST-based structural code search and rewriting capabilities (1c33c779, 07fbd5f2, 8abed697). Key improvements include branch-aware delta indexing, automatic repository indexing for MCP, and expanded support for high-performance embedding models (7c515998, a9690903, 09558952). System reliability is further enhanced through strict structured LLM outputs and optimized batch processing with automated retries (fb0196a3, d40f641c, 5739cb1b).
+
+
+### 🚨 Breaking Changes
+
+⚠️ **Important**: This release contains breaking changes that may require code updates.
+
+- **search**: unify search and add tests `1c33c779`
+
+### ✨ New Features & Enhancements
+
+- **embeddings**: add mpnet and jinabert qk embedding support `09558952`
+- **server**: enhance MCP tool schemas and add new tools `6b7d4e65`
+- **clear**: add commits and graphrag clear modes `e793d8d5`
+- **grep**: add code rewrite with AST templates `07fbd5f2`
+- **grep**: add AST structural code search `8abed697`
+- **indexer**: add last segment matching for imports `ca7fcd10`
+- **grep**: add AST-based structural code search `c15dcddf`
+- **indexer**: add AST-based function call extraction `c698904d`
+- **graphrag**: add branch-aware filtering and merging `09e6337c`
+- **llm**: enable strict mode for structured output `fb0196a3`
+- **graphrag**: validate description model structured output `e4344d71`
+- **benchmark**: add retrieval quality benchmark infrastructure `e1095d2d`
+- **indexer**: add retries and improve batching `d40f641c`
+- **mcp**: add automatic repository indexing `a9690903`
+- **git**: add branch-aware delta indexing `7c515998`
+- **branding**: add project logo to readme `fb536f29`
+- **assets**: add svg icon to readme header `7449dece`
+
+### 🔧 Improvements & Optimizations
+
+- **mcp**: replace handlers module with rmcp transport `bb5f929b`
+- **docs**: standardize LLM config and model format `0c25e456`
+- **llm**: consolidate JSON completion methods `4f2a756d`
+- **indexer**: move LLM structured output validation to index start `d5bce043`
+- **graphrag**: use structured JSON output for LLM calls `25d596d9`
+- **benchmark**: clean up config comments `ff24fb59`
+- **mcp**: use is_some_and for task check `d1469db7`
+
+### 🐛 Bug Fixes & Stability
+
+- **graphrag**: detect partial indexing when relationships missing `e51fe5fb`
+- **graphrag**: clarify architectural analysis JSON response format `d3f9fb96`
+- **graphrag**: clarify JSON response format for file descriptions `872b8ca6`
+- **clippy**: resolve lint warnings in grep and tests `c6f80587`
+- **graphrag**: ensure deleted files don't break processing `0c105ffa`
+- **docs**: swap code and docs search mode labels `ab4fbc2b`
+- **graphrag**: add error context to batch retry logs `b1771ba4`
+- **graphrag**: add retries for batch AI operations `5739cb1b`
+
+### 📚 Documentation & Examples
+
+- update recommended text embedding model to MiniLM `5d5e7cfb`
+- add AI agent workflow docs and MCP setup `50448b99`
+- **grep**: document structural rewrite capability `d62fb98b`
+- fix anchor links in navigation bar `c521f047`
+- **readme**: clarify structural code analysis approach `d48033ab`
+
+### 🔄 Other Changes
+
+5 maintenance, dependency, and tooling updates not listed individually.
+
 ## [0.13.0] - 2026-04-03
 
 ### 📋 Release Summary
