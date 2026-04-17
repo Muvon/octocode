@@ -9,6 +9,7 @@ on:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
+  SCCACHE_GHA_ENABLED: true
 
 jobs:
   check:
@@ -28,18 +29,15 @@ jobs:
       with:
         repo-token: ${{ secrets.GITHUB_TOKEN }}
 
-    - name: Cache dependencies
-      uses: actions/cache@v4
-      with:
-        path: |
-          ~/.cargo/registry
-          ~/.cargo/git
-          target
-        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-        restore-keys: |
-          ${{ runner.os }}-cargo-
+    - name: Cache Rust artifacts
+      uses: Swatinem/rust-cache@v2
+
+    - name: Run sccache-cache
+      uses: mozilla-actions/sccache-action@v0.0.9
 
     - name: Run cargo check
+      env:
+        RUSTC_WRAPPER: sccache
       run: cargo check --all-targets --all-features
 
   fmt:
@@ -74,18 +72,15 @@ jobs:
       with:
         repo-token: ${{ secrets.GITHUB_TOKEN }}
 
-    - name: Cache dependencies
-      uses: actions/cache@v4
-      with:
-        path: |
-          ~/.cargo/registry
-          ~/.cargo/git
-          target
-        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-        restore-keys: |
-          ${{ runner.os }}-cargo-
+    - name: Cache Rust artifacts
+      uses: Swatinem/rust-cache@v2
+
+    - name: Run sccache-cache
+      uses: mozilla-actions/sccache-action@v0.0.9
 
     - name: Run cargo clippy
+      env:
+        RUSTC_WRAPPER: sccache
       run: cargo clippy --all-targets --all-features -- -D warnings
 
   test:
@@ -116,20 +111,16 @@ jobs:
       with:
         repo-token: ${{ secrets.GITHUB_TOKEN }}
 
-    - name: Cache dependencies
-      uses: actions/cache@v4
-      with:
-        path: |
-          ~/.cargo/registry
-          ~/.cargo/git
-          target
-        key: ${{ runner.os }}-${{ matrix.rust }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-        restore-keys: |
-          ${{ runner.os }}-${{ matrix.rust }}-cargo-
-          ${{ runner.os }}-cargo-
+    - name: Cache Rust artifacts
+      uses: Swatinem/rust-cache@v2
+
+    - name: Run sccache-cache
+      uses: mozilla-actions/sccache-action@v0.0.9
 
     - name: Run tests
       shell: bash
+      env:
+        RUSTC_WRAPPER: sccache
       run: |
         # We have issue with onnx runtime so we use no default features
         cargo test --verbose --no-default-features
@@ -173,19 +164,15 @@ jobs:
     - name: Install cargo-tarpaulin
       run: cargo install cargo-tarpaulin --locked
 
-    - name: Cache dependencies
-      uses: actions/cache@v4
-      with:
-        path: |
-          ~/.cargo/registry
-          ~/.cargo/git
-          target
-        key: ${{ runner.os }}-cargo-coverage-${{ hashFiles('**/Cargo.lock') }}
-        restore-keys: |
-          ${{ runner.os }}-cargo-coverage-
-          ${{ runner.os }}-cargo-
+    - name: Cache Rust artifacts
+      uses: Swatinem/rust-cache@v2
+
+    - name: Run sccache-cache
+      uses: mozilla-actions/sccache-action@v0.0.9
 
     - name: Generate code coverage
+      env:
+        RUSTC_WRAPPER: sccache
       run: cargo tarpaulin --verbose --no-default-features --workspace --timeout 120 --out xml
 
     - name: Upload coverage to Codecov

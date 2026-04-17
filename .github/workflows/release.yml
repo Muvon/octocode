@@ -14,6 +14,7 @@ on:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
+  SCCACHE_GHA_ENABLED: true
 
 jobs:
   create-release:
@@ -167,17 +168,19 @@ jobs:
       with:
         repo-token: ${{ secrets.GITHUB_TOKEN }}
 
-    - name: Cache dependencies
-      uses: actions/cache@v4
+    - name: Cache Rust artifacts
+      uses: Swatinem/rust-cache@v2
+
+    - name: Run sccache-cache
+      uses: mozilla-actions/sccache-action@v0.0.9
+
+    - name: Expose GHA cache credentials
+      if: runner.os == 'Linux'
+      uses: actions/github-script@v7
       with:
-        path: |
-          ~/.cargo/registry
-          ~/.cargo/git
-          target
-        key: ${{ endsWith(matrix.target, '-unknown-linux-musl') && 'docker-alpine' || runner.os }}-${{ matrix.target }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-        restore-keys: |
-          ${{ endsWith(matrix.target, '-unknown-linux-musl') && 'docker-alpine' || runner.os }}-${{ matrix.target }}-cargo-
-          ${{ endsWith(matrix.target, '-unknown-linux-musl') && 'docker-alpine' || runner.os }}-cargo-
+        script: |
+          core.exportVariable('ACTIONS_CACHE_URL', process.env['ACTIONS_CACHE_URL'] || '');
+          core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env['ACTIONS_RUNTIME_TOKEN'] || '');
 
     - name: Create swap space for memory-intensive builds
       if: matrix.target == 'aarch64-unknown-linux-musl'
@@ -207,16 +210,30 @@ jobs:
 
     - name: Build binary
       shell: sh
+      env:
+        RUSTC_WRAPPER: sccache
       run: |
         if [ "${{ runner.os }}" = "Linux" ]; then
           # Use official Rust Docker image for Linux builds
-          # Disable default features to avoid ONNX Runtime issues (same as Windows)
+          # Select correct sccache binary for the target architecture
+          if [ "${{ matrix.target }}" = "aarch64-unknown-linux-musl" ]; then
+            SCCACHE_ARCH="aarch64-unknown-linux-musl"
+          else
+            SCCACHE_ARCH="x86_64-unknown-linux-musl"
+          fi
           docker run --rm \
             -v "$(pwd):/workspace" \
+            -v "$RUNNER_TEMP/sccache-cache:/sccache-cache" \
             -w /workspace \
+            -e RUSTC_WRAPPER=sccache \
+            -e SCCACHE_GHA_ENABLED=true \
+            -e ACTIONS_CACHE_URL="${ACTIONS_CACHE_URL}" \
+            -e ACTIONS_RUNTIME_TOKEN="${ACTIONS_RUNTIME_TOKEN}" \
+            -e SCCACHE_DIR=/sccache-cache \
             rust:1.94.0-alpine3.23 \
             sh -c "
-              apk add --no-cache musl-dev openssl-dev openssl-libs-static pkgconfig gcc g++ protobuf-dev && \
+              apk add --no-cache musl-dev openssl-dev openssl-libs-static pkgconfig gcc g++ protobuf-dev curl && \
+              curl -fsSL https://github.com/mozilla/sccache/releases/download/v0.10.0/sccache-v0.10.0-${SCCACHE_ARCH}.tar.gz | tar xz --strip-components=1 -C /usr/local/bin sccache-v0.10.0-${SCCACHE_ARCH}/sccache && \
               rustup target add ${{ matrix.target }} && \
               cargo build --release --target ${{ matrix.target }} --no-default-features
             "
@@ -232,7 +249,6 @@ jobs:
             cargo build --release --target ${{ matrix.target }}
           fi
         fi
-
     - name: Create archive directory
       shell: sh
       run: mkdir -p dist
@@ -283,17 +299,8 @@ jobs:
       with:
         repo-token: ${{ secrets.GITHUB_TOKEN }}
 
-    - name: Cache dependencies
-      uses: actions/cache@v4
-      with:
-        path: |
-          ~/.cargo/registry
-          ~/.cargo/git
-          target
-        key: ${{ runner.os }}-cargo-publish-${{ hashFiles('**/Cargo.lock') }}
-        restore-keys: |
-          ${{ runner.os }}-cargo-publish-
-          ${{ runner.os }}-cargo-
+    - name: Cache Rust artifacts
+      uses: Swatinem/rust-cache@v2
 
     - name: Validate version matches tag
       run: |
