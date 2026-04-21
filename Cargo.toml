@@ -98,7 +98,7 @@ dotenvy = "0.15"
 
 # Local dependency on octolib with embedding features
 # octolib = { path = "../octolib", features = ["fastembed", "huggingface"] }
-octolib = { version = "0.15.0", default-features = false }
+octolib = { version = "0.15.2", default-features = false }
 
 # MCP SDK - official Rust implementation
 rmcp = { version = "1.3.0", features = ["server", "macros", "transport-io", "transport-streamable-http-server"] }
