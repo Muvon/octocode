@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.14.1] - 2026-04-21
+
+### 📋 Release Summary
+
+This update enhances overall system stability and performance through significant upgrades to core engine dependencies (9d872d61, 378effe8). Build and deployment processes have also been optimized to ensure faster, more efficient Docker environments (1d6e752a).
+
+
+### 🔧 Improvements & Optimizations
+
+- **build**: optimize CI and Docker build performance `1d6e752a`
+
+### 🔄 Other Changes
+
+2 maintenance, dependency, and tooling updates not listed individually.
+
 ## [0.14.0] - 2026-04-13
 
 ### 📋 Release Summary
