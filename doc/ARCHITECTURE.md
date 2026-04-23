@@ -10,10 +10,11 @@ The codebase is organized into the following core modules:
 
 - **`config`** - Configuration management with template-based defaults
 - **`constants`** - Application constants and shared values
-- **`embedding`** - Multi-provider embedding system with dynamic model discovery
+- **`embedding`** - Multi-provider embedding system with dynamic model discovery (via octolib v0.16.0)
 - **`indexer`** - Tree-sitter based code parsing and semantic extraction
 - **`lock`** - Process synchronization and concurrent operation management
-- **`mcp`** - Model Context Protocol server implementation
+- **`mcp`** - Model Context Protocol server implementation (rmcp SDK)
+  - Server handles protocol framing; tool providers in `semantic_code.rs`, `graphrag.rs`, `lsp/`, `watcher.rs`
 - **`reranker`** - Search result ranking and optimization
 - **`state`** - Application state management
 - **`storage`** - Vector database operations and data persistence
@@ -30,15 +31,15 @@ The codebase is organized into the following core modules:
 - **Safe symlink handling** - Prevents infinite recursion by disabling symlink following
 - **Intelligent file discovery** with .gitignore and .noindex pattern support
 - **Language-specific parsers** for 10+ programming languages
-
 ### 2. Embedding System (`src/embedding/`)
-- **Multiple providers**: FastEmbed (local), HuggingFace (local), Jina AI, Voyage AI, Google, OpenAI, OctoHub, Together (cloud)
+- **Multiple providers**: Jina AI, Voyage AI, Google, OpenAI, OpenRouter, Together (cloud)
+- **Feature-gated local providers**: FastEmbed, HuggingFace (require `fastembed`/`huggingface` features)
 - **Dynamic model discovery** - No hardcoded model-dimension mappings
 - **Provider validation** - Fail-fast during provider creation for invalid models
 - **Batch processing** for efficient embedding generation
-- **Provider auto-detection** from model string format
+- **Provider auto-detection** from model string format (`provider:model`)
 - **Input type support** for query vs document optimization
-- **Feature-gated providers** with proper compilation flags
+- **Thin wrapper** around octolib v0.16.0 embedding module
 
 ### 3. Vector Database (`src/storage.rs`, `src/store/`)
 - **Lance columnar database** for fast similarity search
@@ -61,10 +62,10 @@ The codebase is organized into the following core modules:
 
 ### 5. Search Engine
 - **Semantic similarity search** using vector embeddings
-- **Keyword boosting** for exact matches
+- **Hybrid search** combining vector similarity with keyword matching (configurable weights)
+- **Result reranking** - Optional reranker model (voyage, cohere, jina, fastembed) for improved relevance
 - **Multi-mode search** (code, docs, text, commits, all)
 - **Configurable similarity thresholds**
-- **Result reranking** for improved relevance
 - **Contextual Retrieval** - Optional AI-enriched chunk context for improved search quality (`src/indexer/contextual.rs`)
 
 ### 5a. Commit Search (`src/indexer/commits/`)
@@ -74,11 +75,12 @@ The codebase is organized into the following core modules:
 - **Detail levels** - Signatures (compact), partial (default), full (complete message + all files)
 
 ### 6. MCP Server (`src/mcp/`)
-- **Model Context Protocol** server implementation
-- **Dual mode support** - Stdin (default) and HTTP modes
+- **Model Context Protocol** server implementation using rmcp SDK
+- **Dual mode support** - Stdin (default) and Streamable HTTP modes (`--bind` flag)
+- **Tool providers**: Semantic code search, GraphRAG queries, LSP integration, file watcher
 - **Intelligent file watching** with debouncing and ignore pattern support
 - **Process management** to prevent concurrent indexing operations
-- **Tool integration** for AI assistants
+- **LSP integration** - Language Server Protocol for go-to-definition, hover, find references, completion
 - **Debug mode** with enhanced logging and performance monitoring
 - **MCP Proxy** for multi-repository management
 

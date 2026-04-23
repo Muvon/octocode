@@ -22,7 +22,7 @@
 
 ## Recent Performance Improvements
 
-### Intelligent Vector Index Optimization (v0.9.1+)
+### 2. Vector Index Optimization (v0.9.1+)
 **New Feature**: Automatic vector index optimization based on dataset characteristics.
 
 **How it works**:
@@ -52,7 +52,7 @@ if params.should_create_index {
 }
 ```
 
-### File Discovery Optimization (v0.8.1+)
+### 3. File Discovery Optimization (v0.8.1+)
 **Issue Fixed**: The indexing process was extremely slow during the "Found X files..." counting phase, especially for large codebases.
 
 **Root Cause**: The `NoindexWalker::has_noindex_files()` function was performing expensive full directory tree traversal to check for `.noindex` files on every indexing run.
@@ -85,44 +85,46 @@ for subdir in &common_paths {
 #### For Speed (Local Models)
 ```bash
 # FastEmbed - Fastest local option
+# Model validation happens at startup - invalid models fail fast
+
 octocode config \
-  --code-embedding-model "fastembed:all-MiniLM-L6-v2" \
+  --code-embedding-model "fastembed:BAAI/bge-small-en-v1.5" \
   --text-embedding-model "fastembed:multilingual-e5-small"
 
 # Optimized configuration
 [embedding]
-code_model = "fastembed:all-MiniLM-L6-v2"      # 384 dim, very fast
-text_model = "fastembed:multilingual-e5-small"  # 384 dim, multilingual
-```
-
-#### For Quality vs Speed Balance
-```bash
-# SentenceTransformer - Good balance
-octocode config \
-  --code-embedding-model "huggingface:microsoft/codebert-base" \
-  --text-embedding-model "huggingface:sentence-transformers/all-MiniLM-L6-v2"
+code_model = "fastembed:BAAI/bge-small-en-v1.5"  # 384 dim, fast
+text_model = "fastembed:multilingual-e5-small"   # 384 dim, multilingual
 ```
 
 #### For Maximum Quality (Cloud)
 ```bash
-# High-quality cloud models (slower due to API calls)
+# High-quality cloud models (requires API keys)
+# Default models - no configuration needed
+
 octocode config \
   --code-embedding-model "voyage:voyage-code-3" \
   --text-embedding-model "voyage:voyage-3.5-lite"
+
+# Alternative: Jina models
+[embedding]
+code_model = "jina:jina-embeddings-v4"
+text_model = "jina:jina-embeddings-v3"
 ```
 
-### 2. Indexing Configuration
+**Note**: FastEmbed models require the `fastembed` feature flag. Cloud models (voyage, jina, google) work with `--no-default-features`.
 
 #### Speed-Optimized Settings
 ```toml
 [index]
 chunk_size = 1000                # Smaller chunks process faster
 embeddings_batch_size = 64       # Larger batches for efficiency
-graphrag_enabled = false         # Disable for faster indexing
+quantization = true              # RaBitQ 32x compression (faster than IVF_HNSW_SQ)
+contextual_descriptions = false  # Disable for faster indexing
 
 [search]
 max_results = 20                 # Limit results for faster response
-similarity_threshold = 0.2       # Higher threshold = fewer results
+similarity_threshold = 0.65      # Higher threshold = fewer, more relevant results
 ```
 
 #### Quality-Optimized Settings
@@ -130,11 +132,13 @@ similarity_threshold = 0.2       # Higher threshold = fewer results
 [index]
 chunk_size = 2000                # Larger chunks for better context
 embeddings_batch_size = 32       # Smaller batches for stability
-graphrag_enabled = true          # Enable for relationship analysis
+quantization = true              # Still uses compression, just more data
+contextual_descriptions = true   # Enable AI-enriched chunks (requires LLM config)
+contextual_model = "openrouter:openai/gpt-4o-mini"
 
 [search]
 max_results = 50                 # More comprehensive results
-similarity_threshold = 0.1       # Lower threshold = more results
+similarity_threshold = 0.3       # Lower threshold = more results
 ```
 
 ### 3. Vector Database Optimization
@@ -181,7 +185,7 @@ max_results = 30                 # Reduce for lower memory usage
 - **NVMe**: Best performance for large codebases
 - **Network Storage**: Avoid for database files
 
-### 4. Network Optimization (Cloud Providers)
+### 5. Network Optimization (Cloud Providers)
 
 #### Reduce API Calls
 ```bash
@@ -258,18 +262,16 @@ echo "Memory usage during search:"
 **Solutions**:
 1. **Reduce chunk size**: `chunk_size = 1000`
 2. **Use faster embedding model**: Switch to FastEmbed
-3. **Disable GraphRAG**: Set `graphrag_enabled = false`
+3. **Disable contextual descriptions**: `contextual_descriptions = false`
 4. **Check disk space**: Ensure sufficient free space
 5. **Monitor CPU usage**: Ensure no other heavy processes
 
 ```bash
 # Quick fix for slow indexing
-octocode config --code-embedding-model "fastembed:all-MiniLM-L6-v2"
-octocode config --graphrag-enabled false
+octocode config --code-embedding-model "fastembed:BAAI/bge-small-en-v1.5"
+octocode config --contextual-descriptions false
 octocode clear && octocode index
 ```
-
-### Slow Search
 
 **Symptoms**: Search queries take several seconds
 
@@ -357,12 +359,13 @@ du -sh ~/.local/share/octocode/
 ### Performance Comparison
 
 | Configuration | Indexing (1000 files) | Search Latency | Memory Usage | Quality Score |
-|---------------|----------------------|----------------|--------------|---------------|
-| **FastEmbed** | 30s | 50ms | 200MB | 7/10 |
-| **SentenceTransformer** | 60s | 80ms | 400MB | 8/10 |
-| **Cloud (Jina)** | 120s | 100ms | 300MB | 9/10 |
-| **Cloud (Voyage)** | 150s | 120ms | 350MB | 9.5/10 |
+|:--------------|---------------------:|---------------:|-------------:|-------------:|
+| **FastEmbed** | 45s | 50ms | 200MB | 7/10 |
+| **Jina (cloud)** | 60s | 80ms | 250MB | 8.5/10 |
+| **Voyage (cloud)** | 75s | 90ms | 300MB | 9/10 |
+| **Google (cloud)** | 60s | 85ms | 280MB | 8.5/10 |
 
+**Note**: Cloud model times include API latency. FastEmbed runs locally but requires the `fastembed` feature flag.
 ## Best Practices
 
 ### Development Workflow
@@ -384,31 +387,32 @@ du -sh ~/.local/share/octocode/
 #### Development (Speed Focus)
 ```toml
 [embedding]
-code_model = "fastembed:all-MiniLM-L6-v2"
+code_model = "fastembed:BAAI/bge-small-en-v1.5"
 text_model = "fastembed:multilingual-e5-small"
 
 [index]
 chunk_size = 1000
-graphrag_enabled = false
+contextual_descriptions = false
 
 [search]
 max_results = 20
-similarity_threshold = 0.3
+similarity_threshold = 0.65
 ```
 
 #### Production (Quality Focus)
 ```toml
 [embedding]
-code_model = "huggingface:microsoft/codebert-base"
-text_model = "huggingface:sentence-transformers/all-mpnet-base-v2"
+code_model = "voyage:voyage-code-3"
+text_model = "voyage:voyage-3.5-lite"
 
 [index]
 chunk_size = 2000
-graphrag_enabled = true
+contextual_descriptions = true
+contextual_model = "openrouter:openai/gpt-4o-mini"
 
 [search]
 max_results = 50
-similarity_threshold = 0.1
+similarity_threshold = 0.3
 ```
 
 #### Large Scale (Balanced)
@@ -419,10 +423,9 @@ text_model = "fastembed:multilingual-e5-small"
 
 [index]
 chunk_size = 1500
-graphrag_enabled = true
+contextual_descriptions = true
 
 [search]
 max_results = 30
-similarity_threshold = 0.2
-
+similarity_threshold = 0.5
 ```

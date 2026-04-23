@@ -60,15 +60,15 @@ Add to your Claude Desktop configuration file:
   "mcpServers": {
     "octocode-rust": {
       "command": "octocode",
-      "args": ["mcp", "--path", "/path/to/rust/project", "--port", "3001"]
+      "args": ["mcp", "--path", "/path/to/rust/project"]
     },
     "octocode-python": {
       "command": "octocode",
-      "args": ["mcp", "--path", "/path/to/python/project", "--port", "3002"]
+      "args": ["mcp", "--path", "/path/to/python/project"]
     },
     "octocode-typescript": {
       "command": "octocode",
-      "args": ["mcp", "--path", "/path/to/ts/project", "--port", "3003"]
+      "args": ["mcp", "--path", "/path/to/ts/project"]
     }
   }
 }

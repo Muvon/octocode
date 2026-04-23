@@ -197,15 +197,30 @@ git push origin main --tags
 
 3. **Use with other MCP-compatible AI assistants** by configuring the server endpoint
 
-### LSP Integration (NEW!)
+### LSP Integration
 
-Octocode now supports Language Server Protocol (LSP) integration for enhanced code navigation and analysis capabilities.
+Octocode supports Language Server Protocol (LSP) integration for enhanced code navigation and analysis capabilities. The MCP server can run in two modes:
+
+#### MCP Server Modes
+
+**Stdin Mode (default)** - Standard MCP protocol over stdin/stdout:
+```bash
+octocode mcp --path /path/to/your/project
+```
+
+**HTTP Mode** - HTTP server for web-based integrations:
+```bash
+octocode mcp --bind 0.0.0.0:12345 --path /path/to/your/project
+```
 
 #### Starting MCP Server with LSP
 
 ```bash
-# Start MCP server with LSP integration
+# Stdin mode with LSP integration
 octocode mcp --path /path/to/your/project --with-lsp "rust-analyzer"
+
+# HTTP mode with LSP integration
+octocode mcp --bind 0.0.0.0:12345 --path /path/to/your/project --with-lsp "rust-analyzer"
 
 # For other language servers
 octocode mcp --path /path/to/your/project --with-lsp "pylsp"

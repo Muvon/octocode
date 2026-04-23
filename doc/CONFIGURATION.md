@@ -11,20 +11,19 @@ octocode config --show
 ### Local Embedding Models (No API Keys Required)
 
 ```bash
-# Use HuggingFace models (recommended for quality)
 octocode config \
-  --code-embedding-model "huggingface:microsoft/codebert-base" \
-  --text-embedding-model "huggingface:sentence-transformers/all-mpnet-base-v2"
+  --code-embedding-model "huggingface:BAAI/bge-base-en-v1.5" \
+  --text-embedding-model "huggingface:BAAI/bge-base-en-v1.5"
 
 # Use FastEmbed (recommended for speed)
 octocode config \
-  --code-embedding-model "fastembed:Xenova/all-MiniLM-L6-v2" \
-  --text-embedding-model "fastembed:intfloat/multilingual-e5-small"
+  --code-embedding-model "fastembed:BAAI/bge-small-en-v1.5" \
+  --text-embedding-model "fastembed:multilingual-e5-small"
 
 # Mix providers as needed
 octocode config \
-  --code-embedding-model "huggingface:microsoft/codebert-base" \
-  --text-embedding-model "fastembed:intfloat/multilingual-e5-small"
+  --code-embedding-model "huggingface:BAAI/bge-base-en-v1.5" \
+  --text-embedding-model "fastembed:multilingual-e5-small"
 ```
 
 ### Cloud Embedding Models (API Keys Required)
@@ -117,15 +116,13 @@ contextual_batch_size = 10                   # Chunks per batch for contextual e
 | **OpenAI** | `openai:model-name` | ✅ Yes | ☁️ Cloud | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐ |
 | **OctoHub** | `octohub:model-name` | ✅ Yes | ☁️ Cloud | ⭐⭐⭐⭐ | ⭐⭐⭐⭐ |
 | **Together** | `together:model-name` | ✅ Yes | ☁️ Cloud | ⭐⭐⭐⭐ | ⭐⭐⭐⭐ |
-
 ### Model Recommendations
 
 #### For Code Understanding (code_model)
 
 **Best Quality:**
 ```bash
-huggingface:microsoft/codebert-base                    # 768 dim, BERT, excellent for code
-huggingface:jinaai/jina-embeddings-v2-base-code       # 768 dim, JinaBERT, code-optimized
+huggingface:BAAI/bge-base-en-v1.5                     # 768 dim, BERT, excellent quality
 jina:jina-embeddings-v2-base-code                     # 768 dim, specialized for code
 voyage:voyage-code-3                                  # Dynamic dim, latest code model
 openai:text-embedding-3-small                         # 1536 dim, versatile for code
@@ -133,30 +130,26 @@ openai:text-embedding-3-small                         # 1536 dim, versatile for 
 
 **Fast Local:**
 ```bash
-fastembed:Xenova/all-MiniLM-L6-v2                     # 384 dim, fast and efficient
-fastembed:Xenova/bge-small-en-v1.5                    # 384 dim, good balance
+fastembed:BAAI/bge-small-en-v1.5                       # 384 dim, fast and efficient
 ```
 
 #### For Text Understanding (text_model)
 
 **Best Quality:**
 ```bash
-huggingface:sentence-transformers/all-mpnet-base-v2   # 768 dim, BERT, excellent quality
-huggingface:BAAI/bge-base-en-v1.5                     # 768 dim, BERT, high performance
+huggingface:BAAI/bge-base-en-v1.5                     # 768 dim, BERT, excellent quality
 jina:jina-embeddings-v4                               # 2048 dim, latest Jina model
-voyage:voyage-3.5-lite                                # Dynamic dim, excellent for text
+voyage:voyage-3.5-lite                               # Dynamic dim, excellent for text
 openai:text-embedding-3-large                         # 3072 dim, highest quality
 openai:text-embedding-3-small                         # 1536 dim, cost-effective
 ```
 
 **Fast Local:**
 ```bash
-fastembed:intfloat/multilingual-e5-small                 # 384 dim, supports multiple languages
-huggingface:sentence-transformers/all-MiniLM-L6-v2    # 384 dim, BERT, fast
+fastembed:multilingual-e5-small                       # 384 dim, supports multiple languages
 ```
 
 **Note**: HuggingFace provider supports BERT and JinaBERT architectures with automatic dimension detection.
-```
 
 ## Environment Variables
 

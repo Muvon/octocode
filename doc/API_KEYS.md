@@ -88,14 +88,13 @@ octocode config \
 ```bash
 # FastEmbed (fastest, requires fastembed feature)
 octocode config \
-  --code-embedding-model "fastembed:all-MiniLM-L6-v2" \
+  --code-embedding-model "fastembed:BAAI/bge-small-en-v1.5" \
   --text-embedding-model "fastembed:multilingual-e5-small"
 
 # HuggingFace (highest quality, requires huggingface feature)
 octocode config \
   --code-embedding-model "huggingface:microsoft/codebert-base" \
   --text-embedding-model "huggingface:sentence-transformers/all-MiniLM-L6-v2"
-```
 
 **Supported Architectures:**
 - **BERT**: Standard BERT models (e.g., `sentence-transformers/all-MiniLM-L6-v2`)
@@ -286,10 +285,8 @@ octocode config --model "anthropic:claude-3-5-sonnet-20241022"
 - `voyage:voyage-code-3` (1024 dim, cloud)
 
 **Fast Local:**
-- `fastembed:all-MiniLM-L6-v2` (384 dim)
 - `fastembed:BAAI/bge-small-en-v1.5` (384 dim)
-
-### For Text/Documentation (text_model)
+- `fastembed:multilingual-e5-small` (384 dim)
 
 **Best Quality:**
 - `huggingface:sentence-transformers/all-MiniLM-L6-v2` (384 dim, local)
@@ -323,7 +320,7 @@ octocode config --model "openrouter:openai/gpt-4o-mini"
 ```bash
 # No API keys required
 octocode config \
-  --code-embedding-model "fastembed:all-MiniLM-L6-v2" \
+  --code-embedding-model "fastembed:BAAI/bge-small-en-v1.5" \
   --text-embedding-model "fastembed:multilingual-e5-small"
 
 # AI features disabled without LLM provider API key
@@ -393,7 +390,7 @@ octocode config \
 
 # Use local models when possible (macOS)
 octocode config \
-  --code-embedding-model "fastembed:all-MiniLM-L6-v2" \
+  --code-embedding-model "fastembed:BAAI/bge-small-en-v1.5" \
   --text-embedding-model "fastembed:multilingual-e5-small"
 
 # Reduce chunk sizes to use fewer tokens

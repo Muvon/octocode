@@ -90,13 +90,14 @@ octocode config --show
 ```bash
 # Use faster local models (requires fastembed feature)
 octocode config \
-  --code-embedding-model "fastembed:Xenova/all-MiniLM-L6-v2" \
-  --text-embedding-model "fastembed:intfloat/multilingual-e5-small"
+  --code-embedding-model "fastembed:BAAI/bge-small-en-v1.5" \
+  --text-embedding-model "fastembed:multilingual-e5-small"
 
 # Or use current cloud defaults (recommended)
 octocode config \
   --code-embedding-model "voyage:voyage-code-3" \
   --text-embedding-model "voyage:voyage-3.5-lite"
+```
 
 # Enable GraphRAG for relationship analysis
 octocode config --graphrag-enabled true
