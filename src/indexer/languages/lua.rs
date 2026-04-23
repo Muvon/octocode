@@ -106,23 +106,20 @@ impl Language for Lua {
 					}
 				}
 			}
-			"return_statement" => {
-				// Check for module exports (return statement at module level)
-				if self.is_module_level_return(node) {
-					// Extract what's being returned as exports
-					for child in node.children(&mut node.walk()) {
-						if child.kind() == "expression_list" {
-							self.extract_lua_exports_from_expression_list(
-								child,
-								contents,
-								&mut exports,
-							);
-						} else if child.kind() == "table_constructor" {
-							self.extract_lua_exports_from_table(child, contents, &mut exports);
-						} else if child.kind() == "identifier" {
-							if let Ok(name) = child.utf8_text(contents.as_bytes()) {
-								exports.push(name.to_string());
-							}
+			"return_statement" if self.is_module_level_return(node) => {
+				// Extract what's being returned as exports
+				for child in node.children(&mut node.walk()) {
+					if child.kind() == "expression_list" {
+						self.extract_lua_exports_from_expression_list(
+							child,
+							contents,
+							&mut exports,
+						);
+					} else if child.kind() == "table_constructor" {
+						self.extract_lua_exports_from_table(child, contents, &mut exports);
+					} else if child.kind() == "identifier" {
+						if let Ok(name) = child.utf8_text(contents.as_bytes()) {
+							exports.push(name.to_string());
 						}
 					}
 				}

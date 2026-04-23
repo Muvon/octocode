@@ -338,7 +338,7 @@ impl AIEnhancements {
 
 		// Prioritize blocks with more symbols (more important code)
 		let mut sorted_blocks: Vec<&crate::store::CodeBlock> = file_blocks.to_vec();
-		sorted_blocks.sort_by(|a, b| b.symbols.len().cmp(&a.symbols.len()));
+		sorted_blocks.sort_by_key(|b| std::cmp::Reverse(b.symbols.len()));
 
 		for block in sorted_blocks {
 			let block_tokens = crate::embedding::count_tokens(&block.content);

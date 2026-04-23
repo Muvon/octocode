@@ -499,7 +499,7 @@ pub(super) fn convert_indentation_smart(
 			if whitespace.chars().all(|c| c == ' ') {
 				// Already all spaces - check if it follows the target pattern
 				let space_count = whitespace.len();
-				if space_count % target_size == 0 {
+				if space_count.is_multiple_of(target_size) {
 					// Already correctly formatted for the target size
 					whitespace.to_string()
 				} else {
@@ -561,7 +561,7 @@ pub(super) fn detect_space_indent_size(space_count: usize, _reference_size: usiz
 	// Common indentations are 4, 2, 8, or 1 spaces per logical level
 	// Try the most common first (4), then others
 	for size in [4, 2, 8, 1] {
-		if space_count % size == 0 {
+		if space_count.is_multiple_of(size) {
 			return size;
 		}
 	}

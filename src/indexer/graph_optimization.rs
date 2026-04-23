@@ -168,7 +168,7 @@ impl TaskFocusedSubgraph {
 
 			// Show a limited number of relationship types and examples
 			let mut rel_types: Vec<_> = rels_by_type.iter().collect();
-			rel_types.sort_by(|a, b| b.1.len().cmp(&a.1.len())); // Sort by frequency
+			rel_types.sort_by_key(|b| std::cmp::Reverse(b.1.len())); // Sort by frequency
 
 			for (rel_type, rels) in rel_types.iter().take(5) {
 				// Show top 5 relationship types

@@ -172,12 +172,7 @@ pub async fn execute(
 			.await?;
 
 	// Zip queries with embeddings
-	let query_embeddings: Vec<_> = args
-		.queries
-		.iter()
-		.cloned()
-		.zip(embeddings.into_iter())
-		.collect();
+	let query_embeddings: Vec<_> = args.queries.iter().cloned().zip(embeddings).collect();
 
 	// Detect branch context for branch-aware search
 	let branch_ctx = {

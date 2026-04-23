@@ -933,11 +933,7 @@ pub async fn search_codebase_with_details_multi_query_text(
 	let embeddings = generate_batch_embeddings_for_queries(queries, mode, config).await?;
 
 	// Zip queries with embeddings
-	let query_embeddings: Vec<_> = queries
-		.iter()
-		.cloned()
-		.zip(embeddings.into_iter())
-		.collect();
+	let query_embeddings: Vec<_> = queries.iter().cloned().zip(embeddings).collect();
 
 	// When reranker is enabled, skip distance pre-filter — let reranker decide relevance.
 	let dedup_distance_threshold = if config.search.reranker.enabled {
@@ -1331,7 +1327,7 @@ pub async fn generate_batch_embeddings_for_queries(
 
 				Ok(code_embeddings
 					.into_iter()
-					.zip(text_embeddings.into_iter())
+					.zip(text_embeddings)
 					.map(
 						|(code_emb, text_emb)| crate::embedding::SearchModeEmbeddings {
 							code_embeddings: Some(code_emb),

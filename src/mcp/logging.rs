@@ -189,7 +189,7 @@ pub fn log_watcher_event(event_type: &str, path: Option<&std::path::Path>, count
 				"File watcher detected batch changes"
 			);
 		}
-		"file_change" if count % 10 == 0 => {
+		"file_change" if count.is_multiple_of(10) => {
 			debug!(
 				event_type = event_type,
 				accumulated_events = count,
@@ -262,7 +262,9 @@ pub fn log_indexing_progress(
 	};
 
 	match phase {
-		"file_processing" if files_processed % 50 == 0 || files_processed == total_files => {
+		"file_processing"
+			if files_processed.is_multiple_of(50) || files_processed == total_files =>
+		{
 			info!(
 				phase = phase,
 				files_processed = files_processed,
