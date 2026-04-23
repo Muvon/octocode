@@ -14,7 +14,7 @@
 
 # Multi-stage Dockerfile for octocode
 # Stage 1: Build
-FROM rust:1.94.0-slim AS builder
+FROM rust:1.95-slim AS builder
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
