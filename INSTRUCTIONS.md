@@ -48,15 +48,16 @@ use super::{EmbeddingProvider, HTTP_CLIENT};
 ```
 
 **Provider Files Structure**:
-- `mod.rs`: Shared code (HTTP_CLIENT, trait, factory) - 110 lines
+- `mod.rs`: Shared code (HTTP_CLIENT, trait, factory)
 - `{provider}.rs`: Individual provider implementations
 - Feature-gated: fastembed.rs, huggingface.rs
-- Always available: jina.rs (138 lines), voyage.rs (154 lines), google.rs (116 lines)
+- Always available: jina.rs, voyage.rs, google.rs
 
-**Current Provider Models**:
-- **Jina**: jina-embeddings-v4 (2048d), jina-clip-v2 (1024d), jina-embeddings-v3 (1024d), jina-clip-v1 (768d), jina-embeddings-v2-base-es (768d), jina-embeddings-v2-base-code (768d), jina-embeddings-v2-base-de (768d), jina-embeddings-v2-base-zh (768d), jina-embeddings-v2-base-en (768d)
-- **Google**: gemini-embedding-001 (3072d), text-embedding-005 (768d), text-multilingual-embedding-002 (768d)
-- **Voyage**: voyage-3.5, voyage-code-2, voyage-finance-2, etc. (use 'info' command for dimensions)
+**Supported Models**: See [octolib embedding docs](https://github.com/Muvon/octolib/blob/main/doc/05-embedding.md) for the full list of providers and models. Examples:
+- `jina` → `jina-embeddings-v3` (1024d)
+- `google` → `text-embedding-005` (768d)
+- `voyage` → `voyage-3.5` (1024d)
+- `fastembed` → `bge-small-en-v1.5` (384d, local)
 
 **Result-based Constructor Pattern**:
 All providers use `pub fn new(model: &str) -> Result<Self>` with graceful error handling and proper model validation. Factory function calls providers with `?` operator for consistent error propagation.
