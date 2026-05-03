@@ -1,376 +1,188 @@
-# Octocode Development Instructions
+# Octocode — AI-Powered Code Intelligence
 
-## Core Principles
-
-### Strict Configuration Management
-- **NO DEFAULTS**: All configuration must be explicitly defined in `config-templates/default.toml`
-- **Template-First**: Update template file when adding new config options
-- **Environment Override**: Use env vars for sensitive data (API keys)
-- **Version Control**: Config has version field for future migrations
-
-### Code Reuse & Architecture
-
-#### Embedding Provider Architecture
-Embedding providers follow a strict modular architecture with each provider in its own file:
-
-```rust
-// Standard provider structure (src/embedding/provider/{provider}.rs)
-pub struct ProviderImpl {
-    model_name: String,
-    dimension: usize,
-}
-
-impl ProviderImpl {
-    pub fn new(model: &str) -> Result<Self> {
-        // Validate supported models first - fail fast with proper error messages
-        let dimension = Self::get_model_dimension_static(model)?;
-        Ok(Self {
-            model_name: model.to_string(),
-            dimension,
-        })
-    }
-
-    fn get_model_dimension_static(model: &str) -> Result<usize> {
-        match model {
-            "model-1" => Ok(768),
-            "model-2" => Ok(1024),
-            _ => Err(anyhow::anyhow!(
-                "Unsupported model: '{}'. Supported models: model-1 (768d), model-2 (1024d)",
-                model
-            )),
-        }
-    }
-}
-
-// Required imports for all providers
-use super::super::types::InputType;
-use super::{EmbeddingProvider, HTTP_CLIENT};
-```
-
-**Provider Files Structure**:
-- `mod.rs`: Shared code (HTTP_CLIENT, trait, factory)
-- `{provider}.rs`: Individual provider implementations
-- Feature-gated: fastembed.rs, huggingface.rs
-- Always available: jina.rs, voyage.rs, google.rs
-
-**Supported Models**: See [octolib embedding docs](https://github.com/Muvon/octolib/blob/main/doc/05-embedding.md) for the full list of providers and models. Examples:
-- `jina` → `jina-embeddings-v3` (1024d)
-- `google` → `text-embedding-005` (768d)
-- `voyage` → `voyage-3.5` (1024d)
-- `fastembed` → `bge-small-en-v1.5` (384d, local)
-
-**Result-based Constructor Pattern**:
-All providers use `pub fn new(model: &str) -> Result<Self>` with graceful error handling and proper model validation. Factory function calls providers with `?` operator for consistent error propagation.
-
-#### Indexer Core Pattern
-```rust
-// Always use this pattern for file processing
-let lang_impl = languages::get_language(language)?;
-parser.set_language(&lang_impl.get_ts_language())?;
-extract_meaningful_regions(tree.root_node(), contents, lang_impl.as_ref(), &mut regions);
-```
-
-#### MANDATORY BUILD COMMANDS:
-- ALWAYS use `--no-default-features` for ALL cargo commands during development
-- cargo build --no-default-features
-- cargo check --no-default-features --message-format=short
-- cargo test --no-default-features
-- NEVER use --release unless explicitly requested
-- NEVER use default cargo build - ALWAYS add --no-default-features flag
-- **Always run clippy** before finalizing code to ensure clean, warning-free code:
-  ```bash
-  cargo clippy --all-features --all-targets -- -D warnings
-  ```
-- **Prefer tokio primitives** over external dependencies when possible (e.g., use tokio for HTTP instead of axum)
-
-#### Watcher Integration
-- Use `NoindexWalker` for file discovery (respects .gitignore + .noindex)
-- **PERFORMANCE**: NoindexWalker now uses fast targeted file system checks with caching
-- Git optimization: only reindex changed files between commits
-- File metadata caching for skip-unchanged logic
-
-#### Storage Pattern
-```rust
-// Batch processing for efficiency
-if should_process_batch(&blocks_batch, |b| &b.content, config) {
-    process_blocks_batch(store, &blocks_batch, config).await?;
-    blocks_batch.clear();
-    flush_if_needed(store, &mut batches_processed, config, false).await?;
-}
-```
-
-### LanceDB Performance & Vector Store Guidelines
-
-#### Intelligent Vector Index Optimization
-Octocode uses an intelligent vector index optimizer that automatically tunes LanceDB parameters based on dataset characteristics. **No configuration required** - all optimizations are automatic.
-
-#### Key Performance Features
-- **Smart Index Creation**: Skips indexing for small datasets (< 1K rows) where brute force is faster
-- **Optimal Parameters**: Automatically calculates partitions, sub-vectors, and search parameters
-- **Growth-Aware**: Recreates indexes with better parameters as datasets grow
-- **Consistent Distance**: Always uses Cosine distance for semantic similarity
-
-#### Best Practices for Store Usage
-
-```rust
-// ✅ GOOD: Use the optimized store methods
-store.store_code_blocks(&blocks, &embeddings).await?;
-store.store_text_blocks(&blocks, &embeddings).await?;
-store.store_document_blocks(&blocks, &embeddings).await?;
-
-// ✅ GOOD: Search with optimized parameters (automatic)
-let results = store.get_code_blocks_with_config(embedding, Some(limit), None).await?;
-
-// ❌ AVOID: Manual index creation (optimizer handles this)
-// table.create_index(&["embedding"], Index::Auto) // Don't do this
-
-// ❌ AVOID: Fixed parameters (optimizer calculates optimal values)
-// .num_partitions(256) // Don't hardcode
-```
-
-#### Performance Characteristics
-- **Small datasets (< 1K rows)**: Brute force search (fastest)
-- **Medium datasets (1K-100K rows)**: Optimized IVF_PQ index with intelligent parameters
-- **Large datasets (> 100K rows)**: Growth-aware optimization with enhanced recall
-- **Search queries**: Automatic nprobes (5-15% of partitions) + refine_factor for better accuracy
-
-#### Memory Module Integration
-The memory system (`src/memory/store.rs`) uses the same intelligent optimization:
-```rust
-// Memory searches automatically use optimized parameters
-let results = memory_store.search_memories(&query).await?;
-```
-
-#### Monitoring and Debugging
-- Index creation timing is logged at INFO level
-- Growth optimization triggers are logged with dataset statistics
-- Search parameter optimization is logged at DEBUG level
-- All failures are gracefully handled with WARNING logs
+Rust CLI tool (v0.14.x) that indexes codebases into LanceDB vector stores, builds knowledge graphs via GraphRAG, and exposes everything through an MCP server for AI assistant integration. Core stack: Rust + tokio + LanceDB + tree-sitter + octolib (embedding/LLM providers). Embedding providers and LLM are delegated entirely to `octolib`.
 
 ## Project Structure
 
-### Core Modules
-- `src/indexer/` - Tree-sitter parsing, semantic extraction
-- `src/indexer/languages/` - Language-specific implementations
-- `src/indexer/graphrag/` - Knowledge graph generation
-- `src/embedding/` - Multi-provider embedding system with dynamic model discovery
-- `src/commands/` - CLI command implementations (index, search, models, etc.)
-- `src/mcp/` - Model Context Protocol server
-
-### Model Management System
-- **Dynamic Model Discovery**: No hardcoded model-dimension mappings
-- **Provider Validation**: Fail-fast during provider creation for invalid models
-- **CLI Commands**: `octocode models list [provider]` and `octocode models info provider:model`
-- **Feature Detection**: Proper feature-gating shows actual provider availability
-
-### MCP Server Modes
-- **Stdin Mode** (default): Standard MCP protocol over stdin/stdout for AI assistant integration
-- **HTTP Mode** (`--bind=host:port`): HTTP server for web-based integrations and testing
-  ```bash
-  # Stdin mode (default)
-  octocode mcp --path=/path/to/project
-
-  # HTTP mode
-  octocode mcp --bind=0.0.0.0:12345 --path=/path/to/project
-  ```
-
-### Key Files
-- `config-templates/default.toml` - Single source of configuration truth
-- `src/config.rs` - Config loading with template fallback
-- `src/indexer/mod.rs` - File processing pipeline
-- `src/store.rs` - Lance database operations
-
-## Development Patterns
-
-### Adding New Language Support
-1. Create `src/indexer/languages/{lang}.rs`
-2. Implement `Language` trait with meaningful_kinds
-3. Add to `languages/mod.rs` registry
-4. Update `detect_language()` function
-
-### Adding Config Options
-1. Update struct in `src/config.rs`
-2. Add defaults in `Default` impl
-3. **MANDATORY**: Update `config-templates/default.toml`
-4. Add validation if needed
-
-### Adding MCP Server Features
-1. **Stdin Mode**: Default mode for AI assistant integration
-2. **HTTP Mode**: Add `--bind=host:port` for web-based access
-3. **Tool Providers**: Implement in `src/mcp/{provider}.rs` with Clone trait
-4. **Request Handling**: Use existing pattern for both stdin and HTTP modes
-5. **State Management**: Use `Arc<Mutex<>>` for shared state across async handlers
-
-### File Processing Pipeline
-1. `create_walker()` - Respects .gitignore/.noindex
-2. Git optimization check for changed files
-3. Language detection → Tree-sitter parsing
-4. Semantic region extraction with smart merging
-5. Batch embedding generation
-6. Lance database storage
-
-### GraphRAG Integration
-- Enabled via `config.graphrag.enabled`
-- Builds relationships from AST imports/exports
-- Uses LLM for file descriptions (optional)
-- Incremental updates on file changes
-
-## Performance Guidelines
-
-### Indexing Optimization
-- Batch size: 16 files per embedding batch
-- Flush frequency: Every 2 batches (32 files)
-- Token limit: 100k tokens per batch
-- Git optimization: Skip unchanged files
-
-### Memory Management
-- Progressive file counting during indexing
-- Preload file metadata in HashMap for O(1) lookup
-- Smart merging of single-line declarations
-- Context-aware markdown chunking
-
-### Database Efficiency
-- Use `content_exists()` before processing
-- Batch operations for inserts/updates
-- Regular flush cycles for persistence
-- Differential processing for file changes
-- **Intelligent vector index optimization** (automatic, no configuration needed)
-- **Growth-aware index recreation** at dataset milestones
-- **Optimized search parameters** (nprobes, refine_factor) calculated per query
-
-## Watch Mode & File Handling
-
-### File Discovery
-```rust
-let walker = NoindexWalker::create_walker(&current_dir).build();
-// Respects both .gitignore and .noindex patterns
+```
+src/
+  main.rs                    — CLI entry point, command dispatch
+  config.rs                  — All config structs; NO runtime defaults (panic on missing)
+  storage.rs                 — Project DB path resolution (~/.local/share/octocode/<hash>/)
+  store/                     — LanceDB operations
+    mod.rs                   — Store struct, block types (CodeBlock, TextBlock, DocumentBlock, CommitBlock)
+    vector_optimizer.rs      — Auto-tuned IVF_RQ / IVF_HNSW_SQ index selection
+    batch_converter.rs       — Arrow RecordBatch construction
+    table_ops.rs             — content_exists(), low-level table ops
+    graphrag.rs              — GraphRAG node storage
+    metadata.rs              — Table metadata helpers
+  embedding/mod.rs           — Thin wrapper over octolib; generate_embeddings*, hash utilities
+  llm/mod.rs                 — Thin wrapper over octolib LLM; LlmClient::from_config()
+  indexer/
+    mod.rs                   — NoindexWalker, file pipeline orchestration
+    languages/               — One file per language, all implement Language trait
+    graphrag/                — GraphRAG builder, AI relationship discovery
+    batch_processor.rs       — Batch embedding + flush logic
+    differential_processor.rs — Incremental file change processing
+    contextual.rs            — LLM-based contextual chunk enrichment
+    commits/                 — Git commit history indexing
+  mcp/
+    server.rs                — McpServer (rmcp-based, stdin + HTTP modes)
+    semantic_code.rs         — SemanticCodeProvider tool impl
+    graphrag.rs              — GraphRagProvider tool impl
+    lsp/                     — LSP integration tools
+    proxy.rs                 — Multi-repo MCP proxy
+  commands/                  — One file per CLI subcommand
+config-templates/default.toml — Single source of truth for ALL config defaults
 ```
 
-### Change Detection
-- Git commit hash tracking for optimization
-- File modification time caching
-- Differential block processing
-- Cleanup of deleted/ignored files
+## Where to Look
 
-### Ignore Patterns
-- `.gitignore` - Standard git ignore
-- `.noindex` - Octocode-specific ignore
-- Config ignore patterns for global exclusions
+| Task | Start here |
+|------|------------|
+| Add/change config option | `config-templates/default.toml` first, then matching struct in `src/config.rs` |
+| Add embedding provider/model | `octolib` repo — providers live there, not here |
+| Add language support | `src/indexer/languages/{lang}.rs` + register in `languages/mod.rs` |
+| Add MCP tool | `src/mcp/semantic_code.rs` or `src/mcp/graphrag.rs` (new provider file if distinct domain) |
+| Add CLI command | `src/commands/{cmd}.rs` + register in `commands/mod.rs` + dispatch in `main.rs` |
+| Store/query LanceDB | `src/store/mod.rs` (block types, Store methods) + `src/store/table_ops.rs` |
+| Vector index tuning | `src/store/vector_optimizer.rs` — automatic, rarely needs changes |
+| File discovery / ignore | `src/indexer/mod.rs` → `NoindexWalker` |
+| Project DB path logic | `src/storage.rs` |
+| Batch embedding pipeline | `src/indexer/batch_processor.rs` |
+| GraphRAG relationships | `src/indexer/graphrag/` |
+| Git commit indexing | `src/indexer/commits/` |
 
-## Quick Start Checklist
+## How Things Work
 
-1. **Config First**: Always update `config-templates/default.toml`
-2. **No Defaults**: Explicit configuration for all options
-3. **Reuse Patterns**: Follow existing indexer/storage patterns
-4. **Batch Processing**: Use established batch sizes and flush cycles
-5. **Git Integration**: Leverage commit-based optimization
-6. **Test Incrementally**: Use watch mode for development iteration
+### Configuration — No Defaults Rule
+Config structs use `panic!()` in `Default::default()` for all non-trivial sections (GraphRAG, Reranker, HybridSearch). This is intentional — every value must come from `config-templates/default.toml`. When adding any config field:
+1. Add to struct in `src/config.rs`
+2. Add default value in `config-templates/default.toml`
+3. Never add a real fallback value in `Default::default()`
 
-## Advanced Topics
+### Embedding — Delegated to octolib
+All provider implementations live in `octolib`. `src/embedding/mod.rs` is a thin wrapper that:
+- Re-exports `octolib::embedding` types
+- Adds `generate_embeddings()` / `generate_embeddings_batch()` with 3-attempt exponential backoff
+- Adds `generate_search_embeddings()` for mode-aware query embedding (`code` / `docs` / `text` / `commits` / `all`)
+- Provides `calculate_content_hash_with_lines()` for block dedup
 
-### LanceDB Performance Troubleshooting
+Model format everywhere: `"provider:model"` (e.g., `"voyage:voyage-code-3"`, `"openrouter:openai/gpt-4o-mini"`).
 
-#### Index Creation Issues
-- Check logs for "Creating optimized vector index" messages
-- Verify dataset size is appropriate for indexing (>= 1000 rows)
-- Monitor index creation timing - should complete in seconds for most datasets
+### LLM — Delegated to octolib
+`src/llm/mod.rs` wraps `octolib::llm`. Use `LlmClient::from_config(config)` for the default model, `LlmClient::with_model(config, model_str)` to override. Never call octolib LLM directly from commands — always go through `LlmClient`.
 
-#### Search Performance Issues
-- Enable DEBUG logging to see search parameter optimization
-- Check if indexes exist: `list_indices()` should show "embedding" indexes
-- Verify distance_type is consistently Cosine across all operations
+### Store — Block Types and Tables
+Four LanceDB tables: `code_blocks`, `text_blocks`, `document_blocks`, `commit_blocks`. Each maps to a typed struct in `src/store/mod.rs`. Schema is created on first use; dimension mismatch triggers automatic table drop + recreate. Table handles are cached in `Arc<RwLock<HashMap>>` — never open tables manually.
 
-#### Growth Optimization Monitoring
-- Look for "Dataset growth detected" log messages at milestones
-- Monitor index recreation timing for large datasets
-- Check that row counts align with expected growth patterns
-
-#### Memory Module Performance
-- Memory system uses same optimization as main store
-- Check memory table row counts and index status
-- Verify embedding dimensions match between memory and main store
-
-### Development Performance Tips
-
-#### MANDATORY BUILD COMMANDS:
-- ALWAYS use `--no-default-features` for ALL cargo commands during development
-- cargo build --no-default-features
-- cargo check --no-default-features --message-format=short
-- cargo test --no-default-features
-- NEVER use --release unless explicitly requested
-- NEVER use default cargo build - ALWAYS add --no-default-features flag
-- **Always run clippy** before finalizing code to ensure clean, warning-free code:
-  ```bash
-  cargo clippy --all-features --all-targets -- -D warnings
-  ```
-- **Prefer tokio primitives** over external dependencies when possible (e.g., use tokio for HTTP instead of axum)
-
-#### Code Quality Standards
-- **Zero clippy warnings** - All code must pass `cargo clippy` without warnings
-- **Minimal dependencies** - Reuse existing dependencies before adding new ones
-- **Clone trait** - Add `#[derive(Clone)]` to structs that need to be shared across async contexts
-- **Error handling** - Use proper `Result<T>` types and meaningful error messages
-
-#### MCP Server Development
-- **Stdin mode** (default): Use for standard MCP protocol compliance
-- **HTTP mode** (`--bind=host:port`): Use for web-based integrations
-- **Pure tokio** implementation for HTTP to avoid unnecessary dependencies
-- **CORS headers** included for browser compatibility
-
-#### Testing Approach
-- **Unit tests** for individual components
-- **Integration tests** for full workflows
-- **Manual testing** with real projects during development
-- **HTTP endpoint testing** using curl or similar tools
-
-## Development Patterns
-
-### Feature-Gating Best Practices
 ```rust
-// Module declarations in mod.rs
-#[cfg(feature = "provider")]
-pub mod provider;
+// ✅ Use typed store methods
+store.store_code_blocks(&blocks, &embeddings).await?;
+store.content_exists(hash, "code_blocks").await?;
 
-// Conditional compilation in factory functions
-#[cfg(feature = "provider")]
-{ Ok(Box::new(ProviderImpl::new(model)?)) }
-#[cfg(not(feature = "provider"))]
-{ Err(anyhow::anyhow!("Provider not compiled")) }
+// ❌ Never open tables or create indexes manually
+// db.open_table("code_blocks")  — use store methods
+// table.create_index(...)       — optimizer handles this
 ```
 
-### Shared Resource Patterns
-```rust
-// HTTP client sharing across providers
-static HTTP_CLIENT: LazyLock<Client> = LazyLock::new(|| {
-    Client::builder()
-        .pool_max_idle_per_host(10)
-        .pool_idle_timeout(Duration::from_secs(30))
-        .timeout(Duration::from_secs(120))
-        .build()
-        .expect("Failed to create HTTP client")
-});
+### Vector Index — Automatic Optimization
+`src/store/vector_optimizer.rs` selects index type and parameters automatically:
+- `< 1K rows` → brute force (no index)
+- `≥ 1K rows` → `IVF_RQ` (32x compression, default) or `IVF_HNSW_SQ` (4x) based on `config.index.quantization`
+- Parameters (partitions, nprobes, refine_factor) calculated from row count — never hardcode them
+- Always Cosine distance
+
+### Indexer Pipeline
+```
+NoindexWalker (respects .gitignore + .noindex)
+  → git optimization (skip unchanged files by commit hash)
+  → language detection → tree-sitter parse
+  → extract_meaningful_regions() → smart merge single-line declarations
+  → optional: contextual LLM description prepended before embedding
+  → batch embedding (16 files/batch, 100K token limit)
+  → store_*_blocks() → flush every 2 batches
 ```
 
-## Quality Standards
+### Language Support Pattern
+```rust
+// src/indexer/languages/{lang}.rs
+pub struct MyLang;
+impl Language for MyLang {
+    fn name(&self) -> &'static str { "mylang" }
+    fn get_ts_language(&self) -> tree_sitter::Language { ... }
+    fn meaningful_kinds(&self) -> &[&str] { &["function_definition", ...] }
+    // implement remaining trait methods
+}
+// Then in languages/mod.rs: add mod, pub use, and register in get_language()
+```
 
-- **Single Responsibility** - Each provider in its own file
-- **Fail-fast validation** - Validate models during provider creation
-- **Dynamic discovery** - No hardcoded dimensions where possible
-- **Async-first** - Use tokio throughout for non-blocking operations
-- **Error resilience** - Graceful degradation when optional features fail
-- **Copyright headers** - All `.rs` source files MUST have the Apache 2.0 copyright header. When modifying a file, update the copyright year to the current year. New files MUST include the full header:
-  ```
-  // Copyright <YEAR> Muvon Un Limited
-  //
-  // Licensed under the Apache License, Version 2.0 (the "License");
-  // you may not use this file except in compliance with the License.
-  // You may obtain a copy of the License at
-  //
-  //     http://www.apache.org/licenses/LICENSE-2.0
-  //
-  // Unless required by applicable law or agreed to in writing, software
-  // distributed under the License is distributed on an "AS IS" BASIS,
-  // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-  // See the License for the specific language governing permissions and
-  // limitations under the License.
-  ```
+### MCP Server
+Two transport modes via `rmcp`:
+- **Stdin** (default): `octocode mcp --path=/repo` — standard MCP protocol for AI assistants
+- **HTTP**: `octocode mcp --bind=0.0.0.0:12345 --path=/repo` — streamable HTTP with CORS
+
+Tool providers implement `Clone` and are registered in `src/mcp/server.rs`. Use `Arc<Mutex<>>` for shared async state.
+
+### Feature Gating
+`fastembed` and `huggingface` are optional features (default-enabled). Gate provider code:
+```rust
+#[cfg(feature = "fastembed")]
+pub mod fastembed;
+
+#[cfg(feature = "fastembed")]
+{ Ok(Box::new(FastEmbedProvider::new(model)?)) }
+#[cfg(not(feature = "fastembed"))]
+{ Err(anyhow::anyhow!("fastembed feature not compiled")) }
+```
+
+Build without local model features: `cargo build --no-default-features`
+
+### Copyright Header — Mandatory
+Every `.rs` file must start with:
+```rust
+// Copyright 2026 Muvon Un Limited
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+```
+Update year to current year when modifying a file. New files must include the full header.
+
+## Code Quality Standards
+
+- **Zero clippy warnings** — `cargo clippy --all-features --all-targets -- -D warnings` must pass clean
+- **Fail-fast validation** — validate model names / config during construction (`new()` returns `Result`)
+- **Async-first** — tokio throughout; prefer tokio primitives over new dependencies
+- **Minimal deps** — reuse existing crates before adding new ones
+- **Single responsibility** — each provider/language/command in its own file
+- **`#[derive(Clone)]`** on structs shared across async contexts
+- **`Result<T>`** with meaningful error messages everywhere; no `.unwrap()` in non-test code
+
+## Gotchas
+
+- **`--no-default-features`** skips `fastembed`/`huggingface` — use this during dev to avoid heavy local model compilation; CI tests with `--all-features`
+- **Config `Default::default()` panics** on GraphRAG/Reranker/HybridSearch — this is intentional; always load from template
+- **DB path is outside the repo** — stored at `~/.local/share/octocode/<project-hash>/storage/`; project hash derived from git remote URL (normalized) or path hash
+- **Schema mismatch auto-drops tables** — changing embedding model dimensions wipes existing index data; coordinate model changes carefully
+- **`NoindexWalker` respects both `.gitignore` AND `.noindex`** — add `.noindex` for octocode-specific exclusions without polluting `.gitignore`
+- **Embedding providers live in `octolib`** — don't add provider implementations here; update `octolib` instead
+- **`require_git = true` by default** — indexing fails without a git repo; override in config for non-git projects
+
+## Never
+
+- Add config fields without a corresponding entry in `config-templates/default.toml`
+- Hardcode vector dimensions, index partition counts, or search parameters — the optimizer calculates them
+- Open LanceDB tables directly — always use `Store` methods
+- Call `octolib` embedding/LLM APIs directly from commands — go through `src/embedding/mod.rs` and `src/llm/mod.rs`
+- Add a new embedding provider implementation in this repo — it belongs in `octolib`
+- Use `--release` builds during development
+- Commit `.rs` files without the Apache 2.0 copyright header
