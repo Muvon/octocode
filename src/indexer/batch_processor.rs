@@ -92,7 +92,6 @@ pub async fn process_code_blocks_batch(
 	// Step 2: Build enriched embedding input
 	// Always prepends structural context (file path, language, symbols).
 	// Optionally prepends LLM-generated natural language description.
-	// The stored content remains the original code - enrichment is for embedding only.
 	let contents: Vec<String> = blocks
 		.iter()
 		.enumerate()
@@ -103,15 +102,29 @@ pub async fn process_code_blocks_batch(
 
 	// Generate embeddings with Document input type for indexing (asymmetric retrieval)
 	let embeddings = crate::embedding::generate_embeddings_batch(
-		contents,
+		contents.clone(),
 		true,
 		config,
 		crate::embedding::types::InputType::Document,
 	)
 	.await?;
 
-	// Store blocks with their embeddings (original blocks unchanged)
-	store.store_code_blocks(blocks, &embeddings).await?;
+	// Store enriched contents in the `content` column so BM25/FTS sees the same
+	// signal as the dense vector ("Contextual BM25" half of Anthropic's recipe).
+	// The cross-encoder reranker, which scores on the stored content, also gets
+	// the enriched text for free.
+	let enriched_blocks: Vec<CodeBlock> = blocks
+		.iter()
+		.zip(contents.iter())
+		.map(|(b, enriched)| {
+			let mut nb = b.clone();
+			nb.content = enriched.clone();
+			nb
+		})
+		.collect();
+	store
+		.store_code_blocks(&enriched_blocks, &embeddings)
+		.await?;
 
 	// CRITICAL: Store file metadata AFTER successful block storage
 	// This ensures atomicity - if blocks are stored, metadata is stored
@@ -138,13 +151,25 @@ pub async fn process_text_blocks_batch(
 		.map(|b| format!("# File: {}\n\n{}", b.path, b.content))
 		.collect();
 	let embeddings = crate::embedding::generate_embeddings_batch(
-		contents,
+		contents.clone(),
 		false,
 		config,
 		crate::embedding::types::InputType::Document,
 	)
 	.await?;
-	store.store_text_blocks(blocks, &embeddings).await?;
+	// Store enriched content so BM25 sees the file-path prefix too.
+	let enriched_blocks: Vec<TextBlock> = blocks
+		.iter()
+		.zip(contents.iter())
+		.map(|(b, enriched)| {
+			let mut nb = b.clone();
+			nb.content = enriched.clone();
+			nb
+		})
+		.collect();
+	store
+		.store_text_blocks(&enriched_blocks, &embeddings)
+		.await?;
 
 	// CRITICAL: Store file metadata AFTER successful block storage
 	file_metadata.persist(store).await?;
@@ -179,13 +204,25 @@ pub async fn process_document_blocks_batch(
 		})
 		.collect();
 	let embeddings = crate::embedding::generate_embeddings_batch(
-		contents,
+		contents.clone(),
 		false,
 		config,
 		crate::embedding::types::InputType::Document,
 	)
 	.await?;
-	store.store_document_blocks(blocks, &embeddings).await?;
+	// Store enriched content so BM25 sees the file-path + section context too.
+	let enriched_blocks: Vec<DocumentBlock> = blocks
+		.iter()
+		.zip(contents.iter())
+		.map(|(b, enriched)| {
+			let mut nb = b.clone();
+			nb.content = enriched.clone();
+			nb
+		})
+		.collect();
+	store
+		.store_document_blocks(&enriched_blocks, &embeddings)
+		.await?;
 
 	// CRITICAL: Store file metadata AFTER successful block storage
 	file_metadata.persist(store).await?;
