@@ -614,6 +614,71 @@ fn distance_to_similarity(distance_threshold: Option<f32>) -> Option<f32> {
 	distance_threshold.map(|d| 1.0 - d)
 }
 
+/// For mode="all": collapse the three per-type result lists down to the
+/// requested total by globally ranking on distance, instead of forcing a
+/// 1/3-each split. Each input list is assumed to be best-first already.
+/// Per-type return shape is preserved so downstream rendering and per-type
+/// reranking stay unchanged — only the *mix* changes (concentrated where
+/// the matches actually are).
+fn fuse_all_mode_results(
+	code_blocks: &mut Vec<CodeBlock>,
+	text_blocks: &mut Vec<TextBlock>,
+	doc_blocks: &mut Vec<DocumentBlock>,
+	total_limit: usize,
+) {
+	let total = code_blocks.len() + text_blocks.len() + doc_blocks.len();
+	if total <= total_limit {
+		return;
+	}
+
+	// (distance, type-tag, position-in-its-list)
+	let mut ranking: Vec<(f32, u8, usize)> = Vec::with_capacity(total);
+	for (i, b) in code_blocks.iter().enumerate() {
+		ranking.push((b.distance.unwrap_or(1.0), 0, i));
+	}
+	for (i, b) in text_blocks.iter().enumerate() {
+		ranking.push((b.distance.unwrap_or(1.0), 1, i));
+	}
+	for (i, b) in doc_blocks.iter().enumerate() {
+		ranking.push((b.distance.unwrap_or(1.0), 2, i));
+	}
+	ranking.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+	ranking.truncate(total_limit);
+
+	let mut keep_code: HashSet<usize> = HashSet::new();
+	let mut keep_text: HashSet<usize> = HashSet::new();
+	let mut keep_doc: HashSet<usize> = HashSet::new();
+	for (_, kind, idx) in &ranking {
+		match kind {
+			0 => {
+				keep_code.insert(*idx);
+			}
+			1 => {
+				keep_text.insert(*idx);
+			}
+			_ => {
+				keep_doc.insert(*idx);
+			}
+		}
+	}
+
+	*code_blocks = code_blocks
+		.drain(..)
+		.enumerate()
+		.filter_map(|(i, b)| keep_code.contains(&i).then_some(b))
+		.collect();
+	*text_blocks = text_blocks
+		.drain(..)
+		.enumerate()
+		.filter_map(|(i, b)| keep_text.contains(&i).then_some(b))
+		.collect();
+	*doc_blocks = doc_blocks
+		.drain(..)
+		.enumerate()
+		.filter_map(|(i, b)| keep_doc.contains(&i).then_some(b))
+		.collect();
+}
+
 async fn search_code_blocks(
 	store: &Store,
 	query: &str,
@@ -885,18 +950,20 @@ pub async fn search_codebase_with_details_text(
 				anyhow::anyhow!("No text embeddings generated for all search mode")
 			})?;
 
-			let results_per_type = candidate_limit.div_ceil(3);
-			let main_rpt = if branch_ctx.is_some() {
-				results_per_type * 2
+			// Pull full candidate pool from each modality. Global mix is
+			// decided by `fuse_all_mode_results` below, not by an a-priori quota.
+			let per_type_limit = candidate_limit;
+			let main_per_type = if branch_ctx.is_some() {
+				per_type_limit * 2
 			} else {
-				results_per_type
+				per_type_limit
 			};
 
 			let mut code_results = search_code_blocks(
 				&store,
 				query,
 				code_embeddings.clone(),
-				main_rpt,
+				main_per_type,
 				distance_threshold,
 				language_filter,
 				hybrid_enabled,
@@ -906,7 +973,7 @@ pub async fn search_codebase_with_details_text(
 				&store,
 				query,
 				text_embeddings.clone(),
-				main_rpt,
+				main_per_type,
 				distance_threshold,
 				hybrid_enabled,
 			)
@@ -915,7 +982,7 @@ pub async fn search_codebase_with_details_text(
 				&store,
 				query,
 				text_embeddings.clone(),
-				main_rpt,
+				main_per_type,
 				distance_threshold,
 				hybrid_enabled,
 			)
@@ -927,7 +994,7 @@ pub async fn search_codebase_with_details_text(
 					&ctx.store,
 					query,
 					code_embeddings,
-					results_per_type,
+					per_type_limit,
 					distance_threshold,
 					language_filter,
 					hybrid_enabled,
@@ -938,7 +1005,7 @@ pub async fn search_codebase_with_details_text(
 					&ctx.store,
 					query,
 					text_embeddings.clone(),
-					results_per_type,
+					per_type_limit,
 					distance_threshold,
 					hybrid_enabled,
 				)
@@ -948,19 +1015,25 @@ pub async fn search_codebase_with_details_text(
 					&ctx.store,
 					query,
 					text_embeddings,
-					results_per_type,
+					per_type_limit,
 					distance_threshold,
 					hybrid_enabled,
 				)
 				.await
 				.unwrap_or_default();
 				code_results =
-					merge_branch_code_blocks(code_results, bc, &overridden, results_per_type);
+					merge_branch_code_blocks(code_results, bc, &overridden, per_type_limit);
 				text_results =
-					merge_branch_text_blocks(text_results, bt, &overridden, results_per_type);
-				doc_results =
-					merge_branch_doc_blocks(doc_results, bd, &overridden, results_per_type);
+					merge_branch_text_blocks(text_results, bt, &overridden, per_type_limit);
+				doc_results = merge_branch_doc_blocks(doc_results, bd, &overridden, per_type_limit);
 			}
+
+			fuse_all_mode_results(
+				&mut code_results,
+				&mut text_results,
+				&mut doc_results,
+				candidate_limit,
+			);
 
 			(code_results, text_results, doc_results, vec![])
 		}
@@ -1609,7 +1682,10 @@ pub async fn execute_single_search_with_embeddings(
 			}
 		}
 		"all" => {
-			let results_per_type = per_query_limit.div_ceil(3);
+			// Pull the full per-query budget from each modality. The 1/3-each
+			// quota is replaced by global ranking in `fuse_all_mode_results`
+			// after all three lists are gathered.
+			let per_type_limit = per_query_limit;
 
 			if let Some(code_emb) = embeddings.code_embeddings {
 				code_blocks = if use_hybrid {
@@ -1618,7 +1694,7 @@ pub async fn execute_single_search_with_embeddings(
 						keywords: keywords.clone(),
 						vector_weight: 1.0,
 						keyword_weight: 1.0,
-						limit: results_per_type,
+						limit: per_type_limit,
 						min_relevance,
 						language_filter: language_filter.map(String::from),
 					};
@@ -1627,7 +1703,7 @@ pub async fn execute_single_search_with_embeddings(
 					store
 						.get_code_blocks_with_language_filter(
 							code_emb,
-							Some(results_per_type),
+							Some(per_type_limit),
 							distance_threshold,
 							language_filter,
 						)
@@ -1644,7 +1720,7 @@ pub async fn execute_single_search_with_embeddings(
 						keywords: keywords.clone(),
 						vector_weight: 1.0,
 						keyword_weight: 1.0,
-						limit: results_per_type,
+						limit: per_type_limit,
 						min_relevance,
 						language_filter: None,
 					};
@@ -1653,7 +1729,7 @@ pub async fn execute_single_search_with_embeddings(
 						keywords: keywords.clone(),
 						vector_weight: 1.0,
 						keyword_weight: 1.0,
-						limit: results_per_type,
+						limit: per_type_limit,
 						min_relevance,
 						language_filter: None,
 					};
@@ -1667,12 +1743,12 @@ pub async fn execute_single_search_with_embeddings(
 					let (text_result, doc_result) = tokio::try_join!(
 						store.get_text_blocks_with_config(
 							text_emb,
-							Some(results_per_type),
+							Some(per_type_limit),
 							distance_threshold,
 						),
 						store.get_document_blocks_with_config(
 							text_emb_clone,
-							Some(results_per_type),
+							Some(per_type_limit),
 							distance_threshold,
 						)
 					)?;
@@ -1680,6 +1756,13 @@ pub async fn execute_single_search_with_embeddings(
 					doc_blocks = doc_result;
 				}
 			}
+
+			fuse_all_mode_results(
+				&mut code_blocks,
+				&mut text_blocks,
+				&mut doc_blocks,
+				per_query_limit,
+			);
 		}
 		_ => return Err(anyhow::anyhow!("Invalid search mode: {}", mode)),
 	}
