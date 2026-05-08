@@ -608,6 +608,122 @@ pub async fn detect_branch_search_context() -> Option<BranchSearchContext> {
 	})
 }
 
+// HybridSearchQuery expresses the cutoff as similarity (higher=better),
+// while the rest of the pipeline uses distance (lower=better).
+fn distance_to_similarity(distance_threshold: Option<f32>) -> Option<f32> {
+	distance_threshold.map(|d| 1.0 - d)
+}
+
+async fn search_code_blocks(
+	store: &Store,
+	query: &str,
+	embedding: Vec<f32>,
+	limit: usize,
+	distance_threshold: Option<f32>,
+	language_filter: Option<&str>,
+	hybrid_enabled: bool,
+) -> Result<Vec<CodeBlock>> {
+	if hybrid_enabled && !query.trim().is_empty() {
+		let hq = crate::store::HybridSearchQuery {
+			vector_query: Some(embedding),
+			keywords: Some(query.to_string()),
+			vector_weight: 1.0,
+			keyword_weight: 1.0,
+			limit,
+			min_relevance: distance_to_similarity(distance_threshold),
+			language_filter: language_filter.map(String::from),
+		};
+		store.hybrid_search::<CodeBlock>(&hq).await
+	} else {
+		store
+			.get_code_blocks_with_language_filter(
+				embedding,
+				Some(limit),
+				distance_threshold,
+				language_filter,
+			)
+			.await
+	}
+}
+
+async fn search_text_blocks(
+	store: &Store,
+	query: &str,
+	embedding: Vec<f32>,
+	limit: usize,
+	distance_threshold: Option<f32>,
+	hybrid_enabled: bool,
+) -> Result<Vec<TextBlock>> {
+	if hybrid_enabled && !query.trim().is_empty() {
+		let hq = crate::store::HybridSearchQuery {
+			vector_query: Some(embedding),
+			keywords: Some(query.to_string()),
+			vector_weight: 1.0,
+			keyword_weight: 1.0,
+			limit,
+			min_relevance: distance_to_similarity(distance_threshold),
+			language_filter: None,
+		};
+		store.hybrid_search::<TextBlock>(&hq).await
+	} else {
+		store
+			.get_text_blocks_with_config(embedding, Some(limit), distance_threshold)
+			.await
+	}
+}
+
+async fn search_doc_blocks(
+	store: &Store,
+	query: &str,
+	embedding: Vec<f32>,
+	limit: usize,
+	distance_threshold: Option<f32>,
+	hybrid_enabled: bool,
+) -> Result<Vec<DocumentBlock>> {
+	if hybrid_enabled && !query.trim().is_empty() {
+		let hq = crate::store::HybridSearchQuery {
+			vector_query: Some(embedding),
+			keywords: Some(query.to_string()),
+			vector_weight: 1.0,
+			keyword_weight: 1.0,
+			limit,
+			min_relevance: distance_to_similarity(distance_threshold),
+			language_filter: None,
+		};
+		store.hybrid_search::<DocumentBlock>(&hq).await
+	} else {
+		store
+			.get_document_blocks_with_config(embedding, Some(limit), distance_threshold)
+			.await
+	}
+}
+
+async fn search_commit_blocks(
+	store: &Store,
+	query: &str,
+	embedding: Vec<f32>,
+	limit: usize,
+	distance_threshold: Option<f32>,
+	hybrid_enabled: bool,
+) -> Result<Vec<crate::store::CommitBlock>> {
+	if hybrid_enabled && !query.trim().is_empty() {
+		let hq = crate::store::HybridSearchQuery {
+			vector_query: Some(embedding),
+			keywords: Some(query.to_string()),
+			vector_weight: 1.0,
+			keyword_weight: 1.0,
+			limit,
+			min_relevance: distance_to_similarity(distance_threshold),
+			language_filter: None,
+		};
+		store.hybrid_search::<crate::store::CommitBlock>(&hq).await
+	} else {
+		store
+			.get_commit_blocks_with_config(embedding, Some(limit), distance_threshold)
+			.await
+	}
+}
+
 pub async fn search_codebase_with_details_text(
 	query: &str,
 	mode: &str,
@@ -649,31 +765,36 @@ pub async fn search_codebase_with_details_text(
 		candidate_limit
 	};
 
+	let hybrid_enabled = config.search.hybrid.enabled;
+
 	// Perform the search based on mode
 	let (mut code_blocks, mut text_blocks, mut doc_blocks, mut commit_blocks) = match mode {
 		"code" => {
 			let embeddings = search_embeddings.code_embeddings.ok_or_else(|| {
 				anyhow::anyhow!("No code embeddings generated for code search mode")
 			})?;
-			let mut results = store
-				.get_code_blocks_with_language_filter(
-					embeddings.clone(),
-					Some(main_limit),
+			let mut results = search_code_blocks(
+				&store,
+				query,
+				embeddings.clone(),
+				main_limit,
+				distance_threshold,
+				language_filter,
+				hybrid_enabled,
+			)
+			.await?;
+			if let Some(ref ctx) = branch_ctx {
+				let branch_results = search_code_blocks(
+					&ctx.store,
+					query,
+					embeddings,
+					candidate_limit,
 					distance_threshold,
 					language_filter,
+					hybrid_enabled,
 				)
-				.await?;
-			if let Some(ref ctx) = branch_ctx {
-				let branch_results = ctx
-					.store
-					.get_code_blocks_with_language_filter(
-						embeddings,
-						Some(candidate_limit),
-						distance_threshold,
-						language_filter,
-					)
-					.await
-					.unwrap_or_default();
+				.await
+				.unwrap_or_default();
 				let overridden = ctx.manifest.overridden_paths();
 				results =
 					merge_branch_code_blocks(results, branch_results, &overridden, candidate_limit);
@@ -684,23 +805,26 @@ pub async fn search_codebase_with_details_text(
 			let embeddings = search_embeddings.text_embeddings.ok_or_else(|| {
 				anyhow::anyhow!("No text embeddings generated for text search mode")
 			})?;
-			let mut results = store
-				.get_text_blocks_with_config(
-					embeddings.clone(),
-					Some(main_limit),
-					distance_threshold,
-				)
-				.await?;
+			let mut results = search_text_blocks(
+				&store,
+				query,
+				embeddings.clone(),
+				main_limit,
+				distance_threshold,
+				hybrid_enabled,
+			)
+			.await?;
 			if let Some(ref ctx) = branch_ctx {
-				let branch_results = ctx
-					.store
-					.get_text_blocks_with_config(
-						embeddings,
-						Some(candidate_limit),
-						distance_threshold,
-					)
-					.await
-					.unwrap_or_default();
+				let branch_results = search_text_blocks(
+					&ctx.store,
+					query,
+					embeddings,
+					candidate_limit,
+					distance_threshold,
+					hybrid_enabled,
+				)
+				.await
+				.unwrap_or_default();
 				let overridden = ctx.manifest.overridden_paths();
 				results =
 					merge_branch_text_blocks(results, branch_results, &overridden, candidate_limit);
@@ -711,23 +835,26 @@ pub async fn search_codebase_with_details_text(
 			let embeddings = search_embeddings.text_embeddings.ok_or_else(|| {
 				anyhow::anyhow!("No text embeddings generated for docs search mode")
 			})?;
-			let mut results = store
-				.get_document_blocks_with_config(
-					embeddings.clone(),
-					Some(main_limit),
-					distance_threshold,
-				)
-				.await?;
+			let mut results = search_doc_blocks(
+				&store,
+				query,
+				embeddings.clone(),
+				main_limit,
+				distance_threshold,
+				hybrid_enabled,
+			)
+			.await?;
 			if let Some(ref ctx) = branch_ctx {
-				let branch_results = ctx
-					.store
-					.get_document_blocks_with_config(
-						embeddings,
-						Some(candidate_limit),
-						distance_threshold,
-					)
-					.await
-					.unwrap_or_default();
+				let branch_results = search_doc_blocks(
+					&ctx.store,
+					query,
+					embeddings,
+					candidate_limit,
+					distance_threshold,
+					hybrid_enabled,
+				)
+				.await
+				.unwrap_or_default();
 				let overridden = ctx.manifest.overridden_paths();
 				results =
 					merge_branch_doc_blocks(results, branch_results, &overridden, candidate_limit);
@@ -739,13 +866,15 @@ pub async fn search_codebase_with_details_text(
 				anyhow::anyhow!("No text embeddings generated for commits search mode")
 			})?;
 			// Commits are global — no branch merge needed
-			let results = store
-				.get_commit_blocks_with_config(
-					embeddings,
-					Some(candidate_limit),
-					distance_threshold,
-				)
-				.await?;
+			let results = search_commit_blocks(
+				&store,
+				query,
+				embeddings,
+				candidate_limit,
+				distance_threshold,
+				hybrid_enabled,
+			)
+			.await?;
 			(vec![], vec![], vec![], results)
 		}
 		"all" => {
@@ -763,59 +892,68 @@ pub async fn search_codebase_with_details_text(
 				results_per_type
 			};
 
-			let mut code_results = store
-				.get_code_blocks_with_language_filter(
-					code_embeddings.clone(),
-					Some(main_rpt),
-					distance_threshold,
-					language_filter,
-				)
-				.await?;
-			let mut text_results = store
-				.get_text_blocks_with_config(
-					text_embeddings.clone(),
-					Some(main_rpt),
-					distance_threshold,
-				)
-				.await?;
-			let mut doc_results = store
-				.get_document_blocks_with_config(
-					text_embeddings.clone(),
-					Some(main_rpt),
-					distance_threshold,
-				)
-				.await?;
+			let mut code_results = search_code_blocks(
+				&store,
+				query,
+				code_embeddings.clone(),
+				main_rpt,
+				distance_threshold,
+				language_filter,
+				hybrid_enabled,
+			)
+			.await?;
+			let mut text_results = search_text_blocks(
+				&store,
+				query,
+				text_embeddings.clone(),
+				main_rpt,
+				distance_threshold,
+				hybrid_enabled,
+			)
+			.await?;
+			let mut doc_results = search_doc_blocks(
+				&store,
+				query,
+				text_embeddings.clone(),
+				main_rpt,
+				distance_threshold,
+				hybrid_enabled,
+			)
+			.await?;
 
 			if let Some(ref ctx) = branch_ctx {
 				let overridden = ctx.manifest.overridden_paths();
-				let bc = ctx
-					.store
-					.get_code_blocks_with_language_filter(
-						code_embeddings,
-						Some(results_per_type),
-						distance_threshold,
-						language_filter,
-					)
-					.await
-					.unwrap_or_default();
-				let bt = ctx
-					.store
-					.get_text_blocks_with_config(
-						text_embeddings.clone(),
-						Some(results_per_type),
-						distance_threshold,
-					)
-					.await
-					.unwrap_or_default();
-				let bd = ctx
-					.store
-					.get_document_blocks_with_config(
-						text_embeddings,
-						Some(results_per_type),
-						distance_threshold,
-					)
-					.await
-					.unwrap_or_default();
+				let bc = search_code_blocks(
+					&ctx.store,
+					query,
+					code_embeddings,
+					results_per_type,
+					distance_threshold,
+					language_filter,
+					hybrid_enabled,
+				)
+				.await
+				.unwrap_or_default();
+				let bt = search_text_blocks(
+					&ctx.store,
+					query,
+					text_embeddings.clone(),
+					results_per_type,
+					distance_threshold,
+					hybrid_enabled,
+				)
+				.await
+				.unwrap_or_default();
+				let bd = search_doc_blocks(
+					&ctx.store,
+					query,
+					text_embeddings,
+					results_per_type,
+					distance_threshold,
+					hybrid_enabled,
+				)
+				.await
+				.unwrap_or_default();
 				code_results =
 					merge_branch_code_blocks(code_results, bc, &overridden, results_per_type);
 				text_results =
@@ -1349,90 +1487,198 @@ pub async fn execute_single_search_with_embeddings(
 	query_index: usize,
 	distance_threshold: Option<f32>,
 	language_filter: Option<&str>,
+	query: Option<&str>,
+	hybrid_enabled: bool,
 ) -> Result<QuerySearchResult> {
 	let mut code_blocks = Vec::new();
 	let mut doc_blocks = Vec::new();
 	let mut text_blocks = Vec::new();
 	let mut commit_blocks = Vec::new();
 
+	// Hybrid path activates when: feature flag on AND a non-empty raw query is provided.
+	// `distance_threshold` is a distance value (lower=better); HybridSearchQuery
+	// expects similarity (higher=better), so invert: similarity = 1.0 - distance.
+	let use_hybrid = hybrid_enabled && query.is_some_and(|q| !q.trim().is_empty());
+	let keywords: Option<String> = if use_hybrid {
+		query.map(|s| s.to_string())
+	} else {
+		None
+	};
+	let min_relevance = distance_threshold.map(|d| 1.0 - d);
+
 	match mode {
 		"code" => {
 			if let Some(code_emb) = embeddings.code_embeddings {
-				code_blocks = store
-					.get_code_blocks_with_language_filter(
-						code_emb,
-						Some(per_query_limit),
-						distance_threshold,
-						language_filter,
-					)
-					.await?;
+				code_blocks = if use_hybrid {
+					let hq = crate::store::HybridSearchQuery {
+						vector_query: Some(code_emb),
+						keywords: keywords.clone(),
+						vector_weight: 1.0,
+						keyword_weight: 1.0,
+						limit: per_query_limit,
+						min_relevance,
+						language_filter: language_filter.map(String::from),
+					};
+					store.hybrid_search::<crate::store::CodeBlock>(&hq).await?
+				} else {
+					store
+						.get_code_blocks_with_language_filter(
+							code_emb,
+							Some(per_query_limit),
+							distance_threshold,
+							language_filter,
+						)
+						.await?
+				};
 			}
 		}
 		"docs" => {
 			if let Some(text_emb) = embeddings.text_embeddings {
-				doc_blocks = store
-					.get_document_blocks_with_config(
-						text_emb,
-						Some(per_query_limit),
-						distance_threshold,
-					)
-					.await?;
+				doc_blocks = if use_hybrid {
+					let hq = crate::store::HybridSearchQuery {
+						vector_query: Some(text_emb),
+						keywords: keywords.clone(),
+						vector_weight: 1.0,
+						keyword_weight: 1.0,
+						limit: per_query_limit,
+						min_relevance,
+						language_filter: None,
+					};
+					store
+						.hybrid_search::<crate::store::DocumentBlock>(&hq)
+						.await?
+				} else {
+					store
+						.get_document_blocks_with_config(
+							text_emb,
+							Some(per_query_limit),
+							distance_threshold,
+						)
+						.await?
+				};
 			}
 		}
 		"text" => {
 			if let Some(text_emb) = embeddings.text_embeddings {
-				text_blocks = store
-					.get_text_blocks_with_config(
-						text_emb,
-						Some(per_query_limit),
-						distance_threshold,
-					)
-					.await?;
+				text_blocks = if use_hybrid {
+					let hq = crate::store::HybridSearchQuery {
+						vector_query: Some(text_emb),
+						keywords: keywords.clone(),
+						vector_weight: 1.0,
+						keyword_weight: 1.0,
+						limit: per_query_limit,
+						min_relevance,
+						language_filter: None,
+					};
+					store.hybrid_search::<crate::store::TextBlock>(&hq).await?
+				} else {
+					store
+						.get_text_blocks_with_config(
+							text_emb,
+							Some(per_query_limit),
+							distance_threshold,
+						)
+						.await?
+				};
 			}
 		}
 		"commits" => {
 			if let Some(text_emb) = embeddings.text_embeddings {
-				commit_blocks = store
-					.get_commit_blocks_with_config(
-						text_emb,
-						Some(per_query_limit),
-						distance_threshold,
-					)
-					.await?;
+				commit_blocks = if use_hybrid {
+					let hq = crate::store::HybridSearchQuery {
+						vector_query: Some(text_emb),
+						keywords: keywords.clone(),
+						vector_weight: 1.0,
+						keyword_weight: 1.0,
+						limit: per_query_limit,
+						min_relevance,
+						language_filter: None,
+					};
+					store
+						.hybrid_search::<crate::store::CommitBlock>(&hq)
+						.await?
+				} else {
+					store
+						.get_commit_blocks_with_config(
+							text_emb,
+							Some(per_query_limit),
+							distance_threshold,
+						)
+						.await?
+				};
 			}
 		}
 		"all" => {
 			let results_per_type = per_query_limit.div_ceil(3);
 
 			if let Some(code_emb) = embeddings.code_embeddings {
-				code_blocks = store
-					.get_code_blocks_with_language_filter(
-						code_emb,
-						Some(results_per_type),
-						distance_threshold,
-						language_filter,
-					)
-					.await?;
+				code_blocks = if use_hybrid {
+					let hq = crate::store::HybridSearchQuery {
+						vector_query: Some(code_emb),
+						keywords: keywords.clone(),
+						vector_weight: 1.0,
+						keyword_weight: 1.0,
+						limit: results_per_type,
+						min_relevance,
+						language_filter: language_filter.map(String::from),
+					};
+					store.hybrid_search::<crate::store::CodeBlock>(&hq).await?
+				} else {
+					store
+						.get_code_blocks_with_language_filter(
+							code_emb,
+							Some(results_per_type),
+							distance_threshold,
+							language_filter,
+						)
+						.await?
+				};
 			}
 
 			if let Some(text_emb) = embeddings.text_embeddings {
 				let text_emb_clone = text_emb.clone();
 
-				let (text_result, doc_result) = tokio::try_join!(
-					store.get_text_blocks_with_config(
-						text_emb,
-						Some(results_per_type),
-						distance_threshold,
-					),
-					store.get_document_blocks_with_config(
-						text_emb_clone,
-						Some(results_per_type),
-						distance_threshold,
-					)
-				)?;
-
-				text_blocks = text_result;
-				doc_blocks = doc_result;
+				if use_hybrid {
+					let hq_text = crate::store::HybridSearchQuery {
+						vector_query: Some(text_emb),
+						keywords: keywords.clone(),
+						vector_weight: 1.0,
+						keyword_weight: 1.0,
+						limit: results_per_type,
+						min_relevance,
+						language_filter: None,
+					};
+					let hq_doc = crate::store::HybridSearchQuery {
+						vector_query: Some(text_emb_clone),
+						keywords: keywords.clone(),
+						vector_weight: 1.0,
+						keyword_weight: 1.0,
+						limit: results_per_type,
+						min_relevance,
+						language_filter: None,
+					};
+					let (t, d) = tokio::try_join!(
+						store.hybrid_search::<crate::store::TextBlock>(&hq_text),
+						store.hybrid_search::<crate::store::DocumentBlock>(&hq_doc),
+					)?;
+					text_blocks = t;
+					doc_blocks = d;
+				} else {
+					let (text_result, doc_result) = tokio::try_join!(
+						store.get_text_blocks_with_config(
+							text_emb,
+							Some(results_per_type),
+							distance_threshold,
+						),
+						store.get_document_blocks_with_config(
+							text_emb_clone,
+							Some(results_per_type),
+							distance_threshold,
+						)
+					)?;
+					text_blocks = text_result;
+					doc_blocks = doc_result;
+				}
 			}
 		}
 		_ => return Err(anyhow::anyhow!("Invalid search mode: {}", mode)),
@@ -1473,12 +1719,15 @@ pub async fn execute_parallel_searches(
 		Some(1.0 - params.similarity_threshold)
 	};
 
+	let hybrid_enabled = params.config.search.hybrid.enabled;
+
 	// Search main store
 	let main_futures: Vec<_> = query_embeddings
 		.iter()
 		.enumerate()
-		.map(|(index, (_, embeddings))| {
+		.map(|(index, (query_str, embeddings))| {
 			let emb = embeddings.clone();
+			let q = query_str.clone();
 			async move {
 				execute_single_search_with_embeddings(
 					store,
@@ -1488,6 +1737,8 @@ pub async fn execute_parallel_searches(
 					index,
 					distance_threshold,
 					params.language_filter,
+					Some(q.as_str()),
+					hybrid_enabled,
 				)
 				.await
 			}
@@ -1505,8 +1756,9 @@ pub async fn execute_parallel_searches(
 	let branch_futures: Vec<_> = query_embeddings
 		.iter()
 		.enumerate()
-		.map(|(index, (_, embeddings))| {
+		.map(|(index, (query_str, embeddings))| {
 			let emb = embeddings.clone();
+			let q = query_str.clone();
 			async move {
 				execute_single_search_with_embeddings(
 					&branch.store,
@@ -1516,6 +1768,8 @@ pub async fn execute_parallel_searches(
 					index,
 					distance_threshold,
 					params.language_filter,
+					Some(q.as_str()),
+					hybrid_enabled,
 				)
 				.await
 			}
