@@ -199,61 +199,6 @@ pub struct SearchModeEmbeddings {
 	pub text_embeddings: Option<Vec<f32>>,
 }
 
-/// Generate embeddings for search based on mode - centralized logic to avoid duplication
-/// Compatibility wrapper for octocode Config (octocode-specific)
-pub async fn generate_search_embeddings(
-	query: &str,
-	mode: &str,
-	config: &Config,
-) -> Result<SearchModeEmbeddings> {
-	match mode {
-		"code" => {
-			// Use code model for code searches only
-			let embeddings = generate_embeddings(query, true, config).await?;
-			Ok(SearchModeEmbeddings {
-				code_embeddings: Some(embeddings),
-				text_embeddings: None,
-			})
-		}
-		"docs" | "text" | "commits" => {
-			// Use text model for documents, text, and commit searches
-			let embeddings = generate_embeddings(query, false, config).await?;
-			Ok(SearchModeEmbeddings {
-				code_embeddings: None,
-				text_embeddings: Some(embeddings),
-			})
-		}
-		"all" => {
-			// For "all" mode, check if code and text models are different
-			// If different, generate separate embeddings; if same, use one set
-			let embedding_config = EmbeddingGenerationConfig::from(config);
-			let code_model = &embedding_config.code_model;
-			let text_model = &embedding_config.text_model;
-
-			if code_model == text_model {
-				// Same model for both - generate once and reuse
-				let embeddings = generate_embeddings(query, true, config).await?;
-				Ok(SearchModeEmbeddings {
-					code_embeddings: Some(embeddings.clone()),
-					text_embeddings: Some(embeddings),
-				})
-			} else {
-				// Different models - generate separate embeddings
-				let code_embeddings = generate_embeddings(query, true, config).await?;
-				let text_embeddings = generate_embeddings(query, false, config).await?;
-				Ok(SearchModeEmbeddings {
-					code_embeddings: Some(code_embeddings),
-					text_embeddings: Some(text_embeddings),
-				})
-			}
-		}
-		_ => Err(anyhow::anyhow!(
-			"Invalid search mode '{}'. Use 'all', 'code', 'docs', 'text', or 'commits'.",
-			mode
-		)),
-	}
-}
-
 /// Calculate a unique hash for content including file path (octocode-specific)
 pub fn calculate_unique_content_hash(contents: &str, file_path: &str) -> String {
 	use sha2::{Digest, Sha256};

@@ -608,18 +608,16 @@ pub async fn detect_branch_search_context() -> Option<BranchSearchContext> {
 	})
 }
 
-// HybridSearchQuery expresses the cutoff as similarity (higher=better),
-// while the rest of the pipeline uses distance (lower=better).
-fn distance_to_similarity(distance_threshold: Option<f32>) -> Option<f32> {
-	distance_threshold.map(|d| 1.0 - d)
-}
-
 /// For mode="all": collapse the three per-type result lists down to the
-/// requested total by globally ranking on distance, instead of forcing a
-/// 1/3-each split. Each input list is assumed to be best-first already.
-/// Per-type return shape is preserved so downstream rendering and per-type
-/// reranking stay unchanged — only the *mix* changes (concentrated where
-/// the matches actually are).
+/// requested total. Code/text/doc come from different embedding models
+/// (e.g. voyage-code-3 vs voyage-3.5-lite), so their raw distances are NOT
+/// comparable across modalities — a global min-distance sort would starve
+/// whichever modality has looser score scaling. We use Reciprocal Rank
+/// Fusion (RRF) instead: each input list is assumed best-first already,
+/// and items are ranked by `1 / (k + rank_in_own_list)`. RRF is
+/// scale-independent, so top picks from every modality survive the cap.
+/// Per-type return shape is preserved so downstream rendering and
+/// reranking stay unchanged — only the *mix* changes.
 fn fuse_all_mode_results(
 	code_blocks: &mut Vec<CodeBlock>,
 	text_blocks: &mut Vec<TextBlock>,
@@ -631,18 +629,37 @@ fn fuse_all_mode_results(
 		return;
 	}
 
-	// (distance, type-tag, position-in-its-list)
+	// Reciprocal Rank Fusion: code/text/doc come from different embedding models
+	// (e.g. voyage-code-3 vs voyage-3.5-lite). Their raw distances are NOT on a
+	// shared scale, so a global min-distance sort would bias toward whichever
+	// model produces tighter distances and starve the others (e.g. docs vanish
+	// in `--mode all` even when they're top-ranked within their own modality).
+	// RRF scores by rank-within-list, which is scale-independent: each list's
+	// best item ties on score, so the global cap fairly samples all modalities.
+	// Inputs are already sorted best-first by their native scorer (vector search
+	// or hybrid_search), so position == rank.
+	const RRF_K: f32 = 60.0;
+	let rrf = |rank: usize| 1.0 / (RRF_K + rank as f32);
+
+	// (rrf_score, type-tag, position-in-its-list)
 	let mut ranking: Vec<(f32, u8, usize)> = Vec::with_capacity(total);
-	for (i, b) in code_blocks.iter().enumerate() {
-		ranking.push((b.distance.unwrap_or(1.0), 0, i));
+	for i in 0..code_blocks.len() {
+		ranking.push((rrf(i), 0, i));
 	}
-	for (i, b) in text_blocks.iter().enumerate() {
-		ranking.push((b.distance.unwrap_or(1.0), 1, i));
+	for i in 0..text_blocks.len() {
+		ranking.push((rrf(i), 1, i));
 	}
-	for (i, b) in doc_blocks.iter().enumerate() {
-		ranking.push((b.distance.unwrap_or(1.0), 2, i));
+	for i in 0..doc_blocks.len() {
+		ranking.push((rrf(i), 2, i));
 	}
-	ranking.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+	// Higher RRF score is better; stable secondary by modality then index keeps
+	// per-modality order deterministic when scores tie.
+	ranking.sort_by(|a, b| {
+		b.0.partial_cmp(&a.0)
+			.unwrap_or(std::cmp::Ordering::Equal)
+			.then(a.1.cmp(&b.1))
+			.then(a.2.cmp(&b.2))
+	});
 	ranking.truncate(total_limit);
 
 	let mut keep_code: HashSet<usize> = HashSet::new();
@@ -679,116 +696,10 @@ fn fuse_all_mode_results(
 		.collect();
 }
 
-async fn search_code_blocks(
-	store: &Store,
-	query: &str,
-	embedding: Vec<f32>,
-	limit: usize,
-	distance_threshold: Option<f32>,
-	language_filter: Option<&str>,
-	hybrid_enabled: bool,
-) -> Result<Vec<CodeBlock>> {
-	if hybrid_enabled && !query.trim().is_empty() {
-		let hq = crate::store::HybridSearchQuery {
-			vector_query: Some(embedding),
-			keywords: Some(query.to_string()),
-			vector_weight: 1.0,
-			keyword_weight: 1.0,
-			limit,
-			min_relevance: distance_to_similarity(distance_threshold),
-			language_filter: language_filter.map(String::from),
-		};
-		store.hybrid_search::<CodeBlock>(&hq).await
-	} else {
-		store
-			.get_code_blocks_with_language_filter(
-				embedding,
-				Some(limit),
-				distance_threshold,
-				language_filter,
-			)
-			.await
-	}
-}
-
-async fn search_text_blocks(
-	store: &Store,
-	query: &str,
-	embedding: Vec<f32>,
-	limit: usize,
-	distance_threshold: Option<f32>,
-	hybrid_enabled: bool,
-) -> Result<Vec<TextBlock>> {
-	if hybrid_enabled && !query.trim().is_empty() {
-		let hq = crate::store::HybridSearchQuery {
-			vector_query: Some(embedding),
-			keywords: Some(query.to_string()),
-			vector_weight: 1.0,
-			keyword_weight: 1.0,
-			limit,
-			min_relevance: distance_to_similarity(distance_threshold),
-			language_filter: None,
-		};
-		store.hybrid_search::<TextBlock>(&hq).await
-	} else {
-		store
-			.get_text_blocks_with_config(embedding, Some(limit), distance_threshold)
-			.await
-	}
-}
-
-async fn search_doc_blocks(
-	store: &Store,
-	query: &str,
-	embedding: Vec<f32>,
-	limit: usize,
-	distance_threshold: Option<f32>,
-	hybrid_enabled: bool,
-) -> Result<Vec<DocumentBlock>> {
-	if hybrid_enabled && !query.trim().is_empty() {
-		let hq = crate::store::HybridSearchQuery {
-			vector_query: Some(embedding),
-			keywords: Some(query.to_string()),
-			vector_weight: 1.0,
-			keyword_weight: 1.0,
-			limit,
-			min_relevance: distance_to_similarity(distance_threshold),
-			language_filter: None,
-		};
-		store.hybrid_search::<DocumentBlock>(&hq).await
-	} else {
-		store
-			.get_document_blocks_with_config(embedding, Some(limit), distance_threshold)
-			.await
-	}
-}
-
-async fn search_commit_blocks(
-	store: &Store,
-	query: &str,
-	embedding: Vec<f32>,
-	limit: usize,
-	distance_threshold: Option<f32>,
-	hybrid_enabled: bool,
-) -> Result<Vec<crate::store::CommitBlock>> {
-	if hybrid_enabled && !query.trim().is_empty() {
-		let hq = crate::store::HybridSearchQuery {
-			vector_query: Some(embedding),
-			keywords: Some(query.to_string()),
-			vector_weight: 1.0,
-			keyword_weight: 1.0,
-			limit,
-			min_relevance: distance_to_similarity(distance_threshold),
-			language_filter: None,
-		};
-		store.hybrid_search::<crate::store::CommitBlock>(&hq).await
-	} else {
-		store
-			.get_commit_blocks_with_config(embedding, Some(limit), distance_threshold)
-			.await
-	}
-}
-
+/// Single-query variant of [`search_codebase_with_details_multi_query_text`].
+/// Forwards to the multi-query implementation with a one-element slice so all
+/// search behavior (branch awareness, hybrid scoring, RRF fusion across
+/// modalities, reranking) lives in a single code path.
 pub async fn search_codebase_with_details_text(
 	query: &str,
 	mode: &str,
@@ -798,318 +709,16 @@ pub async fn search_codebase_with_details_text(
 	language_filter: Option<&str>,
 	config: &Config,
 ) -> Result<String> {
-	// Initialize store
-	let store = Store::new().await?;
-
-	// Detect branch context for branch-aware search
-	let branch_ctx = detect_branch_search_context().await;
-
-	// Generate embeddings for the query using centralized logic
-	let search_embeddings =
-		crate::embedding::generate_search_embeddings(query, mode, config).await?;
-
-	// When reranker is enabled, skip distance pre-filter — let reranker decide relevance.
-	// When disabled, apply similarity threshold as distance filter.
-	let distance_threshold = if config.search.reranker.enabled {
-		None
-	} else {
-		Some(1.0 - similarity_threshold)
-	};
-
-	// Determine candidate limit: fetch more when reranker is enabled
-	let candidate_limit = if config.search.reranker.enabled {
-		config.search.reranker.top_k_candidates
-	} else {
-		max_results
-	};
-
-	// Over-fetch from main when branch is active
-	let main_limit = if branch_ctx.is_some() {
-		candidate_limit * 2
-	} else {
-		candidate_limit
-	};
-
-	let hybrid_enabled = config.search.hybrid.enabled;
-
-	// Perform the search based on mode
-	let (mut code_blocks, mut text_blocks, mut doc_blocks, mut commit_blocks) = match mode {
-		"code" => {
-			let embeddings = search_embeddings.code_embeddings.ok_or_else(|| {
-				anyhow::anyhow!("No code embeddings generated for code search mode")
-			})?;
-			let mut results = search_code_blocks(
-				&store,
-				query,
-				embeddings.clone(),
-				main_limit,
-				distance_threshold,
-				language_filter,
-				hybrid_enabled,
-			)
-			.await?;
-			if let Some(ref ctx) = branch_ctx {
-				let branch_results = search_code_blocks(
-					&ctx.store,
-					query,
-					embeddings,
-					candidate_limit,
-					distance_threshold,
-					language_filter,
-					hybrid_enabled,
-				)
-				.await
-				.unwrap_or_default();
-				let overridden = ctx.manifest.overridden_paths();
-				results =
-					merge_branch_code_blocks(results, branch_results, &overridden, candidate_limit);
-			}
-			(results, vec![], vec![], vec![])
-		}
-		"text" => {
-			let embeddings = search_embeddings.text_embeddings.ok_or_else(|| {
-				anyhow::anyhow!("No text embeddings generated for text search mode")
-			})?;
-			let mut results = search_text_blocks(
-				&store,
-				query,
-				embeddings.clone(),
-				main_limit,
-				distance_threshold,
-				hybrid_enabled,
-			)
-			.await?;
-			if let Some(ref ctx) = branch_ctx {
-				let branch_results = search_text_blocks(
-					&ctx.store,
-					query,
-					embeddings,
-					candidate_limit,
-					distance_threshold,
-					hybrid_enabled,
-				)
-				.await
-				.unwrap_or_default();
-				let overridden = ctx.manifest.overridden_paths();
-				results =
-					merge_branch_text_blocks(results, branch_results, &overridden, candidate_limit);
-			}
-			(vec![], results, vec![], vec![])
-		}
-		"docs" => {
-			let embeddings = search_embeddings.text_embeddings.ok_or_else(|| {
-				anyhow::anyhow!("No text embeddings generated for docs search mode")
-			})?;
-			let mut results = search_doc_blocks(
-				&store,
-				query,
-				embeddings.clone(),
-				main_limit,
-				distance_threshold,
-				hybrid_enabled,
-			)
-			.await?;
-			if let Some(ref ctx) = branch_ctx {
-				let branch_results = search_doc_blocks(
-					&ctx.store,
-					query,
-					embeddings,
-					candidate_limit,
-					distance_threshold,
-					hybrid_enabled,
-				)
-				.await
-				.unwrap_or_default();
-				let overridden = ctx.manifest.overridden_paths();
-				results =
-					merge_branch_doc_blocks(results, branch_results, &overridden, candidate_limit);
-			}
-			(vec![], vec![], results, vec![])
-		}
-		"commits" => {
-			let embeddings = search_embeddings.text_embeddings.ok_or_else(|| {
-				anyhow::anyhow!("No text embeddings generated for commits search mode")
-			})?;
-			// Commits are global — no branch merge needed
-			let results = search_commit_blocks(
-				&store,
-				query,
-				embeddings,
-				candidate_limit,
-				distance_threshold,
-				hybrid_enabled,
-			)
-			.await?;
-			(vec![], vec![], vec![], results)
-		}
-		"all" => {
-			let code_embeddings = search_embeddings.code_embeddings.ok_or_else(|| {
-				anyhow::anyhow!("No code embeddings generated for all search mode")
-			})?;
-			let text_embeddings = search_embeddings.text_embeddings.ok_or_else(|| {
-				anyhow::anyhow!("No text embeddings generated for all search mode")
-			})?;
-
-			// Pull full candidate pool from each modality. Global mix is
-			// decided by `fuse_all_mode_results` below, not by an a-priori quota.
-			let per_type_limit = candidate_limit;
-			let main_per_type = if branch_ctx.is_some() {
-				per_type_limit * 2
-			} else {
-				per_type_limit
-			};
-
-			let mut code_results = search_code_blocks(
-				&store,
-				query,
-				code_embeddings.clone(),
-				main_per_type,
-				distance_threshold,
-				language_filter,
-				hybrid_enabled,
-			)
-			.await?;
-			let mut text_results = search_text_blocks(
-				&store,
-				query,
-				text_embeddings.clone(),
-				main_per_type,
-				distance_threshold,
-				hybrid_enabled,
-			)
-			.await?;
-			let mut doc_results = search_doc_blocks(
-				&store,
-				query,
-				text_embeddings.clone(),
-				main_per_type,
-				distance_threshold,
-				hybrid_enabled,
-			)
-			.await?;
-
-			if let Some(ref ctx) = branch_ctx {
-				let overridden = ctx.manifest.overridden_paths();
-				let bc = search_code_blocks(
-					&ctx.store,
-					query,
-					code_embeddings,
-					per_type_limit,
-					distance_threshold,
-					language_filter,
-					hybrid_enabled,
-				)
-				.await
-				.unwrap_or_default();
-				let bt = search_text_blocks(
-					&ctx.store,
-					query,
-					text_embeddings.clone(),
-					per_type_limit,
-					distance_threshold,
-					hybrid_enabled,
-				)
-				.await
-				.unwrap_or_default();
-				let bd = search_doc_blocks(
-					&ctx.store,
-					query,
-					text_embeddings,
-					per_type_limit,
-					distance_threshold,
-					hybrid_enabled,
-				)
-				.await
-				.unwrap_or_default();
-				code_results =
-					merge_branch_code_blocks(code_results, bc, &overridden, per_type_limit);
-				text_results =
-					merge_branch_text_blocks(text_results, bt, &overridden, per_type_limit);
-				doc_results = merge_branch_doc_blocks(doc_results, bd, &overridden, per_type_limit);
-			}
-
-			fuse_all_mode_results(
-				&mut code_results,
-				&mut text_results,
-				&mut doc_results,
-				candidate_limit,
-			);
-
-			(code_results, text_results, doc_results, vec![])
-		}
-		_ => {
-			return Err(anyhow::anyhow!(
-				"Invalid search mode '{}'. Use 'all', 'code', 'docs', 'commits', or 'text'.",
-				mode
-			))
-		}
-	};
-
-	// Apply reranker if enabled, then filter by similarity threshold
-	if config.search.reranker.enabled {
-		code_blocks = crate::reranker::rerank_code_blocks_with_octolib(
-			query,
-			code_blocks,
-			&config.search.reranker,
-		)
-		.await?;
-		text_blocks = crate::reranker::rerank_text_blocks_with_octolib(
-			query,
-			text_blocks,
-			&config.search.reranker,
-		)
-		.await?;
-		doc_blocks = crate::reranker::rerank_doc_blocks_with_octolib(
-			query,
-			doc_blocks,
-			&config.search.reranker,
-		)
-		.await?;
-		commit_blocks = crate::reranker::rerank_commit_blocks_with_octolib(
-			query,
-			commit_blocks,
-			&config.search.reranker,
-		)
-		.await?;
-
-		// Apply similarity threshold to reranker scores (post-reranker filter)
-		let dist_thresh = 1.0 - similarity_threshold;
-		code_blocks.retain(|b| b.distance.is_none_or(|d| d <= dist_thresh));
-		text_blocks.retain(|b| b.distance.is_none_or(|d| d <= dist_thresh));
-		doc_blocks.retain(|b| b.distance.is_none_or(|d| d <= dist_thresh));
-		commit_blocks.retain(|b| b.distance.is_none_or(|d| d <= dist_thresh));
-	} else {
-		code_blocks.truncate(max_results);
-		text_blocks.truncate(max_results);
-		doc_blocks.truncate(max_results);
-		commit_blocks.truncate(max_results);
-	}
-
-	match mode {
-		"code" => Ok(format_code_search_results_as_text(
-			&code_blocks,
-			detail_level,
-		)),
-		"text" => Ok(format_text_search_results_as_text(
-			&text_blocks,
-			detail_level,
-		)),
-		"docs" => Ok(format_doc_search_results_as_text(&doc_blocks, detail_level)),
-		"commits" => Ok(format_commit_search_results_as_text(
-			&commit_blocks,
-			detail_level,
-		)),
-		"all" => Ok(format_combined_search_results_as_text(
-			&code_blocks,
-			&text_blocks,
-			&doc_blocks,
-			detail_level,
-		)),
-		_ => Err(anyhow::anyhow!(
-			"Invalid search mode '{}'. Use 'all', 'code', 'docs', 'commits', or 'text'.",
-			mode
-		)),
-	}
+	search_codebase_with_details_multi_query_text(
+		&[query.to_string()],
+		mode,
+		detail_level,
+		max_results,
+		similarity_threshold,
+		language_filter,
+		config,
+	)
+	.await
 }
 
 // Enhanced search function for MCP server with multi-query support and detail level control - returns text results
