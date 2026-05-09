@@ -164,6 +164,32 @@ impl Language for Ruby {
 		Vec::new()
 	}
 
+	fn extract_type_relations(
+		&self,
+		node: Node,
+		contents: &str,
+	) -> Vec<(super::TypeRelationKind, String)> {
+		// `class Foo < Bar` → Foo extends Bar.
+		// Module mixins (`include M`, `extend M`) are call expressions and
+		// would require pattern-matching on call sites; deferred for now.
+		let mut out = Vec::new();
+		if node.kind() == "class" {
+			if let Some(superclass) = node.child_by_field_name("superclass") {
+				let mut cursor = superclass.walk();
+				for child in superclass.children(&mut cursor) {
+					if matches!(child.kind(), "constant" | "scope_resolution") {
+						if let Ok(text) = child.utf8_text(contents.as_bytes()) {
+							if let Some(name) = super::simple_type_name(text) {
+								out.push((super::TypeRelationKind::Extends, name));
+							}
+						}
+					}
+				}
+			}
+		}
+		out
+	}
+
 	fn resolve_import(
 		&self,
 		import_path: &str,

@@ -185,6 +185,57 @@ impl Language for Php {
 		}
 	}
 
+	fn extract_type_relations(
+		&self,
+		node: Node,
+		contents: &str,
+	) -> Vec<(super::TypeRelationKind, String)> {
+		// `class Foo extends Bar implements I, J { }`
+		// `interface A extends B, C { }`
+		let mut out = Vec::new();
+		match node.kind() {
+			"class_declaration" => {
+				let mut cursor = node.walk();
+				for child in node.children(&mut cursor) {
+					match child.kind() {
+						"base_clause" => {
+							collect_php_clause_names(
+								child,
+								contents,
+								super::TypeRelationKind::Extends,
+								&mut out,
+							);
+						}
+						"class_interface_clause" => {
+							collect_php_clause_names(
+								child,
+								contents,
+								super::TypeRelationKind::Implements,
+								&mut out,
+							);
+						}
+						_ => {}
+					}
+				}
+			}
+			"interface_declaration" => {
+				let mut cursor = node.walk();
+				for child in node.children(&mut cursor) {
+					if child.kind() == "base_clause" {
+						collect_php_clause_names(
+							child,
+							contents,
+							super::TypeRelationKind::Extends,
+							&mut out,
+						);
+					}
+				}
+			}
+			_ => {}
+		}
+		out
+	}
+
 	fn resolve_import(
 		&self,
 		import_path: &str,
@@ -404,5 +455,27 @@ impl Php {
 		}
 
 		None
+	}
+}
+
+/// Pull type names out of a PHP `base_clause` (extends) or `class_interface_clause`.
+fn collect_php_clause_names(
+	clause: Node,
+	contents: &str,
+	kind: super::TypeRelationKind,
+	out: &mut Vec<(super::TypeRelationKind, String)>,
+) {
+	let mut cursor = clause.walk();
+	for child in clause.children(&mut cursor) {
+		if matches!(
+			child.kind(),
+			"name" | "qualified_name" | "namespace_name_as_prefix" | "namespace_name"
+		) {
+			if let Ok(text) = child.utf8_text(contents.as_bytes()) {
+				if let Some(name) = super::simple_type_name(text) {
+					out.push((kind, name));
+				}
+			}
+		}
 	}
 }

@@ -177,6 +177,31 @@ impl Language for Go {
 		Vec::new()
 	}
 
+	fn extract_type_relations(
+		&self,
+		node: Node,
+		contents: &str,
+	) -> Vec<(super::TypeRelationKind, String)> {
+		// Go has no `extends`/`implements`, but struct embedding —
+		// `type Foo struct { Bar }` — is the idiomatic equivalent of
+		// inheritance/composition and is the most useful edge to capture.
+		// Interface implementation is structural (no syntactic hook); not emitted.
+		let mut out = Vec::new();
+		if node.kind() == "field_declaration" {
+			let has_named_field = node.child_by_field_name("name").is_some();
+			if !has_named_field {
+				if let Some(type_node) = node.child_by_field_name("type") {
+					if let Ok(text) = type_node.utf8_text(contents.as_bytes()) {
+						if let Some(name) = super::simple_type_name(text) {
+							out.push((super::TypeRelationKind::Extends, name));
+						}
+					}
+				}
+			}
+		}
+		out
+	}
+
 	fn resolve_import(
 		&self,
 		import_path: &str,

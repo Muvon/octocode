@@ -267,6 +267,57 @@ impl Language for Java {
 		}
 	}
 
+	fn extract_type_relations(
+		&self,
+		node: Node,
+		contents: &str,
+	) -> Vec<(super::TypeRelationKind, String)> {
+		let mut out = Vec::new();
+		match node.kind() {
+			// `class Foo extends Bar implements I, J { }`
+			"class_declaration" => {
+				let mut cursor = node.walk();
+				for child in node.children(&mut cursor) {
+					match child.kind() {
+						"superclass" => {
+							collect_java_clause_types(
+								child,
+								contents,
+								super::TypeRelationKind::Extends,
+								&mut out,
+							);
+						}
+						"super_interfaces" => {
+							collect_java_clause_types(
+								child,
+								contents,
+								super::TypeRelationKind::Implements,
+								&mut out,
+							);
+						}
+						_ => {}
+					}
+				}
+			}
+			// `interface A extends B, C { }`
+			"interface_declaration" => {
+				let mut cursor = node.walk();
+				for child in node.children(&mut cursor) {
+					if child.kind() == "extends_interfaces" {
+						collect_java_clause_types(
+							child,
+							contents,
+							super::TypeRelationKind::Extends,
+							&mut out,
+						);
+					}
+				}
+			}
+			_ => {}
+		}
+		out
+	}
+
 	fn resolve_import(
 		&self,
 		import_path: &str,
@@ -288,5 +339,32 @@ impl Language for Java {
 
 	fn get_file_extensions(&self) -> Vec<&'static str> {
 		vec!["java"]
+	}
+}
+
+/// Pull `type_identifier` / `generic_type` names from a `superclass`,
+/// `super_interfaces`, `extends_interfaces`, or similar clause.
+fn collect_java_clause_types(
+	clause: Node,
+	contents: &str,
+	kind: super::TypeRelationKind,
+	out: &mut Vec<(super::TypeRelationKind, String)>,
+) {
+	let mut cursor = clause.walk();
+	for child in clause.children(&mut cursor) {
+		match child.kind() {
+			"type_identifier" | "generic_type" | "scoped_type_identifier" => {
+				if let Ok(text) = child.utf8_text(contents.as_bytes()) {
+					if let Some(name) = super::simple_type_name(text) {
+						out.push((kind, name));
+					}
+				}
+			}
+			"type_list" | "interface_type_list" => {
+				// Some grammar versions wrap interfaces in a list node.
+				collect_java_clause_types(child, contents, kind, out);
+			}
+			_ => {}
+		}
 	}
 }

@@ -54,6 +54,16 @@ pub use rust::Rust;
 pub use svelte::Svelte;
 pub use typescript::TypeScript;
 
+/// Kind of type-level relationship a language parser may report from an AST node.
+/// Used by GraphRAG to emit Extends / Implements edges between files.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TypeRelationKind {
+	/// Inheritance: subclass extends superclass; trait/interface inherits from another.
+	Extends,
+	/// Interface or trait implementation: a concrete type satisfies an interface/trait.
+	Implements,
+}
+
 /// Common trait for all language parsers
 pub trait Language: Send + Sync {
 	/// Name of the language
@@ -82,6 +92,19 @@ pub trait Language: Send + Sync {
 	/// Returns callee names if this node represents a function call.
 	/// The recursive walk and line tracking is handled by the caller.
 	fn extract_function_calls(&self, node: Node, contents: &str) -> Vec<String> {
+		let _ = (node, contents);
+		Vec::new()
+	}
+
+	/// Extract type-level relationships (extends / implements) declared at this node.
+	/// Returns (kind, target_name) pairs — e.g. for `class Foo extends Bar implements Baz`,
+	/// the class declaration node should yield `[(Extends, "Bar"), (Implements, "Baz")]`.
+	/// The recursive walk is handled by the caller.
+	fn extract_type_relations(
+		&self,
+		node: Node,
+		contents: &str,
+	) -> Vec<(TypeRelationKind, String)> {
 		let _ = (node, contents);
 		Vec::new()
 	}
@@ -262,6 +285,23 @@ pub fn extract_symbol_by_kind(node: Node, contents: &str, target_kind: &str) -> 
 		}
 	}
 	None
+}
+
+/// Extract the simple (unqualified, non-generic) type name from a possibly
+/// qualified or generic type expression. Examples:
+/// `std::collections::HashMap<K, V>` → `HashMap`,
+/// `com.example.Foo` → `Foo`,
+/// `Foo<T>` → `Foo`, `Bar` → `Bar`.
+pub fn simple_type_name(text: &str) -> Option<String> {
+	let stripped = text.split('<').next().unwrap_or(text);
+	let after_colons = stripped.rsplit("::").next().unwrap_or(stripped);
+	let after_dots = after_colons.rsplit('.').next().unwrap_or(after_colons);
+	let trimmed = after_dots.trim();
+	if trimmed.is_empty() {
+		None
+	} else {
+		Some(trimmed.to_string())
+	}
 }
 
 /// Extract callee name(s) from a call expression's function child.

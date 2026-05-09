@@ -26,6 +26,7 @@ use crate::indexer::graphrag::types::{CodeGraph, CodeNode, CodeRelationship};
 use crate::indexer::graphrag::utils::{
 	cosine_similarity, detect_project_root, detect_project_root_from, to_relative_path,
 };
+use crate::indexer::languages::TypeRelationKind;
 use crate::state::SharedState;
 use crate::store::{CodeBlock, Store};
 use anyhow::{Context, Result};
@@ -270,21 +271,85 @@ impl GraphBuilder {
 					}
 				}
 
-				// Extract function calls and assign to FunctionInfo entries by line range
-				if let Ok(file_calls) = self
+				// Extract callees + type relations (extends/implements).
+				// When per-function FunctionInfo entries are available, attribute
+				// callees by line range. When they are not — currently always, see
+				// extract_functions_from_block — synthesize a single file-scope
+				// FunctionInfo so the edges still reach relationships.rs, which
+				// emits at (source_file.id → target_file.id) granularity.
+				let file_calls = self
 					.extract_function_calls_from_file(&file_path, &language)
 					.await
-				{
+					.unwrap_or_default();
+				let file_type_rels = self
+					.extract_type_relations_from_file(&file_path, &language)
+					.await
+					.unwrap_or_default();
+
+				if !all_functions.is_empty() {
 					for func in &mut all_functions {
 						func.calls = file_calls
 							.iter()
 							.filter(|(line, _)| *line >= func.start_line && *line <= func.end_line)
 							.map(|(_, callee)| callee.clone())
 							.collect();
-						// Deduplicate
 						func.calls.sort();
 						func.calls.dedup();
+
+						let in_range = |line: u32| line >= func.start_line && line <= func.end_line;
+						func.extends = file_type_rels
+							.iter()
+							.filter(|(line, k, _)| {
+								*k == TypeRelationKind::Extends && in_range(*line)
+							})
+							.map(|(_, _, name)| name.clone())
+							.collect();
+						func.extends.sort();
+						func.extends.dedup();
+
+						func.implements = file_type_rels
+							.iter()
+							.filter(|(line, k, _)| {
+								*k == TypeRelationKind::Implements && in_range(*line)
+							})
+							.map(|(_, _, name)| name.clone())
+							.collect();
+						func.implements.sort();
+						func.implements.dedup();
 					}
+				} else if !file_calls.is_empty() || !file_type_rels.is_empty() {
+					let mut callees: Vec<String> = file_calls.into_iter().map(|(_, c)| c).collect();
+					callees.sort();
+					callees.dedup();
+
+					let mut extends: Vec<String> = file_type_rels
+						.iter()
+						.filter(|(_, k, _)| *k == TypeRelationKind::Extends)
+						.map(|(_, _, name)| name.clone())
+						.collect();
+					extends.sort();
+					extends.dedup();
+
+					let mut implements: Vec<String> = file_type_rels
+						.into_iter()
+						.filter(|(_, k, _)| *k == TypeRelationKind::Implements)
+						.map(|(_, _, name)| name)
+						.collect();
+					implements.sort();
+					implements.dedup();
+
+					all_functions.push(crate::indexer::graphrag::types::FunctionInfo {
+						name: file_name.clone(),
+						signature: String::new(),
+						start_line: 0,
+						end_line: u32::MAX,
+						calls: callees,
+						called_by: Vec::new(),
+						parameters: Vec::new(),
+						return_type: None,
+						extends,
+						implements,
+					});
 				}
 
 				// Generate description - collect for batch AI processing when enabled
@@ -1228,6 +1293,40 @@ impl GraphBuilder {
 
 		Ok(calls)
 	}
+
+	/// Extract type-level relationships (Extends / Implements) from a file using
+	/// language-specific AST parsing. Returns (line, kind, target_name) tuples.
+	pub async fn extract_type_relations_from_file(
+		&self,
+		file_path: &str,
+		language: &str,
+	) -> Result<Vec<(u32, TypeRelationKind, String)>> {
+		use crate::indexer::languages;
+		use std::fs;
+		use tree_sitter::Parser;
+
+		let lang_impl = languages::get_language(language).ok_or_else(|| {
+			anyhow::anyhow!("Failed to get language implementation for: {}", language)
+		})?;
+
+		let contents = fs::read_to_string(file_path)?;
+
+		let mut parser = Parser::new();
+		parser.set_language(&lang_impl.get_ts_language())?;
+		let tree = parser
+			.parse(&contents, None)
+			.ok_or_else(|| anyhow::anyhow!("Failed to parse file"))?;
+
+		let mut rels = Vec::new();
+		extract_type_relations_recursive(
+			tree.walk().node(),
+			&contents,
+			lang_impl.as_ref(),
+			&mut rels,
+		);
+
+		Ok(rels)
+	}
 }
 
 // Recursively extract function calls from AST nodes
@@ -1248,6 +1347,27 @@ fn extract_function_calls_recursive(
 	let mut cursor = node.walk();
 	for child in node.children(&mut cursor) {
 		extract_function_calls_recursive(child, contents, lang_impl, calls);
+	}
+}
+
+// Recursively extract type-level relationships (Extends / Implements) from AST nodes.
+fn extract_type_relations_recursive(
+	node: tree_sitter::Node,
+	contents: &str,
+	lang_impl: &dyn crate::indexer::languages::Language,
+	rels: &mut Vec<(u32, TypeRelationKind, String)>,
+) {
+	let pairs = lang_impl.extract_type_relations(node, contents);
+	if !pairs.is_empty() {
+		let line = node.start_position().row as u32;
+		for (kind, target) in pairs {
+			rels.push((line, kind, target));
+		}
+	}
+
+	let mut cursor = node.walk();
+	for child in node.children(&mut cursor) {
+		extract_type_relations_recursive(child, contents, lang_impl, rels);
 	}
 }
 

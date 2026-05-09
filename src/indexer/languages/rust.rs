@@ -219,6 +219,47 @@ impl Language for Rust {
 		}
 	}
 
+	fn extract_type_relations(
+		&self,
+		node: Node,
+		contents: &str,
+	) -> Vec<(super::TypeRelationKind, String)> {
+		let mut out = Vec::new();
+		match node.kind() {
+			// `impl Trait for Type` → Type implements Trait.
+			// Inherent `impl Type {}` (no `trait` field) emits nothing.
+			"impl_item" => {
+				if let Some(trait_node) = node.child_by_field_name("trait") {
+					if let Ok(text) = trait_node.utf8_text(contents.as_bytes()) {
+						if let Some(name) = super::simple_type_name(text) {
+							out.push((super::TypeRelationKind::Implements, name));
+						}
+					}
+				}
+			}
+			// `trait A: B + C` → A extends B, A extends C.
+			"trait_item" => {
+				if let Some(bounds) = node.child_by_field_name("bounds") {
+					let mut cursor = bounds.walk();
+					for child in bounds.children(&mut cursor) {
+						if matches!(
+							child.kind(),
+							"type_identifier" | "scoped_type_identifier" | "generic_type"
+						) {
+							if let Ok(text) = child.utf8_text(contents.as_bytes()) {
+								if let Some(name) = super::simple_type_name(text) {
+									out.push((super::TypeRelationKind::Extends, name));
+								}
+							}
+						}
+					}
+				}
+			}
+			_ => {}
+		}
+		out
+	}
+
 	fn resolve_import(
 		&self,
 		import_path: &str,

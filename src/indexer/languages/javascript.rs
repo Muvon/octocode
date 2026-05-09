@@ -185,6 +185,38 @@ impl Language for JavaScript {
 		}
 	}
 
+	fn extract_type_relations(
+		&self,
+		node: Node,
+		contents: &str,
+	) -> Vec<(super::TypeRelationKind, String)> {
+		// Vanilla JS only has class inheritance: `class Foo extends Bar { }`.
+		// Tree-sitter-javascript's `class_heritage` is a single-target wrapper
+		// around an `extends` keyword + identifier.
+		let mut out = Vec::new();
+		if matches!(node.kind(), "class_declaration" | "class") {
+			let mut cursor = node.walk();
+			for child in node.children(&mut cursor) {
+				if child.kind() == "class_heritage" {
+					let mut hcursor = child.walk();
+					for h in child.children(&mut hcursor) {
+						if matches!(
+							h.kind(),
+							"identifier" | "member_expression" | "call_expression"
+						) {
+							if let Ok(text) = h.utf8_text(contents.as_bytes()) {
+								if let Some(name) = super::simple_type_name(text) {
+									out.push((super::TypeRelationKind::Extends, name));
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+		out
+	}
+
 	fn resolve_import(
 		&self,
 		import_path: &str,
