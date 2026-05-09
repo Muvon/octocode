@@ -1154,6 +1154,8 @@ func helper(x int) int {
 				called_by: Vec::new(),
 				parameters: Vec::new(),
 				return_type: None,
+				extends: Vec::new(),
+				implements: Vec::new(),
 			}],
 			size_lines: 10,
 			language: "rust".to_string(),

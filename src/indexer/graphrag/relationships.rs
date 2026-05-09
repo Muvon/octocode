@@ -114,6 +114,49 @@ impl RelationshipDiscovery {
 						}
 					}
 				}
+
+				// 5. Inheritance edges (e.g. `class Foo extends Bar`,
+				//    `trait A: B`, `class C(D)`).
+				for extended in &function.extends {
+					if let Some(target_ids) = symbol_index.get(extended) {
+						for &target_id in target_ids {
+							if target_id != source_file.id {
+								relationships.push(CodeRelationship {
+									source: source_file.id.clone(),
+									target: target_id.to_string(),
+									relation_type:
+										crate::indexer::graphrag::types::RelationType::Extends,
+									description: format!("{} extends {}", function.name, extended),
+									confidence: 0.9,
+									weight: 1.0,
+								});
+							}
+						}
+					}
+				}
+
+				// 6. Interface / trait implementation edges
+				//    (e.g. `class Foo implements Bar`, `impl Trait for Type`).
+				for implemented in &function.implements {
+					if let Some(target_ids) = symbol_index.get(implemented) {
+						for &target_id in target_ids {
+							if target_id != source_file.id {
+								relationships.push(CodeRelationship {
+									source: source_file.id.clone(),
+									target: target_id.to_string(),
+									relation_type:
+										crate::indexer::graphrag::types::RelationType::Implements,
+									description: format!(
+										"{} implements {}",
+										function.name, implemented
+									),
+									confidence: 0.9,
+									weight: 1.0,
+								});
+							}
+						}
+					}
+				}
 			}
 		}
 
@@ -491,6 +534,8 @@ impl RelationshipDiscovery {
 				called_by: Vec::new(),
 				parameters: Vec::new(), // Could be extracted from content if needed
 				return_type: None,
+				extends: Vec::new(),
+				implements: Vec::new(),
 			})
 	}
 

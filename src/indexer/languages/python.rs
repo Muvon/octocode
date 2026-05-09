@@ -156,6 +156,37 @@ impl Language for Python {
 		Vec::new()
 	}
 
+	fn extract_type_relations(
+		&self,
+		node: Node,
+		contents: &str,
+	) -> Vec<(super::TypeRelationKind, String)> {
+		// Python has no `implements`; bases in `class Foo(Bar, Baz):` are all Extends.
+		// `argument_list` (or `superclasses`, depending on grammar version) holds the bases.
+		let mut out = Vec::new();
+		if node.kind() == "class_definition" {
+			let mut cursor = node.walk();
+			for child in node.children(&mut cursor) {
+				if matches!(child.kind(), "argument_list" | "superclasses") {
+					let mut bcursor = child.walk();
+					for base in child.children(&mut bcursor) {
+						if matches!(
+							base.kind(),
+							"identifier" | "attribute" | "subscript" | "call"
+						) {
+							if let Ok(text) = base.utf8_text(contents.as_bytes()) {
+								if let Some(name) = super::simple_type_name(text) {
+									out.push((super::TypeRelationKind::Extends, name));
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+		out
+	}
+
 	fn resolve_import(
 		&self,
 		import_path: &str,

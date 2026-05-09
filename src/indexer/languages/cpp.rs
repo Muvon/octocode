@@ -322,6 +322,39 @@ impl Language for Cpp {
 		Vec::new()
 	}
 
+	fn extract_type_relations(
+		&self,
+		node: Node,
+		contents: &str,
+	) -> Vec<(super::TypeRelationKind, String)> {
+		// `class Foo : public Bar, private Baz { }` and `struct Foo : Bar { }`.
+		// C++ does not distinguish extends/implements; emit all base types as Extends.
+		let mut out = Vec::new();
+		if matches!(node.kind(), "class_specifier" | "struct_specifier") {
+			let mut cursor = node.walk();
+			for child in node.children(&mut cursor) {
+				if child.kind() == "base_class_clause" {
+					let mut bcursor = child.walk();
+					for base in child.children(&mut bcursor) {
+						if matches!(
+							base.kind(),
+							"type_identifier"
+								| "qualified_identifier" | "template_type"
+								| "scoped_type_identifier"
+						) {
+							if let Ok(text) = base.utf8_text(contents.as_bytes()) {
+								if let Some(name) = super::simple_type_name(text) {
+									out.push((super::TypeRelationKind::Extends, name));
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+		out
+	}
+
 	fn resolve_import(
 		&self,
 		import_path: &str,

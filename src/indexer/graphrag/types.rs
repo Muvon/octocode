@@ -162,7 +162,11 @@ pub struct CodeNode {
 	pub language: String,     // Programming language
 }
 
-// Function-level information for better granularity
+// Function-level information for better granularity. Also doubles as the
+// container for file-scope relationship data (a single synthetic entry per
+// file holds aggregate calls / extends / implements when per-function
+// granularity is unavailable). The new vectors below default to empty so
+// older serialized rows deserialize cleanly.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FunctionInfo {
 	pub name: String,                // Function name
@@ -173,6 +177,10 @@ pub struct FunctionInfo {
 	pub called_by: Vec<String>,      // Functions that call this function
 	pub parameters: Vec<String>,     // Function parameters
 	pub return_type: Option<String>, // Return type if available
+	#[serde(default)]
+	pub extends: Vec<String>, // Types/traits this entity extends (inheritance)
+	#[serde(default)]
+	pub implements: Vec<String>, // Interfaces/traits this entity implements
 }
 
 // A relationship between code nodes - simplified and more efficient

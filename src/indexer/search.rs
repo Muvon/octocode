@@ -1552,16 +1552,24 @@ pub async fn generate_batch_embeddings_for_queries(
 	}
 }
 
+/// Bundle of per-batch invariants shared by every `execute_single_search_with_embeddings`
+/// invocation in a single multi-query / multi-store run. Fields are the values that don't
+/// change as we iterate queries; per-query state (embeddings, query string, query index)
+/// stays as standalone arguments.
+pub struct SingleQuerySearchParams<'a> {
+	pub mode: &'a str,
+	pub limit: usize,
+	pub distance_threshold: Option<f32>,
+	pub language_filter: Option<&'a str>,
+	pub hybrid_enabled: bool,
+}
+
 pub async fn execute_single_search_with_embeddings(
 	store: &Store,
 	embeddings: crate::embedding::SearchModeEmbeddings,
-	mode: &str,
-	per_query_limit: usize,
+	params: &SingleQuerySearchParams<'_>,
 	query_index: usize,
-	distance_threshold: Option<f32>,
-	language_filter: Option<&str>,
 	query: Option<&str>,
-	hybrid_enabled: bool,
 ) -> Result<QuerySearchResult> {
 	let mut code_blocks = Vec::new();
 	let mut doc_blocks = Vec::new();
@@ -1571,15 +1579,18 @@ pub async fn execute_single_search_with_embeddings(
 	// Hybrid path activates when: feature flag on AND a non-empty raw query is provided.
 	// `distance_threshold` is a distance value (lower=better); HybridSearchQuery
 	// expects similarity (higher=better), so invert: similarity = 1.0 - distance.
-	let use_hybrid = hybrid_enabled && query.is_some_and(|q| !q.trim().is_empty());
+	let use_hybrid = params.hybrid_enabled && query.is_some_and(|q| !q.trim().is_empty());
 	let keywords: Option<String> = if use_hybrid {
-		query.map(|s| s.to_string())
+		query.map(str::to_string)
 	} else {
 		None
 	};
-	let min_relevance = distance_threshold.map(|d| 1.0 - d);
+	let min_relevance = params.distance_threshold.map(|d| 1.0 - d);
+	let limit = params.limit;
+	let distance_threshold = params.distance_threshold;
+	let language_filter = params.language_filter;
 
-	match mode {
+	match params.mode {
 		"code" => {
 			if let Some(code_emb) = embeddings.code_embeddings {
 				code_blocks = if use_hybrid {
@@ -1588,7 +1599,7 @@ pub async fn execute_single_search_with_embeddings(
 						keywords: keywords.clone(),
 						vector_weight: 1.0,
 						keyword_weight: 1.0,
-						limit: per_query_limit,
+						limit,
 						min_relevance,
 						language_filter: language_filter.map(String::from),
 					};
@@ -1597,7 +1608,7 @@ pub async fn execute_single_search_with_embeddings(
 					store
 						.get_code_blocks_with_language_filter(
 							code_emb,
-							Some(per_query_limit),
+							Some(limit),
 							distance_threshold,
 							language_filter,
 						)
@@ -1613,7 +1624,7 @@ pub async fn execute_single_search_with_embeddings(
 						keywords: keywords.clone(),
 						vector_weight: 1.0,
 						keyword_weight: 1.0,
-						limit: per_query_limit,
+						limit,
 						min_relevance,
 						language_filter: None,
 					};
@@ -1622,11 +1633,7 @@ pub async fn execute_single_search_with_embeddings(
 						.await?
 				} else {
 					store
-						.get_document_blocks_with_config(
-							text_emb,
-							Some(per_query_limit),
-							distance_threshold,
-						)
+						.get_document_blocks_with_config(text_emb, Some(limit), distance_threshold)
 						.await?
 				};
 			}
@@ -1639,18 +1646,14 @@ pub async fn execute_single_search_with_embeddings(
 						keywords: keywords.clone(),
 						vector_weight: 1.0,
 						keyword_weight: 1.0,
-						limit: per_query_limit,
+						limit,
 						min_relevance,
 						language_filter: None,
 					};
 					store.hybrid_search::<crate::store::TextBlock>(&hq).await?
 				} else {
 					store
-						.get_text_blocks_with_config(
-							text_emb,
-							Some(per_query_limit),
-							distance_threshold,
-						)
+						.get_text_blocks_with_config(text_emb, Some(limit), distance_threshold)
 						.await?
 				};
 			}
@@ -1663,7 +1666,7 @@ pub async fn execute_single_search_with_embeddings(
 						keywords: keywords.clone(),
 						vector_weight: 1.0,
 						keyword_weight: 1.0,
-						limit: per_query_limit,
+						limit,
 						min_relevance,
 						language_filter: None,
 					};
@@ -1672,11 +1675,7 @@ pub async fn execute_single_search_with_embeddings(
 						.await?
 				} else {
 					store
-						.get_commit_blocks_with_config(
-							text_emb,
-							Some(per_query_limit),
-							distance_threshold,
-						)
+						.get_commit_blocks_with_config(text_emb, Some(limit), distance_threshold)
 						.await?
 				};
 			}
@@ -1685,7 +1684,7 @@ pub async fn execute_single_search_with_embeddings(
 			// Pull the full per-query budget from each modality. The 1/3-each
 			// quota is replaced by global ranking in `fuse_all_mode_results`
 			// after all three lists are gathered.
-			let per_type_limit = per_query_limit;
+			let per_type_limit = limit;
 
 			if let Some(code_emb) = embeddings.code_embeddings {
 				code_blocks = if use_hybrid {
@@ -1757,14 +1756,9 @@ pub async fn execute_single_search_with_embeddings(
 				}
 			}
 
-			fuse_all_mode_results(
-				&mut code_blocks,
-				&mut text_blocks,
-				&mut doc_blocks,
-				per_query_limit,
-			);
+			fuse_all_mode_results(&mut code_blocks, &mut text_blocks, &mut doc_blocks, limit);
 		}
-		_ => return Err(anyhow::anyhow!("Invalid search mode: {}", mode)),
+		other => return Err(anyhow::anyhow!("Invalid search mode: {}", other)),
 	}
 
 	Ok(QuerySearchResult {
@@ -1803,6 +1797,20 @@ pub async fn execute_parallel_searches(
 	};
 
 	let hybrid_enabled = params.config.search.hybrid.enabled;
+	let main_params = SingleQuerySearchParams {
+		mode: params.mode,
+		limit: main_limit,
+		distance_threshold,
+		language_filter: params.language_filter,
+		hybrid_enabled,
+	};
+	let branch_params = SingleQuerySearchParams {
+		mode: params.mode,
+		limit: per_query_limit,
+		distance_threshold,
+		language_filter: params.language_filter,
+		hybrid_enabled,
+	};
 
 	// Search main store
 	let main_futures: Vec<_> = query_embeddings
@@ -1811,19 +1819,9 @@ pub async fn execute_parallel_searches(
 		.map(|(index, (query_str, embeddings))| {
 			let emb = embeddings.clone();
 			let q = query_str.clone();
+			let mp = &main_params;
 			async move {
-				execute_single_search_with_embeddings(
-					store,
-					emb,
-					params.mode,
-					main_limit,
-					index,
-					distance_threshold,
-					params.language_filter,
-					Some(q.as_str()),
-					hybrid_enabled,
-				)
-				.await
+				execute_single_search_with_embeddings(store, emb, mp, index, Some(q.as_str())).await
 			}
 		})
 		.collect();
@@ -1842,17 +1840,14 @@ pub async fn execute_parallel_searches(
 		.map(|(index, (query_str, embeddings))| {
 			let emb = embeddings.clone();
 			let q = query_str.clone();
+			let bp = &branch_params;
 			async move {
 				execute_single_search_with_embeddings(
 					&branch.store,
 					emb,
-					params.mode,
-					per_query_limit,
+					bp,
 					index,
-					distance_threshold,
-					params.language_filter,
 					Some(q.as_str()),
-					hybrid_enabled,
 				)
 				.await
 			}

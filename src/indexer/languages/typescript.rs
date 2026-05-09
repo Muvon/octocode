@@ -231,6 +231,36 @@ impl Language for TypeScript {
 		}
 	}
 
+	fn extract_type_relations(
+		&self,
+		node: Node,
+		contents: &str,
+	) -> Vec<(super::TypeRelationKind, String)> {
+		let mut out = Vec::new();
+		match node.kind() {
+			// `class Foo extends Bar implements Baz, Qux { }`
+			"class_declaration" | "abstract_class_declaration" => {
+				let mut cursor = node.walk();
+				for child in node.children(&mut cursor) {
+					if child.kind() == "class_heritage" {
+						collect_ts_heritage(child, contents, &mut out);
+					}
+				}
+			}
+			// `interface A extends B, C { }`
+			"interface_declaration" => {
+				let mut cursor = node.walk();
+				for child in node.children(&mut cursor) {
+					if child.kind() == "extends_type_clause" || child.kind() == "extends_clause" {
+						collect_ts_extends(child, contents, &mut out);
+					}
+				}
+			}
+			_ => {}
+		}
+		out
+	}
+
 	fn resolve_import(
 		&self,
 		import_path: &str,
@@ -513,3 +543,54 @@ fn parse_ts_export_statement(export_text: &str) -> Option<Vec<String>> {
 // Helper functions for TypeScript import/export parsing
 // Re-export JavaScript helper functions for TypeScript to use
 use super::javascript::{parse_js_export_statement, parse_js_import_statement};
+
+/// Walk a `class_heritage` node and collect both extends and implements targets.
+fn collect_ts_heritage(
+	heritage: Node,
+	contents: &str,
+	out: &mut Vec<(super::TypeRelationKind, String)>,
+) {
+	let mut cursor = heritage.walk();
+	for child in heritage.children(&mut cursor) {
+		match child.kind() {
+			"extends_clause" => {
+				collect_ts_clause_names(child, contents, super::TypeRelationKind::Extends, out);
+			}
+			"implements_clause" => {
+				collect_ts_clause_names(child, contents, super::TypeRelationKind::Implements, out);
+			}
+			_ => {}
+		}
+	}
+}
+
+/// Walk an `extends_type_clause`/`extends_clause` (interface inheritance) and emit Extends edges.
+fn collect_ts_extends(
+	clause: Node,
+	contents: &str,
+	out: &mut Vec<(super::TypeRelationKind, String)>,
+) {
+	collect_ts_clause_names(clause, contents, super::TypeRelationKind::Extends, out);
+}
+
+/// Pull type names out of an extends/implements clause and emit them under the given kind.
+fn collect_ts_clause_names(
+	clause: Node,
+	contents: &str,
+	kind: super::TypeRelationKind,
+	out: &mut Vec<(super::TypeRelationKind, String)>,
+) {
+	let mut cursor = clause.walk();
+	for child in clause.children(&mut cursor) {
+		if matches!(
+			child.kind(),
+			"identifier" | "type_identifier" | "nested_type_identifier" | "generic_type"
+		) {
+			if let Ok(text) = child.utf8_text(contents.as_bytes()) {
+				if let Some(name) = super::simple_type_name(text) {
+					out.push((kind, name));
+				}
+			}
+		}
+	}
+}
