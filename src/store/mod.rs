@@ -1062,7 +1062,7 @@ impl Store {
 			return Ok(Vec::new());
 		}
 
-		let table = self.get_table(B::TABLE_NAME).await?;
+		let mut table = self.get_table(B::TABLE_NAME).await?;
 		let distance_threshold = query.min_relevance.map(|sim| 1.0 - sim);
 		let limit = query.limit;
 
@@ -1078,6 +1078,10 @@ impl Store {
 
 				if !has_fts {
 					table_ops.create_fts_index(B::TABLE_NAME).await?;
+					// Cached Table holds a stale dataset snapshot that doesn't see the
+					// freshly created FTS index. Drop it so the next get_table reopens.
+					self.table_cache.write().await.remove(B::TABLE_NAME);
+					table = self.get_table(B::TABLE_NAME).await?;
 				}
 
 				// Native hybrid: LanceDB runs vector + FTS in parallel, fuses with RRF
@@ -1135,6 +1139,9 @@ impl Store {
 				if !has_fts {
 					// Auto-create FTS index (same lazy pattern as the hybrid arm)
 					table_ops.create_fts_index(B::TABLE_NAME).await?;
+					// Reopen the cached handle so the new index becomes visible.
+					self.table_cache.write().await.remove(B::TABLE_NAME);
+					table = self.get_table(B::TABLE_NAME).await?;
 				}
 
 				let mut q = table
