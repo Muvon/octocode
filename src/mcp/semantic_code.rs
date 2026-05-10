@@ -442,47 +442,57 @@ impl SemanticCodeProvider {
 			"Executing view_signatures"
 		);
 
-		// Get files matching patterns
+		// Resolve patterns: direct file paths first, then glob-walk for wildcards
 		let mut matching_files = std::collections::HashSet::new();
+		let mut glob_patterns = Vec::new();
 
-		// Compile all glob patterns first
-		let mut compiled_patterns = Vec::new();
 		for pattern in &file_patterns {
-			let glob_pattern = match globset::Glob::new(pattern) {
-				Ok(g) => g.compile_matcher(),
-				Err(e) => {
-					return Err(McpError::invalid_params(
-						format!("Invalid glob pattern '{}': {}", pattern, e),
-						"view_signatures",
-					));
-				}
+			let pattern_path = if std::path::Path::new(pattern).is_relative() {
+				self.working_directory.join(pattern)
+			} else {
+				std::path::PathBuf::from(pattern)
 			};
-			compiled_patterns.push(glob_pattern);
+
+			if pattern_path.is_file() {
+				// Direct file path — use it immediately, no glob walking needed
+				matching_files.insert(pattern_path);
+			} else {
+				// Not a direct file — treat as glob pattern
+				let glob_pattern = match globset::Glob::new(pattern) {
+					Ok(g) => g.compile_matcher(),
+					Err(e) => {
+						return Err(McpError::invalid_params(
+							format!("Invalid glob pattern '{}': {}", pattern, e),
+							"view_signatures",
+						));
+					}
+				};
+				glob_patterns.push(glob_pattern);
+			}
 		}
 
-		// Walk the directory tree once and test all patterns
-		let walker = NoindexWalker::create_walker(&self.working_directory).build();
+		// Only walk the directory tree if there are actual glob patterns to resolve
+		if !glob_patterns.is_empty() {
+			let walker = NoindexWalker::create_walker(&self.working_directory).build();
 
-		for result in walker {
-			let entry = match result {
-				Ok(entry) => entry,
-				Err(_) => continue,
-			};
+			for result in walker {
+				let entry = match result {
+					Ok(entry) => entry,
+					Err(_) => continue,
+				};
 
-			// Skip directories, only process files
-			if !entry.file_type().is_some_and(|ft| ft.is_file()) {
-				continue;
-			}
+				if !entry.file_type().is_some_and(|ft| ft.is_file()) {
+					continue;
+				}
 
-			// Get relative path once
-			let relative_path =
-				PathUtils::to_relative_string(entry.path(), &self.working_directory);
+				let relative_path =
+					PathUtils::to_relative_string(entry.path(), &self.working_directory);
 
-			// Test against all patterns
-			for glob_pattern in &compiled_patterns {
-				if glob_pattern.is_match(&relative_path) {
-					matching_files.insert(entry.path().to_path_buf());
-					break; // No need to test other patterns for this file
+				for glob_pattern in &glob_patterns {
+					if glob_pattern.is_match(&relative_path) {
+						matching_files.insert(entry.path().to_path_buf());
+						break;
+					}
 				}
 			}
 		}
