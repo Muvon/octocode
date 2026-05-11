@@ -474,17 +474,22 @@ fn render_text_blocks_with_config(
 
 			println!("║");
 
+			// Stored content includes the embedding-input preamble — strip it
+			// before iterating so line numbers and previews align with source.
+			let display_content =
+				octocode::indexer::contextual::strip_enriched_preamble(&block.content);
+
 			// Add content based on detail level (consistent with MCP smart truncation)
 			match detail_level {
 				"signatures" => {
 					// Show only first line for signatures mode
-					if let Some(first_line) = block.content.lines().next() {
+					if let Some(first_line) = display_content.lines().next() {
 						println!("║ {:4} │ {}", block.start_line, first_line.trim());
 					}
 				}
 				"partial" => {
 					// Show smart truncated content (first 4 + last 3 lines with separator)
-					let lines: Vec<&str> = block.content.lines().collect();
+					let lines: Vec<&str> = display_content.lines().collect();
 					if lines.len() <= 10 {
 						// Show all lines if content is short
 						for (i, line) in lines.iter().enumerate() {
@@ -511,14 +516,14 @@ fn render_text_blocks_with_config(
 				}
 				"full" => {
 					// Show full content with line numbers
-					let lines: Vec<&str> = block.content.lines().collect();
+					let lines: Vec<&str> = display_content.lines().collect();
 					for (i, line) in lines.iter().enumerate() {
 						println!("║ {:4} │ {}", block.start_line + i + 1, line);
 					}
 				}
 				_ => {
 					// Default to partial
-					let lines: Vec<&str> = block.content.lines().collect();
+					let lines: Vec<&str> = display_content.lines().collect();
 					if lines.len() <= 10 {
 						for (i, line) in lines.iter().enumerate() {
 							println!("║ {:4} │ {}", block.start_line + i + 1, line);
@@ -598,13 +603,18 @@ fn render_document_blocks_with_config(
 
 			println!("║");
 
+			// Strip the embedding-input preamble so the rendered document
+			// shows raw markdown content with correct line numbers.
+			let display_content =
+				octocode::indexer::contextual::strip_enriched_preamble(&block.content);
+
 			// Add content based on detail level (consistent with smart truncation)
 			match detail_level {
 				"signatures" => {
 					// Show only title/first line for signatures mode
 					if !block.title.is_empty() {
 						println!("║ Title: {}", block.title);
-					} else if let Some(first_line) = block.content.lines().next() {
+					} else if let Some(first_line) = display_content.lines().next() {
 						println!("║ {}: {}", block.start_line, first_line.trim());
 					}
 				}
@@ -613,7 +623,7 @@ fn render_document_blocks_with_config(
 					if !block.title.is_empty() {
 						println!("║ Title: {}", block.title);
 					}
-					let lines: Vec<&str> = block.content.lines().collect();
+					let lines: Vec<&str> = display_content.lines().collect();
 					if lines.len() <= 10 {
 						// Show all lines if content is short
 						for (i, line) in lines.iter().enumerate() {
@@ -643,7 +653,7 @@ fn render_document_blocks_with_config(
 					if !block.title.is_empty() {
 						println!("║ Title: {}", block.title);
 					}
-					let lines: Vec<&str> = block.content.lines().collect();
+					let lines: Vec<&str> = display_content.lines().collect();
 					for (i, line) in lines.iter().enumerate() {
 						println!("║ {:4} │ {}", block.start_line + i + 1, line);
 					}
@@ -653,7 +663,7 @@ fn render_document_blocks_with_config(
 					if !block.title.is_empty() {
 						println!("║ Title: {}", block.title);
 					}
-					let lines: Vec<&str> = block.content.lines().collect();
+					let lines: Vec<&str> = display_content.lines().collect();
 					if lines.len() <= 10 {
 						for (i, line) in lines.iter().enumerate() {
 							println!("║ {:4} │ {}", block.start_line + i + 1, line);

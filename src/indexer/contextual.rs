@@ -57,6 +57,35 @@ pub fn build_structural_context(block: &CodeBlock) -> String {
 	parts.join("\n")
 }
 
+/// Strip the embedding-input preamble (description, structural context,
+/// blank separator) produced by `build_enriched_embedding_input` and
+/// `process_*_blocks_batch` from a stored `content` value. Used at display
+/// time so search results show raw code with correct line numbers while
+/// the on-disk column keeps the enriched text for BM25/reranker alignment.
+///
+/// The preamble always contains a `# File: ` header line followed by zero
+/// or more `# Language:` / `# Defines:` / context lines and ends with a
+/// blank separator before the original content. If no such header is
+/// detected, the input is returned unchanged so legacy/raw rows still
+/// render correctly.
+pub fn strip_enriched_preamble(content: &str) -> &str {
+	let file_pos = if content.starts_with("# File: ") {
+		Some(0)
+	} else {
+		content.find("\n# File: ").map(|p| p + 1)
+	};
+	let Some(file_pos) = file_pos else {
+		return content;
+	};
+
+	let tail = &content[file_pos..];
+	if let Some(blank_pos) = tail.find("\n\n") {
+		let abs = file_pos + blank_pos + 2;
+		return content.get(abs..).unwrap_or("");
+	}
+	content
+}
+
 /// Build the full enriched embedding input for a code block.
 /// Combines: [LLM description] + structural context + code content
 pub fn build_enriched_embedding_input(block: &CodeBlock, description: Option<&str>) -> String {
@@ -329,6 +358,76 @@ mod tests {
 		assert!(result.contains("# Defines: decode_token"));
 		// Then code
 		assert!(result.contains("fn decode_token"));
+	}
+
+	#[test]
+	fn test_strip_enriched_preamble_code_with_description() {
+		let block = CodeBlock {
+			path: "src/auth.rs".to_string(),
+			language: "rust".to_string(),
+			content: "fn verify() {}".to_string(),
+			symbols: vec!["verify".to_string()],
+			start_line: 10,
+			end_line: 10,
+			hash: "h".to_string(),
+			distance: None,
+		};
+		let enriched = build_enriched_embedding_input(&block, Some("Verifies a JWT token"));
+		let stripped = strip_enriched_preamble(&enriched);
+		assert_eq!(stripped, "fn verify() {}");
+	}
+
+	#[test]
+	fn test_strip_enriched_preamble_code_no_description() {
+		let block = CodeBlock {
+			path: "src/main.rs".to_string(),
+			language: "rust".to_string(),
+			content: "fn main() {\n    println!(\"hi\");\n}".to_string(),
+			symbols: vec!["main".to_string()],
+			start_line: 1,
+			end_line: 3,
+			hash: "h".to_string(),
+			distance: None,
+		};
+		let enriched = build_enriched_embedding_input(&block, None);
+		let stripped = strip_enriched_preamble(&enriched);
+		assert_eq!(stripped, "fn main() {\n    println!(\"hi\");\n}");
+	}
+
+	#[test]
+	fn test_strip_enriched_preamble_text_block() {
+		// Matches the format process_text_blocks_batch writes.
+		let enriched = "# File: README.md\n\nThis is content.\nSecond line.";
+		assert_eq!(
+			strip_enriched_preamble(enriched),
+			"This is content.\nSecond line."
+		);
+	}
+
+	#[test]
+	fn test_strip_enriched_preamble_doc_with_context() {
+		// Matches process_document_blocks_batch when context is non-empty.
+		let enriched = "# File: spec.md\nIntroduction > Overview\n\n# Heading\n\nBody.";
+		assert_eq!(strip_enriched_preamble(enriched), "# Heading\n\nBody.");
+	}
+
+	#[test]
+	fn test_strip_enriched_preamble_raw_content_passthrough() {
+		// Legacy rows without preamble must round-trip unchanged.
+		let raw = "fn foo() {}\nfn bar() {}";
+		assert_eq!(strip_enriched_preamble(raw), raw);
+	}
+
+	#[test]
+	fn test_strip_enriched_preamble_code_with_python_hash_comment() {
+		// First substantive line of stored code can start with `#` (Python comment).
+		// Strip must use the structural `# File:` marker, not blanket `#` lines.
+		let enriched =
+			"# File: app.py\n# Language: python\n\n# TODO: refactor\ndef main():\n    pass";
+		assert_eq!(
+			strip_enriched_preamble(enriched),
+			"# TODO: refactor\ndef main():\n    pass"
+		);
 	}
 
 	#[test]
