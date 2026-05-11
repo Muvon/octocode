@@ -94,11 +94,16 @@ pub fn render_code_blocks_with_config(blocks: &[CodeBlock], config: &Config, det
 		println!("║ Content:");
 		println!("║ ┌────────────────────────────────────");
 
+		// Stored `content` is the embedding-input form (path/lang/symbols
+		// preamble + raw code). Strip the preamble for display so line
+		// numbers and previews line up with the original source.
+		let display_content = crate::indexer::contextual::strip_enriched_preamble(&block.content);
+
 		// Use detail level for content display (consistent with text/doc CLI format)
 		match detail_level {
 			"signatures" => {
 				// Show smart preview for signatures mode
-				let lines: Vec<&str> = block.content.lines().collect();
+				let lines: Vec<&str> = display_content.lines().collect();
 				if !lines.is_empty() {
 					if let Some(first_line) = lines.first() {
 						println!("║ │ {:4} │ {}", block.start_line, first_line.trim());
@@ -107,7 +112,7 @@ pub fn render_code_blocks_with_config(blocks: &[CodeBlock], config: &Config, det
 			}
 			"partial" => {
 				// Show smart truncated content with line numbers (CLI format with │)
-				let lines: Vec<&str> = block.content.lines().collect();
+				let lines: Vec<&str> = display_content.lines().collect();
 				if lines.len() <= 10 {
 					// Show all lines if content is short
 					for (i, line) in lines.iter().enumerate() {
@@ -139,9 +144,9 @@ pub fn render_code_blocks_with_config(blocks: &[CodeBlock], config: &Config, det
 			"full" => {
 				// Show full content with line numbers (fallback to config-based truncation if too large)
 				let max_chars = config.search.search_block_max_characters;
-				if max_chars > 0 && block.content.len() > max_chars {
+				if max_chars > 0 && display_content.len() > max_chars {
 					let (content, was_truncated) =
-						crate::indexer::truncate_content_smartly(&block.content, max_chars);
+						crate::indexer::truncate_content_smartly(display_content, max_chars);
 					// Add line numbers to truncated content with │ format
 					for (i, line) in content.lines().enumerate() {
 						println!("║ │ {:4} │ {}", block.start_line + i, line);
@@ -154,14 +159,14 @@ pub fn render_code_blocks_with_config(blocks: &[CodeBlock], config: &Config, det
 					}
 				} else {
 					// Show full content with line numbers using │ format
-					for (i, line) in block.content.lines().enumerate() {
+					for (i, line) in display_content.lines().enumerate() {
 						println!("║ │ {:4} │ {}", block.start_line + i, line);
 					}
 				}
 			}
 			_ => {
 				// Default to partial
-				let lines: Vec<&str> = block.content.lines().collect();
+				let lines: Vec<&str> = display_content.lines().collect();
 				if lines.len() <= 10 {
 					for (i, line) in lines.iter().enumerate() {
 						println!("║ │ {:4} │ {}", block.start_line + i + 1, line);
@@ -310,12 +315,16 @@ pub fn format_code_search_results_as_text(blocks: &[CodeBlock], detail_level: &s
 			}
 		}
 
+		// Stored content carries the embedding-input preamble; strip it
+		// before rendering so the user sees raw code with correct line numbers.
+		let display_content = crate::indexer::contextual::strip_enriched_preamble(&block.content);
+
 		// Add content as-is without truncation for text mode - only efficient labels
 		match detail_level {
 			"signatures" => {
 				// Extract just function/class signatures
 				let preview =
-					get_code_preview_with_lines(&block.content, block.start_line, &block.language);
+					get_code_preview_with_lines(display_content, block.start_line, &block.language);
 				if !preview.is_empty() {
 					if let Some(first_line) = preview.lines().next() {
 						output.push_str(&format!("{}\n", first_line));
@@ -325,7 +334,7 @@ pub fn format_code_search_results_as_text(blocks: &[CodeBlock], detail_level: &s
 			"partial" => {
 				// Smart truncated content with line numbers
 				let preview =
-					get_code_preview_with_lines(&block.content, block.start_line, &block.language);
+					get_code_preview_with_lines(display_content, block.start_line, &block.language);
 				output.push_str(&preview);
 				if !preview.ends_with('\n') {
 					output.push('\n');
@@ -333,8 +342,7 @@ pub fn format_code_search_results_as_text(blocks: &[CodeBlock], detail_level: &s
 			}
 			"full" => {
 				// Full content with line numbers
-				let content_with_lines = block
-					.content
+				let content_with_lines = display_content
 					.lines()
 					.enumerate()
 					.map(|(i, line)| format!("{}: {}", block.start_line + i, line))
@@ -374,11 +382,15 @@ pub fn format_text_search_results_as_text(
 		}
 		output.push('\n');
 
+		// Strip the `# File:` preamble that batch_processor prepends for
+		// FTS/embedding alignment so the rendered text is just the source.
+		let display_content = crate::indexer::contextual::strip_enriched_preamble(&block.content);
+
 		// Add content with line numbers based on detail level
 		match detail_level {
 			"signatures" => {
 				// Show smart preview for signatures mode
-				let preview = get_text_preview_with_lines(&block.content, block.start_line);
+				let preview = get_text_preview_with_lines(display_content, block.start_line);
 				if !preview.is_empty() {
 					if let Some(first_line) = preview.lines().next() {
 						output.push_str(&format!("{}\n", first_line));
@@ -387,7 +399,7 @@ pub fn format_text_search_results_as_text(
 			}
 			"partial" => {
 				// Smart truncated content with line numbers
-				let preview = get_text_preview_with_lines(&block.content, block.start_line);
+				let preview = get_text_preview_with_lines(display_content, block.start_line);
 				output.push_str(&preview);
 				if !preview.ends_with('\n') {
 					output.push('\n');
@@ -395,8 +407,7 @@ pub fn format_text_search_results_as_text(
 			}
 			"full" => {
 				// Full content with line numbers
-				let content_with_lines = block
-					.content
+				let content_with_lines = display_content
 					.lines()
 					.enumerate()
 					.map(|(i, line)| format!("{}: {}", block.start_line + i, line))
@@ -437,11 +448,14 @@ pub fn format_doc_search_results_as_text(
 		}
 		output.push('\n');
 
+		// Strip the `# File:`/context preamble injected for FTS alignment.
+		let display_content = crate::indexer::contextual::strip_enriched_preamble(&block.content);
+
 		// Add content with line numbers based on detail level
 		match detail_level {
 			"signatures" => {
 				// Show smart preview for signatures mode
-				let preview = get_doc_preview_with_lines(&block.content, block.start_line);
+				let preview = get_doc_preview_with_lines(display_content, block.start_line);
 				if !preview.is_empty() {
 					if let Some(first_line) = preview.lines().next() {
 						output.push_str(&format!("{}\n", first_line));
@@ -450,7 +464,7 @@ pub fn format_doc_search_results_as_text(
 			}
 			"partial" => {
 				// Smart truncated content with line numbers
-				let preview = get_doc_preview_with_lines(&block.content, block.start_line);
+				let preview = get_doc_preview_with_lines(display_content, block.start_line);
 				output.push_str(&preview);
 				if !preview.ends_with('\n') {
 					output.push('\n');
@@ -458,8 +472,7 @@ pub fn format_doc_search_results_as_text(
 			}
 			"full" => {
 				// Full content with line numbers
-				let content_with_lines = block
-					.content
+				let content_with_lines = display_content
 					.lines()
 					.enumerate()
 					.map(|(i, line)| format!("{}: {}", block.start_line + i, line))

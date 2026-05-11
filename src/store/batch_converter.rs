@@ -26,6 +26,47 @@ use arrow_schema::{DataType, Field, Schema};
 
 use crate::store::{CodeBlock, CommitBlock, DocumentBlock, TextBlock};
 
+/// Read the per-row distance signal from a LanceDB result batch.
+///
+/// Three result schemas are produced by the search engine:
+/// - Pure vector search → `_distance` (cosine distance, lower=better).
+/// - Native hybrid (vector + FTS via RRF reranker) → `_relevance_score`
+///   (fused RRF score, higher=better; `_distance` is dropped).
+/// - FTS-only query → `_score` (BM25, higher=better, unbounded).
+///
+/// For the score-style columns we min-max normalize per batch (max becomes
+/// 1.0) and invert (1 − norm) so the rest of the pipeline — threshold
+/// filter, ascending sort, multi-query bonus — keeps its single
+/// "lower distance is better" contract regardless of which search path
+/// produced the batch.
+fn extract_distance_array(batch: &RecordBatch) -> Vec<f32> {
+	if let Some(arr) = batch
+		.column_by_name("_distance")
+		.and_then(|col| col.as_any().downcast_ref::<Float32Array>())
+	{
+		return (0..arr.len()).map(|i| arr.value(i)).collect();
+	}
+
+	for score_col in ["_relevance_score", "_score"] {
+		if let Some(arr) = batch
+			.column_by_name(score_col)
+			.and_then(|col| col.as_any().downcast_ref::<Float32Array>())
+		{
+			let scores: Vec<f32> = (0..arr.len()).map(|i| arr.value(i)).collect();
+			let max = scores.iter().copied().fold(0.0_f32, f32::max);
+			if max > 0.0 {
+				return scores
+					.into_iter()
+					.map(|s| (1.0 - s / max).clamp(0.0, 1.0))
+					.collect();
+			}
+			return vec![0.0; scores.len()];
+		}
+	}
+
+	Vec::new()
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct BatchConverter {
 	vector_dim: usize,
@@ -498,12 +539,7 @@ impl BatchConverter {
 			.as_any()
 			.downcast_ref::<StringArray>()
 			.ok_or_else(|| anyhow::anyhow!("hash column is not a StringArray"))?;
-		// Extract distance column from LanceDB search results
-		let distance_array = batch
-			.column_by_name("_distance")
-			.and_then(|col| col.as_any().downcast_ref::<Float32Array>())
-			.map(|arr| (0..arr.len()).map(|i| arr.value(i)).collect::<Vec<f32>>())
-			.unwrap_or_default();
+		let distance_array = extract_distance_array(batch);
 		for i in 0..batch.num_rows() {
 			// Parse symbols JSON
 			let symbols_json = symbols_array.value(i);
@@ -581,12 +617,7 @@ impl BatchConverter {
 			.downcast_ref::<StringArray>()
 			.ok_or_else(|| anyhow::anyhow!("hash column is not a StringArray"))?;
 
-		// Extract distance column from LanceDB search results
-		let distance_array = batch
-			.column_by_name("_distance")
-			.and_then(|col| col.as_any().downcast_ref::<Float32Array>())
-			.map(|arr| (0..arr.len()).map(|i| arr.value(i)).collect::<Vec<f32>>())
-			.unwrap_or_default();
+		let distance_array = extract_distance_array(batch);
 
 		// Process each row
 		for i in 0..batch.num_rows() {
@@ -663,12 +694,7 @@ impl BatchConverter {
 			.as_any()
 			.downcast_ref::<StringArray>()
 			.ok_or_else(|| anyhow::anyhow!("hash column is not a StringArray"))?;
-		// Extract distance column from LanceDB search results
-		let distance_array = batch
-			.column_by_name("_distance")
-			.and_then(|col| col.as_any().downcast_ref::<Float32Array>())
-			.map(|arr| (0..arr.len()).map(|i| arr.value(i)).collect::<Vec<f32>>())
-			.unwrap_or_default();
+		let distance_array = extract_distance_array(batch);
 		for i in 0..batch.num_rows() {
 			let context = if context_array.is_null(i) {
 				Vec::new()
@@ -855,11 +881,7 @@ impl BatchConverter {
 			.downcast_ref::<StringArray>()
 			.ok_or_else(|| anyhow::anyhow!("description column is not a StringArray"))?;
 
-		let distance_array = batch
-			.column_by_name("_distance")
-			.and_then(|col| col.as_any().downcast_ref::<Float32Array>())
-			.map(|arr| (0..arr.len()).map(|i| arr.value(i)).collect::<Vec<f32>>())
-			.unwrap_or_default();
+		let distance_array = extract_distance_array(batch);
 
 		for i in 0..batch.num_rows() {
 			commit_blocks.push(CommitBlock {
@@ -956,5 +978,57 @@ mod tests {
 		let result = converter.commit_block_to_batch(&blocks, &wrong_dim_embeddings);
 		assert!(result.is_err());
 		assert!(result.unwrap_err().to_string().contains("dimension"));
+	}
+
+	fn make_score_batch(column_name: &str, scores: Vec<f32>) -> RecordBatch {
+		let schema = Arc::new(Schema::new(vec![Field::new(
+			column_name,
+			DataType::Float32,
+			false,
+		)]));
+		RecordBatch::try_new(schema, vec![Arc::new(Float32Array::from(scores))]).unwrap()
+	}
+
+	#[test]
+	fn test_extract_distance_array_prefers_distance_column_raw() {
+		let batch = make_score_batch("_distance", vec![0.1, 0.4, 0.25]);
+		let out = extract_distance_array(&batch);
+		assert_eq!(out, vec![0.1, 0.4, 0.25]);
+	}
+
+	#[test]
+	fn test_extract_distance_array_normalizes_relevance_score() {
+		// RRF scores: higher = better; max(0.8) becomes distance 0.0,
+		// half-of-max (0.4) becomes distance 0.5, zero stays at 1.0.
+		let batch = make_score_batch("_relevance_score", vec![0.8, 0.4, 0.0]);
+		let out = extract_distance_array(&batch);
+		assert!((out[0] - 0.0).abs() < 1e-6, "expected 0.0, got {}", out[0]);
+		assert!((out[1] - 0.5).abs() < 1e-6, "expected 0.5, got {}", out[1]);
+		assert!((out[2] - 1.0).abs() < 1e-6, "expected 1.0, got {}", out[2]);
+	}
+
+	#[test]
+	fn test_extract_distance_array_falls_back_to_score_for_fts_only() {
+		let batch = make_score_batch("_score", vec![10.0, 5.0, 2.5]);
+		let out = extract_distance_array(&batch);
+		assert!((out[0] - 0.0).abs() < 1e-6);
+		assert!((out[1] - 0.5).abs() < 1e-6);
+		assert!((out[2] - 0.75).abs() < 1e-6);
+	}
+
+	#[test]
+	fn test_extract_distance_array_no_score_columns_returns_empty() {
+		let schema = Arc::new(Schema::new(vec![Field::new("path", DataType::Utf8, false)]));
+		let batch = RecordBatch::try_new(schema, vec![Arc::new(StringArray::from(vec!["a", "b"]))])
+			.unwrap();
+		assert!(extract_distance_array(&batch).is_empty());
+	}
+
+	#[test]
+	fn test_extract_distance_array_zero_max_score() {
+		// All zeros — guard against division by zero, every row gets distance 0.
+		let batch = make_score_batch("_relevance_score", vec![0.0, 0.0]);
+		let out = extract_distance_array(&batch);
+		assert_eq!(out, vec![0.0, 0.0]);
 	}
 }
