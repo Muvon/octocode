@@ -5,7 +5,7 @@ edition = "2021"
 rust-version = "1.95"
 authors = ["Muvon Un Limited <opensource@muvon.io>"]
 description = "AI-powered code intelligence with semantic search, knowledge graphs, and built-in MCP server. Transform your codebase into a queryable knowledge graph for AI assistants."
-homepage = "https://octocode.muvon.io"
+homepage = "https://octomind.ru"
 repository = "https://github.com/muvon/octocode"
 documentation = "https://docs.rs/octocode"
 license = "Apache-2.0"
@@ -98,7 +98,7 @@ dotenvy = "0.15"
 
 # Local dependency on octolib with embedding features
 # octolib = { path = "../octolib", features = ["fastembed", "huggingface"] }
-octolib = { version = "0.20.0", default-features = false }
+octolib = { version = "0.21.3", default-features = false }
 
 # MCP SDK - official Rust implementation
 rmcp = { version = "1.3.0", features = ["server", "macros", "transport-io", "transport-streamable-http-server"] }
