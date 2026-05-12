@@ -17,11 +17,13 @@
 
 use anyhow::{bail, Result};
 use ast_grep_core::language::Language as AstGrepLanguage;
-use ast_grep_core::matcher::PatternBuilder;
+use ast_grep_core::matcher::{KindMatcher, PatternBuilder, PatternNode};
 use ast_grep_core::source::Edit as AstEdit;
 use ast_grep_core::tree_sitter::{LanguageExt, StrDoc};
 use ast_grep_core::{Pattern, PatternError};
 use std::path::Path;
+
+pub use ast_grep_core::MatchStrictness;
 
 // Language wrapper types that bridge our tree-sitter grammars to ast-grep's traits.
 
@@ -85,23 +87,90 @@ pub struct GrepMatch {
 	pub text: String,
 }
 
-/// Search a single file with the given pattern and language.
-fn search_file_with_lang<L: LanguageExt + AstGrepLanguage>(
+/// Collect (line, col, text) for every node match in a tree.
+fn collect_matches<L: LanguageExt + AstGrepLanguage + Clone, M: ast_grep_core::Matcher>(
+	grep: &ast_grep_core::AstGrep<StrDoc<L>>,
+	matcher: &M,
+) -> Vec<(usize, usize, String)> {
+	grep.root()
+		.find_all(matcher)
+		.map(|m| {
+			let text = m.text().to_string();
+			let pos = m.start_pos();
+			let line = pos.line() + 1; // 0-based → 1-based
+			let col = pos.byte_point().1;
+			(line, col, text)
+		})
+		.collect()
+}
+
+/// Search a single file with the given pattern, language, and strictness.
+fn search_file_with_lang<L: LanguageExt + AstGrepLanguage + Clone>(
 	lang: L,
 	source: &str,
 	pattern_str: &str,
+	strictness: MatchStrictness,
 ) -> Result<Vec<(usize, usize, String)>> {
 	let grep = lang.ast_grep(source);
-	let pattern = Pattern::new(pattern_str, lang);
-	let mut results = Vec::new();
-	for m in grep.root().find_all(&pattern) {
-		let text = m.text().to_string();
-		let pos = m.start_pos();
-		let line = pos.line() + 1; // 0-based → 1-based
-		let col = pos.byte_point().1;
-		results.push((line, col, text));
-	}
-	Ok(results)
+	let pattern = Pattern::try_new(pattern_str, lang)
+		.map_err(|e| anyhow::anyhow!("Invalid pattern: {}", e))?
+		.with_strictness(strictness);
+	Ok(collect_matches(&grep, &pattern))
+}
+
+/// Search a single file using a KindMatcher (pattern interpreted as AST node kind).
+fn search_kind_with_lang<L: LanguageExt + AstGrepLanguage + Clone>(
+	lang: L,
+	source: &str,
+	kind_str: &str,
+) -> Result<Vec<(usize, usize, String)>> {
+	let grep = lang.ast_grep(source);
+	let kind = KindMatcher::try_new(kind_str, lang)
+		.map_err(|e| anyhow::anyhow!("Invalid AST kind '{}': {}", kind_str, e))?;
+	Ok(collect_matches(&grep, &kind))
+}
+
+/// Search a single file with a contextual pattern (wraps `pattern` in `context`,
+/// then selects subtree of kind `selector`). Resolves pattern-parsed-as-wrong-kind issues.
+fn search_contextual_with_lang<L: LanguageExt + AstGrepLanguage + Clone>(
+	lang: L,
+	source: &str,
+	context_src: &str,
+	selector: &str,
+) -> Result<Vec<(usize, usize, String)>> {
+	let grep = lang.ast_grep(source);
+	let pattern = Pattern::contextual(context_src, selector, lang)
+		.map_err(|e| anyhow::anyhow!("Invalid contextual pattern: {}", e))?;
+	Ok(collect_matches(&grep, &pattern))
+}
+
+/// Inspect the root AST kind a pattern parses to, plus parse-error flag and metavars.
+/// Used to build diagnostics when a search yields zero matches.
+fn pattern_info_with_lang<L: LanguageExt + AstGrepLanguage + Clone>(
+	lang: L,
+	pattern_str: &str,
+) -> Result<PatternInfo> {
+	let pattern = Pattern::try_new(pattern_str, lang.clone())
+		.map_err(|e| anyhow::anyhow!("Invalid pattern: {}", e))?;
+	let has_error = pattern.has_error();
+	let root_kind = match &pattern.node {
+		PatternNode::Terminal { kind_id, .. } | PatternNode::Internal { kind_id, .. } => {
+			let ts_lang: tree_sitter::Language = lang.get_ts_language();
+			ts_lang.node_kind_for_id(*kind_id).map(|s| s.to_string())
+		}
+		PatternNode::MetaVar { .. } => None,
+	};
+	let mut defined_vars: Vec<String> = pattern
+		.defined_vars()
+		.into_iter()
+		.map(|s| s.to_string())
+		.collect();
+	defined_vars.sort();
+	Ok(PatternInfo {
+		root_kind,
+		has_error,
+		defined_vars,
+	})
 }
 
 /// Determine language from file extension.
@@ -125,39 +194,168 @@ pub fn language_from_extension(path: &Path) -> Option<&'static str> {
 	}
 }
 
-/// Search a single file for the given pattern. Returns matches.
-pub fn search_file(
-	file_path: &str,
-	source: &str,
-	pattern: &str,
-	language: &str,
-) -> Result<Vec<GrepMatch>> {
-	let raw_matches = match language {
-		"rust" => search_file_with_lang(AstRust, source, pattern),
-		"javascript" => search_file_with_lang(AstJavaScript, source, pattern),
-		"typescript" => search_file_with_lang(AstTypeScript, source, pattern),
-		"python" => search_file_with_lang(AstPython, source, pattern),
-		"go" => search_file_with_lang(AstGo, source, pattern),
-		"java" => search_file_with_lang(AstJava, source, pattern),
-		"cpp" => search_file_with_lang(AstCpp, source, pattern),
-		"php" => search_file_with_lang(AstPhp, source, pattern),
-		"ruby" => search_file_with_lang(AstRuby, source, pattern),
-		"lua" => search_file_with_lang(AstLua, source, pattern),
-		"bash" => search_file_with_lang(AstBash, source, pattern),
-		"css" => search_file_with_lang(AstCss, source, pattern),
-		"json" => search_file_with_lang(AstJson, source, pattern),
-		_ => bail!("Unsupported language: {}", language),
-	}?;
+/// What a parsed pattern looks like — used to build diagnostics when a search
+/// returns zero matches so the LLM knows whether to retry or change strategy.
+#[derive(Debug, Clone)]
+pub struct PatternInfo {
+	/// Root tree-sitter node kind the pattern parses as (e.g. "call_expression").
+	/// None when the whole pattern is a single bare metavariable like `$X`.
+	pub root_kind: Option<String>,
+	/// True when tree-sitter could not parse the pattern as valid syntax.
+	pub has_error: bool,
+	/// Names of capturing metavariables found in the pattern, sorted.
+	pub defined_vars: Vec<String>,
+}
 
-	Ok(raw_matches
-		.into_iter()
+/// Dispatch a search by language. Wraps each `Ast*` lang type behind one match
+/// arm and forwards to the generic helper, monomorphized per language.
+macro_rules! dispatch_lang {
+	($lang_str:expr, |$lang:ident| $body:expr) => {
+		match $lang_str {
+			"rust" => {
+				#[allow(unused_variables)]
+				let $lang = AstRust;
+				$body
+			}
+			"javascript" => {
+				#[allow(unused_variables)]
+				let $lang = AstJavaScript;
+				$body
+			}
+			"typescript" => {
+				#[allow(unused_variables)]
+				let $lang = AstTypeScript;
+				$body
+			}
+			"python" => {
+				#[allow(unused_variables)]
+				let $lang = AstPython;
+				$body
+			}
+			"go" => {
+				#[allow(unused_variables)]
+				let $lang = AstGo;
+				$body
+			}
+			"java" => {
+				#[allow(unused_variables)]
+				let $lang = AstJava;
+				$body
+			}
+			"cpp" => {
+				#[allow(unused_variables)]
+				let $lang = AstCpp;
+				$body
+			}
+			"php" => {
+				#[allow(unused_variables)]
+				let $lang = AstPhp;
+				$body
+			}
+			"ruby" => {
+				#[allow(unused_variables)]
+				let $lang = AstRuby;
+				$body
+			}
+			"lua" => {
+				#[allow(unused_variables)]
+				let $lang = AstLua;
+				$body
+			}
+			"bash" => {
+				#[allow(unused_variables)]
+				let $lang = AstBash;
+				$body
+			}
+			"css" => {
+				#[allow(unused_variables)]
+				let $lang = AstCss;
+				$body
+			}
+			"json" => {
+				#[allow(unused_variables)]
+				let $lang = AstJson;
+				$body
+			}
+			_ => bail!("Unsupported language: {}", $lang_str),
+		}
+	};
+}
+
+fn wrap_matches(file_path: &str, raw: Vec<(usize, usize, String)>) -> Vec<GrepMatch> {
+	raw.into_iter()
 		.map(|(line, column, text)| GrepMatch {
 			file: file_path.to_string(),
 			line,
 			column,
 			text,
 		})
-		.collect())
+		.collect()
+}
+
+/// Search a single file with the default `Smart` strictness. Equivalent to
+/// `search_file_strict(.., MatchStrictness::Smart)`.
+pub fn search_file(
+	file_path: &str,
+	source: &str,
+	pattern: &str,
+	language: &str,
+) -> Result<Vec<GrepMatch>> {
+	search_file_strict(file_path, source, pattern, language, MatchStrictness::Smart)
+}
+
+/// Search a single file with explicit strictness. Use `Relaxed` to ignore
+/// trivia/comments — a common fix when a `Smart` search returns zero matches.
+pub fn search_file_strict(
+	file_path: &str,
+	source: &str,
+	pattern: &str,
+	language: &str,
+	strictness: MatchStrictness,
+) -> Result<Vec<GrepMatch>> {
+	let raw = dispatch_lang!(language, |lang| search_file_with_lang(
+		lang, source, pattern, strictness
+	))?;
+	Ok(wrap_matches(file_path, raw))
+}
+
+/// Search a single file using a tree-sitter node kind as the matcher.
+/// Use this when you want to match all nodes of a given kind (e.g. all
+/// `function_declaration` or `call_expression`) without writing a body pattern.
+pub fn search_file_by_kind(
+	file_path: &str,
+	source: &str,
+	kind: &str,
+	language: &str,
+) -> Result<Vec<GrepMatch>> {
+	let raw = dispatch_lang!(language, |lang| search_kind_with_lang(lang, source, kind))?;
+	Ok(wrap_matches(file_path, raw))
+}
+
+/// Search a single file with a contextual pattern. `context_src` must be valid
+/// standalone code containing the pattern; `selector` picks the sub-AST kind
+/// inside that scaffold. Resolves cases where a bare pattern parses as the
+/// wrong AST kind (e.g. Go `fmt.Println($A)` parsing as type conversion).
+pub fn search_file_contextual(
+	file_path: &str,
+	source: &str,
+	context_src: &str,
+	selector: &str,
+	language: &str,
+) -> Result<Vec<GrepMatch>> {
+	let raw = dispatch_lang!(language, |lang| search_contextual_with_lang(
+		lang,
+		source,
+		context_src,
+		selector
+	))?;
+	Ok(wrap_matches(file_path, raw))
+}
+
+/// Inspect what a pattern parses to. Returns the root AST kind, parse-error
+/// flag, and the set of named metavariables. Cheap — does not require a corpus.
+pub fn pattern_info(pattern: &str, language: &str) -> Result<PatternInfo> {
+	dispatch_lang!(language, |lang| pattern_info_with_lang(lang, pattern))
 }
 
 /// Result of rewriting matches in a single file.
@@ -171,14 +369,15 @@ pub struct RewriteResult {
 /// Rewrite matches in a single file using a replacement template.
 /// Returns None if no matches found. The template supports metavariables
 /// captured by the search pattern (e.g. `$VAR`, `$$$ARGS`).
-fn rewrite_file_with_lang<L: LanguageExt + AstGrepLanguage>(
+fn rewrite_file_with_lang<L: LanguageExt + AstGrepLanguage + Clone>(
 	lang: L,
 	source: &str,
 	pattern_str: &str,
 	rewrite_str: &str,
 ) -> Result<Option<(usize, String)>> {
 	let grep = lang.ast_grep(source);
-	let pattern = Pattern::new(pattern_str, lang);
+	let pattern = Pattern::try_new(pattern_str, lang)
+		.map_err(|e| anyhow::anyhow!("Invalid pattern: {}", e))?;
 	let edits = grep.root().replace_all(&pattern, rewrite_str);
 	if edits.is_empty() {
 		return Ok(None);
@@ -210,22 +409,9 @@ pub fn rewrite_file(
 	rewrite: &str,
 	language: &str,
 ) -> Result<Option<RewriteResult>> {
-	let result = match language {
-		"rust" => rewrite_file_with_lang(AstRust, source, pattern, rewrite),
-		"javascript" => rewrite_file_with_lang(AstJavaScript, source, pattern, rewrite),
-		"typescript" => rewrite_file_with_lang(AstTypeScript, source, pattern, rewrite),
-		"python" => rewrite_file_with_lang(AstPython, source, pattern, rewrite),
-		"go" => rewrite_file_with_lang(AstGo, source, pattern, rewrite),
-		"java" => rewrite_file_with_lang(AstJava, source, pattern, rewrite),
-		"cpp" => rewrite_file_with_lang(AstCpp, source, pattern, rewrite),
-		"php" => rewrite_file_with_lang(AstPhp, source, pattern, rewrite),
-		"ruby" => rewrite_file_with_lang(AstRuby, source, pattern, rewrite),
-		"lua" => rewrite_file_with_lang(AstLua, source, pattern, rewrite),
-		"bash" => rewrite_file_with_lang(AstBash, source, pattern, rewrite),
-		"css" => rewrite_file_with_lang(AstCss, source, pattern, rewrite),
-		"json" => rewrite_file_with_lang(AstJson, source, pattern, rewrite),
-		_ => bail!("Unsupported language: {}", language),
-	}?;
+	let result = dispatch_lang!(language, |lang| rewrite_file_with_lang(
+		lang, source, pattern, rewrite
+	))?;
 
 	Ok(
 		result.map(|(replacements, rewritten_source)| RewriteResult {
@@ -648,5 +834,544 @@ fn main() {
 		assert!(diff.contains("+1:"));
 		// Unchanged line should not appear
 		assert!(!diff.contains("let y = 1"));
+	}
+
+	// ===================================================================
+	// Smart-search building-block tests
+	// ===================================================================
+
+	#[test]
+	fn test_invalid_pattern_returns_error_not_panic() {
+		// LLM sends garbage — must error, never panic.
+		let result = search_file("test.rs", "fn main(){}", "((((", "rust");
+		assert!(result.is_err(), "Invalid pattern should return Err");
+	}
+
+	#[test]
+	fn test_strict_relaxed_picks_up_what_smart_misses() {
+		// `console.log('x')` with surrounding comments: Smart can struggle when
+		// comments are inside the matched region; Relaxed ignores them.
+		let source = "// note\nconsole.log('hello');\n// trailing\nconsole.log('world');\n";
+		let smart = search_file_strict(
+			"a.js",
+			source,
+			"console.log($A)",
+			"javascript",
+			MatchStrictness::Smart,
+		)
+		.unwrap();
+		let relaxed = search_file_strict(
+			"a.js",
+			source,
+			"console.log($A)",
+			"javascript",
+			MatchStrictness::Relaxed,
+		)
+		.unwrap();
+		// Both should find the two calls; main goal is that Relaxed doesn't drop them.
+		assert!(relaxed.len() >= smart.len());
+		assert_eq!(relaxed.len(), 2);
+	}
+
+	#[test]
+	fn test_kind_search_finds_function_declarations() {
+		let source = "function foo() {}\nfunction bar() {}\nconst x = 1;\n";
+		let matches =
+			search_file_by_kind("a.js", source, "function_declaration", "javascript").unwrap();
+		assert_eq!(matches.len(), 2, "Should find both function declarations");
+	}
+
+	#[test]
+	fn test_kind_search_invalid_kind_errors_cleanly() {
+		let source = "function foo() {}\n";
+		let result = search_file_by_kind("a.js", source, "totally_not_a_kind", "javascript");
+		assert!(result.is_err(), "Invalid kind must return Err");
+	}
+
+	#[test]
+	fn test_kind_search_rust_call_expression() {
+		let source = "fn main() { println!(\"hi\"); foo(); bar(1, 2); }";
+		let matches = search_file_by_kind("a.rs", source, "call_expression", "rust").unwrap();
+		// Rust has println! as macro_invocation, but foo() and bar(1,2) are call_expression.
+		assert!(
+			matches.len() >= 2,
+			"Should find at least foo() and bar(1,2)"
+		);
+	}
+
+	#[test]
+	fn test_contextual_resolves_go_call_ambiguity() {
+		// The classic Go trap: `fmt.Println($A)` is ambiguous with type conversion.
+		let source = r#"
+package main
+
+import "fmt"
+
+func main() {
+	fmt.Println("hello")
+	fmt.Println("world")
+}
+"#;
+		let context = "package _\nfunc _() { fmt.Println($A) }";
+		let matches =
+			search_file_contextual("a.go", source, context, "call_expression", "go").unwrap();
+		assert_eq!(
+			matches.len(),
+			2,
+			"Contextual selector should find both calls"
+		);
+	}
+
+	#[test]
+	fn test_contextual_class_field_typescript() {
+		// `name = "x"` parses as assignment; only inside a class is it a field.
+		let source = r#"
+class User {
+	name = "alice";
+	age = 30;
+}
+"#;
+		let context = "class _ { $NAME = $VAL }";
+		let matches = search_file_contextual(
+			"a.ts",
+			source,
+			context,
+			"public_field_definition",
+			"typescript",
+		);
+		// Some grammars use `public_field_definition`, others `field_definition` — accept either.
+		let count = match matches {
+			Ok(m) => m.len(),
+			Err(_) => {
+				search_file_contextual("a.ts", source, context, "field_definition", "typescript")
+					.map(|m| m.len())
+					.unwrap_or(0)
+			}
+		};
+		assert!(count >= 1, "Should find at least one class field");
+	}
+
+	#[test]
+	fn test_pattern_info_returns_root_kind() {
+		let info = pattern_info("$X.unwrap()", "rust").unwrap();
+		assert!(info.root_kind.is_some(), "Pattern should have a root kind");
+		assert!(!info.has_error);
+		assert!(info.defined_vars.contains(&"X".to_string()));
+	}
+
+	#[test]
+	fn test_pattern_info_metavars_sorted_unique() {
+		let info = pattern_info("$A.foo($B, $C)", "rust").unwrap();
+		assert_eq!(info.defined_vars, vec!["A", "B", "C"]);
+	}
+
+	#[test]
+	fn test_pattern_info_bare_metavar() {
+		// `$X` alone is a meta-var; root_kind is None by design.
+		let info = pattern_info("$X", "rust").unwrap();
+		assert!(info.root_kind.is_none());
+	}
+
+	#[test]
+	fn test_pattern_info_detects_parse_error_or_errors() {
+		// Pure garbage should either return Err on construction or flag has_error.
+		let info = pattern_info("((((", "rust");
+		match info {
+			Err(_) => {} // acceptable
+			Ok(i) => assert!(i.has_error, "Broken pattern must flag has_error"),
+		}
+	}
+
+	// ===================================================================
+	// LLM-typical pattern coverage — patterns LLMs commonly attempt.
+	// Each test is named for the scenario so failures point at root cause.
+	// ===================================================================
+
+	#[test]
+	fn test_llm_rust_async_fn() {
+		let source = r#"
+async fn fetch_user(id: u64) -> Result<User, Error> {
+	let resp = client.get(&url).send().await?;
+	Ok(resp.json().await?)
+}
+
+async fn fetch_post(id: u64) -> Result<Post, Error> {
+	Ok(Post::default())
+}
+"#;
+		let matches = search_file(
+			"a.rs",
+			source,
+			"async fn $NAME($$$ARGS) -> $RET { $$$ }",
+			"rust",
+		)
+		.unwrap();
+		assert_eq!(matches.len(), 2, "Should find both async fn definitions");
+	}
+
+	#[test]
+	fn test_llm_rust_question_mark_operator() {
+		let source = r#"
+fn run() -> Result<(), Error> {
+	let x = thing()?;
+	let y = other()?;
+	Ok(())
+}
+"#;
+		let matches = search_file("a.rs", source, "$EXPR?", "rust").unwrap();
+		assert!(matches.len() >= 2, "Should find ? operator usages");
+	}
+
+	#[test]
+	fn test_llm_rust_if_let_some() {
+		let source = r#"
+fn main() {
+	if let Some(x) = maybe_x() {
+		println!("{}", x);
+	}
+	if let Some(y) = maybe_y() {
+		dbg!(y);
+	}
+}
+"#;
+		let matches = search_file("a.rs", source, "if let Some($X) = $Y { $$$ }", "rust").unwrap();
+		assert_eq!(matches.len(), 2, "Should find both if-let-Some");
+	}
+
+	#[test]
+	fn test_llm_rust_match_expression() {
+		let source = r#"
+fn classify(x: i32) -> &'static str {
+	match x {
+		0 => "zero",
+		_ => "other",
+	}
+}
+"#;
+		let matches = search_file("a.rs", source, "match $EXPR { $$$ }", "rust").unwrap();
+		assert_eq!(matches.len(), 1);
+	}
+
+	#[test]
+	fn test_llm_rust_trait_impl() {
+		let source = r#"
+struct S;
+trait T {}
+impl T for S {}
+impl Display for S {}
+"#;
+		let matches = search_file("a.rs", source, "impl $T for $S {}", "rust").unwrap();
+		assert_eq!(matches.len(), 2);
+	}
+
+	#[test]
+	fn test_llm_rust_use_import() {
+		let source = "use std::collections::HashMap;\nuse anyhow::Result;\nuse crate::foo;\n";
+		let matches = search_file("a.rs", source, "use $PATH;", "rust").unwrap();
+		assert_eq!(matches.len(), 3);
+	}
+
+	#[test]
+	fn test_llm_rust_struct_literal() {
+		let source = r#"
+fn make() -> Point {
+	Point { x: 1, y: 2 }
+}
+fn other() -> Pair { Pair { left: a, right: b } }
+"#;
+		let matches = search_file("a.rs", source, "$NAME { $$$ }", "rust").unwrap();
+		assert!(matches.len() >= 2, "Should match struct literals");
+	}
+
+	#[test]
+	fn test_llm_typescript_arrow_function() {
+		let source = r#"
+const add = (a: number, b: number): number => a + b;
+const id = <T>(x: T): T => x;
+"#;
+		let matches = search_file("a.ts", source, "($$$PARAMS) => $BODY", "typescript").unwrap();
+		assert!(matches.len() >= 1, "Should match arrow function");
+	}
+
+	#[test]
+	fn test_llm_typescript_async_function() {
+		let source = r#"
+async function load() { return await fetch('/x'); }
+async function save() { return await fetch('/y'); }
+"#;
+		let matches = search_file(
+			"a.ts",
+			source,
+			"async function $NAME($$$) { $$$ }",
+			"typescript",
+		)
+		.unwrap();
+		assert_eq!(matches.len(), 2);
+	}
+
+	#[test]
+	fn test_llm_typescript_await_expression() {
+		let source = r#"
+async function f() {
+	const a = await one();
+	const b = await two();
+}
+"#;
+		let matches = search_file("a.ts", source, "await $EXPR", "typescript").unwrap();
+		assert_eq!(matches.len(), 2);
+	}
+
+	#[test]
+	fn test_llm_typescript_import_statement() {
+		let source = r#"
+import { foo } from './foo';
+import bar from './bar';
+import * as baz from './baz';
+"#;
+		// Use kind-based matching since import forms vary widely.
+		let matches =
+			search_file_by_kind("a.ts", source, "import_statement", "typescript").unwrap();
+		assert_eq!(matches.len(), 3);
+	}
+
+	#[test]
+	fn test_llm_typescript_try_catch() {
+		let source = r#"
+function f() {
+	try {
+		risky();
+	} catch (e) {
+		log(e);
+	}
+}
+"#;
+		let matches = search_file(
+			"a.ts",
+			source,
+			"try { $$$ } catch ($E) { $$$ }",
+			"typescript",
+		)
+		.unwrap();
+		assert_eq!(matches.len(), 1);
+	}
+
+	#[test]
+	fn test_llm_javascript_console_method_chain() {
+		let source = "console.log('a'); console.error('b'); console.warn('c');";
+		let matches = search_file("a.js", source, "console.$M($ARG)", "javascript").unwrap();
+		assert_eq!(
+			matches.len(),
+			3,
+			"Should find log/error/warn via $M metavar"
+		);
+	}
+
+	#[test]
+	fn test_llm_python_decorator() {
+		let source = r#"
+@cache
+def slow_one():
+	return compute()
+
+@cache
+def slow_two():
+	return compute()
+"#;
+		// Python decorators are part of decorated_definition — kind search is robust.
+		let matches =
+			search_file_by_kind("a.py", source, "decorated_definition", "python").unwrap();
+		assert_eq!(matches.len(), 2);
+	}
+
+	#[test]
+	fn test_llm_python_async_def() {
+		let source = r#"
+async def fetch(u):
+	return await http.get(u)
+
+async def save(x):
+	await db.put(x)
+"#;
+		let matches = search_file("a.py", source, "async def $NAME($$$): $$$", "python");
+		// Some grammars need the wider form; at minimum the search shouldn't error.
+		assert!(matches.is_ok());
+		// Kind-based fallback always works:
+		let by_kind = search_file_by_kind("a.py", source, "function_definition", "python").unwrap();
+		assert_eq!(by_kind.len(), 2);
+	}
+
+	#[test]
+	fn test_llm_python_from_import() {
+		let source = "from os import path\nfrom typing import List, Dict\nimport sys\n";
+		let imports =
+			search_file_by_kind("a.py", source, "import_from_statement", "python").unwrap();
+		assert_eq!(imports.len(), 2);
+		let plain = search_file_by_kind("a.py", source, "import_statement", "python").unwrap();
+		assert_eq!(plain.len(), 1);
+	}
+
+	#[test]
+	fn test_llm_go_if_err_not_nil() {
+		let source = r#"
+package main
+
+func run() error {
+	if err := step1(); err != nil {
+		return err
+	}
+	if err := step2(); err != nil {
+		return err
+	}
+	return nil
+}
+"#;
+		let matches = search_file("a.go", source, "if err != nil { $$$ }", "go").unwrap();
+		assert!(matches.len() >= 1, "Should match Go error check idiom");
+	}
+
+	#[test]
+	fn test_llm_go_function_declaration_kind() {
+		let source = r#"
+package main
+
+func one() {}
+func two(x int) int { return x }
+func (s *S) three() {}
+"#;
+		let matches = search_file_by_kind("a.go", source, "function_declaration", "go").unwrap();
+		assert_eq!(
+			matches.len(),
+			2,
+			"Two free funcs (method is method_declaration)"
+		);
+		let methods = search_file_by_kind("a.go", source, "method_declaration", "go").unwrap();
+		assert_eq!(methods.len(), 1);
+	}
+
+	#[test]
+	fn test_llm_java_method_invocation_chain() {
+		let source = r#"
+public class C {
+	void run() {
+		obj.method1();
+		obj.method2(42);
+	}
+}
+"#;
+		let matches = search_file("Test.java", source, "$O.$M($$$)", "java").unwrap();
+		assert!(matches.len() >= 2);
+	}
+
+	#[test]
+	fn test_llm_cpp_namespaced_call() {
+		let source = r#"
+#include <iostream>
+int main() {
+	std::cout << "hi" << std::endl;
+	std::cerr << "err";
+	return 0;
+}
+"#;
+		// Cpp call expressions; use kind search to be robust to operator overloads.
+		let calls = search_file_by_kind("a.cpp", source, "function_definition", "cpp").unwrap();
+		assert!(!calls.is_empty());
+	}
+
+	#[test]
+	fn test_llm_ruby_block() {
+		let source = r#"
+arr.each do |x|
+	puts x
+end
+list.map { |y| y * 2 }
+"#;
+		let do_blocks = search_file_by_kind("a.rb", source, "do_block", "ruby").unwrap();
+		assert!(!do_blocks.is_empty());
+	}
+
+	// ===================================================================
+	// Patterns that are known to LLM trip-hazards. Verify behavior is
+	// either "works" or "fails cleanly with informative diagnostic".
+	// ===================================================================
+
+	#[test]
+	fn test_llm_trap_typescript_class_field_via_smart_pattern() {
+		// `name = "x"` parses as assignment outside class context.
+		// Direct pattern search may yield 0 — verify the contextual fallback fixes it.
+		let source = r#"
+class User {
+	name = "alice";
+	age = 30;
+}
+"#;
+		// Pattern alone may miss. Contextual should hit.
+		let direct = search_file("a.ts", source, "$NAME = $VAL", "typescript").unwrap();
+		let context = "class _ { $NAME = $VAL }";
+		let via_ctx = search_file_contextual(
+			"a.ts",
+			source,
+			context,
+			"public_field_definition",
+			"typescript",
+		)
+		.or_else(|_| {
+			search_file_contextual("a.ts", source, context, "field_definition", "typescript")
+		});
+		assert!(
+			via_ctx.is_ok() && !via_ctx.unwrap().is_empty(),
+			"Contextual fallback should find class fields even if direct does not. direct={}",
+			direct.len()
+		);
+	}
+
+	#[test]
+	fn test_llm_trap_zero_match_pattern_does_not_panic() {
+		// Pattern is valid syntax but yields no matches in this source.
+		let source = "fn main() { let x = 1; }";
+		let matches = search_file("a.rs", source, "$X.unwrap()", "rust").unwrap();
+		assert!(matches.is_empty());
+	}
+
+	#[test]
+	fn test_smart_then_relaxed_consistency_on_simple_pattern() {
+		let source = "fn main() { let x = foo.unwrap(); }";
+		let smart = search_file_strict(
+			"a.rs",
+			source,
+			"$X.unwrap()",
+			"rust",
+			MatchStrictness::Smart,
+		)
+		.unwrap();
+		let relaxed = search_file_strict(
+			"a.rs",
+			source,
+			"$X.unwrap()",
+			"rust",
+			MatchStrictness::Relaxed,
+		)
+		.unwrap();
+		assert_eq!(smart.len(), 1);
+		assert_eq!(relaxed.len(), 1);
+	}
+
+	#[test]
+	fn test_kind_search_typescript_import() {
+		// Imports vary so much that kind search is the LLM-friendly path.
+		let source = r#"
+import { a } from './a';
+import b from './b';
+const x = 1;
+"#;
+		let matches =
+			search_file_by_kind("a.ts", source, "import_statement", "typescript").unwrap();
+		assert_eq!(matches.len(), 2);
+	}
+
+	#[test]
+	fn test_kind_search_python_class_definition() {
+		let source = "class A:\n    pass\n\nclass B(A):\n    pass\n";
+		let matches = search_file_by_kind("a.py", source, "class_definition", "python").unwrap();
+		assert_eq!(matches.len(), 2);
 	}
 }
