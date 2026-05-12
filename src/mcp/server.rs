@@ -495,10 +495,13 @@ impl McpServer {
 			crate::grep::format_matches_grouped(&outcome.matches)
 		};
 
+		// Note is self-describing (each strategy emits its own bracketed prefix),
+		// so we don't wrap it. Strategy 1 (default Smart pattern) emits no note
+		// — direct matches need no annotation.
 		let header = outcome
 			.note
 			.as_deref()
-			.map(|n| format!("[fallback: {}]\n", n))
+			.map(|n| format!("{}\n", n))
 			.unwrap_or_default();
 
 		Ok(format!(
@@ -926,10 +929,7 @@ fn smart_search_all_files(
 			want_source,
 		);
 		if !r2.0.is_empty() {
-			return finalize(
-				r2,
-				Some("relaxed strictness (default Smart matched nothing)".to_string()),
-			);
+			return finalize(r2, Some("[strictness: relaxed]".to_string()));
 		}
 	}
 
@@ -943,8 +943,10 @@ fn smart_search_all_files(
 			return finalize(
 				r3a,
 				Some(format!(
-					"broadened to all {} (your pattern with metavariables didn't match — likely decorators or signature shape; this returns ALL {})",
-					desc, kind
+					"[kind: {}] broadened from `{}` (returns ALL {} — your pattern likely missed due to decorators or signature shape)",
+					kind,
+					pattern.trim(),
+					desc
 				)),
 			);
 		}
@@ -960,10 +962,7 @@ fn smart_search_all_files(
 		want_source,
 	);
 	if !r3.0.is_empty() {
-		return finalize(
-			r3,
-			Some(format!("interpreted '{}' as AST node kind", pattern)),
-		);
+		return finalize(r3, Some(format!("[kind: {}]", pattern)));
 	}
 
 	// Strategy 5 — canonical kind mapping (rescues LLM naming mismatches)
@@ -981,8 +980,8 @@ fn smart_search_all_files(
 				return finalize(
 					r3b,
 					Some(format!(
-						"mapped '{}' to canonical {} kind '{}'",
-						pattern, language, canonical
+						"[kind: {}] (canonical {} kind for `{}`)",
+						canonical, language, pattern
 					)),
 				);
 			}
@@ -1001,7 +1000,7 @@ fn smart_search_all_files(
 			want_source,
 		);
 		if !r4.0.is_empty() {
-			return finalize(r4, Some(format!("auto-context wrapping ({})", desc)));
+			return finalize(r4, Some(format!("[context wrap: {}]", desc)));
 		}
 	}
 

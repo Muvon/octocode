@@ -549,7 +549,26 @@ pub fn format_rewrite_diff(result: &RewriteResult) -> String {
 	output.trim_end().to_string()
 }
 
+/// Cap multi-line match text at `max_lines` and append a one-line summary
+/// for the remainder. Single-line matches pass through unchanged.
+/// Keeps the first signature line (usually the most informative) and avoids
+/// drowning the LLM in long impl/class bodies when matching by kind.
+pub fn truncate_match_text(text: &str, max_lines: usize) -> String {
+	let line_count = text.lines().count();
+	if line_count <= max_lines {
+		return text.to_string();
+	}
+	let head: Vec<&str> = text.lines().take(max_lines).collect();
+	format!(
+		"{}\n... ({} more lines)",
+		head.join("\n"),
+		line_count - max_lines
+	)
+}
+
 /// Format matches grouped by file (token-efficient output).
+/// Multi-line match bodies are truncated to a few signature lines plus a
+/// "... N more lines" footer to keep responses compact.
 pub fn format_matches_grouped(matches: &[GrepMatch]) -> String {
 	use std::collections::BTreeMap;
 
@@ -563,7 +582,8 @@ pub fn format_matches_grouped(matches: &[GrepMatch]) -> String {
 		output.push_str(file);
 		output.push('\n');
 		for m in file_matches {
-			output.push_str(&format!("{}:{}:  {}\n", m.line, m.column, m.text));
+			let text = truncate_match_text(&m.text, 4);
+			output.push_str(&format!("{}:{}:  {}\n", m.line, m.column, text));
 		}
 		output.push('\n');
 	}
@@ -602,7 +622,8 @@ pub fn format_matches_with_context(
 			}
 		} else {
 			for m in file_matches {
-				output.push_str(&format!("{}:{}:  {}\n", m.line, m.column, m.text));
+				let text = truncate_match_text(&m.text, 4);
+				output.push_str(&format!("{}:{}:  {}\n", m.line, m.column, text));
 			}
 		}
 		output.push('\n');
@@ -1566,6 +1587,43 @@ const x = 1;
 	fn test_canonical_kind_returns_none_for_unknown() {
 		assert_eq!(canonical_kind("xyzzy", "rust"), None);
 		assert_eq!(canonical_kind("function", "klingon"), None);
+	}
+
+	#[test]
+	fn test_truncate_match_text_passthrough_short() {
+		// Single line and short multiline pass through unchanged.
+		assert_eq!(truncate_match_text("hello", 4), "hello");
+		assert_eq!(truncate_match_text("a\nb\nc", 4), "a\nb\nc");
+		assert_eq!(truncate_match_text("a\nb\nc\nd", 4), "a\nb\nc\nd");
+	}
+
+	#[test]
+	fn test_truncate_match_text_caps_long_body() {
+		let text = "line1\nline2\nline3\nline4\nline5\nline6\nline7";
+		let out = truncate_match_text(text, 4);
+		assert!(out.starts_with("line1\nline2\nline3\nline4\n... ("));
+		assert!(out.contains("3 more lines"));
+		assert!(!out.contains("line5"));
+	}
+
+	#[test]
+	fn test_format_matches_grouped_truncates_long_body() {
+		// A kind-based match might capture an entire impl block. Ensure the
+		// formatter doesn't dump the whole thing.
+		let long = (1..=20)
+			.map(|i| format!("line{}", i))
+			.collect::<Vec<_>>()
+			.join("\n");
+		let matches = vec![GrepMatch {
+			file: "a.rs".to_string(),
+			line: 1,
+			column: 0,
+			text: long,
+		}];
+		let out = format_matches_grouped(&matches);
+		assert!(out.contains("line1"));
+		assert!(out.contains("more lines"));
+		assert!(!out.contains("line20"));
 	}
 
 	#[test]
