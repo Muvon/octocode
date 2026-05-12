@@ -358,6 +358,110 @@ pub fn pattern_info(pattern: &str, language: &str) -> Result<PatternInfo> {
 	dispatch_lang!(language, |lang| pattern_info_with_lang(lang, pattern))
 }
 
+/// Map a common LLM intent word (e.g. "function", "class", "import") to the
+/// canonical tree-sitter node kind name for the given language. Returns None
+/// when no mapping exists. Used as a fallback when an LLM passes a kind name
+/// that doesn't exist in the target grammar (e.g. `function_declaration` in
+/// Python where the grammar uses `function_definition`).
+///
+/// The intent string is normalized: lowercased, leading `$` stripped.
+pub fn canonical_kind(intent: &str, language: &str) -> Option<&'static str> {
+	let key = intent.trim().trim_start_matches('$').to_ascii_lowercase();
+	match (key.as_str(), language) {
+		// ---- function-like ----
+		("function" | "func" | "fn" | "function_declaration", "javascript" | "typescript") => {
+			Some("function_declaration")
+		}
+		("function" | "func" | "fn" | "function_definition", "python") => {
+			Some("function_definition")
+		}
+		("function" | "func" | "fn" | "function_item", "rust") => Some("function_item"),
+		("function" | "func" | "fn" | "function_declaration", "go") => Some("function_declaration"),
+		("function" | "func" | "fn", "java") => Some("method_declaration"),
+		("function" | "func" | "fn" | "function_definition", "cpp") => Some("function_definition"),
+		("function" | "func" | "fn" | "function_definition", "php") => Some("function_definition"),
+		("function" | "func" | "fn" | "method", "ruby") => Some("method"),
+		("function" | "func" | "fn", "lua") => Some("function_declaration"),
+		("function" | "func" | "fn", "bash") => Some("function_definition"),
+
+		// ---- method (distinct from free function on some langs) ----
+		("method" | "method_definition", "javascript" | "typescript") => Some("method_definition"),
+		("method", "go" | "method_declaration") => Some("method_declaration"),
+		("method", "java" | "method_invocation") => Some("method_declaration"),
+
+		// ---- class / struct / trait / interface / impl ----
+		("class" | "class_declaration", "javascript" | "typescript") => Some("class_declaration"),
+		("class" | "class_definition", "python") => Some("class_definition"),
+		("class", "java") => Some("class_declaration"),
+		("class" | "class_specifier", "cpp") => Some("class_specifier"),
+		("class", "ruby") => Some("class"),
+		("class", "php") => Some("class_declaration"),
+
+		("struct" | "struct_item", "rust") => Some("struct_item"),
+		("struct" | "struct_specifier", "cpp") => Some("struct_specifier"),
+		("struct", "go") => Some("struct_type"),
+
+		("trait" | "trait_item", "rust") => Some("trait_item"),
+		("interface" | "interface_declaration", "typescript") => Some("interface_declaration"),
+		("interface", "java") => Some("interface_declaration"),
+		("interface", "go") => Some("interface_type"),
+
+		("impl" | "impl_item", "rust") => Some("impl_item"),
+
+		// ---- import-like ----
+		("import" | "import_statement", "javascript" | "typescript") => Some("import_statement"),
+		("import" | "import_statement", "python") => Some("import_statement"),
+		("from_import" | "import_from" | "import_from_statement", "python") => {
+			Some("import_from_statement")
+		}
+		("import" | "use" | "use_declaration", "rust") => Some("use_declaration"),
+		("import" | "import_declaration", "go") => Some("import_declaration"),
+		("import", "java") => Some("import_declaration"),
+		("import" | "namespace_use", "php") => Some("namespace_use_declaration"),
+
+		// ---- call expressions ----
+		("call" | "call_expression", "javascript" | "typescript") => Some("call_expression"),
+		("call", "python") => Some("call"),
+		("call" | "call_expression", "rust") => Some("call_expression"),
+		("call" | "call_expression", "go") => Some("call_expression"),
+		("call" | "method_invocation", "java") => Some("method_invocation"),
+		("call" | "call_expression", "cpp") => Some("call_expression"),
+		("call", "ruby") => Some("call"),
+
+		// ---- control flow ----
+		("if" | "if_statement" | "conditional", "javascript" | "typescript") => {
+			Some("if_statement")
+		}
+		("if" | "if_statement", "python") => Some("if_statement"),
+		("if" | "if_expression", "rust") => Some("if_expression"),
+		("if" | "if_statement", "go") => Some("if_statement"),
+		("if" | "if_statement", "java" | "cpp") => Some("if_statement"),
+
+		("for" | "loop" | "for_statement", "javascript" | "typescript") => Some("for_statement"),
+		("for" | "for_statement", "python") => Some("for_statement"),
+		("for" | "loop" | "for_expression", "rust") => Some("for_expression"),
+		("for" | "for_statement", "go") => Some("for_statement"),
+		("while" | "while_statement", "javascript" | "typescript" | "python" | "go") => {
+			Some("while_statement")
+		}
+
+		// ---- return / try ----
+		("return" | "return_statement", _) => Some("return_statement"),
+		("try" | "try_statement", "javascript" | "typescript" | "java" | "python") => {
+			Some("try_statement")
+		}
+
+		// ---- assignment / variable declarations ----
+		("variable" | "let" | "const" | "var", "javascript" | "typescript") => {
+			Some("variable_declaration")
+		}
+		("let" | "let_declaration", "rust") => Some("let_declaration"),
+		("variable" | "let" | "let_statement", "go") => Some("var_declaration"),
+
+		_ => None,
+	}
+}
+
 /// Result of rewriting matches in a single file.
 pub struct RewriteResult {
 	pub file: String,
@@ -1090,7 +1194,7 @@ const add = (a: number, b: number): number => a + b;
 const id = <T>(x: T): T => x;
 "#;
 		let matches = search_file("a.ts", source, "($$$PARAMS) => $BODY", "typescript").unwrap();
-		assert!(matches.len() >= 1, "Should match arrow function");
+		assert!(!matches.is_empty(), "Should match arrow function");
 	}
 
 	#[test]
@@ -1226,7 +1330,7 @@ func run() error {
 }
 "#;
 		let matches = search_file("a.go", source, "if err != nil { $$$ }", "go").unwrap();
-		assert!(matches.len() >= 1, "Should match Go error check idiom");
+		assert!(!matches.is_empty(), "Should match Go error check");
 	}
 
 	#[test]
@@ -1372,6 +1476,108 @@ const x = 1;
 	fn test_kind_search_python_class_definition() {
 		let source = "class A:\n    pass\n\nclass B(A):\n    pass\n";
 		let matches = search_file_by_kind("a.py", source, "class_definition", "python").unwrap();
+		assert_eq!(matches.len(), 2);
+	}
+
+	// ===================================================================
+	// canonical_kind — fixes LLM naming-mismatch class outright
+	// ===================================================================
+
+	#[test]
+	fn test_canonical_kind_function_per_language() {
+		// Same LLM intent word should map to the right grammar kind in each lang.
+		assert_eq!(
+			canonical_kind("function", "javascript"),
+			Some("function_declaration")
+		);
+		assert_eq!(
+			canonical_kind("function", "typescript"),
+			Some("function_declaration")
+		);
+		assert_eq!(
+			canonical_kind("function", "python"),
+			Some("function_definition")
+		);
+		assert_eq!(canonical_kind("function", "rust"), Some("function_item"));
+		assert_eq!(
+			canonical_kind("function", "go"),
+			Some("function_declaration")
+		);
+		assert_eq!(
+			canonical_kind("function", "java"),
+			Some("method_declaration")
+		);
+	}
+
+	#[test]
+	fn test_canonical_kind_normalizes_input() {
+		// Lowercases + strips leading $
+		assert_eq!(
+			canonical_kind("Function", "python"),
+			Some("function_definition")
+		);
+		assert_eq!(
+			canonical_kind("$Function", "python"),
+			Some("function_definition")
+		);
+		assert_eq!(canonical_kind("  fn  ", "rust"), Some("function_item"));
+	}
+
+	#[test]
+	fn test_canonical_kind_python_naming_rescue() {
+		// Classic LLM trap: passes JS-style kind in Python — must rescue.
+		assert_eq!(
+			canonical_kind("function_declaration", "python"),
+			None,
+			"Don't pretend a JS kind exists in Python; let strategy 3 try raw first"
+		);
+		// But the canonical 'function' word does map.
+		assert_eq!(
+			canonical_kind("function", "python"),
+			Some("function_definition")
+		);
+	}
+
+	#[test]
+	fn test_canonical_kind_imports_per_language() {
+		assert_eq!(
+			canonical_kind("import", "javascript"),
+			Some("import_statement")
+		);
+		assert_eq!(canonical_kind("import", "python"), Some("import_statement"));
+		assert_eq!(canonical_kind("import", "rust"), Some("use_declaration"));
+		assert_eq!(canonical_kind("import", "go"), Some("import_declaration"));
+	}
+
+	#[test]
+	fn test_canonical_kind_class_per_language() {
+		assert_eq!(
+			canonical_kind("class", "javascript"),
+			Some("class_declaration")
+		);
+		assert_eq!(canonical_kind("class", "python"), Some("class_definition"));
+		assert_eq!(canonical_kind("class", "cpp"), Some("class_specifier"));
+		assert_eq!(canonical_kind("class", "rust"), None); // Rust has struct/trait, not class
+		assert_eq!(canonical_kind("struct", "rust"), Some("struct_item"));
+		assert_eq!(canonical_kind("trait", "rust"), Some("trait_item"));
+	}
+
+	#[test]
+	fn test_canonical_kind_returns_none_for_unknown() {
+		assert_eq!(canonical_kind("xyzzy", "rust"), None);
+		assert_eq!(canonical_kind("function", "klingon"), None);
+	}
+
+	#[test]
+	fn test_canonical_kind_resolves_python_via_canonical() {
+		// End-to-end: LLM passes 'function' as a kind name in Python.
+		// Raw KindMatcher fails ('function' isn't a Python AST kind).
+		// canonical_kind maps it to 'function_definition', which works.
+		let source = "def foo():\n    pass\n\ndef bar():\n    pass\n";
+		let raw = search_file_by_kind("a.py", source, "function", "python");
+		assert!(raw.is_err(), "Raw 'function' is not a Python kind");
+		let canonical = canonical_kind("function", "python").unwrap();
+		let matches = search_file_by_kind("a.py", source, canonical, "python").unwrap();
 		assert_eq!(matches.len(), 2);
 	}
 }
