@@ -402,7 +402,7 @@ impl McpServer {
 	// --- Structural search tool ---
 
 	#[tool(
-		description = "Search or rewrite code by AST structure using ast-grep pattern syntax. Finds code matching structural patterns like '$FUNC.unwrap()', 'if let Some($X) = $Y { $$$ }'. Optionally rewrite matches using a template with metavariable substitution. Complements semantic_search: use this for structural/syntactic patterns, semantic_search for meaning-based queries."
+		description = "Search or rewrite code by AST structure using ast-grep pattern syntax. Finds code matching structural patterns like '$FUNC.unwrap()', 'if let Some($X) = $Y { $$$ }'. The pattern argument accepts THREE shapes — the tool tries them in order automatically so an LLM can pass whichever it knows: (1) ast-grep pattern with metavariables ($X, $$$ARGS); (2) bare tree-sitter node kind name like 'function_declaration' or 'call_expression' to match all nodes of that kind; (3) an exact code snippet to match literally. When a pattern returns zero matches the tool automatically retries with relaxed strictness and language-aware context wrapping (resolves Go type-conversion ambiguity, class fields parsing as assignments, JSON key/value fragments), and emits a diagnostic showing how the pattern was parsed and what to try next. Optionally rewrite matches using a template with metavariable substitution. Complements semantic_search: use this for structural/syntactic patterns, semantic_search for meaning-based queries."
 	)]
 	async fn structural_search(
 		&self,
@@ -458,54 +458,38 @@ impl McpServer {
 			);
 		}
 
-		let mut all_matches = Vec::new();
-		let mut source_map = std::collections::HashMap::new();
+		let outcome = smart_search_all_files(
+			&files,
+			&current_dir,
+			&params.pattern,
+			&params.language,
+			max_results,
+			context > 0,
+		);
 
-		for path in &files {
-			if all_matches.len() >= max_results {
-				break;
-			}
-			let source = match std::fs::read_to_string(path) {
-				Ok(s) => s,
-				Err(_) => continue,
-			};
-			let display_path = path
-				.strip_prefix(&current_dir)
-				.unwrap_or(path)
-				.to_string_lossy()
-				.to_string();
-			match crate::grep::search_file(
-				&display_path,
-				&source,
-				&params.pattern,
-				&params.language,
-			) {
-				Ok(matches) => {
-					if context > 0 && !matches.is_empty() {
-						source_map.insert(display_path.clone(), source);
-					}
-					all_matches.extend(matches);
-				}
-				Err(_) => continue,
-			}
+		if outcome.matches.is_empty() {
+			return Ok(outcome
+				.diagnostic
+				.unwrap_or_else(|| "No matches found.".to_string()));
 		}
-
-		if all_matches.is_empty() {
-			return Ok("No matches found.".to_string());
-		}
-
-		all_matches.truncate(max_results);
 
 		let output = if context > 0 {
-			crate::grep::format_matches_with_context(&all_matches, &source_map, context)
+			crate::grep::format_matches_with_context(&outcome.matches, &outcome.source_map, context)
 		} else {
-			crate::grep::format_matches_grouped(&all_matches)
+			crate::grep::format_matches_grouped(&outcome.matches)
 		};
 
+		let header = outcome
+			.note
+			.as_deref()
+			.map(|n| format!("[fallback: {}]\n", n))
+			.unwrap_or_default();
+
 		Ok(format!(
-			"{}\n\n{} matches found.",
+			"{}{}\n\n{} matches found.",
+			header,
 			output,
-			all_matches.len()
+			outcome.matches.len()
 		))
 	}
 }
@@ -837,6 +821,348 @@ impl McpServer {
 			});
 		}
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Smart structural-search orchestration
+// ---------------------------------------------------------------------------
+
+/// Result of a multi-strategy structural search across a file list.
+struct SmartSearchOutcome {
+	matches: Vec<crate::grep::GrepMatch>,
+	source_map: std::collections::HashMap<String, String>,
+	/// When a non-default strategy yielded the matches, describes which one.
+	note: Option<String>,
+	/// Human-readable explanation of why zero matches were found. Only set when
+	/// `matches` is empty; intended to guide an LLM toward a better next attempt.
+	diagnostic: Option<String>,
+}
+
+/// Run the user pattern against `files` using a chain of strategies. Each step
+/// fires only when the previous one produced zero matches; the first step that
+/// yields anything wins. On total failure the result carries a diagnostic
+/// describing how the pattern was parsed and what alternative shapes to try.
+///
+/// Strategy order (designed for the way LLMs commonly mis-pattern):
+///   1. Smart-strictness ast-grep pattern (the default)
+///   2. Relaxed-strictness ast-grep pattern (ignores trivia/comments)
+///   3. KindMatcher — treat the pattern as a tree-sitter node kind
+///   4. Language-aware contextual fallback for known parsing traps
+fn smart_search_all_files(
+	files: &[std::path::PathBuf],
+	current_dir: &std::path::Path,
+	pattern: &str,
+	language: &str,
+	max_results: usize,
+	want_source: bool,
+) -> SmartSearchOutcome {
+	// Strategy 1 — default pattern + Smart strictness
+	let r1 = run_strategy_pattern(
+		files,
+		current_dir,
+		pattern,
+		language,
+		crate::grep::MatchStrictness::Smart,
+		max_results,
+		want_source,
+	);
+	if !r1.0.is_empty() {
+		return SmartSearchOutcome {
+			matches: r1.0,
+			source_map: r1.1,
+			note: None,
+			diagnostic: None,
+		};
+	}
+
+	// Strategy 2 — same pattern, Relaxed strictness (skips trivia + comments)
+	let r2 = run_strategy_pattern(
+		files,
+		current_dir,
+		pattern,
+		language,
+		crate::grep::MatchStrictness::Relaxed,
+		max_results,
+		want_source,
+	);
+	if !r2.0.is_empty() {
+		return SmartSearchOutcome {
+			matches: r2.0,
+			source_map: r2.1,
+			note: Some("relaxed strictness (default Smart matched nothing)".to_string()),
+			diagnostic: None,
+		};
+	}
+
+	// Strategy 3 — KindMatcher (treat pattern as tree-sitter node kind)
+	let r3 = run_strategy_kind(
+		files,
+		current_dir,
+		pattern,
+		language,
+		max_results,
+		want_source,
+	);
+	if !r3.0.is_empty() {
+		return SmartSearchOutcome {
+			matches: r3.0,
+			source_map: r3.1,
+			note: Some(format!("interpreted '{}' as AST node kind", pattern)),
+			diagnostic: None,
+		};
+	}
+
+	// Strategy 4 — language-aware contextual fallback
+	for (desc, selector, context_src) in auto_contexts(language, pattern) {
+		let r4 = run_strategy_contextual(
+			files,
+			current_dir,
+			&context_src,
+			selector,
+			language,
+			max_results,
+			want_source,
+		);
+		if !r4.0.is_empty() {
+			return SmartSearchOutcome {
+				matches: r4.0,
+				source_map: r4.1,
+				note: Some(format!("auto-context wrapping ({})", desc)),
+				diagnostic: None,
+			};
+		}
+	}
+
+	// All strategies exhausted — build diagnostic
+	SmartSearchOutcome {
+		matches: Vec::new(),
+		source_map: std::collections::HashMap::new(),
+		note: None,
+		diagnostic: Some(build_diagnostic(pattern, language)),
+	}
+}
+
+type StrategyOutput = (
+	Vec<crate::grep::GrepMatch>,
+	std::collections::HashMap<String, String>,
+);
+
+fn run_strategy_pattern(
+	files: &[std::path::PathBuf],
+	current_dir: &std::path::Path,
+	pattern: &str,
+	language: &str,
+	strictness: crate::grep::MatchStrictness,
+	max_results: usize,
+	want_source: bool,
+) -> StrategyOutput {
+	let mut matches = Vec::new();
+	let mut source_map = std::collections::HashMap::new();
+	for path in files {
+		if matches.len() >= max_results {
+			break;
+		}
+		let source = match std::fs::read_to_string(path) {
+			Ok(s) => s,
+			Err(_) => continue,
+		};
+		let display_path = path
+			.strip_prefix(current_dir)
+			.unwrap_or(path)
+			.to_string_lossy()
+			.to_string();
+		if let Ok(found) = crate::grep::search_file_strict(
+			&display_path,
+			&source,
+			pattern,
+			language,
+			strictness.clone(),
+		) {
+			if !found.is_empty() {
+				if want_source {
+					source_map.insert(display_path.clone(), source);
+				}
+				matches.extend(found);
+			}
+		}
+	}
+	matches.truncate(max_results);
+	(matches, source_map)
+}
+
+fn run_strategy_kind(
+	files: &[std::path::PathBuf],
+	current_dir: &std::path::Path,
+	kind: &str,
+	language: &str,
+	max_results: usize,
+	want_source: bool,
+) -> StrategyOutput {
+	let mut matches = Vec::new();
+	let mut source_map = std::collections::HashMap::new();
+	for path in files {
+		if matches.len() >= max_results {
+			break;
+		}
+		let source = match std::fs::read_to_string(path) {
+			Ok(s) => s,
+			Err(_) => continue,
+		};
+		let display_path = path
+			.strip_prefix(current_dir)
+			.unwrap_or(path)
+			.to_string_lossy()
+			.to_string();
+		if let Ok(found) = crate::grep::search_file_by_kind(&display_path, &source, kind, language)
+		{
+			if !found.is_empty() {
+				if want_source {
+					source_map.insert(display_path.clone(), source);
+				}
+				matches.extend(found);
+			}
+		}
+	}
+	matches.truncate(max_results);
+	(matches, source_map)
+}
+
+fn run_strategy_contextual(
+	files: &[std::path::PathBuf],
+	current_dir: &std::path::Path,
+	context_src: &str,
+	selector: &str,
+	language: &str,
+	max_results: usize,
+	want_source: bool,
+) -> StrategyOutput {
+	let mut matches = Vec::new();
+	let mut source_map = std::collections::HashMap::new();
+	for path in files {
+		if matches.len() >= max_results {
+			break;
+		}
+		let source = match std::fs::read_to_string(path) {
+			Ok(s) => s,
+			Err(_) => continue,
+		};
+		let display_path = path
+			.strip_prefix(current_dir)
+			.unwrap_or(path)
+			.to_string_lossy()
+			.to_string();
+		if let Ok(found) = crate::grep::search_file_contextual(
+			&display_path,
+			&source,
+			context_src,
+			selector,
+			language,
+		) {
+			if !found.is_empty() {
+				if want_source {
+					source_map.insert(display_path.clone(), source);
+				}
+				matches.extend(found);
+			}
+		}
+	}
+	matches.truncate(max_results);
+	(matches, source_map)
+}
+
+/// Per-language scaffolds for the contextual fallback. Each entry returns
+/// (description, selector, full-context-source) where `pattern` is embedded
+/// at the cursor position so the parser sees it in an unambiguous context.
+///
+/// These cover the documented parsing traps:
+///   • Go — `fmt.Println($A)` parses as type_conversion unless wrapped in a func body
+///   • TS/JS — `name = value` parses as assignment unless wrapped in a class body
+///   • JSON — `"key": $V` doesn't parse standalone; needs an object wrapper
+fn auto_contexts(language: &str, pattern: &str) -> Vec<(&'static str, &'static str, String)> {
+	match language {
+		"go" => vec![(
+			"Go func body, call_expression selector",
+			"call_expression",
+			format!("package _\nfunc _() {{ {} }}", pattern),
+		)],
+		"typescript" | "javascript" => vec![
+			(
+				"class body, field_definition selector",
+				"field_definition",
+				format!("class _ {{ {} }}", pattern),
+			),
+			(
+				"class body, method_definition selector",
+				"method_definition",
+				format!("class _ {{ {} }}", pattern),
+			),
+		],
+		"json" => vec![(
+			"object body, pair selector",
+			"pair",
+			format!("{{ {} }}", pattern),
+		)],
+		_ => Vec::new(),
+	}
+}
+
+/// Produce a structured diagnostic when no strategy matched. The message tells
+/// the LLM how the pattern was parsed, what was tried, and what to try next.
+fn build_diagnostic(pattern: &str, language: &str) -> String {
+	let mut out = String::new();
+	out.push_str(&format!(
+		"No matches for pattern: {}\nLanguage: {}\n",
+		pattern, language
+	));
+
+	match crate::grep::pattern_info(pattern, language) {
+		Ok(info) => {
+			out.push_str("\nPattern parsed as:\n");
+			out.push_str(&format!(
+				"  root_kind = {}\n",
+				info.root_kind.as_deref().unwrap_or("(bare metavariable)")
+			));
+			out.push_str(&format!("  has_parse_error = {}\n", info.has_error));
+			if info.defined_vars.is_empty() {
+				out.push_str("  metavariables = (none)\n");
+			} else {
+				out.push_str(&format!(
+					"  metavariables = {}\n",
+					info.defined_vars
+						.iter()
+						.map(|v| format!("${}", v))
+						.collect::<Vec<_>>()
+						.join(", ")
+				));
+			}
+		}
+		Err(e) => {
+			out.push_str(&format!("\nPattern does not parse: {}\n", e));
+		}
+	}
+
+	out.push_str("\nStrategies tried (all returned 0 matches):\n");
+	out.push_str("  - ast-grep pattern with Smart strictness\n");
+	out.push_str("  - ast-grep pattern with Relaxed strictness\n");
+	out.push_str("  - KindMatcher (pattern as AST node kind name)\n");
+	if !auto_contexts(language, pattern).is_empty() {
+		out.push_str("  - language-aware context wrapping\n");
+	}
+
+	out.push_str("\nSuggestions for the next attempt:\n");
+	out.push_str(
+		"  • Make sure the pattern is valid standalone code in this language\n  \
+		   (e.g. wrap a statement-level pattern in a function body before retrying).\n",
+	);
+	out.push_str(
+		"  • If matching by node type, pass a tree-sitter kind name like\n  \
+		   'function_declaration', 'call_expression', 'import_statement'.\n",
+	);
+	out.push_str(
+		"  • For meaning-based lookups (\"find error handling\", \"find auth checks\")\n  \
+		   prefer the semantic_search tool over structural patterns.\n",
+	);
+	out
 }
 
 // ---------------------------------------------------------------------------
