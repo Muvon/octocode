@@ -116,7 +116,9 @@ pub struct GraphRagParams {
 
 #[derive(Debug, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct StructuralSearchParams {
-	/// AST pattern using ast-grep syntax (e.g. '$FUNC.unwrap()', 'if err != nil { $$$ }')
+	/// AST pattern, kind name, or literal snippet. `$X` = single node, `$$$` = sequence.
+	/// Examples: `$X.unwrap()`, `if err != nil { $$$ }`, `function_item`, `import_statement`.
+	/// Pattern must be valid standalone code in the target language.
 	pub pattern: String,
 	/// Language to search (required: rust, javascript, typescript, python, go, java, cpp, php, ruby, lua, bash, css, json)
 	pub language: String,
@@ -402,7 +404,21 @@ impl McpServer {
 	// --- Structural search tool ---
 
 	#[tool(
-		description = "Search or rewrite code by AST structure using ast-grep pattern syntax. Finds code matching structural patterns like '$FUNC.unwrap()', 'if let Some($X) = $Y { $$$ }'. The pattern argument accepts THREE shapes — the tool tries them in order automatically so an LLM can pass whichever it knows: (1) ast-grep pattern with metavariables ($X, $$$ARGS); (2) bare tree-sitter node kind name like 'function_declaration' or 'call_expression' to match all nodes of that kind; (3) an exact code snippet to match literally. When a pattern returns zero matches the tool automatically retries with relaxed strictness and language-aware context wrapping (resolves Go type-conversion ambiguity, class fields parsing as assignments, JSON key/value fragments), and emits a diagnostic showing how the pattern was parsed and what to try next. Optionally rewrite matches using a template with metavariable substitution. Complements semantic_search: use this for structural/syntactic patterns, semantic_search for meaning-based queries."
+		description = "Search or rewrite code by AST structure. Pattern accepts three shapes (tried in order): \
+		(1) ast-grep pattern with metavariables — `$X` matches one node, `$$$` matches a sequence; \
+		(2) a bare tree-sitter kind name like `function_item`, `call_expression`, `import_statement` to match all nodes of that kind; \
+		(3) a literal code snippet. \
+		\n\nCommon LLM traps to avoid: \
+		(a) Decorators/attributes are children of the item — `pub struct $N { $$$ }` will NOT match `#[derive(...)] pub struct ...`. Either include the decorator (`#[derive($$$)] pub struct $N { $$$ }`) or use the bare kind (`struct_item`). \
+		(b) Method patterns need a receiver — write `$X.map_err($$$)`, not `.map_err($$$)`. \
+		(c) Generic arity is exact — `Result<$T>` matches one-arg Results only; use `Result<$_, $_>` for two args. \
+		(d) Pattern must be valid standalone code in the language — wrap type-expressions or fragments in code (e.g. for Rust types: `Arc<Mutex<$T>>` is invalid alone — use kind `generic_type` instead). \
+		\n\nLanguage tips: \
+		Rust kinds: function_item, struct_item, impl_item, enum_item, trait_item, use_declaration, call_expression, macro_invocation, match_expression, generic_type. \
+		JS/TS kinds: function_declaration, class_declaration, method_definition, import_statement, call_expression. \
+		Python kinds: function_definition, class_definition, import_statement, import_from_statement, decorated_definition. \
+		Go kinds: function_declaration, method_declaration, type_declaration, call_expression, if_statement. \
+		\n\nWhen a pattern returns zero matches the tool auto-retries with relaxed strictness and language-aware context wrapping, then emits a short diagnostic. Use `rewrite` to apply a template with metavariable substitution. Use `semantic_search` for meaning-based lookups instead of this tool."
 	)]
 	async fn structural_search(
 		&self,
@@ -840,14 +856,17 @@ struct SmartSearchOutcome {
 
 /// Run the user pattern against `files` using a chain of strategies. Each step
 /// fires only when the previous one produced zero matches; the first step that
-/// yields anything wins. On total failure the result carries a diagnostic
-/// describing how the pattern was parsed and what alternative shapes to try.
+/// yields anything wins. On total failure the result carries a short diagnostic.
 ///
-/// Strategy order (designed for the way LLMs commonly mis-pattern):
+/// Strategy order (tuned against LLM mis-pattern modes observed in practice):
 ///   1. Smart-strictness ast-grep pattern (the default)
-///   2. Relaxed-strictness ast-grep pattern (ignores trivia/comments)
-///   3. KindMatcher — treat the pattern as a tree-sitter node kind
-///   4. Language-aware contextual fallback for known parsing traps
+///   2. Relaxed-strictness pattern — only when root_kind is None or pattern has
+///      no item-keyword (avoids false positives like `pub mod` matching
+///      `pub struct $N { $$$ }`)
+///   3. Item-keyword broadening — `pub struct …` → `struct_item` kind, etc.
+///   4. KindMatcher with raw pattern
+///   5. Canonical kind mapping (LLM intent dictionary)
+///   6. Language-aware contextual fallback (Rust types, Go calls, TS fields, JSON pairs)
 fn smart_search_all_files(
 	files: &[std::path::PathBuf],
 	current_dir: &std::path::Path,
@@ -856,10 +875,11 @@ fn smart_search_all_files(
 	max_results: usize,
 	want_source: bool,
 ) -> SmartSearchOutcome {
-	// Capture metavariable names once for downstream relevance reranking
-	// (e.g. pattern `$User.save()` boosts files whose path contains "user").
-	let metavars: Vec<String> = crate::grep::pattern_info(pattern, language)
-		.map(|info| info.defined_vars)
+	// Parse the pattern once — needed for diagnostics and to gate Relaxed.
+	let info = crate::grep::pattern_info(pattern, language).ok();
+	let metavars: Vec<String> = info
+		.as_ref()
+		.map(|i| i.defined_vars.clone())
 		.unwrap_or_default();
 
 	let finalize = |mut out: StrategyOutput, note: Option<String>| -> SmartSearchOutcome {
@@ -887,24 +907,50 @@ fn smart_search_all_files(
 		return finalize(r1, None);
 	}
 
-	// Strategy 2 — same pattern, Relaxed strictness (skips trivia + comments)
-	let r2 = run_strategy_pattern(
-		files,
-		current_dir,
-		pattern,
-		language,
-		crate::grep::MatchStrictness::Relaxed,
-		max_results,
-		want_source,
-	);
-	if !r2.0.is_empty() {
-		return finalize(
-			r2,
-			Some("relaxed strictness (default Smart matched nothing)".to_string()),
+	// Strategy 2 — Relaxed strictness, but ONLY when the pattern is
+	// kind-ambiguous. For typed item patterns (struct_item, function_item, …)
+	// Relaxed has been observed to leak false positives (e.g. matching
+	// `pub mod foo;` against `pub struct $N { $$$ }`), so we skip it there.
+	let relaxed_safe = info
+		.as_ref()
+		.map(|i| i.root_kind.is_none() && !i.has_error)
+		.unwrap_or(false);
+	if relaxed_safe {
+		let r2 = run_strategy_pattern(
+			files,
+			current_dir,
+			pattern,
+			language,
+			crate::grep::MatchStrictness::Relaxed,
+			max_results,
+			want_source,
 		);
+		if !r2.0.is_empty() {
+			return finalize(
+				r2,
+				Some("relaxed strictness (default Smart matched nothing)".to_string()),
+			);
+		}
 	}
 
-	// Strategy 3 — KindMatcher with the raw pattern
+	// Strategy 3 — Item-keyword broadening. The single most common LLM trap
+	// is writing `pub struct $N { $$$ }` for code that's `#[derive(...)] pub struct ...`.
+	// Smart can't match (decorator is a child of struct_item), but the *intent*
+	// is clearly "find structs". Fall back to the corresponding kind matcher.
+	if let Some((kind, desc)) = item_keyword_kind(pattern, language) {
+		let r3a = run_strategy_kind(files, current_dir, kind, language, max_results, want_source);
+		if !r3a.0.is_empty() {
+			return finalize(
+				r3a,
+				Some(format!(
+					"broadened to all {} (your pattern with metavariables didn't match — likely decorators or signature shape; this returns ALL {})",
+					desc, kind
+				)),
+			);
+		}
+	}
+
+	// Strategy 4 — KindMatcher with the raw pattern (when LLM passed a kind name)
 	let r3 = run_strategy_kind(
 		files,
 		current_dir,
@@ -920,8 +966,7 @@ fn smart_search_all_files(
 		);
 	}
 
-	// Strategy 3b — canonical kind mapping (rescues LLM naming mismatches
-	// like `function_declaration` in Python where grammar uses `function_definition`).
+	// Strategy 5 — canonical kind mapping (rescues LLM naming mismatches)
 	if let Some(canonical) = crate::grep::canonical_kind(pattern, language) {
 		if canonical != pattern {
 			let r3b = run_strategy_kind(
@@ -944,7 +989,7 @@ fn smart_search_all_files(
 		}
 	}
 
-	// Strategy 4 — language-aware contextual fallback
+	// Strategy 6 — language-aware contextual fallback
 	for (desc, selector, context_src) in auto_contexts(language, pattern) {
 		let r4 = run_strategy_contextual(
 			files,
@@ -1125,6 +1170,25 @@ fn run_strategy_contextual(
 ///   • JSON — `"key": $V` doesn't parse standalone; needs an object wrapper
 fn auto_contexts(language: &str, pattern: &str) -> Vec<(&'static str, &'static str, String)> {
 	match language {
+		"rust" => {
+			// Rust type-expressions like `Arc<Mutex<$T>>` don't parse standalone
+			// (top-level isn't a type). Wrap as a type alias to disambiguate.
+			let looks_like_type = pattern.contains('<')
+				&& pattern.contains('>')
+				&& !pattern.contains('{')
+				&& !pattern.contains(';')
+				&& !pattern.contains(" fn ")
+				&& !pattern.contains("fn ");
+			if looks_like_type {
+				vec![(
+					"Rust type alias context, generic_type selector",
+					"generic_type",
+					format!("type _ = {};", pattern),
+				)]
+			} else {
+				Vec::new()
+			}
+		}
 		"go" => vec![(
 			"Go func body, call_expression selector",
 			"call_expression",
@@ -1151,179 +1215,156 @@ fn auto_contexts(language: &str, pattern: &str) -> Vec<(&'static str, &'static s
 	}
 }
 
-/// Produce a structured diagnostic when no strategy matched. The message tells
-/// the LLM how the pattern was parsed, what was tried, and what to try next.
+/// If `pattern` starts with a recognized item-level keyword in `language`,
+/// return the corresponding tree-sitter kind plus a human label. Used to
+/// broaden a failed structural pattern to "find all items of this kind",
+/// rescuing the common case where the LLM omitted attributes / return types
+/// / signature shape that the real source has.
+fn item_keyword_kind(pattern: &str, language: &str) -> Option<(&'static str, &'static str)> {
+	let trimmed = pattern.trim_start();
+	let starts = |kw: &str| {
+		trimmed.starts_with(kw)
+			&& trimmed[kw.len()..]
+				.chars()
+				.next()
+				.map(|c| c.is_whitespace())
+				.unwrap_or(false)
+	};
+	match language {
+		"rust" => {
+			if starts("pub struct") || starts("struct") {
+				Some(("struct_item", "struct definitions"))
+			} else if starts("pub enum") || starts("enum") {
+				Some(("enum_item", "enum definitions"))
+			} else if starts("pub trait") || starts("trait") {
+				Some(("trait_item", "trait definitions"))
+			} else if starts("impl") {
+				Some(("impl_item", "impl blocks"))
+			} else if starts("pub fn")
+				|| starts("pub async fn")
+				|| starts("async fn")
+				|| starts("fn")
+				|| starts("pub const fn")
+				|| starts("const fn")
+				|| starts("pub unsafe fn")
+				|| starts("unsafe fn")
+			{
+				Some(("function_item", "function definitions"))
+			} else if starts("pub use") || starts("use") {
+				Some(("use_declaration", "use imports"))
+			} else if starts("pub mod") || starts("mod") {
+				Some(("mod_item", "module declarations"))
+			} else if starts("pub type") || starts("type") {
+				Some(("type_item", "type aliases"))
+			} else {
+				None
+			}
+		}
+		"javascript" | "typescript" => {
+			if starts("class") || starts("export class") {
+				Some(("class_declaration", "class declarations"))
+			} else if starts("function") || starts("async function") || starts("export function") {
+				Some(("function_declaration", "function declarations"))
+			} else if starts("interface") || starts("export interface") {
+				Some(("interface_declaration", "interface declarations"))
+			} else if starts("import") {
+				Some(("import_statement", "import statements"))
+			} else {
+				None
+			}
+		}
+		"python" => {
+			if starts("def") || starts("async def") {
+				Some(("function_definition", "function definitions"))
+			} else if starts("class") {
+				Some(("class_definition", "class definitions"))
+			} else if starts("from") {
+				Some(("import_from_statement", "from-imports"))
+			} else if starts("import") {
+				Some(("import_statement", "imports"))
+			} else if starts("@") {
+				Some(("decorated_definition", "decorated definitions"))
+			} else {
+				None
+			}
+		}
+		"go" => {
+			if starts("func") {
+				Some(("function_declaration", "function declarations"))
+			} else if starts("type") {
+				Some(("type_declaration", "type declarations"))
+			} else if starts("import") {
+				Some(("import_declaration", "import declarations"))
+			} else {
+				None
+			}
+		}
+		_ => None,
+	}
+}
+
+/// Short diagnostic for when no strategy matched. Just the signals the LLM
+/// needs to retry — parsed kind, parse-error flag, metavars, and one or two
+/// targeted hints. Worked examples and language tips live in the tool
+/// description (read once), not duplicated per failure.
 fn build_diagnostic(pattern: &str, language: &str) -> String {
 	let mut out = String::new();
-	out.push_str(&format!(
-		"No matches for pattern: {}\nLanguage: {}\n",
-		pattern, language
-	));
+	out.push_str(&format!("No matches: {}\n", pattern));
 
 	match crate::grep::pattern_info(pattern, language) {
 		Ok(info) => {
-			out.push_str("\nPattern parsed as:\n");
-			out.push_str(&format!(
-				"  root_kind = {}\n",
-				info.root_kind.as_deref().unwrap_or("(bare metavariable)")
-			));
-			out.push_str(&format!("  has_parse_error = {}\n", info.has_error));
-			if info.defined_vars.is_empty() {
-				out.push_str("  metavariables = (none)\n");
+			let kind = info.root_kind.as_deref().unwrap_or("(bare $metavar)");
+			let vars = if info.defined_vars.is_empty() {
+				"none".to_string()
 			} else {
+				info.defined_vars
+					.iter()
+					.map(|v| format!("${}", v))
+					.collect::<Vec<_>>()
+					.join(",")
+			};
+			out.push_str(&format!(
+				"Parsed: kind={}, parse_error={}, metavars={}\n",
+				kind, info.has_error, vars
+			));
+
+			// One-shot retargeted hint, chosen by what we observed.
+			if info.has_error {
 				out.push_str(&format!(
-					"  metavariables = {}\n",
-					info.defined_vars
-						.iter()
-						.map(|v| format!("${}", v))
-						.collect::<Vec<_>>()
-						.join(", ")
+					"Hint: pattern doesn't parse as standalone {}. \
+					   For type expressions try kind 'generic_type'; for code fragments \
+					   wrap in a valid context. See tool description for shapes.\n",
+					language
 				));
+			} else if let Some((kind_name, label)) = item_keyword_kind(pattern, language) {
+				out.push_str(&format!(
+					"Hint: for finding all {} regardless of decorators/signature, \
+					   pass `{}` as the pattern (a tree-sitter kind name).\n",
+					label, kind_name
+				));
+			} else if let Some(canonical) = crate::grep::canonical_kind(pattern, language) {
+				if canonical != pattern {
+					out.push_str(&format!(
+						"Hint: canonical {} kind for this intent is '{}'.\n",
+						language, canonical
+					));
+				}
+			} else {
+				out.push_str(
+					"Hint: see tool description for valid pattern shapes per language. \
+					   For meaning-based lookups, use semantic_search.\n",
+				);
 			}
 		}
 		Err(e) => {
-			out.push_str(&format!("\nPattern does not parse: {}\n", e));
+			out.push_str(&format!("Parse error: {}\n", e));
+			out.push_str(
+				"Hint: pattern must be syntactically valid in the target language. \
+				   See tool description for valid shapes.\n",
+			);
 		}
 	}
-
-	out.push_str("\nStrategies tried (all returned 0 matches):\n");
-	out.push_str("  - ast-grep pattern with Smart strictness\n");
-	out.push_str("  - ast-grep pattern with Relaxed strictness\n");
-	out.push_str("  - KindMatcher (pattern as AST node kind name)\n");
-	if let Some(canonical) = crate::grep::canonical_kind(pattern, language) {
-		if canonical != pattern {
-			out.push_str(&format!(
-				"  - KindMatcher with canonical kind '{}'\n",
-				canonical
-			));
-		}
-	}
-	if !auto_contexts(language, pattern).is_empty() {
-		out.push_str("  - language-aware context wrapping\n");
-	}
-
-	// Worked examples: the strongest single LLM-correction signal in the
-	// literature (Structural-Code-Search paper, +12 F1 on F1=33→45).
-	let examples = worked_examples(language);
-	if !examples.is_empty() {
-		out.push_str(&format!(
-			"\nKnown-good {} pattern shapes (copy + adapt):\n",
-			language
-		));
-		for (pat, desc) in examples {
-			out.push_str(&format!("  - {}\n    {}\n", pat, desc));
-		}
-	}
-
-	out.push_str("\nSuggestions for the next attempt:\n");
-	if let Some(canonical) = crate::grep::canonical_kind(pattern, language) {
-		if canonical != pattern {
-			out.push_str(&format!(
-				"  • In {}, the canonical kind for that intent is '{}' — \
-				   try it directly.\n",
-				language, canonical
-			));
-		}
-	}
-	out.push_str(
-		"  • If matching code shape, write the pattern as valid standalone code\n  \
-		   in this language (wrap statements in a function body if needed).\n",
-	);
-	out.push_str(
-		"  • If matching by node type, pass a tree-sitter kind name (above examples\n  \
-		   show typical shapes).\n",
-	);
-	out.push_str(
-		"  • For meaning-based lookups (\"find error handling\", \"find auth checks\")\n  \
-		   prefer the semantic_search tool over structural patterns.\n",
-	);
 	out
-}
-
-/// A small catalog of high-coverage example patterns per language. Inlined
-/// into the zero-match diagnostic so the LLM can rewrite its next attempt
-/// against a known-parsing shape rather than guess. Validated against the
-/// grammars we link in `define_ast_grep_lang!`.
-fn worked_examples(language: &str) -> Vec<(&'static str, &'static str)> {
-	match language {
-		"rust" => vec![
-			("$X.unwrap()", "any unwrap() call on any expression"),
-			("fn $NAME($$$ARGS) { $$$ }", "any function declaration"),
-			("if let Some($X) = $Y { $$$ }", "if-let-Some binding"),
-			("impl $T for $S { $$$ }", "trait implementations"),
-			("use $PATH;", "use-imports (kind: use_declaration)"),
-		],
-		"javascript" => vec![
-			("console.$M($$$)", "any console method call"),
-			("function $NAME($$$) { $$$ }", "function declarations"),
-			("($$$PARAMS) => $BODY", "arrow functions"),
-			("import { $$$ } from $SRC", "named ES imports"),
-			("try { $$$ } catch ($E) { $$$ }", "try/catch blocks"),
-		],
-		"typescript" => vec![
-			("async function $N($$$) { $$$ }", "async functions"),
-			("interface $NAME { $$$ }", "interface declarations"),
-			("import { $$$ } from $SRC", "named ES imports"),
-			(
-				"class $C { $NAME: $TYPE }",
-				"class members (use selector 'public_field_definition' if direct pattern misses)",
-			),
-		],
-		"python" => vec![
-			(
-				"def $NAME($$$): $$$",
-				"function definitions (kind: function_definition)",
-			),
-			(
-				"class $NAME: $$$",
-				"class definitions (kind: class_definition)",
-			),
-			("from $MOD import $$$", "from-imports"),
-			("@$DECO", "decorators (kind: decorator)"),
-		],
-		"go" => vec![
-			("if err != nil { $$$ }", "the err-check idiom"),
-			(
-				"func $N($$$) $RET { $$$ }",
-				"function declarations (kind: function_declaration)",
-			),
-			(
-				"$X.$M($$$)",
-				"method-style calls (Go grammar prefers contextual selector 'call_expression')",
-			),
-		],
-		"java" => vec![
-			(
-				"public $RET $NAME($$$) { $$$ }",
-				"public method declarations",
-			),
-			("$O.$M($$$)", "method invocations (kind: method_invocation)"),
-			("import $PKG;", "imports (kind: import_declaration)"),
-		],
-		"cpp" => vec![
-			(
-				"$RET $NAME($$$) { $$$ }",
-				"function definitions (kind: function_definition)",
-			),
-			("class $NAME { $$$ }", "class specifiers"),
-		],
-		"ruby" => vec![
-			("def $NAME($$$); $$$; end", "method definitions"),
-			(
-				"$X.each do |$P| $$$ end",
-				"each-with-block (kind: do_block)",
-			),
-		],
-		"php" => vec![
-			("function $NAME($$$) { $$$ }", "function definitions"),
-			("use $NS;", "namespace uses"),
-		],
-		"json" => vec![(
-			"\"$KEY\": $VAL",
-			"object pairs (use selector 'pair' when direct pattern fails)",
-		)],
-		_ => vec![],
-	}
 }
 
 // ---------------------------------------------------------------------------
