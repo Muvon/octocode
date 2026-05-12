@@ -856,6 +856,23 @@ fn smart_search_all_files(
 	max_results: usize,
 	want_source: bool,
 ) -> SmartSearchOutcome {
+	// Capture metavariable names once for downstream relevance reranking
+	// (e.g. pattern `$User.save()` boosts files whose path contains "user").
+	let metavars: Vec<String> = crate::grep::pattern_info(pattern, language)
+		.map(|info| info.defined_vars)
+		.unwrap_or_default();
+
+	let finalize = |mut out: StrategyOutput, note: Option<String>| -> SmartSearchOutcome {
+		rerank_matches(&mut out.0, &metavars);
+		out.0.truncate(max_results);
+		SmartSearchOutcome {
+			matches: out.0,
+			source_map: out.1,
+			note,
+			diagnostic: None,
+		}
+	};
+
 	// Strategy 1 — default pattern + Smart strictness
 	let r1 = run_strategy_pattern(
 		files,
@@ -867,12 +884,7 @@ fn smart_search_all_files(
 		want_source,
 	);
 	if !r1.0.is_empty() {
-		return SmartSearchOutcome {
-			matches: r1.0,
-			source_map: r1.1,
-			note: None,
-			diagnostic: None,
-		};
+		return finalize(r1, None);
 	}
 
 	// Strategy 2 — same pattern, Relaxed strictness (skips trivia + comments)
@@ -886,15 +898,13 @@ fn smart_search_all_files(
 		want_source,
 	);
 	if !r2.0.is_empty() {
-		return SmartSearchOutcome {
-			matches: r2.0,
-			source_map: r2.1,
-			note: Some("relaxed strictness (default Smart matched nothing)".to_string()),
-			diagnostic: None,
-		};
+		return finalize(
+			r2,
+			Some("relaxed strictness (default Smart matched nothing)".to_string()),
+		);
 	}
 
-	// Strategy 3 — KindMatcher (treat pattern as tree-sitter node kind)
+	// Strategy 3 — KindMatcher with the raw pattern
 	let r3 = run_strategy_kind(
 		files,
 		current_dir,
@@ -904,12 +914,34 @@ fn smart_search_all_files(
 		want_source,
 	);
 	if !r3.0.is_empty() {
-		return SmartSearchOutcome {
-			matches: r3.0,
-			source_map: r3.1,
-			note: Some(format!("interpreted '{}' as AST node kind", pattern)),
-			diagnostic: None,
-		};
+		return finalize(
+			r3,
+			Some(format!("interpreted '{}' as AST node kind", pattern)),
+		);
+	}
+
+	// Strategy 3b — canonical kind mapping (rescues LLM naming mismatches
+	// like `function_declaration` in Python where grammar uses `function_definition`).
+	if let Some(canonical) = crate::grep::canonical_kind(pattern, language) {
+		if canonical != pattern {
+			let r3b = run_strategy_kind(
+				files,
+				current_dir,
+				canonical,
+				language,
+				max_results,
+				want_source,
+			);
+			if !r3b.0.is_empty() {
+				return finalize(
+					r3b,
+					Some(format!(
+						"mapped '{}' to canonical {} kind '{}'",
+						pattern, language, canonical
+					)),
+				);
+			}
+		}
 	}
 
 	// Strategy 4 — language-aware contextual fallback
@@ -924,12 +956,7 @@ fn smart_search_all_files(
 			want_source,
 		);
 		if !r4.0.is_empty() {
-			return SmartSearchOutcome {
-				matches: r4.0,
-				source_map: r4.1,
-				note: Some(format!("auto-context wrapping ({})", desc)),
-				diagnostic: None,
-			};
+			return finalize(r4, Some(format!("auto-context wrapping ({})", desc)));
 		}
 	}
 
@@ -940,6 +967,24 @@ fn smart_search_all_files(
 		note: None,
 		diagnostic: Some(build_diagnostic(pattern, language)),
 	}
+}
+
+/// Light reranking: hoist matches whose file path mentions any metavariable
+/// name (case-insensitive). Stable within the priority class so per-file
+/// match order is preserved.
+fn rerank_matches(matches: &mut [crate::grep::GrepMatch], metavars: &[String]) {
+	if metavars.is_empty() {
+		return;
+	}
+	let needles: Vec<String> = metavars.iter().map(|n| n.to_ascii_lowercase()).collect();
+	matches.sort_by_key(|m| {
+		let path_lower = m.file.to_ascii_lowercase();
+		let hit = needles
+			.iter()
+			.any(|n| !n.is_empty() && path_lower.contains(n));
+		// Lower key sorts first — boost (0) goes ahead of non-boost (1).
+		(if hit { 0u8 } else { 1u8 }, m.file.clone(), m.line)
+	});
 }
 
 type StrategyOutput = (
@@ -1145,24 +1190,140 @@ fn build_diagnostic(pattern: &str, language: &str) -> String {
 	out.push_str("  - ast-grep pattern with Smart strictness\n");
 	out.push_str("  - ast-grep pattern with Relaxed strictness\n");
 	out.push_str("  - KindMatcher (pattern as AST node kind name)\n");
+	if let Some(canonical) = crate::grep::canonical_kind(pattern, language) {
+		if canonical != pattern {
+			out.push_str(&format!(
+				"  - KindMatcher with canonical kind '{}'\n",
+				canonical
+			));
+		}
+	}
 	if !auto_contexts(language, pattern).is_empty() {
 		out.push_str("  - language-aware context wrapping\n");
 	}
 
+	// Worked examples: the strongest single LLM-correction signal in the
+	// literature (Structural-Code-Search paper, +12 F1 on F1=33→45).
+	let examples = worked_examples(language);
+	if !examples.is_empty() {
+		out.push_str(&format!(
+			"\nKnown-good {} pattern shapes (copy + adapt):\n",
+			language
+		));
+		for (pat, desc) in examples {
+			out.push_str(&format!("  - {}\n    {}\n", pat, desc));
+		}
+	}
+
 	out.push_str("\nSuggestions for the next attempt:\n");
+	if let Some(canonical) = crate::grep::canonical_kind(pattern, language) {
+		if canonical != pattern {
+			out.push_str(&format!(
+				"  • In {}, the canonical kind for that intent is '{}' — \
+				   try it directly.\n",
+				language, canonical
+			));
+		}
+	}
 	out.push_str(
-		"  • Make sure the pattern is valid standalone code in this language\n  \
-		   (e.g. wrap a statement-level pattern in a function body before retrying).\n",
+		"  • If matching code shape, write the pattern as valid standalone code\n  \
+		   in this language (wrap statements in a function body if needed).\n",
 	);
 	out.push_str(
-		"  • If matching by node type, pass a tree-sitter kind name like\n  \
-		   'function_declaration', 'call_expression', 'import_statement'.\n",
+		"  • If matching by node type, pass a tree-sitter kind name (above examples\n  \
+		   show typical shapes).\n",
 	);
 	out.push_str(
 		"  • For meaning-based lookups (\"find error handling\", \"find auth checks\")\n  \
 		   prefer the semantic_search tool over structural patterns.\n",
 	);
 	out
+}
+
+/// A small catalog of high-coverage example patterns per language. Inlined
+/// into the zero-match diagnostic so the LLM can rewrite its next attempt
+/// against a known-parsing shape rather than guess. Validated against the
+/// grammars we link in `define_ast_grep_lang!`.
+fn worked_examples(language: &str) -> Vec<(&'static str, &'static str)> {
+	match language {
+		"rust" => vec![
+			("$X.unwrap()", "any unwrap() call on any expression"),
+			("fn $NAME($$$ARGS) { $$$ }", "any function declaration"),
+			("if let Some($X) = $Y { $$$ }", "if-let-Some binding"),
+			("impl $T for $S { $$$ }", "trait implementations"),
+			("use $PATH;", "use-imports (kind: use_declaration)"),
+		],
+		"javascript" => vec![
+			("console.$M($$$)", "any console method call"),
+			("function $NAME($$$) { $$$ }", "function declarations"),
+			("($$$PARAMS) => $BODY", "arrow functions"),
+			("import { $$$ } from $SRC", "named ES imports"),
+			("try { $$$ } catch ($E) { $$$ }", "try/catch blocks"),
+		],
+		"typescript" => vec![
+			("async function $N($$$) { $$$ }", "async functions"),
+			("interface $NAME { $$$ }", "interface declarations"),
+			("import { $$$ } from $SRC", "named ES imports"),
+			(
+				"class $C { $NAME: $TYPE }",
+				"class members (use selector 'public_field_definition' if direct pattern misses)",
+			),
+		],
+		"python" => vec![
+			(
+				"def $NAME($$$): $$$",
+				"function definitions (kind: function_definition)",
+			),
+			(
+				"class $NAME: $$$",
+				"class definitions (kind: class_definition)",
+			),
+			("from $MOD import $$$", "from-imports"),
+			("@$DECO", "decorators (kind: decorator)"),
+		],
+		"go" => vec![
+			("if err != nil { $$$ }", "the err-check idiom"),
+			(
+				"func $N($$$) $RET { $$$ }",
+				"function declarations (kind: function_declaration)",
+			),
+			(
+				"$X.$M($$$)",
+				"method-style calls (Go grammar prefers contextual selector 'call_expression')",
+			),
+		],
+		"java" => vec![
+			(
+				"public $RET $NAME($$$) { $$$ }",
+				"public method declarations",
+			),
+			("$O.$M($$$)", "method invocations (kind: method_invocation)"),
+			("import $PKG;", "imports (kind: import_declaration)"),
+		],
+		"cpp" => vec![
+			(
+				"$RET $NAME($$$) { $$$ }",
+				"function definitions (kind: function_definition)",
+			),
+			("class $NAME { $$$ }", "class specifiers"),
+		],
+		"ruby" => vec![
+			("def $NAME($$$); $$$; end", "method definitions"),
+			(
+				"$X.each do |$P| $$$ end",
+				"each-with-block (kind: do_block)",
+			),
+		],
+		"php" => vec![
+			("function $NAME($$$) { $$$ }", "function definitions"),
+			("use $NS;", "namespace uses"),
+		],
+		"json" => vec![(
+			"\"$KEY\": $VAL",
+			"object pairs (use selector 'pair' when direct pattern fails)",
+		)],
+		_ => vec![],
+	}
 }
 
 // ---------------------------------------------------------------------------
