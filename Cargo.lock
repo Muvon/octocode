@@ -2122,8 +2122,7 @@ dependencies = [
 [[package]]
 name = "esaxx-rs"
 version = "0.1.10"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d817e038c30374a4bcb22f94d0a8a0e216958d4c3dcde369b1439fec4bdda6e6"
+source = "git+https://github.com/ocentra/esaxx-rs?rev=4f4fd5acd624e43c770a0d198fcaa9d97bfd7f0b#4f4fd5acd624e43c770a0d198fcaa9d97bfd7f0b"
 dependencies = [
  "cc",
 ]
@@ -4772,9 +4771,9 @@ dependencies = [
 
 [[package]]
 name = "octolib"
-version = "0.21.4"
+version = "0.21.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e5960f24a5c3a48e13c2406ca9aa0b4123b49a13d5c63ef507c711cadbae946e"
+checksum = "ec833fb6df7129c81cdeca503ae94989b8f7cab9b705a3999c0e6cf5c8a02a19"
 dependencies = [
  "anyhow",
  "arc-swap",

@@ -107,6 +107,15 @@ hyper = { version = "1", features = ["server", "http1"] }  # Required for HTTP m
 hyper-util = { version = "0.1", features = ["server", "tokio", "service"] }  # Required for HTTP mode connection handling
 http-body-util = "0.1"  # Required for proxy HTTP body types (matches rmcp's version)
 
+# Replace esaxx-rs 0.1.10 (transitive: tokenizers/esaxx_fast → esaxx-rs/cpp).
+# Upstream build.rs hardcodes cc::Build::static_crt(true), forcing /MT on
+# Windows MSVC and producing LNK2038 RuntimeLibrary mismatches when linking
+# with ort (pyke prebuilt onnxruntime, built /MD). Pinned by SHA so a
+# force-push on the fork branch cannot silently flip our build.
+# Upstream PR: https://github.com/Narsil/esaxx-rs/pull/19 (unmerged).
+[patch.crates-io]
+esaxx-rs = { git = "https://github.com/ocentra/esaxx-rs", rev = "4f4fd5acd624e43c770a0d198fcaa9d97bfd7f0b" }
+
 [profile.dev]
 opt-level = 1          # Basic optimizations without slowing compilation too much
 debug = true           # Keep debug symbols for backtraces
