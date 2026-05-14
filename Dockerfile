@@ -21,7 +21,26 @@ RUN apt-get update && apt-get install -y \
 		pkg-config \
 		protobuf-compiler \
 		libssl-dev \
+		curl \
+		unzip \
 		&& rm -rf /var/lib/apt/lists/*
+
+# Download prebuilt static ONNX Runtime (csukuangfj/onnxruntime-libs).
+# ort-sys's single-file shortcut links libonnxruntime.a directly; built
+# against glibc 2.17 so it works on debian bookworm and older.
+ENV ORT_VERSION=1.24.2
+RUN set -eu; \
+		case "$(uname -m)" in \
+			x86_64)  ORT_ARCH=x64 ;; \
+			aarch64) ORT_ARCH=arm64 ;; \
+			*) echo "unsupported arch $(uname -m)"; exit 1 ;; \
+		esac; \
+		ORT_ASSET="onnxruntime-linux-${ORT_ARCH}-static_lib-${ORT_VERSION}-glibc2_17"; \
+		curl -sL "https://github.com/csukuangfj/onnxruntime-libs/releases/download/v${ORT_VERSION}/${ORT_ASSET}.zip" -o /tmp/ort.zip; \
+		unzip -q /tmp/ort.zip -d /opt; \
+		ln -s "/opt/${ORT_ASSET}/lib" /opt/ort-lib; \
+		rm /tmp/ort.zip
+ENV ORT_LIB_LOCATION=/opt/ort-lib
 
 # Create app directory
 WORKDIR /app
@@ -35,7 +54,7 @@ RUN mkdir -p src && echo 'fn main() {}' > src/main.rs
 # Build dependencies only (cached via BuildKit mount)
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
 	--mount=type=cache,target=/app/target \
-	cargo build --release --no-default-features 2>/dev/null || true
+	cargo build --release 2>/dev/null || true
 
 # Remove dummy source and copy real source code + config templates
 RUN rm -rf src
@@ -45,7 +64,7 @@ COPY config-templates ./config-templates
 # Build the application (dependencies hit cache, only source recompiled)
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
 	--mount=type=cache,target=/app/target \
-	touch src/main.rs && cargo build --release --no-default-features
+	touch src/main.rs && cargo build --release
 
 # Copy binary out of cache mount to a known location
 RUN --mount=type=cache,target=/app/target \
