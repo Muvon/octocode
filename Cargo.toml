@@ -36,7 +36,7 @@ lto = true              # Enable Link Time Optimization
 codegen-units = 1       # Reduce parallel code generation units for better optimization
 panic = "abort"         # Abort on panic for smaller binary size
 strip = true            # Strip symbols from binary
-opt-level = 3         # Optimize for speed
+opt-level = "z"         # Optimize for speed
 overflow-checks = false # Disable overflow checks in release mode
 
 # Cross-compilation configuration is in .cargo/config.toml
@@ -98,7 +98,7 @@ dotenvy = "0.15"
 
 # Local dependency on octolib with embedding features
 # octolib = { path = "../octolib", features = ["fastembed", "huggingface"] }
-octolib = { version = "0.21.3", default-features = false }
+octolib = { version = "0.21.4", default-features = false }
 
 # MCP SDK - official Rust implementation
 rmcp = { version = "1.3.0", features = ["server", "macros", "transport-io", "transport-streamable-http-server"] }
