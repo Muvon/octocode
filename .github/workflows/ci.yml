@@ -161,9 +161,18 @@ jobs:
         RUSTC_WRAPPER: sccache
         # Windows: ORT prebuilts (pyke download-binaries) are compiled with /MD
         # (dynamic CRT). Rust on MSVC defaults to /MT (static CRT) → __imp_*
-        # unresolved-symbol link errors. Switch to dynamic CRT to match.
+        # unresolved-symbol link errors. Switch rust to dynamic CRT to match.
         # vcruntime140.dll is present on all GitHub Windows runners.
         RUSTFLAGS: ${{ runner.os == 'Windows' && '-C target-feature=-crt-static' || '' }}
+        # esaxx-rs 0.1.10 (pulled by tokenizers/esaxx_fast in the huggingface
+        # feature) hardcodes `cc::Build::static_crt(true)` in its build.rs,
+        # forcing /MT regardless of RUSTFLAGS. That conflicts with ort's /MD
+        # at link time (LNK2038 RuntimeLibrary mismatch). cc-rs appends
+        # CXXFLAGS_<target> AFTER its own /MT, and cl.exe takes the last
+        # /M* flag for both compile and the RuntimeLibrary directive in the
+        # .obj — so /MD wins. Same trick for CFLAGS in case any C dep flips.
+        CFLAGS_x86_64_pc_windows_msvc: ${{ runner.os == 'Windows' && '/MD' || '' }}
+        CXXFLAGS_x86_64_pc_windows_msvc: ${{ runner.os == 'Windows' && '/MD' || '' }}
       run: cargo test --verbose --all-features
 
   musl-build:

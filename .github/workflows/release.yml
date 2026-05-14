@@ -339,9 +339,21 @@ jobs:
         elif [ "${{ runner.os }}" = "Windows" ]; then
           # Pyke's prebuilt ORT static lib is compiled with /MD (dynamic CRT).
           # Rust on MSVC defaults to /MT (static CRT) → __imp_* unresolved
-          # symbol errors at link time. Switch to dynamic CRT to match.
+          # symbol errors at link time. Switch rust to dynamic CRT to match.
           # vcruntime140.dll is present on all Windows hosts.
           export RUSTFLAGS="-C target-feature=-crt-static"
+          # esaxx-rs 0.1.10 (pulled by tokenizers/esaxx_fast) hardcodes
+          # cc::Build::static_crt(true), forcing /MT regardless of RUSTFLAGS.
+          # cc-rs appends CXXFLAGS_<target> AFTER its own /MT, and cl.exe
+          # takes the last /M* flag — so /MD wins both at compile time and
+          # in the .obj RuntimeLibrary directive. Mirror for CFLAGS too.
+          if [ "${{ matrix.target }}" = "x86_64-pc-windows-msvc" ]; then
+            export CFLAGS_x86_64_pc_windows_msvc=/MD
+            export CXXFLAGS_x86_64_pc_windows_msvc=/MD
+          else
+            export CFLAGS_aarch64_pc_windows_msvc=/MD
+            export CXXFLAGS_aarch64_pc_windows_msvc=/MD
+          fi
           cargo build --release --target ${{ matrix.target }}
         elif [ "${{ matrix.target }}" = "x86_64-apple-darwin" ]; then
           # macOS x86_64: pyke 2.0.0-rc.12 ships no x86_64-apple-darwin
