@@ -106,6 +106,27 @@ jobs:
       with:
         toolchain: ${{ matrix.rust }}
 
+    # On macos-latest the runner ships a preinstalled rust that can collide
+    # with the toolchain dtolnay/rust-toolchain just installed — leaving
+    # `cargo` resolving to the `rustup-init` binary rather than the proxy.
+    # Force the requested toolchain as default and dump the proxy state
+    # before tests run. Diagnostic output is harmless on the other runners
+    # and invaluable when this breaks again.
+    - name: Verify Rust toolchain
+      shell: bash
+      run: |
+        set -x
+        echo "PATH=$PATH"
+        for bin in cargo rustc rustup rustup-init; do
+          command -v "$bin" || true
+        done
+        ls -la "$HOME/.cargo/bin/" || true
+        file "$HOME/.cargo/bin/cargo" || true
+        rustup default "${{ matrix.rust }}" || true
+        rustup show || true
+        cargo --version
+        rustc --version
+
     - name: Install protobuf compiler
       uses: arduino/setup-protoc@v3
       with:
@@ -301,10 +322,15 @@ jobs:
         unzip -q /tmp/ort.zip -d /tmp/ort
         echo "ORT_LIB_LOCATION=/tmp/ort/${ORT_ASSET}/lib" >> "$GITHUB_ENV"
 
+    # `--engine llvm` uses LLVM source-based coverage instead of the default
+    # ptrace engine. Ptrace requires `-Clink-dead-code`, which forces
+    # monomorphizations of dead-code paths and trips pulp v0.22.2's
+    # `CheckSameSize::<i8, u16>` const-eval assertion. llvm coverage doesn't
+    # need link-dead-code, so the offending instantiations never happen.
     - name: Generate code coverage
       env:
         RUSTC_WRAPPER: sccache
-      run: cargo tarpaulin --verbose --all-features --workspace --timeout 120 --out xml
+      run: cargo tarpaulin --engine llvm --verbose --all-features --workspace --timeout 120 --out xml
 
     - name: Upload coverage to Codecov
       uses: codecov/codecov-action@v4
