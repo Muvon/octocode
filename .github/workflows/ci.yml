@@ -117,13 +117,135 @@ jobs:
     - name: Run sccache-cache
       uses: mozilla-actions/sccache-action@v0.0.9
 
+    # Linux: csukuangfj ships a single bundled libonnxruntime.a — ort-sys's
+    # single-file shortcut links it directly. Just point ORT_LIB_LOCATION at
+    # the extracted lib/ dir. ubuntu-latest is glibc-based so the
+    # glibc2_17-built static archive is ABI-compatible.
+    # Windows MSVC: nothing to download — ort-sys's download-binaries feature
+    # pulls pyke's prebuilts automatically; we only flip RUSTFLAGS below.
+    # macOS aarch64: pyke prebuilts work out of the box.
+    - name: Download ONNX Runtime static library (Linux)
+      if: runner.os == 'Linux'
+      shell: bash
+      run: |
+        ORT_VERSION="1.24.2"
+        ORT_ASSET="onnxruntime-linux-x64-static_lib-${ORT_VERSION}-glibc2_17"
+        curl -sL "https://github.com/csukuangfj/onnxruntime-libs/releases/download/v${ORT_VERSION}/${ORT_ASSET}.zip" -o /tmp/ort.zip
+        unzip -q /tmp/ort.zip -d /tmp/ort
+        echo "ORT_LIB_LOCATION=/tmp/ort/${ORT_ASSET}/lib" >> "$GITHUB_ENV"
+
     - name: Run tests
       shell: bash
       env:
         RUSTC_WRAPPER: sccache
+        # Windows: ORT prebuilts (pyke download-binaries) are compiled with /MD
+        # (dynamic CRT). Rust on MSVC defaults to /MT (static CRT) → __imp_*
+        # unresolved-symbol link errors. Switch to dynamic CRT to match.
+        # vcruntime140.dll is present on all GitHub Windows runners.
+        RUSTFLAGS: ${{ runner.os == 'Windows' && '-C target-feature=-crt-static' || '' }}
+      run: cargo test --verbose --all-features
+
+  musl-build:
+    name: Musl Build (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+          - target: aarch64-unknown-linux-musl
+            os: ubuntu-22.04-arm
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    # Cache the static ONNX Runtime build (45–60 min cold) between runs.
+    # Cache full source+build tree because ort-sys's static-link branch
+    # walks build/_deps/ for re2/abseil/protobuf — flattening .a files
+    # into one dir breaks linking.
+    - name: Cache ONNX Runtime static build
+      uses: actions/cache@v4
+      with:
+        path: onnxruntime-src
+        key: onnxruntime-1.24.2-${{ matrix.target }}-alpine3.22-v6
+
+    - name: Cache cargo registry and target
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target
+        key: docker-alpine-${{ matrix.target }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          docker-alpine-${{ matrix.target }}-cargo-
+
+    - name: Build in Alpine (mirrors release pipeline)
       run: |
-        # We have issue with onnx runtime so we use no default features
-        cargo test --verbose --no-default-features
+        mkdir -p onnxruntime-src
+        chmod -R 777 onnxruntime-src
+
+        docker run --rm \
+          --user 0:0 \
+          -v "$(pwd):/workspace" \
+          -w /workspace \
+          rust:1.95.0-alpine3.22 \
+          sh -c '
+            set -eu
+            apk add --no-cache \
+              git perl bash musl-dev openssl-dev openssl-libs-static \
+              pkgconfig gcc g++ \
+              cmake make linux-headers python3 py3-pip patch
+
+            mkdir -p /tmp/include
+            cat > /tmp/include/execinfo.h << "EOF"
+        #ifndef _EXECINFO_H
+        #define _EXECINFO_H
+        #include <stddef.h>
+        static inline int backtrace(void **buffer, int size) { (void)buffer; (void)size; return 0; }
+        static inline char **backtrace_symbols(void *const *buffer, int size) { (void)buffer; (void)size; return NULL; }
+        static inline void backtrace_symbols_fd(void *const *buffer, int size, int fd) { (void)buffer; (void)size; (void)fd; }
+        #endif
+        EOF
+            export C_INCLUDE_PATH=/tmp/include
+            export CPLUS_INCLUDE_PATH=/tmp/include
+
+            rustup target add ${{ matrix.target }}
+
+            ORT_SRC=/workspace/onnxruntime-src
+            ORT_LIB_LOCATION="$ORT_SRC/build/Release"
+            if [ ! -f "$ORT_LIB_LOCATION/_deps/re2-build/libre2.a" ]; then
+              echo "==> Building ONNX Runtime 1.24.2 from source (static, musl)"
+              rm -rf "$ORT_SRC"
+              git clone --single-branch --branch v1.24.2 --recursive \
+                https://github.com/microsoft/onnxruntime.git "$ORT_SRC"
+              cd "$ORT_SRC"
+              ./build.sh \
+                --config Release \
+                --build_dir build \
+                --parallel \
+                --skip_tests \
+                --skip_submodule_sync \
+                --allow_running_as_root \
+                --compile_no_warning_as_error \
+                --no_kleidiai \
+                --no_sve \
+                --cmake_extra_defines \
+                  CMAKE_POSITION_INDEPENDENT_CODE=ON \
+                  onnxruntime_BUILD_UNIT_TESTS=OFF \
+                  onnxruntime_BUILD_SHARED_LIB=OFF \
+                  onnxruntime_USE_KLEIDIAI=OFF
+              cmake --build "$ORT_LIB_LOCATION" --target re2 -j
+              cd /workspace
+            else
+              echo "==> Using cached ONNX Runtime static build"
+            fi
+
+            export ORT_LIB_LOCATION="$ORT_LIB_LOCATION"
+            export RUSTFLAGS="-C link-arg=-lgcc"
+            cargo build --target ${{ matrix.target }}
+          '
 
   security:
     name: Security Audit
@@ -170,10 +292,19 @@ jobs:
     - name: Run sccache-cache
       uses: mozilla-actions/sccache-action@v0.0.9
 
+    - name: Download ONNX Runtime static library
+      shell: bash
+      run: |
+        ORT_VERSION="1.24.2"
+        ORT_ASSET="onnxruntime-linux-x64-static_lib-${ORT_VERSION}-glibc2_17"
+        curl -sL "https://github.com/csukuangfj/onnxruntime-libs/releases/download/v${ORT_VERSION}/${ORT_ASSET}.zip" -o /tmp/ort.zip
+        unzip -q /tmp/ort.zip -d /tmp/ort
+        echo "ORT_LIB_LOCATION=/tmp/ort/${ORT_ASSET}/lib" >> "$GITHUB_ENV"
+
     - name: Generate code coverage
       env:
         RUSTC_WRAPPER: sccache
-      run: cargo tarpaulin --verbose --no-default-features --workspace --timeout 120 --out xml
+      run: cargo tarpaulin --verbose --all-features --workspace --timeout 120 --out xml
 
     - name: Upload coverage to Codecov
       uses: codecov/codecov-action@v4

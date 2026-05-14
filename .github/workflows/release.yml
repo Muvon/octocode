@@ -208,46 +208,170 @@ jobs:
         free -h
         swapon --show
 
+    # Cache the static ONNX Runtime build for targets where pyke ships no
+    # prebuilts (musl, x86_64-apple-darwin). Cache full source+build tree
+    # because ort-sys's full static-link branch needs build/_deps/ subtrees
+    # for re2/abseil/protobuf/etc.
+    - name: Cache ONNX Runtime static build
+      if: endsWith(matrix.target, '-unknown-linux-musl') || matrix.target == 'x86_64-apple-darwin'
+      uses: actions/cache@v4
+      with:
+        path: onnxruntime-src
+        key: onnxruntime-1.24.2-${{ matrix.target }}-v6
+
     - name: Build binary
       shell: sh
       run: |
         if [ "${{ runner.os }}" = "Linux" ]; then
-          # Use official Rust Docker image for Linux builds
-          # Select correct sccache binary for the target architecture
-          if [ "${{ matrix.target }}" = "aarch64-unknown-linux-musl" ]; then
-            SCCACHE_ARCH="aarch64-unknown-linux-musl"
-          else
-            SCCACHE_ARCH="x86_64-unknown-linux-musl"
-          fi
+          # Linux musl: build ONNX Runtime statically from source inside Alpine,
+          # then build octocode with fastembed enabled, linking ort-sys against
+          # the local static build via ORT_LIB_LOCATION. Pyke ships no musl
+          # prebuilts, so this is the only supported path. ORT 1.24.2 matches
+          # ort-sys 2.0.0-rc.12 / fastembed's api-24 feature.
+          #
+          # Pre-create the cache dir on the host so Docker volume-mount
+          # inherits writable permissions.
+          mkdir -p onnxruntime-src
+          chmod -R 777 onnxruntime-src
+
           docker run --rm \
+            --user 0:0 \
             -v "$(pwd):/workspace" \
-            -v "$RUNNER_TEMP/sccache-cache:/sccache-cache" \
             -w /workspace \
-            -e SCCACHE_GHA_ENABLED=true \
-            -e ACTIONS_CACHE_URL="${ACTIONS_CACHE_URL}" \
-            -e ACTIONS_RUNTIME_TOKEN="${ACTIONS_RUNTIME_TOKEN}" \
-            -e SCCACHE_DIR=/sccache-cache \
-            rust:1.95.0-alpine3.23 \
-            sh -c "
-              apk add --no-cache musl-dev openssl-dev openssl-libs-static pkgconfig gcc g++ protobuf-dev curl && \
-              curl -fsSL https://github.com/mozilla/sccache/releases/download/v0.10.0/sccache-v0.10.0-${SCCACHE_ARCH}.tar.gz | tar xz --strip-components=1 -C /usr/local/bin sccache-v0.10.0-${SCCACHE_ARCH}/sccache && \
-              rustup target add ${{ matrix.target }} && \
-              if sccache --start-server 2>/dev/null; then
-                export RUSTC_WRAPPER=sccache
-              fi && \
-              cargo build --release --target ${{ matrix.target }} --no-default-features
-            "
+            rust:1.95.0-alpine3.22 \
+            sh -c '
+              set -eu
+              # No protobuf-dev: it pulls in abseil-cpp-dev transitively, which
+              # makes ORT'\''s CMake skip its bundled abseil and (because re2
+              # depends on bundled absl targets) drop re2 from the build entirely.
+              # ort-sys 2.0.0-rc.12 hardcodes static links to ~25 absl_*, re2,
+              # protobuf libs at fixed _deps/ paths, so all three must be built
+              # by ORT, not the system. Without the system packages ORT
+              # FetchContent'\''s and compiles all three from source.
+              apk add --no-cache \
+                git perl bash musl-dev openssl-dev openssl-libs-static \
+                pkgconfig gcc g++ \
+                cmake make linux-headers python3 py3-pip patch
+
+              # Provide stub execinfo.h — musl lacks it and Alpine 3.17+ removed
+              # libexecinfo. ORT'\''s stacktrace.cc unconditionally includes it on
+              # non-Android POSIX. The stub provides no-op backtrace functions.
+              mkdir -p /tmp/include
+              cat > /tmp/include/execinfo.h << "EOF"
+        #ifndef _EXECINFO_H
+        #define _EXECINFO_H
+        #include <stddef.h>
+        static inline int backtrace(void **buffer, int size) { (void)buffer; (void)size; return 0; }
+        static inline char **backtrace_symbols(void *const *buffer, int size) { (void)buffer; (void)size; return NULL; }
+        static inline void backtrace_symbols_fd(void *const *buffer, int size, int fd) { (void)buffer; (void)size; (void)fd; }
+        #endif
+        EOF
+              export C_INCLUDE_PATH=/tmp/include
+              export CPLUS_INCLUDE_PATH=/tmp/include
+
+              rustup target add ${{ matrix.target }}
+
+              ORT_SRC=/workspace/onnxruntime-src
+              ORT_LIB_LOCATION="$ORT_SRC/build/Release"
+              # libre2.a is the late marker — re2 is built last in the bundled
+              # dep graph (after abseil + protobuf), so its presence proves the
+              # full static tree is in place. A partial cache that only has
+              # libonnxruntime_common.a but no libre2.a triggers a clean rebuild.
+              if [ ! -f "$ORT_LIB_LOCATION/_deps/re2-build/libre2.a" ]; then
+                echo "==> Building ONNX Runtime 1.24.2 from source (static, musl)"
+                rm -rf "$ORT_SRC"
+                git clone --single-branch --branch v1.24.2 --recursive \
+                  https://github.com/microsoft/onnxruntime.git "$ORT_SRC"
+                cd "$ORT_SRC"
+                ./build.sh \
+                  --config Release \
+                  --build_dir build \
+                  --parallel \
+                  --skip_tests \
+                  --skip_submodule_sync \
+                  --allow_running_as_root \
+                  --compile_no_warning_as_error \
+                  --no_kleidiai \
+                  --no_sve \
+                  --cmake_extra_defines \
+                    CMAKE_POSITION_INDEPENDENT_CODE=ON \
+                    onnxruntime_BUILD_UNIT_TESTS=OFF \
+                    onnxruntime_BUILD_SHARED_LIB=OFF \
+                    onnxruntime_USE_KLEIDIAI=OFF
+                # ORT'\''s static build (.a archives, --skip_tests) never link an
+                # executable, so target_link_libraries deps like re2::re2 don'\''t
+                # trigger compilation — re2 is FetchContent-populated but its
+                # CMake target stays unbuilt. ort-sys 2.0.0-rc.12 hardcodes a
+                # static link to it. Explicitly drive the re2 target inside ORT'\''s
+                # configured build tree (uses bundled abseil from the same tree).
+                cmake --build "$ORT_LIB_LOCATION" --target re2 -j
+                cd /workspace
+              else
+                echo "==> Using cached ONNX Runtime static build"
+              fi
+
+              # ort-sys static_config #1 with empty profile detection.
+              # ORT_LIB_LOCATION = build/Release (where libonnxruntime_common.a lives directly).
+              # Profile detection iterates build/Release/{Release,RelWithDebInfo,...},
+              # none exist → profile="" → transform_dep adds no suffix.
+              # lib_dir = base ✓, external_lib_dir = base/_deps = build/Release/_deps
+              # which is where cmake actually places onnx-build/, re2-build/, abseil_cpp-build/, etc.
+              #
+              # DO NOT use ORT_LIB_LOCATION="$ORT_SRC/build": that triggers profile=Release
+              # detection, which makes transform_dep append /Release to every _deps path,
+              # so search paths land at build/_deps/onnx-build/Release (non-existent) and
+              # linking fails with "could not find native static library '\''onnx'\''".
+              export ORT_LIB_LOCATION="$ORT_LIB_LOCATION"
+              # GCC 15 (Alpine 3.23) introduced __cpu_features2 in libgcc.
+              # ORT'\''s cpuid_info.cc.o references it; musl static link needs
+              # libgcc.a explicitly or the symbol is undefined at link time.
+              export RUSTFLAGS="-C link-arg=-lgcc"
+              cargo build --release --target ${{ matrix.target }}
+            '
         elif [ "${{ runner.os }}" = "Windows" ]; then
-          # Windows: disable default features to avoid ONNX Runtime issues
-          cargo build --release --target ${{ matrix.target }} --no-default-features
-        elif [ "${{ runner.os }}" = "macOS" ]; then
-          # macOS: only use --no-default-features for x86_64 (Intel) due to ONNX Runtime
-          # not providing prebuilt binaries for this target. aarch64 (Apple Silicon) works.
-          if [ "${{ matrix.target }}" = "x86_64-apple-darwin" ]; then
-            cargo build --release --target ${{ matrix.target }} --no-default-features
+          # Pyke's prebuilt ORT static lib is compiled with /MD (dynamic CRT).
+          # Rust on MSVC defaults to /MT (static CRT) → __imp_* unresolved
+          # symbol errors at link time. Switch to dynamic CRT to match.
+          # vcruntime140.dll is present on all Windows hosts.
+          export RUSTFLAGS="-C target-feature=-crt-static"
+          cargo build --release --target ${{ matrix.target }}
+        elif [ "${{ matrix.target }}" = "x86_64-apple-darwin" ]; then
+          # macOS x86_64: pyke 2.0.0-rc.12 ships no x86_64-apple-darwin
+          # prebuilt (xcframework linking unsupported on this target). Build
+          # ONNX Runtime 1.24.2 from source statically and link via
+          # ORT_LIB_LOCATION, same approach as Linux musl.
+          ORT_SRC="$(pwd)/onnxruntime-src"
+          ORT_LIB_LOCATION="$ORT_SRC/build/Release"
+          if [ ! -f "$ORT_LIB_LOCATION/_deps/re2-build/libre2.a" ]; then
+            echo "==> Building ONNX Runtime 1.24.2 from source (static, macOS x86_64)"
+            rm -rf "$ORT_SRC"
+            git clone --single-branch --branch v1.24.2 --recursive \
+              https://github.com/microsoft/onnxruntime.git "$ORT_SRC"
+            (cd "$ORT_SRC" && ./build.sh \
+              --config Release \
+              --build_dir build \
+              --parallel \
+              --skip_tests \
+              --skip_submodule_sync \
+              --compile_no_warning_as_error \
+              --cmake_extra_defines \
+                CMAKE_POSITION_INDEPENDENT_CODE=ON \
+                CMAKE_OSX_ARCHITECTURES=x86_64 \
+                CMAKE_OSX_DEPLOYMENT_TARGET=11.0 \
+                onnxruntime_BUILD_UNIT_TESTS=OFF \
+                onnxruntime_BUILD_SHARED_LIB=OFF)
+            # Static archive build never links an executable, so re2's
+            # CMake target stays unbuilt while ort-sys hardcodes a static
+            # link to libre2.a. Force-build it.
+            cmake --build "$ORT_LIB_LOCATION" --target re2 -j
           else
-            cargo build --release --target ${{ matrix.target }}
+            echo "==> Using cached ONNX Runtime static build"
           fi
+          export ORT_LIB_LOCATION="$ORT_LIB_LOCATION"
+          cargo build --release --target ${{ matrix.target }}
+        else
+          # Native build for other macOS targets (aarch64) — pyke ships prebuilts.
+          cargo build --release --target ${{ matrix.target }}
         fi
     - name: Create archive directory
       shell: sh
@@ -335,7 +459,7 @@ jobs:
       if: steps.check_published.outputs.already_published == 'false'
       run: |
         echo "🔍 Running dry-run publish to validate package..."
-        cargo publish --dry-run --no-default-features
+        cargo publish --dry-run
       env:
         CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
@@ -343,7 +467,7 @@ jobs:
       if: steps.check_published.outputs.already_published == 'false'
       run: |
         echo "🚀 Publishing to crates.io..."
-        cargo publish --no-default-features
+        cargo publish
         echo "✅ Successfully published to crates.io!"
       env:
         CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
