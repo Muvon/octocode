@@ -310,6 +310,14 @@ jobs:
                 echo "==> Using cached ONNX Runtime static build"
               fi
 
+              # Install protobuf-dev AFTER ORT build: lance-encoding build.rs
+              # needs the well-known .proto includes (google/protobuf/empty.proto)
+              # which only ship in protobuf-dev. Installing it earlier would pull
+              # abseil-cpp-dev and make ORT CMake skip its bundled abseil + drop
+              # re2. By this point ORT artifacts already exist, and cargo only
+              # links pre-built .a files via ORT_LIB_LOCATION.
+              apk add --no-cache protobuf-dev
+
               # ort-sys static_config #1 with empty profile detection.
               # ORT_LIB_LOCATION = build/Release (where libonnxruntime_common.a lives directly).
               # Profile detection iterates build/Release/{Release,RelWithDebInfo,...},
