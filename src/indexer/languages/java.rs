@@ -68,6 +68,22 @@ impl Language for Java {
 				if let Some(name) = super::extract_symbol_by_kind(node, contents, "identifier") {
 					symbols.push(name);
 				}
+				// Surface the enclosing class/interface/enum/record name so
+				// "Foo.bar" queries can resolve the method via BM25/dense.
+				if let Some(owner) = super::find_enclosing_container_name(
+					node,
+					contents,
+					&[
+						"class_declaration",
+						"interface_declaration",
+						"enum_declaration",
+						"record_declaration",
+						"annotation_type_declaration",
+					],
+					&["identifier"],
+				) {
+					symbols.push(owner);
+				}
 			}
 			"lambda_expression" => {
 				// For lambda expressions, mark as lambda

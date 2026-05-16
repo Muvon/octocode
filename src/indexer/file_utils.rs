@@ -54,7 +54,11 @@ impl FileUtils {
 
 	/// Check if a file extension is allowed for text indexing
 	pub fn is_allowed_text_extension(path: &Path) -> bool {
+		// Documentation, config, and infra files we want searchable as text blocks.
+		// Languages already handled by tree-sitter (json, css, bash, etc.) are NOT
+		// listed here — they take the code path with semantic chunking.
 		const ALLOWED_TEXT_EXTENSIONS: &[&str] = &[
+			// Plain text / docs
 			"txt",
 			"md",
 			"markdown",
@@ -66,6 +70,28 @@ impl FileUtils {
 			"changelog",
 			"license",
 			"contributors",
+			"authors",
+			"notes",
+			// Config formats (no dedicated tree-sitter grammar in this build)
+			"yaml",
+			"yml",
+			"toml",
+			"ini",
+			"conf",
+			"cfg",
+			"properties",
+			"env",
+			// Data / markup
+			"xml",
+			"html",
+			"htm",
+			"sql",
+			"csv",
+			"tsv",
+			// Logs and build manifests commonly grep'd for context
+			"log",
+			"dockerfile",
+			"makefile",
 		];
 
 		if let Some(extension) = path.extension() {

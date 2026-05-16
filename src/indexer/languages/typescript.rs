@@ -29,10 +29,13 @@ impl Language for TypeScript {
 	}
 
 	fn get_meaningful_kinds(&self) -> Vec<&'static str> {
+		// `class_declaration` is intentionally excluded (mirrors JS) so methods are
+		// captured as individual `method_definition` chunks instead of collapsing
+		// the whole class body into one chunk. `interface_declaration` and
+		// `type_alias_declaration` stay — they're naturally small.
 		vec![
 			"function_declaration",
 			"method_definition",
-			"class_declaration",
 			"arrow_function",
 			"interface_declaration",
 			"type_alias_declaration",
@@ -68,6 +71,20 @@ impl Language for TypeScript {
 							js.extract_js_variable_declarations(child, contents, &mut symbols);
 							break;
 						}
+					}
+				}
+
+				// For method_definition inside a class, surface the owning class name
+				// so "Foo.bar" queries can hit via BM25/dense without relying on the
+				// LLM description.
+				if node.kind() == "method_definition" {
+					if let Some(owner) = super::find_enclosing_container_name(
+						node,
+						contents,
+						&["class_declaration"],
+						&["type_identifier", "identifier"],
+					) {
+						symbols.push(owner);
 					}
 				}
 			}

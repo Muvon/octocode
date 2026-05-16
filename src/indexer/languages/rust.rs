@@ -51,6 +51,28 @@ impl Language for Rust {
 				if let Some(name) = super::extract_symbol_by_kind(node, contents, "identifier") {
 					symbols.push(name);
 				}
+				// Enrich with enclosing impl receiver type (and trait for `impl Trait for T`),
+				// so methods inside `impl Foo { fn bar() }` carry `Foo` in their symbols.
+				// Without this, "Foo bar" queries miss method chunks via BM25 and the
+				// receiver type only appears if the LLM description happens to mention it.
+				if let Some(owner) = super::find_enclosing_container_name(
+					node,
+					contents,
+					&["impl_item"],
+					&["type_identifier", "scoped_type_identifier", "generic_type"],
+				) {
+					symbols.push(owner);
+				}
+				// For `impl Trait for Type`, also surface the trait name.
+				if let Some(impl_node) = find_enclosing_node(node, "impl_item") {
+					if let Some(trait_node) = impl_node.child_by_field_name("trait") {
+						if let Ok(text) = trait_node.utf8_text(contents.as_bytes()) {
+							if let Some(name) = super::simple_type_name(text) {
+								symbols.push(name);
+							}
+						}
+					}
+				}
 			}
 			"struct_item" | "enum_item" | "trait_item" | "mod_item" | "const_item"
 			| "macro_definition" => {
@@ -296,6 +318,19 @@ impl Language for Rust {
 	fn get_file_extensions(&self) -> Vec<&'static str> {
 		vec!["rs"]
 	}
+}
+
+// Walk up the parent chain to find an enclosing node of `target_kind`.
+// Used by Rust's symbol extraction to locate the `impl_item` that owns a method.
+fn find_enclosing_node<'a>(node: Node<'a>, target_kind: &str) -> Option<Node<'a>> {
+	let mut cur = node.parent();
+	while let Some(parent) = cur {
+		if parent.kind() == target_kind {
+			return Some(parent);
+		}
+		cur = parent.parent();
+	}
+	None
 }
 
 // Expand a Rust `use` statement into fully-qualified individual paths.

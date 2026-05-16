@@ -29,11 +29,14 @@ impl Language for Cpp {
 	}
 
 	fn get_meaningful_kinds(&self) -> Vec<&'static str> {
+		// `class_specifier` and `struct_specifier` are intentionally excluded so
+		// large classes don't collapse into a single huge chunk. Member functions
+		// inside classes are captured individually as `function_definition` (and
+		// inline-declared methods via `declaration`) thanks to recursion into the
+		// class body. `enum_specifier` stays — enums are naturally small.
 		vec![
 			"function_definition",
 			"declaration", // For function declarations in headers
-			"class_specifier",
-			"struct_specifier",
 			"enum_specifier",
 			"namespace_definition",
 			"preproc_include", // For #include statements
@@ -49,7 +52,9 @@ impl Language for Cpp {
 				for child in node.children(&mut node.walk()) {
 					if child.kind() == "function_declarator" {
 						for decl_child in child.children(&mut child.walk()) {
-							if decl_child.kind() == "identifier" {
+							if decl_child.kind() == "identifier"
+								|| decl_child.kind() == "field_identifier"
+							{
 								if let Ok(name) = decl_child.utf8_text(contents.as_bytes()) {
 									symbols.push(name.to_string());
 								}
@@ -58,6 +63,18 @@ impl Language for Cpp {
 						}
 						break;
 					}
+				}
+
+				// Surface the enclosing class/struct name for member functions so
+				// "Foo::bar" queries resolve via BM25/dense without depending on
+				// the LLM description mentioning the owner.
+				if let Some(owner) = super::find_enclosing_container_name(
+					node,
+					contents,
+					&["class_specifier", "struct_specifier"],
+					&["type_identifier", "name"],
+				) {
+					symbols.push(owner);
 				}
 
 				// Extract variables from function body

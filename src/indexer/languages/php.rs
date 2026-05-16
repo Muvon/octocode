@@ -50,6 +50,23 @@ impl Language for Php {
 				if let Some(name) = super::extract_symbol_by_kind(node, contents, "name") {
 					symbols.push(name);
 				}
+				// For methods, also surface the enclosing class/trait/interface name
+				// so queries like "MyClass::myMethod" resolve via BM25/dense even
+				// when the LLM description doesn't mention the owner.
+				if node.kind() == "method_declaration" {
+					if let Some(owner) = super::find_enclosing_container_name(
+						node,
+						contents,
+						&[
+							"class_declaration",
+							"trait_declaration",
+							"interface_declaration",
+						],
+						&["name"],
+					) {
+						symbols.push(owner);
+					}
+				}
 			}
 			_ => self.extract_identifiers(node, contents, &mut symbols),
 		}

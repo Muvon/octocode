@@ -352,3 +352,51 @@ pub fn extract_symbol_by_kinds(
 	}
 	None
 }
+
+/// Walk up the parent chain from `node` looking for an enclosing container of any
+/// `container_kinds` (e.g. `impl_item`, `class_definition`, `class_declaration`).
+/// When one is found, return its name by looking at its direct children for any of
+/// `name_kinds` and, for Rust-style trait impls, also try the `type` field. The
+/// returned name is normalized via `simple_type_name` so generics/qualifiers drop.
+///
+/// Used to enrich method symbols with their owning type — e.g. a `mark_set` method
+/// declared inside `impl Suppression { ... }` gets `Suppression` added to its
+/// symbol list so BM25 and dense retrieval can hit "Suppression mark_set" queries
+/// without depending on the LLM contextual description mentioning the receiver.
+pub fn find_enclosing_container_name(
+	node: Node,
+	contents: &str,
+	container_kinds: &[&str],
+	name_kinds: &[&str],
+) -> Option<String> {
+	let mut cur = node.parent();
+	while let Some(parent) = cur {
+		if container_kinds.contains(&parent.kind()) {
+			// Prefer Rust's `type` field on impl_item (works for both `impl Foo` and
+			// `impl Trait for Foo`). Falls through to name-kind scan for other langs.
+			if let Some(type_field) = parent.child_by_field_name("type") {
+				if let Ok(text) = type_field.utf8_text(contents.as_bytes()) {
+					if let Some(name) = simple_type_name(text) {
+						return Some(name);
+					}
+				}
+			}
+			// Generic: first direct child whose kind matches any name_kinds entry.
+			for child in parent.children(&mut parent.walk()) {
+				if name_kinds.iter().any(|k| child.kind() == *k) {
+					if let Ok(text) = child.utf8_text(contents.as_bytes()) {
+						if let Some(name) = simple_type_name(text) {
+							return Some(name);
+						}
+					}
+				}
+			}
+			// Container found but unnamed (anonymous class/struct) — stop walking,
+			// don't bubble up to grandparents which would attribute the method to
+			// the wrong owner.
+			return None;
+		}
+		cur = parent.parent();
+	}
+	None
+}
