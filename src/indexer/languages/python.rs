@@ -29,13 +29,13 @@ impl Language for Python {
 	}
 
 	fn get_meaningful_kinds(&self) -> Vec<&'static str> {
+		// `class_definition` is intentionally excluded so large classes don't collapse
+		// into a single huge chunk. Methods inside classes are captured individually
+		// as `function_definition` via recursion into the class body.
 		vec![
 			"function_definition",
-			"class_definition",
 			"import_statement",
 			"import_from_statement",
-			// Removed: "class_definition" - too large, not semantic
-			// Individual methods inside classes will be extracted separately if needed
 		]
 	}
 
@@ -47,6 +47,17 @@ impl Language for Python {
 				// Extract function name
 				if let Some(name) = super::extract_symbol_by_kind(node, contents, "identifier") {
 					symbols.push(name);
+				}
+
+				// If this function_definition is a method declared inside a class,
+				// add the class name so "Foo.bar" queries can hit via BM25/dense.
+				if let Some(owner) = super::find_enclosing_container_name(
+					node,
+					contents,
+					&["class_definition"],
+					&["identifier"],
+				) {
+					symbols.push(owner);
 				}
 
 				// Extract variable assignments within the function

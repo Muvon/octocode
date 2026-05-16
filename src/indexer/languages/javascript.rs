@@ -52,6 +52,20 @@ impl Language for JavaScript {
 					symbols.push(name);
 				}
 
+				// For method_definition inside a class, also include the class name so
+				// "Foo.bar" queries hit via BM25/dense without depending on the LLM
+				// description mentioning the owning class.
+				if node.kind() == "method_definition" {
+					if let Some(owner) = super::find_enclosing_container_name(
+						node,
+						contents,
+						&["class_declaration", "class"],
+						&["identifier", "type_identifier"],
+					) {
+						symbols.push(owner);
+					}
+				}
+
 				// Look for variable declarations within the function/method body
 				for child in node.children(&mut node.walk()) {
 					if child.kind() == "statement_block" {

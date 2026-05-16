@@ -29,7 +29,10 @@ impl Language for Ruby {
 	}
 
 	fn get_meaningful_kinds(&self) -> Vec<&'static str> {
-		vec!["method", "class", "module", "call"] // call for require/load statements
+		// `class` and `module` are intentionally excluded so large containers don't
+		// collapse into a single chunk. Methods inside them are captured individually
+		// as `method` via recursion. `call` stays for require/load statements.
+		vec!["method", "call"]
 	}
 
 	fn extract_symbols(&self, node: Node, contents: &str) -> Vec<String> {
@@ -47,8 +50,17 @@ impl Language for Ruby {
 					}
 				}
 
-				// For methods, extract local variables
+				// For methods, extract local variables and the enclosing class/module
+				// name so queries like "Foo#bar" / "Foo.bar" resolve via BM25/dense.
 				if node.kind() == "method" {
+					if let Some(owner) = super::find_enclosing_container_name(
+						node,
+						contents,
+						&["class", "module"],
+						&["constant", "identifier"],
+					) {
+						symbols.push(owner);
+					}
 					for child in node.children(&mut node.walk()) {
 						if child.kind() == "body_statement" || child.kind() == "do_block" {
 							self.extract_ruby_variables(child, contents, &mut symbols);
