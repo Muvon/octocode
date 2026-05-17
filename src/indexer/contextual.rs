@@ -35,10 +35,16 @@ These descriptions are used for search retrieval — use terms a developer would
 Be specific to the code's domain and purpose. Do NOT repeat or paraphrase the code itself.";
 
 /// File-level context extracted during tree-sitter parsing.
-/// Provides imports and all symbols for a file, used to enrich LLM description prompts.
+/// Provides imports, exports, and sibling symbols used to enrich the LLM
+/// description prompt. Full-file content was trialed (Anthropic Contextual
+/// Retrieval, Sept 2024) but measured neutral on our CSN Ruby + synx evals
+/// and burned ~16× more LLM tokens, so it's not stored here. Exports stay —
+/// they're cheap, already parsed, and help the LLM describe a chunk's role
+/// in the larger module.
 #[derive(Debug, Clone, Default)]
 pub struct FileContext {
 	pub imports: Vec<String>,
+	pub exports: Vec<String>,
 	pub all_symbols: Vec<String>,
 }
 
@@ -113,9 +119,16 @@ pub fn build_enriched_embedding_input(block: &CodeBlock, description: Option<&st
 
 /// Generate contextual descriptions for a batch of code blocks using LLM.
 /// Returns a map of block index -> description string.
-/// Processes blocks in sub-batches according to config.contextual_batch_size.
 ///
-/// `file_context` provides file-level imports and sibling symbols to enrich the LLM prompt.
+/// Batches up to `contextual_batch_size` chunks per LLM call, mixing across
+/// files. Each chunk in the prompt carries its file path, language, imports,
+/// exports, sibling symbols, and own symbols — cheap structural context that
+/// helps the LLM situate the chunk without us paying for full-file content.
+///
+/// We trialed Anthropic-style full-document context (Sept 2024 blog) and it
+/// measured neutral on CSN Ruby and synx while burning ~16× more LLM tokens,
+/// so we dropped it. Exports stayed because they're free at parse time and
+/// give the LLM a hint about the module's role in the codebase.
 pub async fn generate_contextual_descriptions(
 	blocks: &[CodeBlock],
 	config: &Config,
@@ -136,26 +149,20 @@ pub async fn generate_contextual_descriptions(
 	// (complements file_context which has symbols from all regions in the file)
 	let siblings = build_siblings_map(blocks);
 
-	let batch_size = config.index.contextual_batch_size;
+	let batch_size = config.index.contextual_batch_size.max(1);
 
-	for chunk_start in (0..blocks.len()).step_by(batch_size) {
-		let chunk_end = (chunk_start + batch_size).min(blocks.len());
-		let batch = &blocks[chunk_start..chunk_end];
-
-		// LLM call includes retry with exponential backoff (in LlmClient).
-		// If it still fails after retries, propagate error to stop indexing.
-		let batch_descriptions =
-			generate_descriptions_batch(&client, batch, chunk_start, file_context, &siblings)
-				.await
-				.map_err(|e| {
-					anyhow::anyhow!(
-						"Contextual description batch failed for chunks {}-{}: {}. \
-						 Stopping indexing to prevent storing data without LLM descriptions.",
-						chunk_start,
-						chunk_end - 1,
-						e
-					)
-				})?;
+	let indexed: Vec<(usize, &CodeBlock)> = blocks.iter().enumerate().collect();
+	for sub in indexed.chunks(batch_size) {
+		let batch_descriptions = generate_descriptions_batch(&client, sub, file_context, &siblings)
+			.await
+			.map_err(|e| {
+				anyhow::anyhow!(
+					"Contextual description batch failed for {} chunks: {}. \
+					 Stopping indexing to prevent storing data without LLM descriptions.",
+					sub.len(),
+					e
+				)
+			})?;
 		descriptions.extend(batch_descriptions);
 	}
 
@@ -177,82 +184,86 @@ fn build_siblings_map(blocks: &[CodeBlock]) -> HashMap<String, Vec<String>> {
 	siblings
 }
 
-/// Generate descriptions for a single sub-batch of code blocks.
+/// Generate descriptions for a cross-file batch of code blocks.
+///
+/// Each chunk in the prompt carries its own `Imports / Exports / Also in file`
+/// header so the LLM can describe its purpose without us needing to attach the
+/// whole file body. Exports are the structural piece kept from the trialed
+/// Anthropic full-file path — they're cheap (already parsed) and tell the LLM
+/// what API surface this file contributes to the module.
 async fn generate_descriptions_batch(
 	client: &LlmClient,
-	batch: &[CodeBlock],
-	global_offset: usize,
+	batch: &[(usize, &CodeBlock)],
 	file_context: &FileContextMap,
 	siblings: &HashMap<String, Vec<String>>,
 ) -> Result<HashMap<usize, String>> {
 	let mut descriptions = HashMap::new();
+	if batch.is_empty() {
+		return Ok(descriptions);
+	}
+
 	let mut prompt = String::new();
+	prompt.push_str(&format!(
+		"Write a description for each of the {} code chunks below. Each chunk includes its file's \
+		 imports/exports/sibling-symbols header. Output 1-2 sentences per chunk using \
+		 search-friendly terms.\n\n",
+		batch.len()
+	));
 
-	for (i, block) in batch.iter().enumerate() {
+	for (i, (_global_idx, block)) in batch.iter().enumerate() {
 		let chunk_num = i + 1;
-
-		// Get file-level context for this block's file
 		let file_ctx = file_context.get(&block.path);
-
-		// Build imports line
-		let imports_line = if let Some(ctx) = file_ctx {
-			if !ctx.imports.is_empty() {
-				format!("Imports: {}\n", ctx.imports.join(", "))
-			} else {
-				String::new()
-			}
-		} else {
-			String::new()
+		let imports_line = match file_ctx {
+			Some(c) if !c.imports.is_empty() => format!("Imports: {}\n", c.imports.join(", ")),
+			_ => String::new(),
 		};
-
-		// Build siblings line (other functions in same file, excluding current block's symbols)
-		let siblings_line = if let Some(all_syms) = file_ctx
+		let exports_line = match file_ctx {
+			Some(c) if !c.exports.is_empty() => format!("Exports: {}\n", c.exports.join(", ")),
+			_ => String::new(),
+		};
+		let other_syms: Vec<&str> = match file_ctx
 			.map(|c| &c.all_symbols)
 			.or(siblings.get(&block.path))
 		{
-			let other_syms: Vec<&str> = all_syms
+			Some(syms) => syms
 				.iter()
 				.filter(|s| !block.symbols.contains(s))
 				.map(|s| s.as_str())
-				.collect();
-			if !other_syms.is_empty() {
-				format!("Also in file: {}\n", other_syms.join(", "))
-			} else {
-				String::new()
-			}
-		} else {
-			String::new()
+				.collect(),
+			None => Vec::new(),
 		};
-
+		let siblings_line = if other_syms.is_empty() {
+			String::new()
+		} else {
+			format!("Also in file: {}\n", other_syms.join(", "))
+		};
+		let sym_line = if block.symbols.is_empty() {
+			"(no symbols)".to_string()
+		} else {
+			block.symbols.join(", ")
+		};
 		prompt.push_str(&format!(
-			"=== CHUNK {} ===\nFile: {}\nLanguage: {}\n{}{}Symbols: {}\nCode:\n{}\n\n",
+			"=== CHUNK {} ===\nFile: {}\nLanguage: {}\n{}{}{}Symbols: {}\nCode:\n<chunk>\n{}\n</chunk>\n\n",
 			chunk_num,
 			block.path,
 			block.language,
 			imports_line,
+			exports_line,
 			siblings_line,
-			if block.symbols.is_empty() {
-				"(none)".to_string()
-			} else {
-				block.symbols.join(", ")
-			},
+			sym_line,
 			truncate_code_for_context(&block.content, 1500),
 		));
 	}
 
 	prompt.push_str(&format!(
-        "Write a description for each of the {} chunks above.\n\n\
-         Rules:\n\
-         - Each description: 1-2 sentences, specific to the code's purpose\n\
-         - Use search-friendly terms (e.g. \"JWT authentication\", \"database connection pooling\")\n\
-         - Mention the domain/context when imports or sibling functions reveal it\n\n\
-         Output format: a JSON object where keys are chunk numbers as strings, values are descriptions.\n\
-         Output ONLY the JSON object. Do not wrap in code fences. Start with {{ and end with }}.\n\n\
-         Example output:\n\
-         {{\"1\": \"Validates JWT bearer tokens for API authentication middleware\", \
-         \"2\": \"Initializes database connection pool with retry and timeout configuration\"}}",
-        batch.len()
-    ));
+		"Output format: a JSON object where keys are chunk numbers as strings, values are descriptions.\n\
+		 Output ONLY the JSON object. Do not wrap in code fences. Start with {{ and end with }}.\n\n\
+		 Example output for 2 chunks:\n\
+		 {{\"1\": \"Validates JWT bearer tokens for API authentication middleware\", \
+		 \"2\": \"Initializes database connection pool with retry and timeout configuration\"}}\n\n\
+		 Now produce the JSON for the {} chunks above.",
+		batch.len()
+	));
 
 	let messages = vec![
 		Message::system(CONTEXTUAL_SYSTEM_PROMPT),
@@ -262,7 +273,7 @@ async fn generate_descriptions_batch(
 	let json = client.chat_completion_json(messages, None).await?;
 
 	if let Some(obj) = json.as_object() {
-		for (i, _block) in batch.iter().enumerate() {
+		for (i, (global_idx, _block)) in batch.iter().enumerate() {
 			let chunk_key = format!("{}", i + 1);
 			if let Some(desc) = obj.get(&chunk_key).and_then(|v| v.as_str()) {
 				let trimmed = if desc.len() > 300 {
@@ -270,7 +281,7 @@ async fn generate_descriptions_batch(
 				} else {
 					desc.to_string()
 				};
-				descriptions.insert(global_offset + i, trimmed);
+				descriptions.insert(*global_idx, trimmed);
 			}
 		}
 	}
