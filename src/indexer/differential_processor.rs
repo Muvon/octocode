@@ -29,7 +29,38 @@ use crate::state::SharedState;
 use crate::store::{CodeBlock, DocumentBlock, Store, TextBlock};
 use anyhow::Result;
 use std::collections::HashSet;
-use tree_sitter::Parser;
+use tree_sitter::{Node, Parser};
+
+/// Walk the whole tree and accumulate imports + exports from every node the
+/// language parser recognizes. The per-language `extract_imports_exports`
+/// inspects a single node's kind, so we have to visit every descendant — the
+/// root is almost never an `import_statement` itself.
+fn walk_for_imports_exports(
+	node: Node,
+	contents: &str,
+	lang: &dyn languages::Language,
+) -> (Vec<String>, Vec<String>) {
+	let mut imports = Vec::new();
+	let mut exports = Vec::new();
+	let mut stack = vec![node];
+	while let Some(n) = stack.pop() {
+		let (imp, exp) = lang.extract_imports_exports(n, contents);
+		imports.extend(imp);
+		exports.extend(exp);
+		let mut cursor = n.walk();
+		for child in n.children(&mut cursor) {
+			stack.push(child);
+		}
+	}
+	dedup_in_place(&mut imports);
+	dedup_in_place(&mut exports);
+	(imports, exports)
+}
+
+fn dedup_in_place(v: &mut Vec<String>) {
+	let mut seen = HashSet::new();
+	v.retain(|s| seen.insert(s.clone()));
+}
 
 /// Context for file processing to reduce the number of function arguments
 pub struct ProcessFileContext<'a> {
@@ -76,8 +107,10 @@ pub async fn process_file_differential(
 		&mut code_regions,
 	);
 
-	// Extract file-level imports for contextual description enrichment
-	let (imports, _exports) = lang_impl.extract_imports_exports(tree.root_node(), contents);
+	// Extract file-level imports/exports and the full file source for the
+	// LLM contextual-description prompt (Anthropic "situate within document").
+	let (imports, exports) =
+		walk_for_imports_exports(tree.root_node(), contents, lang_impl.as_ref());
 	let all_symbols: Vec<String> = code_regions
 		.iter()
 		.flat_map(|r| r.symbols.iter().cloned())
@@ -86,6 +119,7 @@ pub async fn process_file_differential(
 		file_path.to_string(),
 		FileContext {
 			imports,
+			exports,
 			all_symbols,
 		},
 	);
@@ -336,8 +370,10 @@ pub async fn process_file(
 		&mut code_regions,
 	);
 
-	// Extract file-level imports for contextual description enrichment
-	let (imports, _exports) = lang_impl.extract_imports_exports(tree.root_node(), contents);
+	// Extract file-level imports/exports + full file source for the LLM
+	// contextual-description prompt.
+	let (imports, exports) =
+		walk_for_imports_exports(tree.root_node(), contents, lang_impl.as_ref());
 	let all_symbols: Vec<String> = code_regions
 		.iter()
 		.flat_map(|r| r.symbols.iter().cloned())
@@ -346,6 +382,7 @@ pub async fn process_file(
 		file_path.to_string(),
 		FileContext {
 			imports,
+			exports,
 			all_symbols,
 		},
 	);
