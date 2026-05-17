@@ -1066,6 +1066,14 @@ impl Store {
 		let distance_threshold = query.min_relevance.map(|sim| 1.0 - sim);
 		let limit = query.limit;
 
+		// Empty table → nothing to search. Without this guard, an FTS query against an
+		// indexless empty table fails with "Cannot perform full text search unless an
+		// INVERTED index has been created". `create_fts_index` also short-circuits on
+		// zero rows, so we must avoid issuing the FTS query at all.
+		if table.count_rows(None).await? == 0 {
+			return Ok(Vec::new());
+		}
+
 		// When both signals are present, use LanceDB native hybrid (vector + FTS with RRF).
 		// When only one signal is present, use that signal alone.
 		match (&query.vector_query, &query.keywords) {
@@ -1082,6 +1090,26 @@ impl Store {
 					// freshly created FTS index. Drop it so the next get_table reopens.
 					self.table_cache.write().await.remove(B::TABLE_NAME);
 					table = self.get_table(B::TABLE_NAME).await?;
+
+					// Verify creation actually succeeded. It can no-op (e.g. empty table
+					// raced to zero, or index build failed silently); issuing an FTS
+					// query without the index raises an opaque Lance error. Fall back
+					// to vector-only search when the index is still missing.
+					let indices = table.list_indices().await?;
+					let has_fts_now = indices
+						.iter()
+						.any(|idx| idx.index_type == lancedb::index::IndexType::FTS);
+					if !has_fts_now {
+						return self
+							.get_blocks_with_config::<B>(
+								embedding.clone(),
+								Some(limit),
+								distance_threshold,
+								query.language_filter.as_deref(),
+								0,
+							)
+							.await;
+					}
 				}
 
 				// Native hybrid: LanceDB runs vector + FTS in parallel, fuses with RRF
@@ -1142,6 +1170,17 @@ impl Store {
 					// Reopen the cached handle so the new index becomes visible.
 					self.table_cache.write().await.remove(B::TABLE_NAME);
 					table = self.get_table(B::TABLE_NAME).await?;
+
+					// If the index still isn't there (creation no-op), we have no
+					// vector fallback in this arm — return empty results rather than
+					// raising the cryptic Lance INVERTED-index error.
+					let indices = table.list_indices().await?;
+					let has_fts_now = indices
+						.iter()
+						.any(|idx| idx.index_type == lancedb::index::IndexType::FTS);
+					if !has_fts_now {
+						return Ok(Vec::new());
+					}
 				}
 
 				let mut q = table
