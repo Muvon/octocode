@@ -998,6 +998,11 @@ pub async fn index_branch_delta(
 
 	branch::save_manifest(&branch_dir, &manifest)?;
 
+	// Same end-of-run maintenance as the main index path.
+	if let Err(e) = branch_store.optimize_tables().await {
+		tracing::warn!(error = %e, "Post-branch-index optimize_tables failed (non-fatal)");
+	}
+
 	Ok(manifest)
 }
 
@@ -1987,6 +1992,14 @@ pub async fn index_files_with_quiet(
 	// at first index time will never store a commit hash, causing infinite "first-time indexing"
 	// loops on subsequent runs where all files are skipped by mtime but 0 files are processed.
 	persist_and_store_metadata(store, git_repo_root, config, quiet, "indexing_complete").await?;
+
+	// Run LanceDB maintenance once per indexing run: compact fragments, extend
+	// vector & FTS indexes to cover the newly-added tail, prune old versions.
+	// Without this, repeated incremental indexing leaves growing unindexed tails
+	// that the query path must brute-force scan — search degrades with DB size.
+	if let Err(e) = store.optimize_tables().await {
+		tracing::warn!(error = %e, "Post-index optimize_tables failed (non-fatal)");
+	}
 
 	Ok(())
 }
