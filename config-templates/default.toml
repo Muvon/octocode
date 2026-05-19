@@ -41,10 +41,14 @@ context_lines = 3
 search_block_max_characters = 400  # Maximum characters to display per code/text/doc block
 
 [search.reranker]
-enabled = false
+enabled = true
 # Reranker model in provider:model format
 # Supported providers: voyage (VOYAGE_API_KEY), cohere (COHERE_API_KEY), jina (JINA_API_KEY), fastembed (local)
-model = "voyage:rerank-2.5"
+# fastembed:jina-reranker-v2-base-multilingual — local, no API key, code-aware, multilingual, ~15x faster than bge-reranker-v2-m3
+# Remote API alternatives (higher quality, require API keys):
+#   model = "voyage:rerank-2.5"
+#   model = "cohere:rerank-english-v3.0"
+model = "fastembed:jina-reranker-v2-base-multilingual"
 # Number of candidates to fetch from vector search before reranking
 top_k_candidates = 50
 # Number of final results to return after reranking
@@ -52,25 +56,24 @@ final_top_k = 10
 
 [search.hybrid]
 # Enable hybrid search combining vector similarity with keyword matching
-enabled = false
+enabled = true
 # Weight for vector similarity signal (0.0-1.0)
-default_vector_weight = 0.7
+default_vector_weight = 0.6
 # Weight for keyword matching signal (0.0-1.0)
-default_keyword_weight = 0.3
-# Weight for keyword matches in path/filename
-keyword_path_weight = 2.0
-# Weight for keyword matches in content
-keyword_content_weight = 1.0
-# Weight for keyword matches in symbols (code blocks only)
-keyword_symbols_weight = 2.5
-# Weight for keyword matches in title (document blocks only)
-keyword_title_weight = 3.0
+default_keyword_weight = 0.4
 
 [embedding]
-code_model = "voyage:voyage-code-3"
-text_model = "voyage:voyage-3.5-lite"
+# Local models via fastembed (no API key required, downloaded on first use to system cache)
+# code_model: jina-embeddings-v2-base-code — purpose-built for code search, 768d, fast CPU inference
+# text_model: nomic-embed-text-v1.5 — best local general-text model (Matryoshka, 8K ctx, Apache 2.0)
+# Remote API alternatives (higher quality, require API keys):
+#   code_model = "voyage:voyage-code-3"
+#   text_model = "voyage:voyage-3.5-lite"
+#   code_model = "jina:jina-embeddings-v3"
+code_model = "fastembed:jinaai/jina-embeddings-v2-base-code"
+text_model = "fastembed:nomic-ai/nomic-embed-text-v1.5"
 
-# API keys are sourced from environment variables:
+# API keys (only needed for remote providers):
 # JINA_API_KEY, VOYAGE_API_KEY, GOOGLE_API_KEY
 
 [graphrag]
