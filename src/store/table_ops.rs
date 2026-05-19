@@ -101,30 +101,13 @@ impl<'a> TableOperations<'a> {
 		Ok(())
 	}
 
-	/// Flush all tables to ensure data is persisted
+	/// Flush all tables to ensure data is persisted.
+	///
+	/// LanceDB writes are durable once `.add().execute()` returns — the previous
+	/// implementation issued `count_rows(None)` + `schema()` on every table on the
+	/// assumption that this forced persistence, but those are read-only ops that
+	/// only triggered full table scans. This is now a no-op kept for API stability.
 	pub async fn flush_all_tables(&self) -> Result<()> {
-		// Get all tables
-		let table_names = self.db.table_names().execute().await?;
-
-		// Open and flush each table by performing operations that force persistence
-		for table_name in table_names {
-			let table = self.db.open_table(&table_name).execute().await?;
-
-			// Perform operations to ensure any pending writes are flushed:
-			// 1. Count rows to force read access and ensure consistency
-			let row_count = table.count_rows(None).await?;
-
-			// 2. For tables with data, also check schema to ensure metadata is flushed
-			if row_count > 0 {
-				let _ = table.schema().await?;
-			}
-
-			// Log flush activity in debug mode for troubleshooting
-			if cfg!(debug_assertions) {
-				tracing::debug!("Flushed table '{}' with {} rows", table_name, row_count);
-			}
-		}
-
 		Ok(())
 	}
 
@@ -151,28 +134,21 @@ impl<'a> TableOperations<'a> {
 		Ok(false)
 	}
 
-	/// Remove blocks by path from a table
-	pub async fn remove_blocks_by_path(&self, file_path: &str, table_name: &str) -> Result<usize> {
+	/// Remove blocks by path from a table.
+	/// Returns Ok(()) on success. Avoids pre/post `count_rows` (each is a full scan).
+	pub async fn remove_blocks_by_path(&self, file_path: &str, table_name: &str) -> Result<()> {
 		if !self.table_exists(table_name).await? {
-			return Ok(0);
+			return Ok(());
 		}
 
 		let table = self.db.open_table(table_name).execute().await?;
 
-		// Count rows before deletion for reporting
-		let before_count = table.count_rows(None).await?;
-
-		// Delete rows matching the file path
 		table
 			.delete(&format!("path = '{}'", file_path))
 			.await
 			.map_err(|e| anyhow::anyhow!("Failed to delete from {}: {}", table_name, e))?;
 
-		// Count rows after deletion
-		let after_count = table.count_rows(None).await?;
-		let deleted_count = before_count.saturating_sub(after_count);
-
-		Ok(deleted_count)
+		Ok(())
 	}
 
 	/// Remove blocks by hashes from a table

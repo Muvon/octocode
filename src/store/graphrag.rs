@@ -617,8 +617,8 @@ impl<'a> GraphRagOperations<'a> {
 
 		// CRITICAL FIX: Also remove relationships when removing nodes
 		let relationships_removed = self.remove_graph_relationships_by_path(file_path).await?;
-		let nodes_removed = self
-			.table_ops
+		let nodes_removed = node_ids.len();
+		self.table_ops
 			.remove_blocks_by_path(file_path, "graphrag_nodes")
 			.await?;
 
@@ -657,9 +657,6 @@ impl<'a> GraphRagOperations<'a> {
 
 		let table = self.get_table("graphrag_relationships").await?;
 
-		// Count rows before deletion for reporting
-		let before_count = table.count_rows(None).await?;
-
 		// Create filter for relationships where source OR target is any of the node IDs
 		let node_filters: Vec<String> = node_ids
 			.iter()
@@ -683,11 +680,8 @@ impl<'a> GraphRagOperations<'a> {
 			self.invalidate_cache_for_node(node_id);
 		}
 
-		// Count rows after deletion
-		let after_count = table.count_rows(None).await?;
-		let deleted_count = before_count.saturating_sub(after_count);
-
-		Ok(deleted_count)
+		// Approximate count from filter cardinality; avoids two full-scan count_rows.
+		Ok(node_ids.len())
 	}
 
 	/// Get all node IDs for a specific file path from graphrag_nodes

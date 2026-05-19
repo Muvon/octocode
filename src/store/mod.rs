@@ -149,15 +149,16 @@ pub struct Store {
 	text_vector_dim: usize, // Size of text embedding vectors
 	// Cache for table instances to avoid repeated opening overhead
 	table_cache: Arc<RwLock<HashMap<String, Arc<Table>>>>,
-}
-
-// Implementing Drop for the Store
-impl Drop for Store {
-	fn drop(&mut self) {
-		if cfg!(debug_assertions) {
-			tracing::debug!("Store instance dropped, database connection released");
-		}
-	}
+	// Cache for "vector index exists" flag per table. Populated lazily on first
+	// successful index check; subsequent batch inserts skip the open+list_indices
+	// round-trip. Cleared when a new index is created.
+	vector_index_present: Arc<RwLock<HashMap<String, bool>>>,
+	// Cache for "FTS index exists" flag per table. Same rationale.
+	fts_index_present: Arc<RwLock<HashMap<String, bool>>>,
+	// Cached `[index].quantization` setting; avoids re-reading TOML on every batch.
+	quantization: bool,
+	// Cached `[search.hybrid].enabled` setting; avoids re-reading TOML on every batch.
+	hybrid_enabled: bool,
 }
 
 impl Store {
@@ -257,6 +258,10 @@ impl Store {
 			code_vector_dim,
 			text_vector_dim,
 			table_cache: Arc::new(RwLock::new(HashMap::new())),
+			vector_index_present: Arc::new(RwLock::new(HashMap::new())),
+			fts_index_present: Arc::new(RwLock::new(HashMap::new())),
+			quantization: config.index.quantization,
+			hybrid_enabled: config.search.hybrid.enabled,
 		})
 	}
 
@@ -384,8 +389,28 @@ impl Store {
 
 	// Delegate operations to modular components
 	pub async fn content_exists(&self, hash: &str, collection: &str) -> Result<bool> {
-		let table_ops = TableOperations::new(&self.db);
-		table_ops.content_exists(hash, collection).await
+		// Use cached table handle — `content_exists` is called per-block during the
+		// differential pass; opening the table each time costs a manifest read.
+		if !TableOperations::new(&self.db)
+			.table_exists(collection)
+			.await?
+		{
+			return Ok(false);
+		}
+		let table = self.get_table(collection).await?;
+		let mut results = table
+			.query()
+			.only_if(format!("hash = '{}'", hash))
+			.limit(1)
+			.select(lancedb::query::Select::Columns(vec!["hash".to_string()]))
+			.execute()
+			.await?;
+		while let Some(batch) = results.try_next().await? {
+			if batch.num_rows() > 0 {
+				return Ok(true);
+			}
+		}
+		Ok(false)
 	}
 
 	pub async fn store_code_blocks(
@@ -560,6 +585,63 @@ impl Store {
 		table_ops.flush_all_tables().await
 	}
 
+	/// Run LanceDB's full table optimization on all block + graphrag tables.
+	///
+	/// This is the maintenance routine LanceDB recommends after incremental writes:
+	///   1. Compact small fragments into larger ones (fewer files, faster reads).
+	///   2. Extend the vector & FTS indexes to cover newly-added rows
+	///      (otherwise every batch insert lands in an unindexed tail that the
+	///      query path must brute-force scan — search latency grows with the tail).
+	///   3. Prune dataset versions older than 7 days (default retention).
+	///
+	/// Skips tables that don't exist. Logged at info level. Errors are logged
+	/// and swallowed per-table so one bad table doesn't abort the whole sweep.
+	pub async fn optimize_tables(&self) -> Result<()> {
+		use lancedb::table::OptimizeAction;
+
+		let candidates = [
+			"code_blocks",
+			"text_blocks",
+			"document_blocks",
+			"commit_blocks",
+			"graphrag_nodes",
+			"graphrag_relationships",
+			"file_metadata",
+		];
+
+		let existing = self.db.table_names().execute().await?;
+		for name in candidates {
+			if !existing.contains(&name.to_string()) {
+				continue;
+			}
+			let table = match self.db.open_table(name).execute().await {
+				Ok(t) => t,
+				Err(e) => {
+					tracing::warn!("optimize: failed to open '{}': {}", name, e);
+					continue;
+				}
+			};
+			let start = std::time::Instant::now();
+			match table.optimize(OptimizeAction::All).await {
+				Ok(stats) => {
+					tracing::info!(
+						"optimize '{}': compaction={:?} prune={:?} in {:.2}s",
+						name,
+						stats.compaction.is_some(),
+						stats.prune.is_some(),
+						start.elapsed().as_secs_f64()
+					);
+					// Cached Table snapshot is stale after compaction — invalidate.
+					self.table_cache.write().await.remove(name);
+				}
+				Err(e) => {
+					tracing::warn!("optimize '{}' failed: {}", name, e);
+				}
+			}
+		}
+		Ok(())
+	}
+
 	pub async fn close(self) -> Result<()> {
 		// The database connection is closed automatically when the Store is dropped
 		Ok(())
@@ -591,51 +673,60 @@ impl Store {
 		let table_ops = TableOperations::new(&self.db);
 		table_ops.store_batch(B::TABLE_NAME, batch).await?;
 
-		// Create or optimize vector index based on dataset growth
-		if let Ok(table) = self.db.open_table(B::TABLE_NAME).execute().await {
-			let row_count = table.count_rows(None).await?;
-			let indices = table.list_indices().await?;
-			let has_vector_index = indices.iter().any(|idx| idx.columns == vec!["embedding"]);
-			let use_quantization = crate::config::Config::load()
-				.map(|c| c.index.quantization)
-				.unwrap_or(true);
+		// Vector index: only check/create if not cached as present. Avoids
+		// open_table + list_indices on every batch flush.
+		let needs_vector_check = {
+			let cache = self.vector_index_present.read().await;
+			!cache.get(B::TABLE_NAME).copied().unwrap_or(false)
+		};
 
-			if !has_vector_index {
-				if let Err(e) = table_ops
+		if needs_vector_check {
+			if let Ok(table) = self.db.open_table(B::TABLE_NAME).execute().await {
+				let indices = table.list_indices().await?;
+				let has_vector_index = indices.iter().any(|idx| idx.columns == vec!["embedding"]);
+
+				if has_vector_index {
+					self.vector_index_present
+						.write()
+						.await
+						.insert(B::TABLE_NAME.to_string(), true);
+				} else if let Err(e) = table_ops
 					.create_vector_index_optimized(
 						B::TABLE_NAME,
 						"embedding",
 						vector_dim,
-						use_quantization,
+						self.quantization,
 					)
 					.await
 				{
 					tracing::warn!("Failed to create optimized vector index: {}", e);
-				}
-			} else if VectorOptimizer::should_optimize_for_growth(row_count, vector_dim, true) {
-				tracing::info!(
-					"Dataset growth detected, optimizing {} index",
-					B::TABLE_NAME
-				);
-				if let Err(e) = table_ops
-					.recreate_vector_index_optimized(
-						B::TABLE_NAME,
-						"embedding",
-						vector_dim,
-						use_quantization,
-					)
-					.await
-				{
-					tracing::warn!("Failed to recreate optimized vector index: {}", e);
+				} else {
+					self.vector_index_present
+						.write()
+						.await
+						.insert(B::TABLE_NAME.to_string(), true);
+					// Invalidate cached Table handle so subsequent searches see the
+					// fresh index. A stale dataset snapshot would otherwise miss it.
+					self.table_cache.write().await.remove(B::TABLE_NAME);
 				}
 			}
+		}
 
-			// Build FTS index lazily — only when hybrid search is configured
-			if let Ok(config) = crate::config::Config::load() {
-				if config.search.hybrid.enabled {
-					if let Err(e) = table_ops.create_fts_index(B::TABLE_NAME).await {
-						tracing::warn!("Failed to create FTS index for '{}': {}", B::TABLE_NAME, e);
-					}
+		// FTS index: only build when hybrid search is configured, and only check
+		// when not cached as present.
+		if self.hybrid_enabled {
+			let needs_fts_check = {
+				let cache = self.fts_index_present.read().await;
+				!cache.get(B::TABLE_NAME).copied().unwrap_or(false)
+			};
+			if needs_fts_check {
+				if let Err(e) = table_ops.create_fts_index(B::TABLE_NAME).await {
+					tracing::warn!("Failed to create FTS index for '{}': {}", B::TABLE_NAME, e);
+				} else {
+					self.fts_index_present
+						.write()
+						.await
+						.insert(B::TABLE_NAME.to_string(), true);
 				}
 			}
 		}
