@@ -147,7 +147,7 @@ Connections between nodes represent different types of relationships:
 | **TypeScript** | `.ts`, `.tsx` | Type definitions, interface extraction, modules |
 | **Go** | `.go` | Package/import analysis, function extraction |
 | **PHP** | `.php` | Class/function extraction, namespace support |
-| **C++** | `.cpp`, `.hpp`, `.h`, `.cc`, `.cxx` | Include analysis, function/class extraction |
+| **C++** | `.cpp`, `.hpp`, `.h`, `.cc`, `.cxx`, `.c++`, `.hxx`, `.cppm`, `.ixx`, `.mxx`, `.ccm`, `.cxxm` | Include analysis, class/function extraction |
 | **Ruby** | `.rb` | Class/module extraction, method definitions |
 | **JSON** | `.json` | Structure analysis, key extraction |
 | **Bash** | `.sh`, `.bash` | Function and variable extraction |

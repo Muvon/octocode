@@ -257,8 +257,8 @@ pub fn detect_language_from_path(file_path: &str) -> Option<String> {
 		"py" => Some("python".to_string()),
 		"go" => Some("go".to_string()),
 		"php" => Some("php".to_string()),
-		"cpp" | "cc" | "cxx" | "c++" => Some("cpp".to_string()),
-		"c" | "h" => Some("c".to_string()),
+		"cpp" | "cc" | "cxx" | "c++" | "c" | "h" | "hpp" | "hxx" | "cppm" | "ixx" | "mxx"
+		| "ccm" | "cxxm" => Some("cpp".to_string()),
 		"rb" => Some("ruby".to_string()),
 		"sh" | "bash" => Some("bash".to_string()),
 		"json" => Some("json".to_string()),

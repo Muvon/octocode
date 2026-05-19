@@ -322,7 +322,7 @@ AI: *analyzes changes* "The PR adds password hashing in src/auth/hash.rs. Howeve
 | **TypeScript/JavaScript** | `.ts`, `.tsx`, `.js`, `.jsx` | ES6 imports/exports, type definitions |
 | **Go** | `.go` | Package/import analysis, struct/interface parsing |
 | **PHP** | `.php` | Class/function extraction, namespace support |
-| **C++** | `.cpp`, `.hpp`, `.h` | Include analysis, class/function extraction |
+| **C++** | `.cpp`, `.cc`, `.cxx`, `.c++`, `.c`, `.h`, `.hpp`, `.hxx`, `.cppm`, `.ixx`, `.mxx`, `.ccm`, `.cxxm` | Include analysis, class/function extraction, C++20 module support |
 | **Ruby** | `.rb` | Class/module extraction, method definitions |
 | **Java** | `.java` | Import analysis, class/method extraction |
 | **JSON** | `.json` | Structure analysis, key extraction |
