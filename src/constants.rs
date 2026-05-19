@@ -15,7 +15,7 @@
 //! Application-wide constants
 
 /// Maximum number of queries allowed in multi-query operations
-pub const MAX_QUERIES: usize = 5;
+pub const MAX_QUERIES: usize = 10;
 
 /// Embedding input type prefixes for manual injection (non-API providers)
 pub const QUERY_PREFIX: &str = "Represent the query for retrieving supporting documents: ";
