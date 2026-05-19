@@ -183,7 +183,8 @@ pub fn language_from_extension(path: &Path) -> Option<&'static str> {
 		"py" | "pyi" => Some("python"),
 		"go" => Some("go"),
 		"java" => Some("java"),
-		"c" | "cc" | "cpp" | "cxx" | "h" | "hpp" | "hxx" => Some("cpp"),
+		"c" | "cc" | "cpp" | "cxx" | "c++" | "h" | "hpp" | "hxx" | "cppm" | "ixx" | "mxx"
+		| "ccm" | "cxxm" => Some("cpp"),
 		"php" => Some("php"),
 		"rb" => Some("ruby"),
 		"lua" => Some("lua"),

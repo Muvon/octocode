@@ -129,7 +129,8 @@ impl FileUtils {
 			// Java
 			"java" => Some("java"),
 			// C++
-			"cpp" | "cc" | "cxx" | "c" | "h" | "hpp" => Some("cpp"),
+			"cpp" | "cc" | "cxx" | "c++" | "c" | "h" | "hpp" | "hxx" | "cppm" | "ixx" | "mxx"
+			| "ccm" | "cxxm" => Some("cpp"),
 			// PHP
 			"php" => Some("php"),
 			// Bash/Shell

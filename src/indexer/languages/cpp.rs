@@ -413,7 +413,12 @@ impl Language for Cpp {
 	}
 
 	fn get_file_extensions(&self) -> Vec<&'static str> {
-		vec!["cpp", "cc", "cxx", "c++", "c", "h", "hpp"]
+		vec![
+			// Traditional C/C++ source and header extensions
+			"cpp", "cc", "cxx", "c++", "c", "h", "hpp", "hxx",
+			// C++ module extensions (Clang: .cppm, MSVC: .ixx, alternatives: .mxx .ccm .cxxm)
+			"cppm", "ixx", "mxx", "ccm", "cxxm",
+		]
 	}
 }
 
