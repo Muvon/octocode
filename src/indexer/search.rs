@@ -1184,6 +1184,10 @@ pub struct SingleQuerySearchParams<'a> {
 	pub distance_threshold: Option<f32>,
 	pub language_filter: Option<&'a str>,
 	pub hybrid_enabled: bool,
+	/// Per-source weights for the weighted RRF fusion inside hybrid_search.
+	/// Read from `config.search.hybrid.default_vector_weight/keyword_weight`.
+	pub vector_weight: f32,
+	pub keyword_weight: f32,
 }
 
 pub async fn execute_single_search_with_embeddings(
@@ -1219,8 +1223,8 @@ pub async fn execute_single_search_with_embeddings(
 					let hq = crate::store::HybridSearchQuery {
 						vector_query: Some(code_emb),
 						keywords: keywords.clone(),
-						vector_weight: 1.0,
-						keyword_weight: 1.0,
+						vector_weight: params.vector_weight,
+						keyword_weight: params.keyword_weight,
 						limit,
 						min_relevance,
 						language_filter: language_filter.map(String::from),
@@ -1244,8 +1248,8 @@ pub async fn execute_single_search_with_embeddings(
 					let hq = crate::store::HybridSearchQuery {
 						vector_query: Some(text_emb),
 						keywords: keywords.clone(),
-						vector_weight: 1.0,
-						keyword_weight: 1.0,
+						vector_weight: params.vector_weight,
+						keyword_weight: params.keyword_weight,
 						limit,
 						min_relevance,
 						language_filter: None,
@@ -1266,8 +1270,8 @@ pub async fn execute_single_search_with_embeddings(
 					let hq = crate::store::HybridSearchQuery {
 						vector_query: Some(text_emb),
 						keywords: keywords.clone(),
-						vector_weight: 1.0,
-						keyword_weight: 1.0,
+						vector_weight: params.vector_weight,
+						keyword_weight: params.keyword_weight,
 						limit,
 						min_relevance,
 						language_filter: None,
@@ -1286,8 +1290,8 @@ pub async fn execute_single_search_with_embeddings(
 					let hq = crate::store::HybridSearchQuery {
 						vector_query: Some(text_emb),
 						keywords: keywords.clone(),
-						vector_weight: 1.0,
-						keyword_weight: 1.0,
+						vector_weight: params.vector_weight,
+						keyword_weight: params.keyword_weight,
 						limit,
 						min_relevance,
 						language_filter: None,
@@ -1313,8 +1317,8 @@ pub async fn execute_single_search_with_embeddings(
 					let hq = crate::store::HybridSearchQuery {
 						vector_query: Some(code_emb),
 						keywords: keywords.clone(),
-						vector_weight: 1.0,
-						keyword_weight: 1.0,
+						vector_weight: params.vector_weight,
+						keyword_weight: params.keyword_weight,
 						limit: per_type_limit,
 						min_relevance,
 						language_filter: language_filter.map(String::from),
@@ -1339,8 +1343,8 @@ pub async fn execute_single_search_with_embeddings(
 					let hq_text = crate::store::HybridSearchQuery {
 						vector_query: Some(text_emb),
 						keywords: keywords.clone(),
-						vector_weight: 1.0,
-						keyword_weight: 1.0,
+						vector_weight: params.vector_weight,
+						keyword_weight: params.keyword_weight,
 						limit: per_type_limit,
 						min_relevance,
 						language_filter: None,
@@ -1348,8 +1352,8 @@ pub async fn execute_single_search_with_embeddings(
 					let hq_doc = crate::store::HybridSearchQuery {
 						vector_query: Some(text_emb_clone),
 						keywords: keywords.clone(),
-						vector_weight: 1.0,
-						keyword_weight: 1.0,
+						vector_weight: params.vector_weight,
+						keyword_weight: params.keyword_weight,
 						limit: per_type_limit,
 						min_relevance,
 						language_filter: None,
@@ -1419,12 +1423,16 @@ pub async fn execute_parallel_searches(
 	};
 
 	let hybrid_enabled = params.config.search.hybrid.enabled;
+	let vector_weight = params.config.search.hybrid.default_vector_weight;
+	let keyword_weight = params.config.search.hybrid.default_keyword_weight;
 	let main_params = SingleQuerySearchParams {
 		mode: params.mode,
 		limit: main_limit,
 		distance_threshold,
 		language_filter: params.language_filter,
 		hybrid_enabled,
+		vector_weight,
+		keyword_weight,
 	};
 	let branch_params = SingleQuerySearchParams {
 		mode: params.mode,
@@ -1432,6 +1440,8 @@ pub async fn execute_parallel_searches(
 		distance_threshold,
 		language_filter: params.language_filter,
 		hybrid_enabled,
+		vector_weight,
+		keyword_weight,
 	};
 
 	// Search main store

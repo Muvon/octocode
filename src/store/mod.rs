@@ -47,6 +47,7 @@ mod hybrid_tests;
 pub mod metadata;
 pub mod table_ops;
 pub mod vector_optimizer;
+pub mod weighted_rrf;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct CodeBlock {
@@ -1203,12 +1204,23 @@ impl Store {
 					}
 				}
 
-				// Native hybrid: LanceDB runs vector + FTS in parallel, fuses with RRF
+				// Native hybrid: LanceDB runs vector + FTS in parallel. We swap in our
+				// WeightedRRFReranker so the operator can shift the balance away from
+				// the unweighted default — e.g. vector=0.3 / keyword=0.7 favours BM25
+				// hits, which matters for identifier-heavy code queries where the FTS
+				// signal is the cleaner one.
+				let reranker =
+					std::sync::Arc::new(crate::store::weighted_rrf::WeightedRRFReranker::new(
+						60.0,
+						query.vector_weight,
+						query.keyword_weight,
+					));
 				let mut vq = table
 					.vector_search(embedding.clone())?
 					.distance_type(DistanceType::Cosine)
 					.limit(limit)
-					.full_text_search(FullTextSearchQuery::new(kw_query.clone()));
+					.full_text_search(FullTextSearchQuery::new(kw_query.clone()))
+					.rerank(reranker);
 
 				if let Some(lang) = query.language_filter.as_deref() {
 					vq = vq.only_if(format!("language = '{}'", lang));
