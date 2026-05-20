@@ -267,16 +267,22 @@ pub async fn reconcile_master_state(
 					),
 				}
 			}
-			super::index_files_with_quiet(main_store, state.clone(), config, Some(git_repo_root), quiet)
-				.await
-				.map_err(|e| {
-					anyhow::anyhow!(
-						"Main index resync failed while preparing branch delta for '{}': {}. \
+			super::index_files_with_quiet(
+				main_store,
+				state.clone(),
+				config,
+				Some(git_repo_root),
+				quiet,
+			)
+			.await
+			.map_err(|e| {
+				anyhow::anyhow!(
+					"Main index resync failed while preparing branch delta for '{}': {}. \
 						 Branch indexing aborted — main DB is left in its previous state.",
-						branch_name,
-						e
-					)
-				})?;
+					branch_name,
+					e
+				)
+			})?;
 			main_store.flush().await?;
 			Some(local_ref_commit.clone())
 		}

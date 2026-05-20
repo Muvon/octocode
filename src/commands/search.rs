@@ -186,7 +186,10 @@ pub async fn execute(
 			match indexer::branch::load_manifest(&branch_dir) {
 				Ok(Some(manifest)) => {
 					let main_commit = store.get_last_commit_hash().await.ok().flatten();
-					if !indexer::branch::manifest_is_coherent_with(&manifest, main_commit.as_deref()) {
+					if !indexer::branch::manifest_is_coherent_with(
+						&manifest,
+						main_commit.as_deref(),
+					) {
 						eprintln!(
 							"⚠️  Branch '{}' index was built against main at {}, but main is now at {}. \
 							 Skipping branch overlay — re-run `octocode index` to refresh.",
