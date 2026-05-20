@@ -597,16 +597,19 @@ pub async fn index_branch_delta(
 
 	// Reset state counters that may have been advanced by a master resync
 	// inside reconcile_master_state. Without this, the branch-delta phase
-	// inherits the master phase's progress numbers, which is confusing in
-	// the progress display.
+	// inherits the master phase's progress numbers (file counts, graphrag
+	// blocks, status text), making the display show "0 files indexed,
+	// GraphRAG: N blocks" when the branch delta is empty — N is the master
+	// graphrag count carrying over, not branch work.
 	{
 		let mut state_guard = state.write();
 		state_guard.indexed_files = 0;
 		state_guard.skipped_files = 0;
 		state_guard.total_files = 0;
+		state_guard.graphrag_blocks = 0;
 		state_guard.indexing_complete = false;
 		state_guard.counting_files = false;
-		state_guard.status_message = String::new();
+		state_guard.status_message = format!("Branch '{}' delta indexing...", branch_name);
 	}
 
 	// Load existing manifest to check if we can do incremental update
@@ -640,18 +643,23 @@ pub async fn index_branch_delta(
 		);
 	}
 
-	// Compute the full delta: files that differ between default branch and current HEAD
+	// Compute the full delta against the resolved fork-point commit, not the
+	// `default_branch` ref. `git diff <ref>...HEAD` already collapses to
+	// merge-base internally, so the two forms produce the same file list
+	// today — but pinning to the SHA we resolved in reconcile means a ref
+	// move during indexing can't shift the diff base out from under us, and
+	// the call site matches what the v2 manifest claims (`fork_point`).
 	let (changed_files, deleted_files) =
-		branch::compute_branch_delta(git_repo_root, &default_branch)?;
+		branch::compute_branch_delta(git_repo_root, &master_state.fork_point)?;
 
 	if !quiet {
 		println!(
-			"🔀 Branch '{}' delta: {} changed, {} deleted files (vs '{}' at {})",
+			"🔀 Branch '{}' delta: {} changed, {} deleted files (vs fork-point {} on '{}')",
 			branch_name,
 			changed_files.len(),
 			deleted_files.len(),
+			&master_state.fork_point[..master_state.fork_point.len().min(8)],
 			default_branch,
-			&base_db_commit[..base_db_commit.len().min(8)],
 		);
 	}
 
