@@ -68,7 +68,7 @@ pub enum GraphRAGOperation {
 
 /// Execute a GraphRAG command
 pub async fn execute(
-	_store: &Store,
+	store: &Store,
 	args: &GraphRAGArgs,
 	config: &Config,
 ) -> Result<(), anyhow::Error> {
@@ -90,17 +90,39 @@ pub async fn execute(
 		}
 	};
 
-	// Branch-aware GraphRAG: filter main graph and merge branch data
+	// Branch-aware GraphRAG: filter main graph and merge branch data.
+	// Same coherence rule as semantic search: skip the branch overlay when
+	// the branch DB was built against a different main commit than the one
+	// we'd be filtering — the override set would point at paths whose graph
+	// state has since changed in main.
 	if let Some(branch_name) = indexer::branch::detect_branch_context(&current_dir) {
 		if let Ok(branch_dir) = octocode::storage::get_branch_dir(&current_dir, &branch_name) {
 			if let Ok(Some(manifest)) = indexer::branch::load_manifest(&branch_dir) {
-				let overridden = manifest.overridden_paths();
-				graph_builder.apply_branch_filter(&overridden).await;
-				if let Ok(branch_store) = octocode::store::Store::new_for_branch(&branch_name).await
-				{
-					if let Err(e) = graph_builder.merge_branch_graph(&branch_store).await {
-						eprintln!("Warning: Failed to merge branch GraphRAG data: {}", e);
+				let main_commit = store.get_last_commit_hash().await.ok().flatten();
+				if indexer::branch::manifest_is_coherent_with(&manifest, main_commit.as_deref()) {
+					let overridden = manifest.overridden_paths();
+					graph_builder.apply_branch_filter(&overridden).await;
+					if let Ok(branch_store) =
+						octocode::store::Store::new_for_branch(&branch_name).await
+					{
+						if let Err(e) = graph_builder.merge_branch_graph(&branch_store).await {
+							eprintln!("Warning: Failed to merge branch GraphRAG data: {}", e);
+						}
 					}
+				} else {
+					eprintln!(
+						"⚠️  Branch '{}' GraphRAG overlay skipped: branch DB at {} doesn't match main DB at {}. Re-run `octocode index`.",
+						branch_name,
+						if manifest.base_db_commit.is_empty() {
+							"<unknown>"
+						} else {
+							&manifest.base_db_commit[..manifest.base_db_commit.len().min(8)]
+						},
+						main_commit
+							.as_deref()
+							.map(|s| &s[..s.len().min(8)])
+							.unwrap_or("<unknown>"),
+					);
 				}
 			}
 		}

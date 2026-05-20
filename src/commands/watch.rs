@@ -114,6 +114,7 @@ pub async fn execute(
 			let branch_store = Store::new_for_branch(&branch_name).await?;
 			branch_store.initialize_collections().await?;
 			indexer::index_branch_delta(
+				store,
 				&branch_store,
 				state.clone(),
 				config,
@@ -244,6 +245,7 @@ pub async fn execute(
 						let branch_store = Store::new_for_branch(&branch_name).await?;
 						branch_store.initialize_collections().await?;
 						indexer::index_branch_delta(
+							store,
 							&branch_store,
 							state.clone(),
 							&config,

@@ -154,6 +154,70 @@ impl GitUtils {
 		Ok(changed_files.into_iter().collect())
 	}
 
+	/// Resolve a ref to a commit hash. Returns `None` if the ref doesn't exist
+	/// (e.g. `origin/main` in a repo without a remote, or before `git fetch`).
+	/// Distinguishes "ref doesn't exist" from "git command failed" — both map
+	/// to None here because the caller cares about "is there a commit we can
+	/// compare against", not why.
+	pub fn resolve_ref(repo_path: &Path, refname: &str) -> Option<String> {
+		let output = Command::new("git")
+			.args(["rev-parse", "--verify", "--quiet", refname])
+			.current_dir(repo_path)
+			.output()
+			.ok()?;
+		if !output.status.success() {
+			return None;
+		}
+		let s = String::from_utf8(output.stdout).ok()?.trim().to_string();
+		if s.is_empty() {
+			None
+		} else {
+			Some(s)
+		}
+	}
+
+	/// Compute the merge-base (common ancestor) between two refs. This is the
+	/// real fork point for branch-delta computation — diffing against the
+	/// default-branch tip directly includes commits the branch is "missing",
+	/// which would pollute the branch delta with files that belong in main.
+	pub fn merge_base(repo_path: &Path, a: &str, b: &str) -> Result<String> {
+		let output = Command::new("git")
+			.args(["merge-base", a, b])
+			.current_dir(repo_path)
+			.output()?;
+		if !output.status.success() {
+			let stderr = String::from_utf8_lossy(&output.stderr);
+			return Err(anyhow::anyhow!(
+				"git merge-base {} {} failed: {}",
+				a,
+				b,
+				stderr.trim()
+			));
+		}
+		Ok(String::from_utf8(output.stdout)?.trim().to_string())
+	}
+
+	/// Count commits that `head_ref` is ahead of `base_ref` (i.e. commits in
+	/// head_ref that aren't in base_ref). Used to surface "local main is N
+	/// commits behind origin/main" warnings.
+	pub fn commits_ahead(repo_path: &Path, base_ref: &str, head_ref: &str) -> Result<usize> {
+		let range = format!("{}..{}", base_ref, head_ref);
+		let output = Command::new("git")
+			.args(["rev-list", "--count", &range])
+			.current_dir(repo_path)
+			.output()?;
+		if !output.status.success() {
+			let stderr = String::from_utf8_lossy(&output.stderr);
+			return Err(anyhow::anyhow!(
+				"git rev-list --count {} failed: {}",
+				range,
+				stderr.trim()
+			));
+		}
+		let n: usize = String::from_utf8(output.stdout)?.trim().parse()?;
+		Ok(n)
+	}
+
 	/// Detect the default branch name
 	pub fn get_default_branch(repo_path: &Path) -> Result<String> {
 		// Try remote HEAD first

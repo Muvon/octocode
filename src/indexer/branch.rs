@@ -26,6 +26,16 @@ use std::path::{Path, PathBuf};
 use super::git_utils::GitUtils;
 
 /// Metadata describing a branch's delta index state.
+///
+/// Version history:
+/// - v1: changed_paths/deleted_paths + base_commit (default-branch tip)
+/// - v2: adds fork_point, base_db_commit, remote_base_observed. The branch
+///   delta is now diffed against `fork_point` (the merge-base) instead of the
+///   default-branch tip, so commits the branch is "missing" no longer leak
+///   into the delta. `base_db_commit` records which commit the main index was
+///   at when we built this branch — search refuses to load the branch DB on
+///   top of a main DB that has since moved, because the override semantics
+///   would be incoherent.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BranchManifest {
 	/// Schema version for forward compatibility.
@@ -35,6 +45,9 @@ pub struct BranchManifest {
 	/// Default branch name at time of indexing (e.g. "main").
 	pub base_branch: String,
 	/// Commit hash of the default branch HEAD when delta was computed.
+	/// Kept for backwards compatibility with v1 manifests; new code should
+	/// prefer `fork_point` for the diff base and `base_db_commit` for the
+	/// search-time coherence check.
 	pub base_commit: String,
 	/// Branch HEAD commit when last indexed.
 	pub branch_commit: String,
@@ -44,6 +57,21 @@ pub struct BranchManifest {
 	pub deleted_paths: Vec<String>,
 	/// Unix timestamp of when the index was last updated.
 	pub indexed_at: i64,
+	/// Merge-base between the default branch and this branch's HEAD — the
+	/// real fork point. Delta is diffed against this commit so the branch
+	/// DB only contains files that actually changed on the branch.
+	#[serde(default)]
+	pub fork_point: String,
+	/// The commit hash the *main index* was at when this branch delta was
+	/// built. Search rejects this branch DB if the main DB has since moved
+	/// to a different commit — the override mapping would be wrong.
+	#[serde(default)]
+	pub base_db_commit: String,
+	/// `origin/<default_branch>` commit observed at index time, if a remote
+	/// existed. Empty when there's no remote or the fetch ref was missing.
+	/// Diagnostic only — does not gate anything.
+	#[serde(default)]
+	pub remote_base_observed: String,
 }
 
 impl BranchManifest {
@@ -120,15 +148,161 @@ pub fn get_branch_commit(repo_path: &Path, branch: &str) -> Result<String> {
 	Ok(String::from_utf8(output.stdout)?.trim().to_string())
 }
 
-/// Compute the delta between the current branch and the default branch.
+/// Snapshot of "where the master/main branch is" across the three places that
+/// can disagree: the index database, the local git ref, and the remote ref.
+/// Produced by [`reconcile_master_state`] and passed into branch indexing so
+/// the delta gets computed against the right commit and the manifest captures
+/// the state we relied on.
+#[derive(Debug, Clone)]
+pub struct MasterState {
+	/// Default branch name as detected from `origin/HEAD` (or fallback).
+	pub branch_name: String,
+	/// Last commit the main index was updated to. `None` if the main DB has
+	/// never been indexed (fresh setup).
+	pub db_commit: Option<String>,
+	/// Current commit of the local `<default_branch>` ref.
+	pub local_ref_commit: String,
+	/// Current commit of `origin/<default_branch>`, if a remote ref exists.
+	pub remote_ref_commit: Option<String>,
+	/// Merge-base between `<default_branch>` (local ref) and `HEAD` — the
+	/// commit where the current branch actually forked off main.
+	pub fork_point: String,
+	/// True when the local default-branch ref is behind the remote one. The
+	/// caller is expected to log a prominent warning; we keep indexing
+	/// against the local ref because pulling is a workspace action that
+	/// belongs to the user.
+	pub local_behind_remote: bool,
+	/// `Some(n)` if the main DB was re-indexed by reconcile because the DB
+	/// commit didn't match the local ref. `None` when no master reindex was
+	/// triggered (DB already current, or no main DB exists yet).
+	pub db_resynced_to: Option<String>,
+}
+
+/// Compare and (when needed) converge the three views of the main branch
+/// before branch-delta indexing runs. Steps:
+///
+/// 1. Read the default branch name, local ref, and (best-effort) remote ref.
+/// 2. Compute the fork-point between local default branch and `HEAD`.
+/// 3. Read the main DB's last indexed commit.
+/// 4. If DB commit != local ref commit: re-index the main store so the branch
+///    DB lays on top of a coherent main snapshot. This is the "always index up
+///    to master before branching" guarantee — silent skip is what got the
+///    `conversation_compression/` files lost in the first place.
+/// 5. Surface (don't auto-fix) `local < remote` divergence. Pulling is a
+///    user workspace action; we won't run it implicitly.
+///
+/// Pass `main_store` so we can resynchronize when needed.
+pub async fn reconcile_master_state(
+	main_store: &crate::store::Store,
+	state: crate::state::SharedState,
+	config: &crate::config::Config,
+	git_repo_root: &Path,
+	quiet: bool,
+) -> Result<MasterState> {
+	let branch_name = GitUtils::get_default_branch(git_repo_root)?;
+
+	let local_ref_commit = GitUtils::resolve_ref(git_repo_root, &branch_name).ok_or_else(|| {
+		anyhow::anyhow!(
+			"Default branch '{}' could not be resolved locally. Check `git rev-parse {}`.",
+			branch_name,
+			branch_name
+		)
+	})?;
+
+	let remote_ref_name = format!("origin/{}", branch_name);
+	let remote_ref_commit = GitUtils::resolve_ref(git_repo_root, &remote_ref_name);
+
+	let fork_point = GitUtils::merge_base(git_repo_root, &branch_name, "HEAD").map_err(|e| {
+		anyhow::anyhow!(
+			"Failed to compute fork-point between '{}' and HEAD: {}. \
+			 If the branches have no common ancestor (orphan branch), branch-delta \
+			 indexing cannot proceed — checkout the default branch and re-run.",
+			branch_name,
+			e
+		)
+	})?;
+
+	let local_behind_remote = match &remote_ref_commit {
+		Some(remote) if remote != &local_ref_commit => {
+			// `local..remote` counts commits the remote has that local doesn't.
+			match GitUtils::commits_ahead(git_repo_root, &branch_name, &remote_ref_name) {
+				Ok(n) if n > 0 => {
+					if !quiet {
+						eprintln!(
+							"⚠️  Local '{}' is behind '{}' by {} commit{} — branch delta \
+							 will be computed against the local (stale) base. Run `git pull` \
+							 on '{}' and re-index to use the latest remote tip.",
+							branch_name,
+							remote_ref_name,
+							n,
+							if n == 1 { "" } else { "s" },
+							branch_name,
+						);
+					}
+					true
+				}
+				_ => false,
+			}
+		}
+		_ => false,
+	};
+
+	let db_commit = main_store.get_last_commit_hash().await.unwrap_or(None);
+
+	let db_resynced_to = match &db_commit {
+		Some(db) if db == &local_ref_commit => None,
+		_ => {
+			if !quiet {
+				match &db_commit {
+					Some(prev) => println!(
+						"🔄 Main index at {} but local '{}' is at {} — resyncing main \
+						 index before computing branch delta.",
+						&prev[..prev.len().min(8)],
+						branch_name,
+						&local_ref_commit[..local_ref_commit.len().min(8)],
+					),
+					None => println!(
+						"🔄 Main index empty — running a full main index before computing \
+						 branch delta."
+					),
+				}
+			}
+			super::index_files_with_quiet(main_store, state.clone(), config, Some(git_repo_root), quiet)
+				.await
+				.map_err(|e| {
+					anyhow::anyhow!(
+						"Main index resync failed while preparing branch delta for '{}': {}. \
+						 Branch indexing aborted — main DB is left in its previous state.",
+						branch_name,
+						e
+					)
+				})?;
+			main_store.flush().await?;
+			Some(local_ref_commit.clone())
+		}
+	};
+
+	Ok(MasterState {
+		branch_name,
+		db_commit,
+		local_ref_commit,
+		remote_ref_commit,
+		fork_point,
+		local_behind_remote,
+		db_resynced_to,
+	})
+}
+
+/// Compute the delta between the current branch and a specific base commit
+/// (typically the fork-point returned by [`reconcile_master_state`]).
 /// Returns `(changed_files, deleted_files)` as relative paths.
 pub fn compute_branch_delta(
 	repo_path: &Path,
-	default_branch: &str,
+	base_ref: &str,
 ) -> Result<(Vec<String>, Vec<String>)> {
-	// Get committed changes: files that differ between default branch and HEAD
-	let changed = get_diff_files(repo_path, default_branch, None)?;
-	let deleted = get_diff_files(repo_path, default_branch, Some("D"))?;
+	// Get committed changes: files that differ between base ref and HEAD
+	let changed = get_diff_files(repo_path, base_ref, None)?;
+	let deleted = get_diff_files(repo_path, base_ref, Some("D"))?;
 
 	// Also include uncommitted changes (staged + unstaged + untracked)
 	let working_changes = get_working_tree_changes(repo_path)?;
@@ -233,6 +407,18 @@ fn get_working_tree_changes(repo_path: &Path) -> Result<Vec<String>> {
 	}
 
 	Ok(files.into_iter().collect())
+}
+
+/// Decide whether a branch manifest is still safe to overlay onto the given
+/// `main_commit`. v2 manifests must match exactly; v1 manifests (no
+/// `base_db_commit`) are grandfathered so existing indexes keep working until
+/// the next re-index upgrades them. Returns `Ok(())` when overlay is safe.
+pub fn manifest_is_coherent_with(manifest: &BranchManifest, main_commit: Option<&str>) -> bool {
+	match (main_commit, manifest.base_db_commit.as_str()) {
+		(Some(main), recorded) if !recorded.is_empty() && main == recorded => true,
+		(_, "") => true, // legacy v1 manifest, grandfathered
+		_ => false,
+	}
 }
 
 /// Load a branch manifest from disk.
@@ -385,7 +571,7 @@ mod tests {
 
 	fn make_manifest(changed: Vec<&str>, deleted: Vec<&str>) -> BranchManifest {
 		BranchManifest {
-			version: 1,
+			version: 2,
 			branch_name: "test-branch".to_string(),
 			base_branch: "main".to_string(),
 			base_commit: "abc123".to_string(),
@@ -393,6 +579,9 @@ mod tests {
 			changed_paths: changed.into_iter().map(|s| s.to_string()).collect(),
 			deleted_paths: deleted.into_iter().map(|s| s.to_string()).collect(),
 			indexed_at: 1000,
+			fork_point: "abc123".to_string(),
+			base_db_commit: "abc123".to_string(),
+			remote_base_observed: String::new(),
 		}
 	}
 
@@ -413,6 +602,35 @@ mod tests {
 	}
 
 	#[test]
+	fn test_coherent_matching_commit() {
+		let m = make_manifest(vec!["a.rs"], vec![]);
+		// base_db_commit == "abc123" per make_manifest
+		assert!(manifest_is_coherent_with(&m, Some("abc123")));
+	}
+
+	#[test]
+	fn test_incoherent_when_main_moved() {
+		let m = make_manifest(vec!["a.rs"], vec![]);
+		assert!(!manifest_is_coherent_with(&m, Some("abc999")));
+	}
+
+	#[test]
+	fn test_incoherent_when_main_missing() {
+		let m = make_manifest(vec!["a.rs"], vec![]);
+		assert!(!manifest_is_coherent_with(&m, None));
+	}
+
+	#[test]
+	fn test_legacy_v1_manifest_grandfathered() {
+		// Manifests written before v2 have empty base_db_commit; coherence
+		// check must trust them rather than break existing indexes.
+		let mut m = make_manifest(vec!["a.rs"], vec![]);
+		m.base_db_commit = String::new();
+		assert!(manifest_is_coherent_with(&m, Some("abc999")));
+		assert!(manifest_is_coherent_with(&m, None));
+	}
+
+	#[test]
 	fn test_manifest_save_load_roundtrip() {
 		let dir = std::env::temp_dir().join("octocode_test_manifest_roundtrip");
 		let _ = std::fs::remove_dir_all(&dir);
@@ -428,8 +646,11 @@ mod tests {
 		assert_eq!(loaded.branch_commit, "def456");
 		assert_eq!(loaded.changed_paths, vec!["src/foo.rs"]);
 		assert_eq!(loaded.deleted_paths, vec!["src/bar.rs"]);
-		assert_eq!(loaded.version, 1);
+		assert_eq!(loaded.version, 2);
 		assert_eq!(loaded.indexed_at, 1000);
+		assert_eq!(loaded.fork_point, "abc123");
+		assert_eq!(loaded.base_db_commit, "abc123");
+		assert_eq!(loaded.remote_base_observed, "");
 
 		let _ = std::fs::remove_dir_all(&dir);
 	}

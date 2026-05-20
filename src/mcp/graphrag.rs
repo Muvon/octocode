@@ -301,16 +301,32 @@ impl GraphRagProvider {
 				.await
 				.map_err(|e| anyhow::anyhow!("Failed to initialize GraphRAG system: {}", e))?;
 
-		// Branch-aware GraphRAG: filter main graph and merge branch data
+		// Branch-aware GraphRAG: filter main graph and merge branch data.
+		// MCP is long-lived and the main DB can move under us via background
+		// reindexing; re-check coherence on every call rather than trusting
+		// the snapshot we took at provider construction.
 		if let Some(ref manifest) = self.branch_manifest {
-			let overridden = manifest.overridden_paths();
-			graph_builder.apply_branch_filter(&overridden).await;
-			if let Ok(branch_store) =
-				crate::store::Store::new_for_branch(&manifest.branch_name).await
-			{
-				if let Err(e) = graph_builder.merge_branch_graph(&branch_store).await {
-					tracing::warn!(error = %e, "Failed to merge branch GraphRAG data");
+			let main_commit = match crate::store::Store::new().await {
+				Ok(s) => s.get_last_commit_hash().await.ok().flatten(),
+				Err(_) => None,
+			};
+			if crate::indexer::branch::manifest_is_coherent_with(manifest, main_commit.as_deref()) {
+				let overridden = manifest.overridden_paths();
+				graph_builder.apply_branch_filter(&overridden).await;
+				if let Ok(branch_store) =
+					crate::store::Store::new_for_branch(&manifest.branch_name).await
+				{
+					if let Err(e) = graph_builder.merge_branch_graph(&branch_store).await {
+						tracing::warn!(error = %e, "Failed to merge branch GraphRAG data");
+					}
 				}
+			} else {
+				tracing::warn!(
+					branch = %manifest.branch_name,
+					recorded = %manifest.base_db_commit,
+					main_now = ?main_commit,
+					"Branch GraphRAG overlay skipped: branch DB doesn't match current main commit."
+				);
 			}
 		}
 

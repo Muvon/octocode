@@ -569,6 +569,7 @@ pub async fn index_files(
 /// This creates or updates a lightweight branch database containing only
 /// files that differ from the default branch. The main index is untouched.
 pub async fn index_branch_delta(
+	main_store: &Store,
 	branch_store: &Store,
 	state: SharedState,
 	config: &Config,
@@ -576,23 +577,74 @@ pub async fn index_branch_delta(
 	branch_name: &str,
 	quiet: bool,
 ) -> Result<branch::BranchManifest> {
-	let default_branch = GitUtils::get_default_branch(git_repo_root)?;
 	let current_dir = state.read().current_directory.clone();
+
+	// Reconcile master state BEFORE computing branch delta. This guarantees:
+	//   - The main index matches the local default-branch ref (resyncs if not),
+	//     so the branch DB lays on top of a coherent main snapshot.
+	//   - A loud warning surfaces if `origin/<default>` is ahead of local — we
+	//     don't auto-pull (workspace action), we just refuse to be silent.
+	// If the resync itself fails, the error propagates and the branch index is
+	// not written, so we never end up with a branch DB anchored to a missing
+	// main snapshot.
+	let master_state = branch::reconcile_master_state(
+		main_store,
+		state.clone(),
+		config,
+		git_repo_root,
+		quiet,
+	)
+	.await?;
+
+	let default_branch = master_state.branch_name.clone();
+	let base_db_commit = master_state.local_ref_commit.clone();
+	let remote_base_observed = master_state
+		.remote_ref_commit
+		.clone()
+		.unwrap_or_default();
+
+	// Reset state counters that may have been advanced by a master resync
+	// inside reconcile_master_state. Without this, the branch-delta phase
+	// inherits the master phase's progress numbers, which is confusing in
+	// the progress display.
+	{
+		let mut state_guard = state.write();
+		state_guard.indexed_files = 0;
+		state_guard.skipped_files = 0;
+		state_guard.total_files = 0;
+		state_guard.indexing_complete = false;
+		state_guard.counting_files = false;
+		state_guard.status_message = String::new();
+	}
 
 	// Load existing manifest to check if we can do incremental update
 	let (branch_dir, existing_manifest) = branch::resolve_branch_state(&current_dir, branch_name)?;
 
-	// Check if base branch changed (e.g. default branch renamed) — rebuild from scratch
-	let force_rebuild = existing_manifest
-		.as_ref()
-		.map(|m| m.base_branch != default_branch)
-		.unwrap_or(false);
+	// Rebuild from scratch when any of these change since last time, because
+	// every one of them invalidates the assumptions the branch DB was built on:
+	//   - default branch renamed (override mapping is keyed off it)
+	//   - main DB moved to a different commit (overlay would be incoherent)
+	//   - we just resynced main (any prior branch DB was built against the
+	//     stale main snapshot; throw it away rather than serve mixed content)
+	let force_rebuild = existing_manifest.as_ref().is_some_and(|m| {
+		m.base_branch != default_branch
+			|| (!m.base_db_commit.is_empty() && m.base_db_commit != base_db_commit)
+			|| master_state.db_resynced_to.is_some()
+	});
 
 	if force_rebuild && !quiet {
+		let prev = existing_manifest.as_ref().unwrap();
 		println!(
-			"⚠️  Base branch changed ({} → {}), rebuilding delta from scratch",
-			existing_manifest.as_ref().unwrap().base_branch,
-			default_branch
+			"⚠️  Branch DB rebuild required (base_branch: {} → {}, base_db_commit: {} → {}, main_resynced: {})",
+			prev.base_branch,
+			default_branch,
+			if prev.base_db_commit.is_empty() {
+				"<unset>".to_string()
+			} else {
+				prev.base_db_commit[..prev.base_db_commit.len().min(8)].to_string()
+			},
+			&base_db_commit[..base_db_commit.len().min(8)],
+			master_state.db_resynced_to.is_some(),
 		);
 	}
 
@@ -602,16 +654,17 @@ pub async fn index_branch_delta(
 
 	if !quiet {
 		println!(
-			"🔀 Branch '{}' delta: {} changed, {} deleted files (vs '{}')",
+			"🔀 Branch '{}' delta: {} changed, {} deleted files (vs '{}' at {})",
 			branch_name,
 			changed_files.len(),
 			deleted_files.len(),
 			default_branch,
+			&base_db_commit[..base_db_commit.len().min(8)],
 		);
 	}
 
 	let branch_commit = branch::get_branch_commit(git_repo_root, "HEAD")?;
-	let base_commit = branch::get_branch_commit(git_repo_root, &default_branch)?;
+	let base_commit = base_db_commit.clone();
 
 	// Check if we can skip (same branch commit, no working changes)
 	if !force_rebuild {
@@ -683,13 +736,28 @@ pub async fn index_branch_delta(
 			println!("✅ No files need re-processing in branch delta");
 		}
 	} else {
+		// On force_rebuild, scrub every path that was in the prior manifest —
+		// the old branch DB was built against a different main snapshot or base
+		// branch, so its rows are stale even for paths that don't appear in the
+		// current delta. Without this, a file that *used* to be in delta but is
+		// now matching main would keep its old branch-DB rows and shadow main.
+		if force_rebuild {
+			if let Some(ref prev) = existing_manifest {
+				for path in prev.changed_paths.iter().chain(prev.deleted_paths.iter()) {
+					if let Err(e) = branch_store.remove_blocks_by_path(path).await {
+						tracing::warn!(path = %path, error = %e, "Failed to scrub prior-manifest path during branch rebuild");
+					}
+				}
+			}
+		}
+
 		// Clean up existing data for files we're about to re-process
 		for file_path in &files_to_process {
 			if let Err(e) = branch_store.remove_blocks_by_path(file_path).await {
 				tracing::warn!(path = %file_path, error = %e, "Failed to clean up branch block");
 			}
 		}
-		if !files_to_process.is_empty() {
+		if !files_to_process.is_empty() || force_rebuild {
 			branch_store.flush().await?;
 		}
 
@@ -978,9 +1046,12 @@ pub async fn index_branch_delta(
 		state_guard.indexing_complete = true;
 	}
 
-	// Build and save manifest
+	// Build and save manifest. `base_db_commit` is what search uses to decide
+	// whether this branch DB is still coherent with the main DB; `fork_point`
+	// + `remote_base_observed` are diagnostics so future indexing runs can
+	// detect divergence and explain it to the operator.
 	let manifest = branch::BranchManifest {
-		version: 1,
+		version: 2,
 		branch_name: branch_name.to_string(),
 		base_branch: default_branch,
 		base_commit,
@@ -988,6 +1059,9 @@ pub async fn index_branch_delta(
 		changed_paths: manifest_changed_paths,
 		deleted_paths: manifest_deleted_paths,
 		indexed_at: chrono::Utc::now().timestamp(),
+		fork_point: master_state.fork_point.clone(),
+		base_db_commit,
+		remote_base_observed,
 	};
 
 	branch::save_manifest(&branch_dir, &manifest)?;
