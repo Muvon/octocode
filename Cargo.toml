@@ -96,6 +96,10 @@ lsp-types = "0.97.0"
 url = "2.5.8"
 dotenvy = "0.15"
 
+# Dataset export/import (octocode export | octocode import)
+tar = "0.4"
+zstd = { version = "0.13", default-features = false, features = ["zstdmt"] }
+
 # Local dependency on octolib with embedding features
 # octolib = { path = "../octolib", features = ["fastembed", "huggingface"] }
 octolib = { version = "0.21.4", default-features = false }
