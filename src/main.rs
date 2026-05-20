@@ -99,6 +99,12 @@ enum Commands {
 		command: commands::ModelsCommand,
 	},
 
+	/// Export the current directory's dataset to a portable archive
+	Export(commands::ExportArgs),
+
+	/// Import a dataset archive into the current directory
+	Import(commands::ImportArgs),
+
 	/// Generate shell completion scripts
 	Completion {
 		/// The shell to generate completion for
@@ -170,6 +176,16 @@ async fn main() -> Result<(), anyhow::Error> {
 		return commands::models::execute_models_command(command.clone()).await;
 	}
 
+	// Handle the Export command separately (operates on storage files directly)
+	if let Commands::Export(export_args) = &args.command {
+		return commands::export::execute(export_args).await;
+	}
+
+	// Handle the Import command separately (operates on storage files directly)
+	if let Commands::Import(import_args) = &args.command {
+		return commands::import::execute(import_args).await;
+	}
+
 	// Handle the Completion command separately (doesn't need store)
 	if let Commands::Completion { shell } = &args.command {
 		let mut app = OctocodeArgs::command();
@@ -216,6 +232,8 @@ async fn main() -> Result<(), anyhow::Error> {
 		Commands::Format(_) => unreachable!(), // Already handled above
 		Commands::Logs(_) => unreachable!(),   // Already handled above
 		Commands::Models { .. } => unreachable!(), // Already handled above
+		Commands::Export(_) => unreachable!(), // Already handled above
+		Commands::Import(_) => unreachable!(), // Already handled above
 		Commands::Completion { .. } => unreachable!(), // Already handled above
 	};
 
