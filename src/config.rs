@@ -149,23 +149,20 @@ pub struct RerankerConfig {
 	pub final_top_k: usize,
 }
 
-/// Hybrid search configuration for combining vector and keyword search
+/// Hybrid search configuration for combining vector and keyword search.
+///
+/// FTS is BM25 over the `content` column only — there is no multi-field
+/// keyword scoring, so per-field weights (path/symbols/title) would have no
+/// effect. Only the two RRF fusion weights below are wired into the search
+/// pipeline (`WeightedRRFReranker` in `store::weighted_rrf`).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HybridSearchConfig {
 	/// Enable hybrid search (vector + keyword)
 	pub enabled: bool,
-	/// Default weight for vector similarity signal
+	/// Default weight for vector similarity signal in RRF fusion
 	pub default_vector_weight: f32,
-	/// Default weight for keyword matching signal
+	/// Default weight for keyword (BM25) signal in RRF fusion
 	pub default_keyword_weight: f32,
-	/// Weight for keyword matches in path/filename
-	pub keyword_path_weight: f32,
-	/// Weight for keyword matches in content
-	pub keyword_content_weight: f32,
-	/// Weight for keyword matches in symbols (code blocks only)
-	pub keyword_symbols_weight: f32,
-	/// Weight for keyword matches in title (document blocks only)
-	pub keyword_title_weight: f32,
 }
 
 impl Default for HybridSearchConfig {

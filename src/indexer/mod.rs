@@ -587,21 +587,13 @@ pub async fn index_branch_delta(
 	// If the resync itself fails, the error propagates and the branch index is
 	// not written, so we never end up with a branch DB anchored to a missing
 	// main snapshot.
-	let master_state = branch::reconcile_master_state(
-		main_store,
-		state.clone(),
-		config,
-		git_repo_root,
-		quiet,
-	)
-	.await?;
+	let master_state =
+		branch::reconcile_master_state(main_store, state.clone(), config, git_repo_root, quiet)
+			.await?;
 
 	let default_branch = master_state.branch_name.clone();
 	let base_db_commit = master_state.local_ref_commit.clone();
-	let remote_base_observed = master_state
-		.remote_ref_commit
-		.clone()
-		.unwrap_or_default();
+	let remote_base_observed = master_state.remote_ref_commit.clone().unwrap_or_default();
 
 	// Reset state counters that may have been advanced by a master resync
 	// inside reconcile_master_state. Without this, the branch-delta phase
