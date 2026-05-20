@@ -364,7 +364,7 @@ mod tests {
 				.embedding
 				.get_active_provider()
 				.expect("embedding provider should be set"),
-			crate::embedding::types::EmbeddingProviderType::Voyage
+			crate::embedding::types::EmbeddingProviderType::FastEmbed
 		);
 		// Test new GraphRAG configuration structure
 		assert!(!config.graphrag.enabled);
@@ -406,8 +406,14 @@ mod tests {
 		assert_eq!(config.llm.model, "openrouter:openai/gpt-4o-mini");
 		assert_eq!(config.index.chunk_size, 2000);
 		assert_eq!(config.search.max_results, 20);
-		assert_eq!(config.embedding.code_model, "voyage:voyage-code-3");
-		assert_eq!(config.embedding.text_model, "voyage:voyage-3.5-lite");
+		assert_eq!(
+			config.embedding.code_model,
+			"fastembed:jinaai/jina-embeddings-v2-base-code"
+		);
+		assert_eq!(
+			config.embedding.text_model,
+			"fastembed:nomic-ai/nomic-embed-text-v1.5"
+		);
 		// Test new GraphRAG configuration structure from template
 		assert!(!config.graphrag.enabled);
 		assert!(!config.graphrag.use_llm);
