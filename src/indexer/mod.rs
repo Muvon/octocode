@@ -771,7 +771,7 @@ pub async fn index_branch_delta(
 						if should_process_batch(&code_blocks_batch, |b| &b.content, &branch_config)
 						{
 							embedding_calls += code_blocks_batch.len();
-							match process_code_blocks_batch(
+							process_code_blocks_batch(
 								branch_store,
 								&code_blocks_batch,
 								&branch_config,
@@ -779,21 +779,18 @@ pub async fn index_branch_delta(
 								&file_context_map,
 							)
 							.await
-							{
-								Ok(()) => {
-									batches_processed += 1;
-									flush_if_needed(
-										branch_store,
-										&mut batches_processed,
-										&branch_config,
-										false,
-									)
-									.await?;
-								}
-								Err(e) => {
-									tracing::error!("Failed to process code blocks batch: {}", e);
-								}
-							}
+							.map_err(|e| anyhow::anyhow!(
+								"Failed to process code blocks batch: {}. Aborting indexing — partial state retained, rerun to resume.",
+								e
+							))?;
+							batches_processed += 1;
+							flush_if_needed(
+								branch_store,
+								&mut batches_processed,
+								&branch_config,
+								false,
+							)
+							.await?;
 							code_blocks_batch.clear();
 							code_file_metadata.clear();
 							file_context_map.clear();
@@ -801,28 +798,25 @@ pub async fn index_branch_delta(
 						if should_process_batch(&text_blocks_batch, |b| &b.content, &branch_config)
 						{
 							embedding_calls += text_blocks_batch.len();
-							match process_text_blocks_batch(
+							process_text_blocks_batch(
 								branch_store,
 								&text_blocks_batch,
 								&branch_config,
 								&text_file_metadata,
 							)
 							.await
-							{
-								Ok(()) => {
-									batches_processed += 1;
-									flush_if_needed(
-										branch_store,
-										&mut batches_processed,
-										&branch_config,
-										false,
-									)
-									.await?;
-								}
-								Err(e) => {
-									tracing::error!("Failed to process text blocks batch: {}", e);
-								}
-							}
+							.map_err(|e| anyhow::anyhow!(
+								"Failed to process text blocks batch: {}. Aborting indexing — partial state retained, rerun to resume.",
+								e
+							))?;
+							batches_processed += 1;
+							flush_if_needed(
+								branch_store,
+								&mut batches_processed,
+								&branch_config,
+								false,
+							)
+							.await?;
 							text_blocks_batch.clear();
 							text_file_metadata.clear();
 						}
@@ -832,31 +826,25 @@ pub async fn index_branch_delta(
 							&branch_config,
 						) {
 							embedding_calls += document_blocks_batch.len();
-							match process_document_blocks_batch(
+							process_document_blocks_batch(
 								branch_store,
 								&document_blocks_batch,
 								&branch_config,
 								&document_file_metadata,
 							)
 							.await
-							{
-								Ok(()) => {
-									batches_processed += 1;
-									flush_if_needed(
-										branch_store,
-										&mut batches_processed,
-										&branch_config,
-										false,
-									)
-									.await?;
-								}
-								Err(e) => {
-									tracing::error!(
-										"Failed to process document blocks batch: {}",
-										e
-									);
-								}
-							}
+							.map_err(|e| anyhow::anyhow!(
+								"Failed to process document blocks batch: {}. Aborting indexing — partial state retained, rerun to resume.",
+								e
+							))?;
+							batches_processed += 1;
+							flush_if_needed(
+								branch_store,
+								&mut batches_processed,
+								&branch_config,
+								false,
+							)
+							.await?;
 							document_blocks_batch.clear();
 							document_file_metadata.clear();
 						}
@@ -913,7 +901,7 @@ pub async fn index_branch_delta(
 
 		// Process remaining batches
 		if !code_blocks_batch.is_empty() {
-			if let Err(e) = process_code_blocks_batch(
+			process_code_blocks_batch(
 				branch_store,
 				&code_blocks_batch,
 				&branch_config,
@@ -921,33 +909,36 @@ pub async fn index_branch_delta(
 				&file_context_map,
 			)
 			.await
-			{
-				tracing::error!("Failed to process remaining code blocks batch: {}", e);
-			}
+			.map_err(|e| anyhow::anyhow!(
+				"Failed to process remaining code blocks batch: {}. Aborting indexing — partial state retained, rerun to resume.",
+				e
+			))?;
 		}
 		if !text_blocks_batch.is_empty() {
-			if let Err(e) = process_text_blocks_batch(
+			process_text_blocks_batch(
 				branch_store,
 				&text_blocks_batch,
 				&branch_config,
 				&text_file_metadata,
 			)
 			.await
-			{
-				tracing::error!("Failed to process remaining text blocks batch: {}", e);
-			}
+			.map_err(|e| anyhow::anyhow!(
+				"Failed to process remaining text blocks batch: {}. Aborting indexing — partial state retained, rerun to resume.",
+				e
+			))?;
 		}
 		if !document_blocks_batch.is_empty() {
-			if let Err(e) = process_document_blocks_batch(
+			process_document_blocks_batch(
 				branch_store,
 				&document_blocks_batch,
 				&branch_config,
 				&document_file_metadata,
 			)
 			.await
-			{
-				tracing::error!("Failed to process remaining document blocks batch: {}", e);
-			}
+			.map_err(|e| anyhow::anyhow!(
+				"Failed to process remaining document blocks batch: {}. Aborting indexing — partial state retained, rerun to resume.",
+				e
+			))?;
 		}
 
 		// Final flush
@@ -1421,7 +1412,7 @@ pub async fn index_files_with_quiet(
 						// Process batches when they reach the batch size or token limit
 						if should_process_batch(&code_blocks_batch, |b| &b.content, config) {
 							embedding_calls += code_blocks_batch.len();
-							match process_code_blocks_batch(
+							process_code_blocks_batch(
 								store,
 								&code_blocks_batch,
 								config,
@@ -1429,16 +1420,12 @@ pub async fn index_files_with_quiet(
 								&file_context_map,
 							)
 							.await
-							{
-								Ok(()) => {
-									batches_processed += 1;
-									flush_if_needed(store, &mut batches_processed, config, false)
-										.await?;
-								}
-								Err(e) => {
-									tracing::error!("Failed to process code blocks batch: {}", e);
-								}
-							}
+							.map_err(|e| anyhow::anyhow!(
+								"Failed to process code blocks batch: {}. Aborting indexing — partial state retained, rerun to resume.",
+								e
+							))?;
+							batches_processed += 1;
+							flush_if_needed(store, &mut batches_processed, config, false).await?;
 							code_blocks_batch.clear();
 							code_file_metadata.clear();
 							file_context_map.clear();
@@ -1446,48 +1433,37 @@ pub async fn index_files_with_quiet(
 						// Only process text_blocks_batch if we have any (from unsupported files)
 						if should_process_batch(&text_blocks_batch, |b| &b.content, config) {
 							embedding_calls += text_blocks_batch.len();
-							match process_text_blocks_batch(
+							process_text_blocks_batch(
 								store,
 								&text_blocks_batch,
 								config,
 								&text_file_metadata,
 							)
 							.await
-							{
-								Ok(()) => {
-									batches_processed += 1;
-									flush_if_needed(store, &mut batches_processed, config, false)
-										.await?;
-								}
-								Err(e) => {
-									tracing::error!("Failed to process text blocks batch: {}", e);
-								}
-							}
+							.map_err(|e| anyhow::anyhow!(
+								"Failed to process text blocks batch: {}. Aborting indexing — partial state retained, rerun to resume.",
+								e
+							))?;
+							batches_processed += 1;
+							flush_if_needed(store, &mut batches_processed, config, false).await?;
 							text_blocks_batch.clear();
 							text_file_metadata.clear();
 						}
 						if should_process_batch(&document_blocks_batch, |b| &b.content, config) {
 							embedding_calls += document_blocks_batch.len();
-							match process_document_blocks_batch(
+							process_document_blocks_batch(
 								store,
 								&document_blocks_batch,
 								config,
 								&document_file_metadata,
 							)
 							.await
-							{
-								Ok(()) => {
-									batches_processed += 1;
-									flush_if_needed(store, &mut batches_processed, config, false)
-										.await?;
-								}
-								Err(e) => {
-									tracing::error!(
-										"Failed to process document blocks batch: {}",
-										e
-									);
-								}
-							}
+							.map_err(|e| anyhow::anyhow!(
+								"Failed to process document blocks batch: {}. Aborting indexing — partial state retained, rerun to resume.",
+								e
+							))?;
+							batches_processed += 1;
+							flush_if_needed(store, &mut batches_processed, config, false).await?;
 							document_blocks_batch.clear();
 							document_file_metadata.clear();
 						}
@@ -1538,31 +1514,20 @@ pub async fn index_files_with_quiet(
 							// Process batch when it reaches the batch size or token limit
 							if should_process_batch(&text_blocks_batch, |b| &b.content, config) {
 								embedding_calls += text_blocks_batch.len();
-								match process_text_blocks_batch(
+								process_text_blocks_batch(
 									store,
 									&text_blocks_batch,
 									config,
 									&text_file_metadata,
 								)
 								.await
-								{
-									Ok(()) => {
-										batches_processed += 1;
-										flush_if_needed(
-											store,
-											&mut batches_processed,
-											config,
-											false,
-										)
-										.await?;
-									}
-									Err(e) => {
-										tracing::error!(
-											"Failed to process text blocks batch: {}",
-											e
-										);
-									}
-								}
+								.map_err(|e| anyhow::anyhow!(
+									"Failed to process text blocks batch: {}. Aborting indexing — partial state retained, rerun to resume.",
+									e
+								))?;
+								batches_processed += 1;
+								flush_if_needed(store, &mut batches_processed, config, false)
+									.await?;
 								text_blocks_batch.clear();
 								text_file_metadata.clear();
 							}
@@ -1685,7 +1650,7 @@ pub async fn index_files_with_quiet(
 						// Process batches when they reach the batch size or token limit
 						if should_process_batch(&code_blocks_batch, |b| &b.content, config) {
 							embedding_calls += code_blocks_batch.len();
-							match process_code_blocks_batch(
+							process_code_blocks_batch(
 								store,
 								&code_blocks_batch,
 								config,
@@ -1693,16 +1658,12 @@ pub async fn index_files_with_quiet(
 								&file_context_map,
 							)
 							.await
-							{
-								Ok(()) => {
-									batches_processed += 1;
-									flush_if_needed(store, &mut batches_processed, config, false)
-										.await?;
-								}
-								Err(e) => {
-									tracing::error!("Failed to process code blocks batch: {}", e);
-								}
-							}
+							.map_err(|e| anyhow::anyhow!(
+								"Failed to process code blocks batch: {}. Aborting indexing — partial state retained, rerun to resume.",
+								e
+							))?;
+							batches_processed += 1;
+							flush_if_needed(store, &mut batches_processed, config, false).await?;
 							code_blocks_batch.clear();
 							code_file_metadata.clear();
 							file_context_map.clear();
@@ -1710,48 +1671,37 @@ pub async fn index_files_with_quiet(
 						// Only process text_blocks_batch if we have any (from unsupported files)
 						if should_process_batch(&text_blocks_batch, |b| &b.content, config) {
 							embedding_calls += text_blocks_batch.len();
-							match process_text_blocks_batch(
+							process_text_blocks_batch(
 								store,
 								&text_blocks_batch,
 								config,
 								&text_file_metadata,
 							)
 							.await
-							{
-								Ok(()) => {
-									batches_processed += 1;
-									flush_if_needed(store, &mut batches_processed, config, false)
-										.await?;
-								}
-								Err(e) => {
-									tracing::error!("Failed to process text blocks batch: {}", e);
-								}
-							}
+							.map_err(|e| anyhow::anyhow!(
+								"Failed to process text blocks batch: {}. Aborting indexing — partial state retained, rerun to resume.",
+								e
+							))?;
+							batches_processed += 1;
+							flush_if_needed(store, &mut batches_processed, config, false).await?;
 							text_blocks_batch.clear();
 							text_file_metadata.clear();
 						}
 						if should_process_batch(&document_blocks_batch, |b| &b.content, config) {
 							embedding_calls += document_blocks_batch.len();
-							match process_document_blocks_batch(
+							process_document_blocks_batch(
 								store,
 								&document_blocks_batch,
 								config,
 								&document_file_metadata,
 							)
 							.await
-							{
-								Ok(()) => {
-									batches_processed += 1;
-									flush_if_needed(store, &mut batches_processed, config, false)
-										.await?;
-								}
-								Err(e) => {
-									tracing::error!(
-										"Failed to process document blocks batch: {}",
-										e
-									);
-								}
-							}
+							.map_err(|e| anyhow::anyhow!(
+								"Failed to process document blocks batch: {}. Aborting indexing — partial state retained, rerun to resume.",
+								e
+							))?;
+							batches_processed += 1;
+							flush_if_needed(store, &mut batches_processed, config, false).await?;
 							document_blocks_batch.clear();
 							document_file_metadata.clear();
 						}
@@ -1802,31 +1752,20 @@ pub async fn index_files_with_quiet(
 							// Process batch when it reaches the batch size or token limit
 							if should_process_batch(&text_blocks_batch, |b| &b.content, config) {
 								embedding_calls += text_blocks_batch.len();
-								match process_text_blocks_batch(
+								process_text_blocks_batch(
 									store,
 									&text_blocks_batch,
 									config,
 									&text_file_metadata,
 								)
 								.await
-								{
-									Ok(()) => {
-										batches_processed += 1;
-										flush_if_needed(
-											store,
-											&mut batches_processed,
-											config,
-											false,
-										)
-										.await?;
-									}
-									Err(e) => {
-										tracing::error!(
-											"Failed to process text blocks batch: {}",
-											e
-										);
-									}
-								}
+								.map_err(|e| anyhow::anyhow!(
+									"Failed to process text blocks batch: {}. Aborting indexing — partial state retained, rerun to resume.",
+									e
+								))?;
+								batches_processed += 1;
+								flush_if_needed(store, &mut batches_processed, config, false)
+									.await?;
 								text_blocks_batch.clear();
 								text_file_metadata.clear();
 							}
@@ -1840,7 +1779,7 @@ pub async fn index_files_with_quiet(
 	// Process remaining batches
 	if !code_blocks_batch.is_empty() {
 		embedding_calls += code_blocks_batch.len();
-		match process_code_blocks_batch(
+		process_code_blocks_batch(
 			store,
 			&code_blocks_batch,
 			config,
@@ -1848,46 +1787,37 @@ pub async fn index_files_with_quiet(
 			&file_context_map,
 		)
 		.await
-		{
-			Ok(()) => {
-				batches_processed += 1;
-			}
-			Err(e) => {
-				tracing::error!("Failed to process remaining code blocks batch: {}", e);
-			}
-		}
+		.map_err(|e| anyhow::anyhow!(
+			"Failed to process remaining code blocks batch: {}. Aborting indexing — partial state retained, rerun to resume.",
+			e
+		))?;
+		batches_processed += 1;
 	}
 	// Only process text_blocks_batch if we have any (from unsupported files)
 	if !text_blocks_batch.is_empty() {
 		embedding_calls += text_blocks_batch.len();
-		match process_text_blocks_batch(store, &text_blocks_batch, config, &text_file_metadata)
+		process_text_blocks_batch(store, &text_blocks_batch, config, &text_file_metadata)
 			.await
-		{
-			Ok(()) => {
-				batches_processed += 1;
-			}
-			Err(e) => {
-				tracing::error!("Failed to process remaining text blocks batch: {}", e);
-			}
-		}
+			.map_err(|e| anyhow::anyhow!(
+				"Failed to process remaining text blocks batch: {}. Aborting indexing — partial state retained, rerun to resume.",
+				e
+			))?;
+		batches_processed += 1;
 	}
 	if !document_blocks_batch.is_empty() {
 		embedding_calls += document_blocks_batch.len();
-		match process_document_blocks_batch(
+		process_document_blocks_batch(
 			store,
 			&document_blocks_batch,
 			config,
 			&document_file_metadata,
 		)
 		.await
-		{
-			Ok(()) => {
-				batches_processed += 1;
-			}
-			Err(e) => {
-				tracing::error!("Failed to process remaining document blocks batch: {}", e);
-			}
-		}
+		.map_err(|e| anyhow::anyhow!(
+			"Failed to process remaining document blocks batch: {}. Aborting indexing — partial state retained, rerun to resume.",
+			e
+		))?;
+		batches_processed += 1;
 	}
 
 	// Force flush any remaining data after processing all batches

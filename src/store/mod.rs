@@ -1230,22 +1230,35 @@ impl Store {
 					.await
 					.map_err(|e| anyhow::anyhow!("Failed to optimize query: {}", e))?;
 
+				// LanceDB drops the `_distance` column during hybrid execution: the
+				// reranker returns `_relevance_score` (RRF rank fusion) instead, which
+				// is a ranking signal, not a similarity. We recompute cosine distance
+				// per row from the stored embedding so the surfaced `distance` is the
+				// real semantic distance to the query — what every downstream
+				// consumer expects when it formats a similarity number. The RRF order
+				// from the stream is preserved as the ranking; we do not re-sort by
+				// the recomputed distance.
 				let mut stream = vq.execute().await?;
 				let mut blocks = Vec::new();
 				while let Some(batch) = stream.try_next().await? {
-					if batch.num_rows() > 0 {
-						let mut batch_blocks = B::from_batch(&batch)?;
-						if let Some(thresh) = distance_threshold {
-							batch_blocks.retain(|b| b.distance().is_none_or(|d| d <= thresh));
-						}
-						blocks.append(&mut batch_blocks);
+					if batch.num_rows() == 0 {
+						continue;
 					}
+					let row_embeddings = batch_converter::extract_embeddings_from_batch(&batch);
+					let mut batch_blocks = B::from_batch(&batch)?;
+					if let Some(embeddings) = row_embeddings.as_ref() {
+						for (idx, block) in batch_blocks.iter_mut().enumerate() {
+							if let Some(stored) = embeddings.get(idx) {
+								let sim = cosine_similarity(embedding, stored);
+								block.set_distance((1.0 - sim).clamp(0.0, 2.0));
+							}
+						}
+					}
+					if let Some(thresh) = distance_threshold {
+						batch_blocks.retain(|b| b.distance().is_none_or(|d| d <= thresh));
+					}
+					blocks.append(&mut batch_blocks);
 				}
-				blocks.sort_by(|a, b| {
-					a.distance()
-						.partial_cmp(&b.distance())
-						.unwrap_or(std::cmp::Ordering::Equal)
-				});
 				blocks.truncate(limit);
 				Ok(blocks)
 			}
@@ -1315,5 +1328,29 @@ impl Store {
 	pub async fn ensure_fts_index(&self, table_name: &str) -> Result<()> {
 		let table_ops = TableOperations::new(&self.db);
 		table_ops.create_fts_index(table_name).await
+	}
+}
+
+/// Cosine similarity between two equal-length vectors. Returns 0.0 when
+/// lengths mismatch or either vector is zero. Used by `hybrid_search` to
+/// recompute the displayed distance after LanceDB strips `_distance` from
+/// the RRF rerank output.
+fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
+	if a.len() != b.len() {
+		return 0.0;
+	}
+	let mut dot = 0.0_f32;
+	let mut na = 0.0_f32;
+	let mut nb = 0.0_f32;
+	for i in 0..a.len() {
+		dot += a[i] * b[i];
+		na += a[i] * a[i];
+		nb += b[i] * b[i];
+	}
+	let denom = na.sqrt() * nb.sqrt();
+	if denom == 0.0 {
+		0.0
+	} else {
+		dot / denom
 	}
 }

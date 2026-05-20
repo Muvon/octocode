@@ -31,14 +31,14 @@ use crate::store::{CodeBlock, CommitBlock, DocumentBlock, TextBlock};
 /// Three result schemas are produced by the search engine:
 /// - Pure vector search → `_distance` (cosine distance, lower=better).
 /// - Native hybrid (vector + FTS via RRF reranker) → `_relevance_score`
-///   (fused RRF score, higher=better; `_distance` is dropped).
-/// - FTS-only query → `_score` (BM25, higher=better, unbounded).
-///
-/// For the score-style columns we min-max normalize per batch (max becomes
-/// 1.0) and invert (1 − norm) so the rest of the pipeline — threshold
-/// filter, ascending sort, multi-query bonus — keeps its single
-/// "lower distance is better" contract regardless of which search path
-/// produced the batch.
+///   (fused RRF score; `_distance` is dropped). Hybrid callers MUST recompute
+///   the per-row distance from stored embeddings via
+///   `extract_embeddings_from_batch` — the RRF score is a rank-fusion signal,
+///   not a similarity, and surfacing it as one made the top result look like
+///   a 1.0 match regardless of how relevant it actually was.
+/// - FTS-only query → `_score` (BM25, higher=better, unbounded). No semantic
+///   distance is computable; we return an empty vec so blocks come back with
+///   `distance: None` rather than a fabricated similarity.
 fn extract_distance_array(batch: &RecordBatch) -> Vec<f32> {
 	if let Some(arr) = batch
 		.column_by_name("_distance")
@@ -47,24 +47,36 @@ fn extract_distance_array(batch: &RecordBatch) -> Vec<f32> {
 		return (0..arr.len()).map(|i| arr.value(i)).collect();
 	}
 
-	for score_col in ["_relevance_score", "_score"] {
-		if let Some(arr) = batch
-			.column_by_name(score_col)
-			.and_then(|col| col.as_any().downcast_ref::<Float32Array>())
-		{
-			let scores: Vec<f32> = (0..arr.len()).map(|i| arr.value(i)).collect();
-			let max = scores.iter().copied().fold(0.0_f32, f32::max);
-			if max > 0.0 {
-				return scores
-					.into_iter()
-					.map(|s| (1.0 - s / max).clamp(0.0, 1.0))
-					.collect();
-			}
-			return vec![0.0; scores.len()];
-		}
-	}
-
 	Vec::new()
+}
+
+/// Read the `embedding` FixedSizeList column from a result batch.
+///
+/// Returns one Vec<f32> per row. Used by `hybrid_search` to recompute cosine
+/// distance against the query embedding so the displayed similarity is a real
+/// semantic distance rather than a min-max-normalised rank position.
+///
+/// Returns `None` if the column is missing or has an unexpected type (e.g.
+/// the row came from a batch that was pre-stripped of the embedding column).
+pub fn extract_embeddings_from_batch(batch: &RecordBatch) -> Option<Vec<Vec<f32>>> {
+	let col = batch.column_by_name("embedding")?;
+	let list_arr = col.as_any().downcast_ref::<FixedSizeListArray>()?;
+	let dim = list_arr.value_length() as usize;
+	if dim == 0 {
+		return None;
+	}
+	let values_arr = list_arr.values().as_any().downcast_ref::<Float32Array>()?;
+	let n = list_arr.len();
+	let mut out = Vec::with_capacity(n);
+	for i in 0..n {
+		let start = i * dim;
+		let mut row = Vec::with_capacity(dim);
+		for j in 0..dim {
+			row.push(values_arr.value(start + j));
+		}
+		out.push(row);
+	}
+	Some(out)
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -997,23 +1009,18 @@ mod tests {
 	}
 
 	#[test]
-	fn test_extract_distance_array_normalizes_relevance_score() {
-		// RRF scores: higher = better; max(0.8) becomes distance 0.0,
-		// half-of-max (0.4) becomes distance 0.5, zero stays at 1.0.
+	fn test_extract_distance_array_ignores_relevance_score_column() {
+		// RRF score is a rank-fusion signal, not a similarity. We refuse to fake
+		// a distance out of it — hybrid_search recomputes from stored embeddings.
 		let batch = make_score_batch("_relevance_score", vec![0.8, 0.4, 0.0]);
-		let out = extract_distance_array(&batch);
-		assert!((out[0] - 0.0).abs() < 1e-6, "expected 0.0, got {}", out[0]);
-		assert!((out[1] - 0.5).abs() < 1e-6, "expected 0.5, got {}", out[1]);
-		assert!((out[2] - 1.0).abs() < 1e-6, "expected 1.0, got {}", out[2]);
+		assert!(extract_distance_array(&batch).is_empty());
 	}
 
 	#[test]
-	fn test_extract_distance_array_falls_back_to_score_for_fts_only() {
+	fn test_extract_distance_array_ignores_score_column() {
+		// BM25 score is unbounded and has no semantic-distance interpretation.
 		let batch = make_score_batch("_score", vec![10.0, 5.0, 2.5]);
-		let out = extract_distance_array(&batch);
-		assert!((out[0] - 0.0).abs() < 1e-6);
-		assert!((out[1] - 0.5).abs() < 1e-6);
-		assert!((out[2] - 0.75).abs() < 1e-6);
+		assert!(extract_distance_array(&batch).is_empty());
 	}
 
 	#[test]
@@ -1022,13 +1029,5 @@ mod tests {
 		let batch = RecordBatch::try_new(schema, vec![Arc::new(StringArray::from(vec!["a", "b"]))])
 			.unwrap();
 		assert!(extract_distance_array(&batch).is_empty());
-	}
-
-	#[test]
-	fn test_extract_distance_array_zero_max_score() {
-		// All zeros — guard against division by zero, every row gets distance 0.
-		let batch = make_score_batch("_relevance_score", vec![0.0, 0.0]);
-		let out = extract_distance_array(&batch);
-		assert_eq!(out, vec![0.0, 0.0]);
 	}
 }
