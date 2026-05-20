@@ -123,6 +123,7 @@ pub async fn execute(
 		let progress_handle = tokio::spawn(display_indexing_progress(state.clone()));
 
 		let manifest = indexer::index_branch_delta(
+			store,
 			&branch_store,
 			state.clone(),
 			config,

@@ -608,12 +608,31 @@ pub fn format_combined_search_results_as_text(
 
 // Enhanced search function for MCP server with detail level control - returns formatted text results (token-efficient)
 /// Build a BranchSearchContext if the current checkout is on a non-default branch
-/// and a branch delta index exists. Used by MCP and other internal search paths.
-pub async fn detect_branch_search_context() -> Option<BranchSearchContext> {
+/// and a branch delta index exists AND that delta is still coherent with the
+/// main DB. Used by MCP and other internal search paths.
+///
+/// Coherence rule: the branch DB's recorded `base_db_commit` must match what
+/// the main DB is currently sitting at. If main has moved on, the branch
+/// override mapping is stale — we drop it and search main-only rather than
+/// silently surface mis-overlaid results. v1 manifests (no `base_db_commit`)
+/// are grandfathered through; a re-index upgrades them to v2.
+pub async fn detect_branch_search_context(main_store: &Store) -> Option<BranchSearchContext> {
 	let current_dir = std::env::current_dir().ok()?;
 	let branch_name = crate::indexer::branch::detect_branch_context(&current_dir)?;
 	let branch_dir = crate::storage::get_branch_dir(&current_dir, &branch_name).ok()?;
 	let manifest = crate::indexer::branch::load_manifest(&branch_dir).ok()??;
+
+	let main_commit = main_store.get_last_commit_hash().await.ok().flatten();
+	if !crate::indexer::branch::manifest_is_coherent_with(&manifest, main_commit.as_deref()) {
+		tracing::warn!(
+			branch = %branch_name,
+			recorded = %manifest.base_db_commit,
+			main_now = ?main_commit,
+			"Branch DB base commit doesn't match current main DB commit — dropping branch overlay for this search."
+		);
+		return None;
+	}
+
 	let branch_store = Store::new_for_branch(&branch_name).await.ok()?;
 	Some(BranchSearchContext {
 		store: branch_store,
@@ -748,7 +767,7 @@ pub async fn search_codebase_with_details_multi_query_text(
 	let store = Store::new().await?;
 
 	// Detect branch context for branch-aware search
-	let branch_ctx = detect_branch_search_context().await;
+	let branch_ctx = detect_branch_search_context(&store).await;
 
 	// Validate queries (same as CLI)
 	if queries.is_empty() {
@@ -2099,7 +2118,7 @@ mod tests {
 	#[test]
 	fn test_merge_branch_query_results() {
 		let manifest = BranchManifest {
-			version: 1,
+			version: 2,
 			branch_name: "feat".to_string(),
 			base_branch: "main".to_string(),
 			base_commit: "aaa".to_string(),
@@ -2107,6 +2126,9 @@ mod tests {
 			changed_paths: vec!["src/x.rs".to_string()],
 			deleted_paths: vec!["src/old.rs".to_string()],
 			indexed_at: 0,
+			fork_point: "aaa".to_string(),
+			base_db_commit: "aaa".to_string(),
+			remote_base_observed: String::new(),
 		};
 
 		let main = QuerySearchResult {

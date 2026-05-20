@@ -174,20 +174,58 @@ pub async fn execute(
 	// Zip queries with embeddings
 	let query_embeddings: Vec<_> = args.queries.iter().cloned().zip(embeddings).collect();
 
-	// Detect branch context for branch-aware search
+	// Detect branch context for branch-aware search. We refuse to layer a
+	// branch DB on top of a main DB that has moved past the branch's recorded
+	// base: the override semantics (changed_paths take priority over main)
+	// are only coherent when main is still at the commit the branch was
+	// indexed against. Falling back to main-only search beats serving stale
+	// overrides without telling anyone.
 	let branch_ctx = {
 		if let Some(branch_name) = indexer::branch::detect_branch_context(&current_dir) {
 			let branch_dir = storage::get_branch_dir(&current_dir, &branch_name)?;
-			if let Ok(Some(manifest)) = indexer::branch::load_manifest(&branch_dir) {
-				match octocode::store::Store::new_for_branch(&branch_name).await {
-					Ok(branch_store) => Some(indexer::search::BranchSearchContext {
-						store: branch_store,
-						manifest,
-					}),
-					Err(_) => None,
+			match indexer::branch::load_manifest(&branch_dir) {
+				Ok(Some(manifest)) => {
+					let main_commit = store.get_last_commit_hash().await.ok().flatten();
+					if !indexer::branch::manifest_is_coherent_with(&manifest, main_commit.as_deref()) {
+						eprintln!(
+							"⚠️  Branch '{}' index was built against main at {}, but main is now at {}. \
+							 Skipping branch overlay — re-run `octocode index` to refresh.",
+							branch_name,
+							if manifest.base_db_commit.is_empty() {
+								"<unknown>"
+							} else {
+								&manifest.base_db_commit[..manifest.base_db_commit.len().min(8)]
+							},
+							main_commit
+								.as_deref()
+								.map(|s| &s[..s.len().min(8)])
+								.unwrap_or("<unknown>"),
+						);
+						None
+					} else {
+						match octocode::store::Store::new_for_branch(&branch_name).await {
+							Ok(branch_store) => Some(indexer::search::BranchSearchContext {
+								store: branch_store,
+								manifest,
+							}),
+							Err(e) => {
+								eprintln!(
+									"⚠️  Could not open branch store for '{}': {}. Falling back to main index.",
+									branch_name, e
+								);
+								None
+							}
+						}
+					}
 				}
-			} else {
-				None
+				Ok(None) => None,
+				Err(e) => {
+					eprintln!(
+						"⚠️  Could not load branch manifest for '{}': {}. Falling back to main index.",
+						branch_name, e
+					);
+					None
+				}
 			}
 		} else {
 			None
