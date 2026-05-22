@@ -1,5 +1,66 @@
 # Changelog
 
+## [0.15.0] - 2026-05-22
+
+### 📋 Release Summary
+
+This release significantly enhances code intelligence through the introduction of hybrid search, weighted reranking, and advanced GraphRAG capabilities for better type and inheritance discovery (0a5b3d13, 1023fb93, 0f88b59e, aef744d6). Users will benefit from improved search precision via smart structural grep, expanded C++20 support, and new dataset import/export functionality (83ffcb66, b186cbe6, a0ffdfd0). General stability and performance have been increased through optimized database indexing and various reliability fixes across the store and indexer (1042b2fe, dcba3dcc, 467ea6c8).
+
+
+### ✨ New Features & Enhancements
+
+- **commands**: implement dataset export and import `a0ffdfd0`
+- **indexer**: implement coherent branch delta tracking `ac33edde`
+- **constants**: increase maximum allowed queries `70da432b`
+- **cpp**: add support for C++20 module extensions `b186cbe6`
+- **indexer**: implement weighted hybrid search reranking `0a5b3d13`
+- **indexer**: improve symbol tracking and prompt context `2447591a`
+- **indexer**: enrich method symbols with parent type and split large class containers `62c38e94`
+- **grep**: truncate multi-line match bodies `d4a3bff6`
+- **search**: enhance tree-sitter mapping and search reranking `1023fb93`
+- **grep**: implement smart structural search with fallback strategies `83ffcb66`
+- **search**: strip preambles and normalize search scores `e90b54ba`
+- **graphrag**: add type inheritance and implementation discovery `0f88b59e`
+- **indexer**: implement global ranking for all-mode search `76a261af`
+- **indexer**: implement hybrid search support `aef744d6`
+- **indexer**: persist enriched content for hybrid search `6e4fb231`
+
+### 🔧 Improvements & Optimizations
+
+- **config**: remove unused keyword weights from hybrid search `d0d2efd8`
+- **config**: set default search and embedding models `8802ffd8`
+- **store**: optimize database maintenance and indexing `1042b2fe`
+- **workflows**: migrate pr brief to reusable workflow `ba21b4ce`
+- **windows**: fix MSVC runtime library mismatches `8ce943fb`
+- **windows**: force dynamic CRT for MSVC builds `159f1d41`
+- **workflow**: install protoc for alpine builds `d47f2b1b`
+- **github**: fix macos toolchain and coverage engine `36139802`
+- **build**: implement static ONNX Runtime builds and musl support `bf53a631`
+- **build**: optimize binary size and bump deps `4f040479`
+- **grep**: replace fragile patterns with kind-based search `21300a29`
+- **mcp**: improve structural search robustness and diagnostics `f7548719`
+- **mcp**: optimize file resolution in view_signatures `5a2b4033`
+- **search**: unify embedding logic and implement RRF `1ae00882`
+- use idiomatic Rust patterns across codebase `0f9ceaea`
+
+### 🐛 Bug Fixes & Stability
+
+- **config**: correct embedding provider test expectations `7c9d62b3`
+- **indexer**: reset GraphRAG blocks and pin delta base `dcba3dcc`
+- **store**: improve indexer reliability and scoring logic `467ea6c8`
+- **store**: prevent FTS errors on empty tables `47358e69`
+- **store**: refresh table cache after fts creation `feb6ae5e`
+
+### 📚 Documentation & Examples
+
+- **instructions**: rewrite development guide for v0.14.x `a2fff72d`
+- **instructions**: link external model documentation `f91aed6e`
+- update MCP modes and embedding model defaults `164b0f62`
+
+### 🔄 Other Changes
+
+4 maintenance, dependency, and tooling updates not listed individually.
+
 ## [0.14.1] - 2026-04-21
 
 ### 📋 Release Summary
