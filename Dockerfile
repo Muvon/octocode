@@ -32,11 +32,11 @@ ENV ORT_VERSION=1.24.2
 RUN set -eu; \
 		case "$(uname -m)" in \
 			x86_64)  ORT_ARCH=x64 ;; \
-			aarch64) ORT_ARCH=arm64 ;; \
+			aarch64) ORT_ARCH=aarch64 ;; \
 			*) echo "unsupported arch $(uname -m)"; exit 1 ;; \
 		esac; \
 		ORT_ASSET="onnxruntime-linux-${ORT_ARCH}-static_lib-${ORT_VERSION}-glibc2_17"; \
-		curl -sL "https://github.com/csukuangfj/onnxruntime-libs/releases/download/v${ORT_VERSION}/${ORT_ASSET}.zip" -o /tmp/ort.zip; \
+		curl -fsSL "https://github.com/csukuangfj/onnxruntime-libs/releases/download/v${ORT_VERSION}/${ORT_ASSET}.zip" -o /tmp/ort.zip; \
 		unzip -q /tmp/ort.zip -d /opt; \
 		ln -s "/opt/${ORT_ASSET}/lib" /opt/ort-lib; \
 		rm /tmp/ort.zip
