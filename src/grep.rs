@@ -74,6 +74,7 @@ define_ast_grep_lang!(AstJava, tree_sitter_java::LANGUAGE, '$');
 define_ast_grep_lang!(AstCpp, tree_sitter_cpp::LANGUAGE, '$');
 define_ast_grep_lang!(AstPhp, tree_sitter_php::LANGUAGE_PHP, '#');
 define_ast_grep_lang!(AstRuby, tree_sitter_ruby::LANGUAGE, '$');
+define_ast_grep_lang!(AstSwift, tree_sitter_swift::LANGUAGE, '$');
 define_ast_grep_lang!(AstLua, tree_sitter_lua::LANGUAGE, 'µ');
 define_ast_grep_lang!(AstBash, tree_sitter_bash::LANGUAGE, '$');
 define_ast_grep_lang!(AstCss, tree_sitter_css::LANGUAGE, 'µ');
@@ -256,6 +257,11 @@ macro_rules! dispatch_lang {
 			"ruby" => {
 				#[allow(unused_variables)]
 				let $lang = AstRuby;
+				$body
+			}
+			"swift" => {
+				#[allow(unused_variables)]
+				let $lang = AstSwift;
 				$body
 			}
 			"lua" => {
