@@ -109,7 +109,7 @@ impl SemanticCodeProvider {
 	pub fn get_view_signatures_tool_definition() -> McpTool {
 		McpTool {
 			name: "view_signatures".to_string(),
-			description: "Extract function signatures, class definitions, and declarations from files without implementation bodies. Supports Rust, JS/TS, Python, Go, C++, PHP, Ruby, Bash, JSON, CSS, Svelte, Markdown.".to_string(),
+			description: "Extract function signatures, class definitions, and declarations from files without implementation bodies. Supports Rust, JS/TS, Python, Go, C++, PHP, Ruby, Bash, JSON, CSS, Svelte, Swift, Markdown.".to_string(),
 			input_schema: json!({
 				"type": "object",
 				"properties": {

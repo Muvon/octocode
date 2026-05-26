@@ -249,7 +249,7 @@ impl McpServer {
 	}
 
 	#[tool(
-		description = "Extract function signatures, class definitions, and declarations from files without implementation bodies. Supports Rust, JS/TS, Python, Go, C++, PHP, Ruby, Bash, JSON, CSS, Svelte, Markdown."
+		description = "Extract function signatures, class definitions, and declarations from files without implementation bodies. Supports Rust, JS/TS, Python, Go, C++, PHP, Ruby, Bash, JSON, CSS, Svelte, Swift, Markdown."
 	)]
 	async fn view_signatures(
 		&self,
