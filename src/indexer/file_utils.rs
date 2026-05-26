@@ -141,6 +141,8 @@ impl FileUtils {
 			"lua" => Some("lua"),
 			// JSON
 			"json" => Some("json"),
+			// Swift
+			"swift" => Some("swift"),
 			// Svelte
 			"svelte" => Some("svelte"),
 			// CSS

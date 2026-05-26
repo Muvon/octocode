@@ -35,6 +35,9 @@ pub mod resolution_utils;
 mod ruby;
 mod rust;
 mod svelte;
+mod swift;
+#[cfg(test)]
+mod swift_test;
 mod typescript;
 
 // Re-export language modules
@@ -52,6 +55,7 @@ pub use python::Python;
 pub use ruby::Ruby;
 pub use rust::Rust;
 pub use svelte::Svelte;
+pub use swift::Swift;
 pub use typescript::TypeScript;
 
 /// Kind of type-level relationship a language parser may report from an AST node.
@@ -168,6 +172,7 @@ pub fn get_language(name: &str) -> Option<Box<dyn Language>> {
 		"lua" => Some(Box::new(Lua {})),
 		"json" => Some(Box::new(Json {})),
 		"svelte" => Some(Box::new(Svelte {})),
+		"swift" => Some(Box::new(Swift {})),
 		"css" => Some(Box::new(Css {})),
 		"markdown" => Some(Box::new(Markdown {})),
 		_ => None,
