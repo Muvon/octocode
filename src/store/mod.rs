@@ -34,8 +34,8 @@ use tokio::sync::RwLock;
 // Import modular components
 use self::{
 	batch_converter::BatchConverter, block_trait::BlockType, debug::DebugOperations,
-	graphrag::GraphRagOperations, metadata::MetadataOperations, table_ops::TableOperations,
-	vector_optimizer::VectorOptimizer,
+	graphrag::GraphRagOperations, metadata::MetadataOperations, sql::escape_single_quotes,
+	table_ops::TableOperations, vector_optimizer::VectorOptimizer,
 };
 
 pub mod batch_converter;
@@ -45,9 +45,28 @@ pub mod graphrag;
 #[cfg(test)]
 mod hybrid_tests;
 pub mod metadata;
+pub mod sql;
 pub mod table_ops;
 pub mod vector_optimizer;
 pub mod weighted_rrf;
+
+/// Canonical LanceDB table names. These are the single source of truth for the
+/// physical table identifiers — referenced everywhere instead of repeating the
+/// string literals, so a rename or typo can't silently desync one call site
+/// from the rest. Block-backed tables also expose the name via
+/// [`block_trait::BlockType::TABLE_NAME`], which is defined in terms of these.
+pub mod tables {
+	pub const CODE_BLOCKS: &str = "code_blocks";
+	pub const TEXT_BLOCKS: &str = "text_blocks";
+	pub const DOCUMENT_BLOCKS: &str = "document_blocks";
+	pub const COMMIT_BLOCKS: &str = "commit_blocks";
+	pub const GRAPHRAG_NODES: &str = "graphrag_nodes";
+	pub const GRAPHRAG_RELATIONSHIPS: &str = "graphrag_relationships";
+	pub const FILE_METADATA: &str = "file_metadata";
+	pub const GIT_METADATA: &str = "git_metadata";
+	pub const GRAPHRAG_GIT_METADATA: &str = "graphrag_git_metadata";
+	pub const COMMITS_GIT_METADATA: &str = "commits_git_metadata";
+}
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct CodeBlock {
@@ -216,36 +235,32 @@ impl Store {
 		// Check if tables exist and if their schema matches the current configuration
 		let table_names = db.table_names().execute().await?;
 
-		// Check for schema mismatches and recreate tables if necessary
-		for table_name in [
-			"code_blocks",
-			"text_blocks",
-			"document_blocks",
-			"graphrag_nodes",
-		] {
-			if table_names.contains(&table_name.to_string()) {
-				if let Ok(table) = db.open_table(table_name).execute().await {
-					if let Ok(schema) = table.schema().await {
-						// Check if embedding field has the right dimension
-						if let Ok(field) = schema.field_with_name("embedding") {
-							if let DataType::FixedSizeList(_, size) = field.data_type() {
-								let expected_dim = match table_name {
-									"code_blocks" | "graphrag_nodes" => code_vector_dim as i32,
-									"text_blocks" | "document_blocks" => text_vector_dim as i32,
-									_ => continue,
-								};
-
-								if size != &expected_dim {
-									tracing::warn!("Schema mismatch detected for table '{}': expected dimension {}, found {}. Dropping table for recreation.",
-										table_name, expected_dim, size);
-									drop(table); // Release table handle before dropping
-									if let Err(e) = db.drop_table(table_name, &[]).await {
-										tracing::warn!(
-											"Failed to drop table {}: {}",
-											table_name,
-											e
-										);
-									}
+		// Check for schema mismatches and recreate tables if necessary. Each
+		// embedding-backed table is paired with the dimension its model should
+		// produce; if the stored dimension drifts (model or config changed) we
+		// drop the table so it is recreated with the correct schema on next write.
+		let dim_by_table = [
+			(tables::CODE_BLOCKS, code_vector_dim as i32),
+			(tables::TEXT_BLOCKS, text_vector_dim as i32),
+			(tables::DOCUMENT_BLOCKS, text_vector_dim as i32),
+			(tables::COMMIT_BLOCKS, text_vector_dim as i32),
+			(tables::GRAPHRAG_NODES, code_vector_dim as i32),
+		];
+		for (table_name, expected_dim) in dim_by_table {
+			if !table_names.contains(&table_name.to_string()) {
+				continue;
+			}
+			if let Ok(table) = db.open_table(table_name).execute().await {
+				if let Ok(schema) = table.schema().await {
+					// Check if embedding field has the right dimension
+					if let Ok(field) = schema.field_with_name("embedding") {
+						if let DataType::FixedSizeList(_, size) = field.data_type() {
+							if size != &expected_dim {
+								tracing::warn!("Schema mismatch detected for table '{}': expected dimension {}, found {}. Dropping table for recreation.",
+									table_name, expected_dim, size);
+								drop(table); // Release table handle before dropping
+								if let Err(e) = db.drop_table(table_name, &[]).await {
+									tracing::warn!("Failed to drop table {}: {}", table_name, e);
 								}
 							}
 						}
@@ -293,12 +308,32 @@ impl Store {
 		Ok(table)
 	}
 
+	/// Build a `TableOperations` bound to this Store's connection.
+	fn table_ops(&self) -> TableOperations<'_> {
+		TableOperations::new(&self.db)
+	}
+
+	/// Build a `MetadataOperations` bound to this Store's connection.
+	fn metadata_ops(&self) -> MetadataOperations<'_> {
+		MetadataOperations::new(&self.db)
+	}
+
+	/// Build a `GraphRagOperations` sharing this Store's table cache. Centralises
+	/// the three-argument construction that every GraphRAG delegate needs.
+	fn graphrag_ops(&self) -> GraphRagOperations<'_> {
+		GraphRagOperations::new(
+			&self.db,
+			self.code_vector_dim,
+			Arc::clone(&self.table_cache),
+		)
+	}
+
 	pub async fn initialize_collections(&self) -> Result<()> {
 		// Check if tables exist, if not create them
 		let table_names = self.db.table_names().execute().await?;
 
 		// Create code_blocks table if it doesn't exist
-		if !table_names.contains(&"code_blocks".to_string()) {
+		if !table_names.contains(&tables::CODE_BLOCKS.to_string()) {
 			let schema = Arc::new(Schema::new(vec![
 				Field::new("id", DataType::Utf8, false),
 				Field::new("path", DataType::Utf8, false),
@@ -320,13 +355,13 @@ impl Store {
 
 			let _table = self
 				.db
-				.create_empty_table("code_blocks", schema)
+				.create_empty_table(tables::CODE_BLOCKS, schema)
 				.execute()
 				.await?;
 		}
 
 		// Create text_blocks table if it doesn't exist
-		if !table_names.contains(&"text_blocks".to_string()) {
+		if !table_names.contains(&tables::TEXT_BLOCKS.to_string()) {
 			let schema = Arc::new(Schema::new(vec![
 				Field::new("id", DataType::Utf8, false),
 				Field::new("path", DataType::Utf8, false),
@@ -347,13 +382,13 @@ impl Store {
 
 			let _table = self
 				.db
-				.create_empty_table("text_blocks", schema)
+				.create_empty_table(tables::TEXT_BLOCKS, schema)
 				.execute()
 				.await?;
 		}
 
 		// Create document_blocks table if it doesn't exist
-		if !table_names.contains(&"document_blocks".to_string()) {
+		if !table_names.contains(&tables::DOCUMENT_BLOCKS.to_string()) {
 			let schema = Arc::new(Schema::new(vec![
 				Field::new("id", DataType::Utf8, false),
 				Field::new("path", DataType::Utf8, false),
@@ -380,7 +415,7 @@ impl Store {
 
 			let _table = self
 				.db
-				.create_empty_table("document_blocks", schema)
+				.create_empty_table(tables::DOCUMENT_BLOCKS, schema)
 				.execute()
 				.await?;
 		}
@@ -392,16 +427,13 @@ impl Store {
 	pub async fn content_exists(&self, hash: &str, collection: &str) -> Result<bool> {
 		// Use cached table handle — `content_exists` is called per-block during the
 		// differential pass; opening the table each time costs a manifest read.
-		if !TableOperations::new(&self.db)
-			.table_exists(collection)
-			.await?
-		{
+		if !self.table_ops().table_exists(collection).await? {
 			return Ok(false);
 		}
 		let table = self.get_table(collection).await?;
 		let mut results = table
 			.query()
-			.only_if(format!("hash = '{}'", hash))
+			.only_if(format!("hash = '{}'", escape_single_quotes(hash)))
 			.limit(1)
 			.select(lancedb::query::Select::Columns(vec!["hash".to_string()]))
 			.execute()
@@ -544,45 +576,45 @@ impl Store {
 
 	// Delegate other operations to modular components
 	pub async fn remove_blocks_by_path(&self, file_path: &str) -> Result<()> {
-		let table_ops = TableOperations::new(&self.db);
+		let table_ops = self.table_ops();
 		table_ops
-			.remove_blocks_by_path(file_path, "code_blocks")
+			.remove_blocks_by_path(file_path, tables::CODE_BLOCKS)
 			.await?;
 		table_ops
-			.remove_blocks_by_path(file_path, "text_blocks")
+			.remove_blocks_by_path(file_path, tables::TEXT_BLOCKS)
 			.await?;
 		table_ops
-			.remove_blocks_by_path(file_path, "document_blocks")
+			.remove_blocks_by_path(file_path, tables::DOCUMENT_BLOCKS)
 			.await?;
 		// Clean up GraphRAG data for the file
 		table_ops
-			.remove_blocks_by_path(file_path, "graphrag_nodes")
+			.remove_blocks_by_path(file_path, tables::GRAPHRAG_NODES)
 			.await?;
 		// Use specific GraphRAG operation for relationships (they don't have a 'path' field)
-		let graphrag_ops = GraphRagOperations::new(
-			&self.db,
-			self.code_vector_dim,
-			Arc::clone(&self.table_cache),
-		);
+		let graphrag_ops = self.graphrag_ops();
 		graphrag_ops
 			.remove_graph_relationships_by_path(file_path)
 			.await?;
 		// Also remove file metadata to prevent stale mtime from causing skip-on-reindex
 		table_ops
-			.remove_blocks_by_path(file_path, "file_metadata")
+			.remove_blocks_by_path(file_path, tables::FILE_METADATA)
 			.await?;
 		Ok(())
 	}
 
 	pub async fn get_all_indexed_file_paths(&self) -> Result<std::collections::HashSet<String>> {
-		let table_ops = TableOperations::new(&self.db);
+		let table_ops = self.table_ops();
 		table_ops
-			.get_all_indexed_file_paths(&["code_blocks", "text_blocks", "document_blocks"])
+			.get_all_indexed_file_paths(&[
+				tables::CODE_BLOCKS,
+				tables::TEXT_BLOCKS,
+				tables::DOCUMENT_BLOCKS,
+			])
 			.await
 	}
 
 	pub async fn flush(&self) -> Result<()> {
-		let table_ops = TableOperations::new(&self.db);
+		let table_ops = self.table_ops();
 		table_ops.flush_all_tables().await
 	}
 
@@ -601,13 +633,13 @@ impl Store {
 		use lancedb::table::OptimizeAction;
 
 		let candidates = [
-			"code_blocks",
-			"text_blocks",
-			"document_blocks",
-			"commit_blocks",
-			"graphrag_nodes",
-			"graphrag_relationships",
-			"file_metadata",
+			tables::CODE_BLOCKS,
+			tables::TEXT_BLOCKS,
+			tables::DOCUMENT_BLOCKS,
+			tables::COMMIT_BLOCKS,
+			tables::GRAPHRAG_NODES,
+			tables::GRAPHRAG_RELATIONSHIPS,
+			tables::FILE_METADATA,
 		];
 
 		let existing = self.db.table_names().execute().await?;
@@ -649,13 +681,13 @@ impl Store {
 	}
 
 	pub async fn clear_all_tables(&self) -> Result<()> {
-		let table_ops = TableOperations::new(&self.db);
+		let table_ops = self.table_ops();
 		table_ops.clear_all_tables().await
 	}
 
 	pub async fn clear_code_table(&self) -> Result<()> {
-		let table_ops = TableOperations::new(&self.db);
-		table_ops.clear_table("code_blocks").await
+		let table_ops = self.table_ops();
+		table_ops.clear_table(tables::CODE_BLOCKS).await
 	}
 
 	// ============================================================================
@@ -671,7 +703,7 @@ impl Store {
 		vector_dim: usize,
 	) -> Result<()> {
 		let batch = B::to_batch(blocks, embeddings, vector_dim)?;
-		let table_ops = TableOperations::new(&self.db);
+		let table_ops = self.table_ops();
 		table_ops.store_batch(B::TABLE_NAME, batch).await?;
 
 		// Vector index: only check/create if not cached as present. Avoids
@@ -745,7 +777,7 @@ impl Store {
 		language_filter: Option<&str>,
 		_vector_dim: usize,
 	) -> Result<Vec<B>> {
-		let table_ops = TableOperations::new(&self.db);
+		let table_ops = self.table_ops();
 		if !table_ops.table_exists(B::TABLE_NAME).await? {
 			return Ok(Vec::new());
 		}
@@ -759,7 +791,7 @@ impl Store {
 
 		// Apply language filter if specified (only for code/text blocks)
 		if let Some(language) = language_filter {
-			query = query.only_if(format!("language = '{}'", language));
+			query = query.only_if(format!("language = '{}'", escape_single_quotes(language)));
 		}
 
 		// Apply intelligent search optimization
@@ -801,28 +833,28 @@ impl Store {
 	}
 
 	pub async fn clear_docs_table(&self) -> Result<()> {
-		let table_ops = TableOperations::new(&self.db);
-		table_ops.clear_table("document_blocks").await
+		let table_ops = self.table_ops();
+		table_ops.clear_table(tables::DOCUMENT_BLOCKS).await
 	}
 
 	pub async fn clear_text_table(&self) -> Result<()> {
-		let table_ops = TableOperations::new(&self.db);
-		table_ops.clear_table("text_blocks").await
+		let table_ops = self.table_ops();
+		table_ops.clear_table(tables::TEXT_BLOCKS).await
 	}
 
 	pub async fn clear_commits_table(&self) -> Result<()> {
-		let table_ops = TableOperations::new(&self.db);
-		table_ops.clear_table("commit_blocks").await
+		let table_ops = self.table_ops();
+		table_ops.clear_table(tables::COMMIT_BLOCKS).await
 	}
 
 	pub async fn clear_commits_git_metadata(&self) -> Result<()> {
-		let table_ops = TableOperations::new(&self.db);
-		table_ops.clear_table("commits_git_metadata").await
+		let table_ops = self.table_ops();
+		table_ops.clear_table(tables::COMMITS_GIT_METADATA).await
 	}
 
 	pub async fn clear_graphrag_git_metadata(&self) -> Result<()> {
-		let table_ops = TableOperations::new(&self.db);
-		table_ops.clear_table("graphrag_git_metadata").await
+		let table_ops = self.table_ops();
+		table_ops.clear_table(tables::GRAPHRAG_GIT_METADATA).await
 	}
 
 	pub fn get_code_vector_dim(&self) -> usize {
@@ -831,7 +863,7 @@ impl Store {
 
 	/// Get row count for a table. Returns 0 if table doesn't exist.
 	pub async fn get_table_row_count(&self, table_name: &str) -> Result<usize> {
-		let table_ops = TableOperations::new(&self.db);
+		let table_ops = self.table_ops();
 		if !table_ops.table_exists(table_name).await? {
 			return Ok(0);
 		}
@@ -841,52 +873,52 @@ impl Store {
 
 	// Metadata operations
 	pub async fn store_git_metadata(&self, commit_hash: &str) -> Result<()> {
-		let metadata_ops = MetadataOperations::new(&self.db);
+		let metadata_ops = self.metadata_ops();
 		metadata_ops.store_git_metadata(commit_hash).await
 	}
 
 	pub async fn get_last_commit_hash(&self) -> Result<Option<String>> {
-		let metadata_ops = MetadataOperations::new(&self.db);
+		let metadata_ops = self.metadata_ops();
 		metadata_ops.get_last_commit_hash().await
 	}
 
 	pub async fn store_file_metadata(&self, file_path: &str, mtime: u64) -> Result<()> {
-		let metadata_ops = MetadataOperations::new(&self.db);
+		let metadata_ops = self.metadata_ops();
 		metadata_ops.store_file_metadata(file_path, mtime).await
 	}
 
 	pub async fn get_file_mtime(&self, file_path: &str) -> Result<Option<u64>> {
-		let metadata_ops = MetadataOperations::new(&self.db);
+		let metadata_ops = self.metadata_ops();
 		metadata_ops.get_file_mtime(file_path).await
 	}
 
 	pub async fn get_all_file_metadata(&self) -> Result<std::collections::HashMap<String, u64>> {
-		let metadata_ops = MetadataOperations::new(&self.db);
+		let metadata_ops = self.metadata_ops();
 		metadata_ops.get_all_file_metadata().await
 	}
 
 	pub async fn clear_git_metadata(&self) -> Result<()> {
-		let metadata_ops = MetadataOperations::new(&self.db);
+		let metadata_ops = self.metadata_ops();
 		metadata_ops.clear_git_metadata().await
 	}
 
 	pub async fn get_graphrag_last_commit_hash(&self) -> Result<Option<String>> {
-		let metadata_ops = MetadataOperations::new(&self.db);
+		let metadata_ops = self.metadata_ops();
 		metadata_ops.get_graphrag_last_commit_hash().await
 	}
 
 	pub async fn store_graphrag_commit_hash(&self, commit_hash: &str) -> Result<()> {
-		let metadata_ops = MetadataOperations::new(&self.db);
+		let metadata_ops = self.metadata_ops();
 		metadata_ops.store_graphrag_commit_hash(commit_hash).await
 	}
 
 	pub async fn get_commits_last_commit_hash(&self) -> Result<Option<String>> {
-		let metadata_ops = MetadataOperations::new(&self.db);
+		let metadata_ops = self.metadata_ops();
 		metadata_ops.get_commits_last_commit_hash().await
 	}
 
 	pub async fn store_commits_last_commit_hash(&self, commit_hash: &str) -> Result<()> {
-		let metadata_ops = MetadataOperations::new(&self.db);
+		let metadata_ops = self.metadata_ops();
 		metadata_ops
 			.store_commits_last_commit_hash(commit_hash)
 			.await
@@ -894,103 +926,59 @@ impl Store {
 
 	// GraphRAG operations
 	pub async fn graphrag_needs_indexing(&self) -> Result<bool> {
-		let graphrag_ops = GraphRagOperations::new(
-			&self.db,
-			self.code_vector_dim,
-			Arc::clone(&self.table_cache),
-		);
+		let graphrag_ops = self.graphrag_ops();
 		graphrag_ops.graphrag_needs_indexing().await
 	}
 
 	pub async fn get_all_code_blocks_for_graphrag(&self) -> Result<Vec<CodeBlock>> {
-		let graphrag_ops = GraphRagOperations::new(
-			&self.db,
-			self.code_vector_dim,
-			Arc::clone(&self.table_cache),
-		);
+		let graphrag_ops = self.graphrag_ops();
 		graphrag_ops.get_all_code_blocks_for_graphrag().await
 	}
 
 	pub async fn store_graph_nodes(&self, node_batch: RecordBatch) -> Result<()> {
-		let graphrag_ops = GraphRagOperations::new(
-			&self.db,
-			self.code_vector_dim,
-			Arc::clone(&self.table_cache),
-		);
+		let graphrag_ops = self.graphrag_ops();
 		graphrag_ops.store_graph_nodes(node_batch).await
 	}
 
 	pub async fn store_graph_relationships(&self, rel_batch: RecordBatch) -> Result<()> {
-		let graphrag_ops = GraphRagOperations::new(
-			&self.db,
-			self.code_vector_dim,
-			Arc::clone(&self.table_cache),
-		);
+		let graphrag_ops = self.graphrag_ops();
 		graphrag_ops.store_graph_relationships(rel_batch).await
 	}
 
 	pub async fn clear_graph_nodes(&self) -> Result<()> {
-		let graphrag_ops = GraphRagOperations::new(
-			&self.db,
-			self.code_vector_dim,
-			Arc::clone(&self.table_cache),
-		);
+		let graphrag_ops = self.graphrag_ops();
 		graphrag_ops.clear_graph_nodes().await
 	}
 
 	pub async fn clear_graph_relationships(&self) -> Result<()> {
-		let graphrag_ops = GraphRagOperations::new(
-			&self.db,
-			self.code_vector_dim,
-			Arc::clone(&self.table_cache),
-		);
+		let graphrag_ops = self.graphrag_ops();
 		graphrag_ops.clear_graph_relationships().await
 	}
 
 	pub async fn remove_graph_nodes_by_path(&self, file_path: &str) -> Result<usize> {
-		let graphrag_ops = GraphRagOperations::new(
-			&self.db,
-			self.code_vector_dim,
-			Arc::clone(&self.table_cache),
-		);
+		let graphrag_ops = self.graphrag_ops();
 		graphrag_ops.remove_graph_nodes_by_path(file_path).await
 	}
 
 	pub async fn remove_graph_relationships_by_path(&self, file_path: &str) -> Result<usize> {
-		let graphrag_ops = GraphRagOperations::new(
-			&self.db,
-			self.code_vector_dim,
-			Arc::clone(&self.table_cache),
-		);
+		let graphrag_ops = self.graphrag_ops();
 		graphrag_ops
 			.remove_graph_relationships_by_path(file_path)
 			.await
 	}
 
 	pub async fn get_all_graph_nodes(&self) -> Result<RecordBatch> {
-		let graphrag_ops = GraphRagOperations::new(
-			&self.db,
-			self.code_vector_dim,
-			Arc::clone(&self.table_cache),
-		);
+		let graphrag_ops = self.graphrag_ops();
 		graphrag_ops.get_all_graph_nodes().await
 	}
 
 	pub async fn search_graph_nodes(&self, embedding: &[f32], limit: usize) -> Result<RecordBatch> {
-		let graphrag_ops = GraphRagOperations::new(
-			&self.db,
-			self.code_vector_dim,
-			Arc::clone(&self.table_cache),
-		);
+		let graphrag_ops = self.graphrag_ops();
 		graphrag_ops.search_graph_nodes(embedding, limit).await
 	}
 
 	pub async fn get_graph_relationships(&self) -> Result<RecordBatch> {
-		let graphrag_ops = GraphRagOperations::new(
-			&self.db,
-			self.code_vector_dim,
-			Arc::clone(&self.table_cache),
-		);
+		let graphrag_ops = self.graphrag_ops();
 		graphrag_ops.get_graph_relationships().await
 	}
 
@@ -1000,11 +988,7 @@ impl Store {
 		node_id: &str,
 		direction: crate::indexer::graphrag::types::RelationshipDirection,
 	) -> Result<Vec<crate::indexer::graphrag::types::CodeRelationship>> {
-		let graphrag_ops = GraphRagOperations::new(
-			&self.db,
-			self.code_vector_dim,
-			Arc::clone(&self.table_cache),
-		);
+		let graphrag_ops = self.graphrag_ops();
 		graphrag_ops
 			.get_node_relationships(node_id, direction)
 			.await
@@ -1015,11 +999,7 @@ impl Store {
 		&self,
 		relation_type: &crate::indexer::graphrag::types::RelationType,
 	) -> Result<Vec<crate::indexer::graphrag::types::CodeRelationship>> {
-		let graphrag_ops = GraphRagOperations::new(
-			&self.db,
-			self.code_vector_dim,
-			Arc::clone(&self.table_cache),
-		);
+		let graphrag_ops = self.graphrag_ops();
 		graphrag_ops.get_relationships_by_type(relation_type).await
 	}
 
@@ -1029,11 +1009,7 @@ impl Store {
 		offset: usize,
 		limit: usize,
 	) -> Result<Vec<crate::indexer::graphrag::types::CodeNode>> {
-		let graphrag_ops = GraphRagOperations::new(
-			&self.db,
-			self.code_vector_dim,
-			Arc::clone(&self.table_cache),
-		);
+		let graphrag_ops = self.graphrag_ops();
 		graphrag_ops.get_all_nodes_paginated(offset, limit).await
 	}
 
@@ -1041,11 +1017,7 @@ impl Store {
 	pub async fn get_all_relationships_efficient(
 		&self,
 	) -> Result<Vec<crate::indexer::graphrag::types::CodeRelationship>> {
-		let graphrag_ops = GraphRagOperations::new(
-			&self.db,
-			self.code_vector_dim,
-			Arc::clone(&self.table_cache),
-		);
+		let graphrag_ops = self.graphrag_ops();
 		graphrag_ops.get_all_relationships_efficient().await
 	}
 
@@ -1062,15 +1034,15 @@ impl Store {
 
 	// Additional methods for backward compatibility
 	pub async fn get_code_block_by_symbol(&self, symbol: &str) -> Result<Option<CodeBlock>> {
-		let table_ops = TableOperations::new(&self.db);
-		if !table_ops.table_exists("code_blocks").await? {
+		let table_ops = self.table_ops();
+		if !table_ops.table_exists(tables::CODE_BLOCKS).await? {
 			return Ok(None);
 		}
 
-		let table = self.get_table("code_blocks").await?;
+		let table = self.get_table(tables::CODE_BLOCKS).await?;
 		let mut results = table
 			.query()
-			.only_if(format!("symbols LIKE '%{}%'", symbol))
+			.only_if(format!("symbols LIKE '%{}%'", escape_single_quotes(symbol)))
 			.limit(1)
 			.execute()
 			.await?;
@@ -1087,15 +1059,15 @@ impl Store {
 	}
 
 	pub async fn get_code_block_by_hash(&self, hash: &str) -> Result<CodeBlock> {
-		let table_ops = TableOperations::new(&self.db);
-		if !table_ops.table_exists("code_blocks").await? {
+		let table_ops = self.table_ops();
+		if !table_ops.table_exists(tables::CODE_BLOCKS).await? {
 			return Err(anyhow::anyhow!("Code blocks table does not exist"));
 		}
 
-		let table = self.get_table("code_blocks").await?;
+		let table = self.get_table(tables::CODE_BLOCKS).await?;
 		let mut results = table
 			.query()
-			.only_if(format!("hash = '{}'", hash))
+			.only_if(format!("hash = '{}'", escape_single_quotes(hash)))
 			.limit(1)
 			.execute()
 			.await?;
@@ -1115,7 +1087,7 @@ impl Store {
 	}
 
 	pub async fn tables_exist(&self, table_names: &[&str]) -> Result<bool> {
-		let table_ops = TableOperations::new(&self.db);
+		let table_ops = self.table_ops();
 		table_ops.tables_exist(table_names).await
 	}
 
@@ -1125,14 +1097,14 @@ impl Store {
 		file_path: &str,
 		table_name: &str,
 	) -> Result<Vec<String>> {
-		let table_ops = TableOperations::new(&self.db);
+		let table_ops = self.table_ops();
 		table_ops
 			.get_file_blocks_metadata(file_path, table_name)
 			.await
 	}
 
 	pub async fn remove_blocks_by_hashes(&self, hashes: &[String], table_name: &str) -> Result<()> {
-		let table_ops = TableOperations::new(&self.db);
+		let table_ops = self.table_ops();
 		table_ops.remove_blocks_by_hashes(hashes, table_name).await
 	}
 	// ===== Hybrid Search =====
@@ -1149,7 +1121,7 @@ impl Store {
 			.validate()
 			.map_err(|e| anyhow::anyhow!("Invalid hybrid query: {}", e))?;
 
-		let table_ops = TableOperations::new(&self.db);
+		let table_ops = self.table_ops();
 		if !table_ops.table_exists(B::TABLE_NAME).await? {
 			return Ok(Vec::new());
 		}
@@ -1223,7 +1195,7 @@ impl Store {
 					.rerank(reranker);
 
 				if let Some(lang) = query.language_filter.as_deref() {
-					vq = vq.only_if(format!("language = '{}'", lang));
+					vq = vq.only_if(format!("language = '{}'", escape_single_quotes(lang)));
 				}
 
 				vq = VectorOptimizer::optimize_query(vq, &table, B::TABLE_NAME)
@@ -1305,7 +1277,7 @@ impl Store {
 					.limit(limit);
 
 				if let Some(lang) = query.language_filter.as_deref() {
-					q = q.only_if(format!("language = '{}'", lang));
+					q = q.only_if(format!("language = '{}'", escape_single_quotes(lang)));
 				}
 
 				let mut stream = q.execute().await?;
@@ -1326,7 +1298,7 @@ impl Store {
 	/// Called after data is stored so the index covers all current rows.
 	/// Safe to call repeatedly — skips creation if index already exists.
 	pub async fn ensure_fts_index(&self, table_name: &str) -> Result<()> {
-		let table_ops = TableOperations::new(&self.db);
+		let table_ops = self.table_ops();
 		table_ops.create_fts_index(table_name).await
 	}
 }

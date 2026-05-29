@@ -22,7 +22,7 @@ use arrow_array::{Array, RecordBatch, StringArray};
 use arrow_schema::{DataType, Field, Schema};
 
 // LanceDB imports
-use crate::store::{table_ops::TableOperations, CodeBlock};
+use crate::store::{sql::escape_single_quotes, table_ops::TableOperations, tables, CodeBlock};
 use futures::TryStreamExt;
 use lancedb::{
 	query::{ExecutableQuery, QueryBase},
@@ -184,13 +184,13 @@ impl<'a> GraphRagOperations<'a> {
 		// Check if relationships table exists
 		if !self
 			.table_ops
-			.table_exists("graphrag_relationships")
+			.table_exists(tables::GRAPHRAG_RELATIONSHIPS)
 			.await?
 		{
 			return Ok(());
 		}
 
-		let table = self.get_table("graphrag_relationships").await?;
+		let table = self.get_table(tables::GRAPHRAG_RELATIONSHIPS).await?;
 
 		// Stream all relationships
 		let mut results = table.query().execute().await?;
@@ -386,11 +386,11 @@ impl<'a> GraphRagOperations<'a> {
 
 	/// Get all node IDs from the database
 	async fn get_all_node_ids(&self) -> Result<Vec<String>> {
-		if !self.table_ops.table_exists("graphrag_nodes").await? {
+		if !self.table_ops.table_exists(tables::GRAPHRAG_NODES).await? {
 			return Ok(Vec::new());
 		}
 
-		let table = self.get_table("graphrag_nodes").await?;
+		let table = self.get_table(tables::GRAPHRAG_NODES).await?;
 		let mut results = table.query().execute().await?;
 
 		let mut node_ids = Vec::new();
@@ -419,15 +419,15 @@ impl<'a> GraphRagOperations<'a> {
 		// Check if GraphRAG tables exist
 		if !self
 			.table_ops
-			.tables_exist(&["graphrag_nodes", "graphrag_relationships"])
+			.tables_exist(&[tables::GRAPHRAG_NODES, tables::GRAPHRAG_RELATIONSHIPS])
 			.await?
 		{
 			return Ok(true); // Tables don't exist, need indexing
 		}
 
 		// Check if tables are empty
-		let nodes_table = self.get_table("graphrag_nodes").await?;
-		let relationships_table = self.get_table("graphrag_relationships").await?;
+		let nodes_table = self.get_table(tables::GRAPHRAG_NODES).await?;
+		let relationships_table = self.get_table(tables::GRAPHRAG_RELATIONSHIPS).await?;
 
 		let nodes_count = nodes_table.count_rows(None).await?;
 		let relationships_count = relationships_table.count_rows(None).await?;
@@ -448,11 +448,11 @@ impl<'a> GraphRagOperations<'a> {
 	pub async fn get_all_code_blocks_for_graphrag(&self) -> Result<Vec<CodeBlock>> {
 		let mut all_blocks = Vec::new();
 
-		if !self.table_ops.table_exists("code_blocks").await? {
+		if !self.table_ops.table_exists(tables::CODE_BLOCKS).await? {
 			return Ok(all_blocks);
 		}
 
-		let table = self.get_table("code_blocks").await?;
+		let table = self.get_table(tables::CODE_BLOCKS).await?;
 
 		// Get all code blocks in batches to avoid memory issues
 		let mut results = table.query().execute().await?;
@@ -483,24 +483,25 @@ impl<'a> GraphRagOperations<'a> {
 	pub async fn store_graph_nodes(&self, node_batch: RecordBatch) -> Result<()> {
 		// Use the same proven pattern as code_blocks, text_blocks, document_blocks
 		self.table_ops
-			.store_batch("graphrag_nodes", node_batch)
+			.store_batch(tables::GRAPHRAG_NODES, node_batch)
 			.await?;
 
-		// Create or optimize vector index based on dataset growth
-		if let Ok(table) = self.db.open_table("graphrag_nodes").execute().await {
-			let row_count = table.count_rows(None).await?;
+		// Create the vector index once the table is large enough to benefit (the
+		// optimizer skips indexing small datasets where brute-force is faster).
+		// Extending the index to cover rows added by later batches is handled by
+		// `Store::optimize_tables`, the LanceDB-recommended maintenance pass.
+		if let Ok(table) = self.db.open_table(tables::GRAPHRAG_NODES).execute().await {
 			let indices = table.list_indices().await?;
 			let has_index = indices.iter().any(|idx| idx.columns == vec!["embedding"]);
-			let use_quantization = crate::config::Config::load()
-				.map(|c| c.index.quantization)
-				.unwrap_or(true);
 
 			if !has_index {
-				// Create initial index
+				let use_quantization = crate::config::Config::load()
+					.map(|c| c.index.quantization)
+					.unwrap_or(true);
 				if let Err(e) = self
 					.table_ops
 					.create_vector_index_optimized(
-						"graphrag_nodes",
+						tables::GRAPHRAG_NODES,
 						"embedding",
 						self.code_vector_dim,
 						use_quantization,
@@ -508,33 +509,9 @@ impl<'a> GraphRagOperations<'a> {
 					.await
 				{
 					tracing::warn!(
-						"Failed to create optimized vector index on graph_nodes: {}",
+						"Failed to create optimized vector index on graphrag_nodes: {}",
 						e
 					);
-				}
-			} else {
-				// Check if we should optimize existing index due to growth
-				if super::vector_optimizer::VectorOptimizer::should_optimize_for_growth(
-					row_count,
-					self.code_vector_dim,
-					true,
-				) {
-					tracing::info!("Dataset growth detected, optimizing graphrag_nodes index");
-					if let Err(e) = self
-						.table_ops
-						.recreate_vector_index_optimized(
-							"graphrag_nodes",
-							"embedding",
-							self.code_vector_dim,
-							use_quantization,
-						)
-						.await
-					{
-						tracing::warn!(
-							"Failed to recreate optimized vector index on graphrag_nodes: {}",
-							e
-						);
-					}
 				}
 			}
 		}
@@ -546,7 +523,7 @@ impl<'a> GraphRagOperations<'a> {
 	pub async fn store_graph_relationships(&self, rel_batch: RecordBatch) -> Result<()> {
 		// Store in database first
 		self.table_ops
-			.store_batch("graphrag_relationships", rel_batch.clone())
+			.store_batch(tables::GRAPHRAG_RELATIONSHIPS, rel_batch.clone())
 			.await?;
 
 		// Update adjacency cache with new relationships
@@ -596,7 +573,7 @@ impl<'a> GraphRagOperations<'a> {
 
 	/// Clear all graph nodes from the database
 	pub async fn clear_graph_nodes(&self) -> Result<()> {
-		self.table_ops.clear_table("graphrag_nodes").await?;
+		self.table_ops.clear_table(tables::GRAPHRAG_NODES).await?;
 		// Clear cache when clearing nodes
 		self.clear_cache();
 		Ok(())
@@ -604,7 +581,9 @@ impl<'a> GraphRagOperations<'a> {
 
 	/// Clear all graph relationships from the database
 	pub async fn clear_graph_relationships(&self) -> Result<()> {
-		self.table_ops.clear_table("graphrag_relationships").await?;
+		self.table_ops
+			.clear_table(tables::GRAPHRAG_RELATIONSHIPS)
+			.await?;
 		// Clear cache when clearing relationships
 		self.clear_cache();
 		Ok(())
@@ -619,7 +598,7 @@ impl<'a> GraphRagOperations<'a> {
 		let relationships_removed = self.remove_graph_relationships_by_path(file_path).await?;
 		let nodes_removed = node_ids.len();
 		self.table_ops
-			.remove_blocks_by_path(file_path, "graphrag_nodes")
+			.remove_blocks_by_path(file_path, tables::GRAPHRAG_NODES)
 			.await?;
 
 		// Invalidate cache for removed nodes
@@ -643,7 +622,7 @@ impl<'a> GraphRagOperations<'a> {
 	pub async fn remove_graph_relationships_by_path(&self, file_path: &str) -> Result<usize> {
 		if !self
 			.table_ops
-			.table_exists("graphrag_relationships")
+			.table_exists(tables::GRAPHRAG_RELATIONSHIPS)
 			.await?
 		{
 			return Ok(0);
@@ -655,15 +634,16 @@ impl<'a> GraphRagOperations<'a> {
 			return Ok(0); // No nodes for this file, so no relationships to remove
 		}
 
-		let table = self.get_table("graphrag_relationships").await?;
+		let table = self.get_table(tables::GRAPHRAG_RELATIONSHIPS).await?;
 
 		// Create filter for relationships where source OR target is any of the node IDs
 		let node_filters: Vec<String> = node_ids
 			.iter()
 			.flat_map(|node_id| {
+				let escaped = escape_single_quotes(node_id);
 				vec![
-					format!("source = '{}'", node_id),
-					format!("target = '{}'", node_id),
+					format!("source = '{}'", escaped),
+					format!("target = '{}'", escaped),
 				]
 			})
 			.collect();
@@ -688,16 +668,16 @@ impl<'a> GraphRagOperations<'a> {
 	async fn get_node_ids_for_file_path(&self, file_path: &str) -> Result<Vec<String>> {
 		let mut node_ids = Vec::new();
 
-		if !self.table_ops.table_exists("graphrag_nodes").await? {
+		if !self.table_ops.table_exists(tables::GRAPHRAG_NODES).await? {
 			return Ok(node_ids);
 		}
 
-		let table = self.get_table("graphrag_nodes").await?;
+		let table = self.get_table(tables::GRAPHRAG_NODES).await?;
 
 		// Query for nodes matching the file path, only selecting id column
 		let mut results = table
 			.query()
-			.only_if(format!("path = '{}'", file_path))
+			.only_if(format!("path = '{}'", escape_single_quotes(file_path)))
 			.select(lancedb::query::Select::Columns(vec!["id".to_string()]))
 			.execute()
 			.await?;
@@ -722,7 +702,7 @@ impl<'a> GraphRagOperations<'a> {
 
 	/// Get all graph nodes via full table scan (no vector search, no limit)
 	pub async fn get_all_graph_nodes(&self) -> Result<RecordBatch> {
-		if !self.table_ops.table_exists("graphrag_nodes").await? {
+		if !self.table_ops.table_exists(tables::GRAPHRAG_NODES).await? {
 			let schema = Arc::new(Schema::new(vec![
 				Field::new("id", DataType::Utf8, false),
 				Field::new("name", DataType::Utf8, false),
@@ -740,7 +720,7 @@ impl<'a> GraphRagOperations<'a> {
 			return Ok(RecordBatch::new_empty(schema));
 		}
 
-		let table = self.get_table("graphrag_nodes").await?;
+		let table = self.get_table(tables::GRAPHRAG_NODES).await?;
 
 		let mut results = table.query().execute().await?;
 
@@ -788,7 +768,7 @@ impl<'a> GraphRagOperations<'a> {
 			));
 		}
 
-		if !self.table_ops.table_exists("graphrag_nodes").await? {
+		if !self.table_ops.table_exists(tables::GRAPHRAG_NODES).await? {
 			// Return empty batch with expected schema that matches the actual storage schema
 			let schema = Arc::new(Schema::new(vec![
 				Field::new("id", DataType::Utf8, false),
@@ -807,7 +787,7 @@ impl<'a> GraphRagOperations<'a> {
 			return Ok(RecordBatch::new_empty(schema));
 		}
 
-		let table = self.get_table("graphrag_nodes").await?;
+		let table = self.get_table(tables::GRAPHRAG_NODES).await?;
 
 		// Perform vector similarity search with optimization
 		let query = table
@@ -819,7 +799,7 @@ impl<'a> GraphRagOperations<'a> {
 		let optimized_query = crate::store::vector_optimizer::VectorOptimizer::optimize_query(
 			query,
 			&table,
-			"graphrag_nodes",
+			tables::GRAPHRAG_NODES,
 		)
 		.await
 		.map_err(|e| anyhow::anyhow!("Failed to optimize query: {}", e))?;
@@ -877,7 +857,7 @@ impl<'a> GraphRagOperations<'a> {
 	pub async fn get_graph_relationships(&self) -> Result<RecordBatch> {
 		if !self
 			.table_ops
-			.table_exists("graphrag_relationships")
+			.table_exists(tables::GRAPHRAG_RELATIONSHIPS)
 			.await?
 		{
 			// Return empty batch with expected schema that matches the actual storage schema
@@ -893,7 +873,7 @@ impl<'a> GraphRagOperations<'a> {
 			return Ok(RecordBatch::new_empty(schema));
 		}
 
-		let table = self.get_table("graphrag_relationships").await?;
+		let table = self.get_table(tables::GRAPHRAG_RELATIONSHIPS).await?;
 
 		// Get all relationships
 		let mut results = table.query().execute().await?;
@@ -939,15 +919,16 @@ impl<'a> GraphRagOperations<'a> {
 
 		if !self
 			.table_ops
-			.table_exists("graphrag_relationships")
+			.table_exists(tables::GRAPHRAG_RELATIONSHIPS)
 			.await?
 		{
 			return Ok(Vec::new());
 		}
 
-		let table = self.get_table("graphrag_relationships").await?;
+		let table = self.get_table(tables::GRAPHRAG_RELATIONSHIPS).await?;
 
 		// Build filter based on direction
+		let node_id = escape_single_quotes(node_id);
 		let filter = match direction {
 			RelationshipDirection::Outgoing => format!("source = '{}'", node_id),
 			RelationshipDirection::Incoming => format!("target = '{}'", node_id),
@@ -1036,13 +1017,13 @@ impl<'a> GraphRagOperations<'a> {
 	) -> Result<Vec<crate::indexer::graphrag::types::CodeRelationship>> {
 		if !self
 			.table_ops
-			.table_exists("graphrag_relationships")
+			.table_exists(tables::GRAPHRAG_RELATIONSHIPS)
 			.await?
 		{
 			return Ok(Vec::new());
 		}
 
-		let table = self.get_table("graphrag_relationships").await?;
+		let table = self.get_table(tables::GRAPHRAG_RELATIONSHIPS).await?;
 
 		// Filter by relationship type
 		let filter = format!("relation_type = '{}'", relation_type.as_str());
@@ -1123,11 +1104,11 @@ impl<'a> GraphRagOperations<'a> {
 		offset: usize,
 		limit: usize,
 	) -> Result<Vec<crate::indexer::graphrag::types::CodeNode>> {
-		if !self.table_ops.table_exists("graphrag_nodes").await? {
+		if !self.table_ops.table_exists(tables::GRAPHRAG_NODES).await? {
 			return Ok(Vec::new());
 		}
 
-		let table = self.get_table("graphrag_nodes").await?;
+		let table = self.get_table(tables::GRAPHRAG_NODES).await?;
 
 		// Use proper pagination instead of vector search
 		let mut results = table.query().limit(limit).offset(offset).execute().await?;
@@ -1286,13 +1267,13 @@ impl<'a> GraphRagOperations<'a> {
 		// Reuse get_node_relationships logic but without filter
 		if !self
 			.table_ops
-			.table_exists("graphrag_relationships")
+			.table_exists(tables::GRAPHRAG_RELATIONSHIPS)
 			.await?
 		{
 			return Ok(Vec::new());
 		}
 
-		let table = self.get_table("graphrag_relationships").await?;
+		let table = self.get_table(tables::GRAPHRAG_RELATIONSHIPS).await?;
 
 		let mut results = table.query().execute().await?;
 

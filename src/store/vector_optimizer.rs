@@ -256,42 +256,6 @@ impl VectorOptimizer {
 		// This ensures optimal partition count as data grows
 		growth > 0.5
 	}
-
-	/// Check if index should be optimized based on dataset growth
-	///
-	/// This is a convenience method that combines growth detection with
-	/// index parameter validation. Used for incremental optimization.
-	///
-	/// # Arguments
-	/// * `current_rows` - Current number of rows in the table
-	/// * `_vector_dim` - Vector dimension (unused, kept for API compatibility)
-	/// * `check_growth` - Whether to check for growth (if false, returns false)
-	///
-	/// # Returns
-	/// True if the index should be recreated for better performance
-	pub fn should_optimize_for_growth(
-		_current_rows: usize,
-		_vector_dim: usize,
-		check_growth: bool,
-	) -> bool {
-		if !check_growth {
-			return false;
-		}
-
-		// For IVF_HNSW_SQ, we should recreate the index when:
-		// 1. Dataset has grown significantly (more than 2x since last optimization)
-		// 2. Or when crossing size thresholds (e.g., from 1K to 10K, 10K to 100K)
-		//
-		// Since we don't track when the index was created, we use heuristics:
-		// - Small datasets (< 10K): recreate at 2x growth
-		// - Medium datasets (10K-100K): recreate at 1.5x growth
-		// - Large datasets (> 100K): recreate at 1.25x growth
-
-		// This is a simplified check - in production, you'd want to track
-		// the row count when the index was created and compare
-		// For now, we return false and rely on manual optimization calls
-		false
-	}
 }
 
 #[cfg(test)]

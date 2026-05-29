@@ -27,6 +27,8 @@ use lancedb::{
 	Connection,
 };
 
+use crate::store::sql::escape_single_quotes;
+
 /// Generic table operations for LanceDB
 pub struct TableOperations<'a> {
 	pub db: &'a Connection,
@@ -118,7 +120,7 @@ impl<'a> TableOperations<'a> {
 		// Use a more efficient query to check existence
 		let mut results = table
 			.query()
-			.only_if(format!("hash = '{}'", hash))
+			.only_if(format!("hash = '{}'", escape_single_quotes(hash)))
 			.limit(1) // We only need to know if one exists
 			.select(Select::Columns(vec!["hash".to_string()])) // Only select hash column
 			.execute()
@@ -144,7 +146,7 @@ impl<'a> TableOperations<'a> {
 		let table = self.db.open_table(table_name).execute().await?;
 
 		table
-			.delete(&format!("path = '{}'", file_path))
+			.delete(&format!("path = '{}'", escape_single_quotes(file_path)))
 			.await
 			.map_err(|e| anyhow::anyhow!("Failed to delete from {}: {}", table_name, e))?;
 
@@ -164,7 +166,10 @@ impl<'a> TableOperations<'a> {
 		let table = self.db.open_table(table_name).execute().await?;
 
 		// Create a filter for all hashes
-		let hash_filters: Vec<String> = hashes.iter().map(|h| format!("hash = '{}'", h)).collect();
+		let hash_filters: Vec<String> = hashes
+			.iter()
+			.map(|h| format!("hash = '{}'", escape_single_quotes(h)))
+			.collect();
 		let filter = hash_filters.join(" OR ");
 
 		// Delete rows matching any of the hashes
@@ -193,7 +198,7 @@ impl<'a> TableOperations<'a> {
 		// Query for blocks matching the file path, only selecting hash column
 		let mut results = table
 			.query()
-			.only_if(format!("path = '{}'", file_path))
+			.only_if(format!("path = '{}'", escape_single_quotes(file_path)))
 			.select(Select::Columns(vec!["hash".to_string()]))
 			.execute()
 			.await?;
@@ -272,25 +277,20 @@ impl<'a> TableOperations<'a> {
 
 	/// Store a record batch in a table (create table if it doesn't exist)
 	pub async fn store_batch(&self, table_name: &str, batch: RecordBatch) -> Result<()> {
-		// Check if table exists
+		use std::iter::once;
+
+		// Capture the schema before moving `batch` into the reader; the reader
+		// consumes a single owned batch, so there's no need to clone it.
+		let schema = batch.schema();
+		let batch_reader = arrow::record_batch::RecordBatchIterator::new(once(Ok(batch)), schema);
+
 		if self.table_exists(table_name).await? {
 			// Table exists, append data
 			let table = self.db.open_table(table_name).execute().await?;
-
-			// Use RecordBatchIterator instead of Vec<RecordBatch>
-			use std::iter::once;
-			let batches = once(Ok(batch.clone()));
-			let batch_reader =
-				arrow::record_batch::RecordBatchIterator::new(batches, batch.schema());
 			table.add(batch_reader).execute().await?;
 		} else {
 			// Table doesn't exist, create it with the batch
-			use std::iter::once;
-			let batches = once(Ok(batch.clone()));
-			let batch_reader =
-				arrow::record_batch::RecordBatchIterator::new(batches, batch.schema());
-			let _table = self
-				.db
+			self.db
 				.create_table(table_name, batch_reader)
 				.execute()
 				.await?;
@@ -400,102 +400,6 @@ impl<'a> TableOperations<'a> {
 			table_name,
 			duration.as_secs_f64()
 		);
-		Ok(())
-	}
-
-	/// Recreate vector index with new optimal parameters
-	pub async fn recreate_vector_index_optimized(
-		&self,
-		table_name: &str,
-		column_name: &str,
-		vector_dimension: usize,
-		use_quantization: bool,
-	) -> Result<()> {
-		if !self.table_exists(table_name).await? {
-			return Err(anyhow::anyhow!("Table {} does not exist", table_name));
-		}
-
-		let table = self.db.open_table(table_name).execute().await?;
-		let row_count = table.count_rows(None).await?;
-
-		tracing::info!(
-			"Recreating vector index for table '{}' with {} rows for better performance",
-			table_name,
-			row_count
-		);
-
-		// Drop existing index first
-		let existing_indices = table.list_indices().await?;
-		for index in existing_indices {
-			if index.columns == vec![column_name] {
-				tracing::debug!("Dropping existing index: {}", index.name);
-				// Note: LanceDB doesn't have a direct drop_index method in current version
-				// The index will be replaced when we create a new one
-				break;
-			}
-		}
-
-		// Calculate new optimal parameters
-		let index_params = super::vector_optimizer::VectorOptimizer::calculate_index_params(
-			row_count,
-			vector_dimension,
-			use_quantization,
-		);
-
-		if !index_params.should_create_index {
-			tracing::warn!("Dataset size no longer warrants an index, skipping recreation");
-			return Ok(());
-		}
-
-		// Create new optimized index based on quantization setting
-		let index_type_name = match index_params.index_type {
-			super::vector_optimizer::IndexType::IvfHnswSq => "IVF_HNSW_SQ",
-			super::vector_optimizer::IndexType::IvfRq => "IVF_RQ",
-		};
-
-		let start_time = std::time::Instant::now();
-
-		// Create the appropriate index type
-		match index_params.index_type {
-			super::vector_optimizer::IndexType::IvfHnswSq => {
-				table
-					.create_index(
-						&[column_name],
-						lancedb::index::Index::IvfHnswSq(
-							lancedb::index::vector::IvfHnswSqIndexBuilder::default()
-								.distance_type(index_params.distance_type)
-								.num_partitions(index_params.num_partitions)
-								.num_edges(index_params.num_edges)
-								.ef_construction(index_params.ef_construction),
-						),
-					)
-					.execute()
-					.await?;
-			}
-			super::vector_optimizer::IndexType::IvfRq => {
-				table
-					.create_index(
-						&[column_name],
-						lancedb::index::Index::IvfRq(
-							lancedb::index::vector::IvfRqIndexBuilder::default()
-								.distance_type(index_params.distance_type)
-								.num_partitions(index_params.num_partitions),
-						),
-					)
-					.execute()
-					.await?;
-			}
-		}
-
-		let duration = start_time.elapsed();
-		tracing::info!(
-			"Successfully recreated {} index for table '{}' in {:.2}s - {} partitions",
-			index_type_name,
-			table_name,
-			duration.as_secs_f64(),
-			index_params.num_partitions
-		);
-
 		Ok(())
 	}
 
