@@ -42,7 +42,7 @@ pub trait BlockType: Clone + Send + Sync + 'static {
 }
 
 impl BlockType for CodeBlock {
-	const TABLE_NAME: &'static str = "code_blocks";
+	const TABLE_NAME: &'static str = super::tables::CODE_BLOCKS;
 
 	fn to_batch(
 		blocks: &[Self],
@@ -71,7 +71,7 @@ impl BlockType for CodeBlock {
 }
 
 impl BlockType for TextBlock {
-	const TABLE_NAME: &'static str = "text_blocks";
+	const TABLE_NAME: &'static str = super::tables::TEXT_BLOCKS;
 
 	fn to_batch(
 		blocks: &[Self],
@@ -100,7 +100,7 @@ impl BlockType for TextBlock {
 }
 
 impl BlockType for DocumentBlock {
-	const TABLE_NAME: &'static str = "document_blocks";
+	const TABLE_NAME: &'static str = super::tables::DOCUMENT_BLOCKS;
 
 	fn to_batch(
 		blocks: &[Self],
@@ -129,7 +129,7 @@ impl BlockType for DocumentBlock {
 }
 
 impl BlockType for CommitBlock {
-	const TABLE_NAME: &'static str = "commit_blocks";
+	const TABLE_NAME: &'static str = super::tables::COMMIT_BLOCKS;
 
 	fn to_batch(
 		blocks: &[Self],

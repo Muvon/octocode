@@ -26,7 +26,9 @@ use lancedb::{
 	Connection,
 };
 
+use crate::store::sql::escape_single_quotes;
 use crate::store::table_ops::TableOperations;
+use crate::store::tables;
 
 /// Handles git and file metadata operations
 pub struct MetadataOperations<'a> {
@@ -42,54 +44,31 @@ impl<'a> MetadataOperations<'a> {
 		}
 	}
 
-	/// Store git metadata (commit hash, etc.)
-	pub async fn store_git_metadata(&self, commit_hash: &str) -> Result<()> {
-		// Check if table exists, create if not
-		if !self.table_ops.table_exists("git_metadata").await? {
-			self.create_git_metadata_table().await?;
-		}
+	// ========================================================================
+	// Commit-marker tables
+	//
+	// `git_metadata`, `graphrag_git_metadata` and `commits_git_metadata` are
+	// structurally identical: each holds a single row tracking the last commit
+	// hash a given pipeline indexed, plus a timestamp. They differ only by which
+	// pipeline owns them, so the schema and the get/store logic are shared here
+	// and the per-pipeline methods are thin delegates.
+	// ========================================================================
 
-		// Check if the commit hash is already stored
-		if let Ok(Some(existing_hash)) = self.get_last_commit_hash().await {
-			if existing_hash == commit_hash {
-				// Same commit hash, no need to update
-				return Ok(());
-			}
-		}
-
-		// Create a record with the current timestamp
-		let schema = Arc::new(Schema::new(vec![
+	/// Schema shared by every commit-marker table.
+	fn commit_marker_schema() -> Arc<Schema> {
+		Arc::new(Schema::new(vec![
 			Field::new("commit_hash", DataType::Utf8, false),
 			Field::new("indexed_at", DataType::Int64, false),
-		]));
-
-		let commit_hashes = vec![commit_hash];
-		let timestamps = vec![chrono::Utc::now().timestamp()];
-
-		let batch = RecordBatch::try_new(
-			schema,
-			vec![
-				Arc::new(StringArray::from(commit_hashes)),
-				Arc::new(Int64Array::from(timestamps)),
-			],
-		)?;
-
-		// Only clear and store if we have a different commit hash
-		self.table_ops.clear_table("git_metadata").await?;
-		self.table_ops.store_batch("git_metadata", batch).await?;
-
-		Ok(())
+		]))
 	}
 
-	/// Get last indexed git commit hash
-	pub async fn get_last_commit_hash(&self) -> Result<Option<String>> {
-		if !self.table_ops.table_exists("git_metadata").await? {
+	/// Read the stored commit hash from a commit-marker table, if present.
+	async fn get_commit_marker(&self, table_name: &str) -> Result<Option<String>> {
+		if !self.table_ops.table_exists(table_name).await? {
 			return Ok(None);
 		}
 
-		let table = self.db.open_table("git_metadata").execute().await?;
-
-		// Get the most recent commit hash
+		let table = self.db.open_table(table_name).execute().await?;
 		let mut results = table
 			.query()
 			.select(Select::Columns(vec!["commit_hash".to_string()]))
@@ -97,7 +76,6 @@ impl<'a> MetadataOperations<'a> {
 			.execute()
 			.await?;
 
-		// Process results
 		while let Some(batch) = results.try_next().await? {
 			if batch.num_rows() > 0 {
 				if let Some(column) = batch.column_by_name("commit_hash") {
@@ -113,19 +91,109 @@ impl<'a> MetadataOperations<'a> {
 		Ok(None)
 	}
 
+	/// Overwrite a commit-marker table with `commit_hash` and the current time.
+	/// No-op when the stored hash already matches. The table holds exactly one
+	/// row, so we clear and rewrite rather than update in place. `store_batch`
+	/// creates the table on first write, so no explicit create step is needed.
+	async fn store_commit_marker(&self, table_name: &str, commit_hash: &str) -> Result<()> {
+		if let Ok(Some(existing_hash)) = self.get_commit_marker(table_name).await {
+			if existing_hash == commit_hash {
+				return Ok(());
+			}
+		}
+
+		let batch = RecordBatch::try_new(
+			Self::commit_marker_schema(),
+			vec![
+				Arc::new(StringArray::from(vec![commit_hash])),
+				Arc::new(Int64Array::from(vec![chrono::Utc::now().timestamp()])),
+			],
+		)?;
+
+		self.table_ops.clear_table(table_name).await?;
+		self.table_ops.store_batch(table_name, batch).await?;
+
+		Ok(())
+	}
+
+	// ----- git_metadata (main code index) -----
+
+	/// Store git metadata (commit hash, etc.)
+	pub async fn store_git_metadata(&self, commit_hash: &str) -> Result<()> {
+		self.store_commit_marker(tables::GIT_METADATA, commit_hash)
+			.await
+	}
+
+	/// Get last indexed git commit hash
+	pub async fn get_last_commit_hash(&self) -> Result<Option<String>> {
+		self.get_commit_marker(tables::GIT_METADATA).await
+	}
+
+	/// Clear git metadata table to force full re-scan
+	pub async fn clear_git_metadata(&self) -> Result<()> {
+		self.table_ops.clear_table(tables::GIT_METADATA).await
+	}
+
+	// ----- graphrag_git_metadata -----
+
+	/// Get the last GraphRAG commit hash
+	pub async fn get_graphrag_last_commit_hash(&self) -> Result<Option<String>> {
+		self.get_commit_marker(tables::GRAPHRAG_GIT_METADATA).await
+	}
+
+	/// Store GraphRAG git metadata (commit hash and timestamp)
+	pub async fn store_graphrag_commit_hash(&self, commit_hash: &str) -> Result<()> {
+		self.store_commit_marker(tables::GRAPHRAG_GIT_METADATA, commit_hash)
+			.await
+	}
+
+	// ----- commits_git_metadata (commit history index) -----
+
+	/// Get the last commits commit hash
+	pub async fn get_commits_last_commit_hash(&self) -> Result<Option<String>> {
+		self.get_commit_marker(tables::COMMITS_GIT_METADATA).await
+	}
+
+	/// Store commits git metadata (commit hash and timestamp)
+	pub async fn store_commits_last_commit_hash(&self, commit_hash: &str) -> Result<()> {
+		self.store_commit_marker(tables::COMMITS_GIT_METADATA, commit_hash)
+			.await
+	}
+
+	// ========================================================================
+	// File metadata (per-file modification time, for incremental reindex)
+	// ========================================================================
+
+	/// Schema for the `file_metadata` table.
+	fn file_metadata_schema() -> Arc<Schema> {
+		Arc::new(Schema::new(vec![
+			Field::new("path", DataType::Utf8, false),
+			Field::new("mtime", DataType::Int64, false),
+			Field::new("indexed_at", DataType::Int64, false),
+		]))
+	}
+
+	/// Create the file metadata table.
+	async fn create_file_metadata_table(&self) -> Result<()> {
+		self.table_ops
+			.create_table_with_schema(tables::FILE_METADATA, Self::file_metadata_schema())
+			.await
+	}
+
 	/// Store file metadata (modification time, etc.)
 	pub async fn store_file_metadata(&self, file_path: &str, mtime: u64) -> Result<()> {
 		// Check if table exists, create if not
-		if !self.table_ops.table_exists("file_metadata").await? {
+		if !self.table_ops.table_exists(tables::FILE_METADATA).await? {
 			self.create_file_metadata_table().await?;
 		}
 
-		let table = self.db.open_table("file_metadata").execute().await?;
+		let table = self.db.open_table(tables::FILE_METADATA).execute().await?;
+		let path_predicate = format!("path = '{}'", escape_single_quotes(file_path));
 
 		// Check if file already exists in metadata
 		let mut existing_results = table
 			.query()
-			.only_if(format!("path = '{}'", file_path))
+			.only_if(path_predicate.clone())
 			.limit(1)
 			.execute()
 			.await?;
@@ -142,38 +210,24 @@ impl<'a> MetadataOperations<'a> {
 			// Update existing record using correct LanceDB UpdateBuilder API
 			table
 				.update()
-				.only_if(format!("path = '{}'", file_path))
+				.only_if(path_predicate)
 				.column("mtime", (mtime as i64).to_string())
 				.column("indexed_at", chrono::Utc::now().timestamp().to_string())
 				.execute()
 				.await?;
 		} else {
 			// Insert new record
-			let schema = Arc::new(Schema::new(vec![
-				Field::new("path", DataType::Utf8, false),
-				Field::new("mtime", DataType::Int64, false),
-				Field::new("indexed_at", DataType::Int64, false),
-			]));
-
-			let paths = vec![file_path];
-			let mtimes = vec![mtime as i64];
-			let timestamps = vec![chrono::Utc::now().timestamp()];
-
 			let batch = RecordBatch::try_new(
-				schema,
+				Self::file_metadata_schema(),
 				vec![
-					Arc::new(StringArray::from(paths)),
-					Arc::new(Int64Array::from(mtimes)),
-					Arc::new(Int64Array::from(timestamps)),
+					Arc::new(StringArray::from(vec![file_path])),
+					Arc::new(Int64Array::from(vec![mtime as i64])),
+					Arc::new(Int64Array::from(vec![chrono::Utc::now().timestamp()])),
 				],
 			)?;
-
-			// Use RecordBatchIterator instead of Vec<RecordBatch>
-			use std::iter::once;
-			let batches = once(Ok(batch.clone()));
-			let batch_reader =
-				arrow::record_batch::RecordBatchIterator::new(batches, batch.schema());
-			table.add(batch_reader).execute().await?;
+			self.table_ops
+				.store_batch(tables::FILE_METADATA, batch)
+				.await?;
 		}
 
 		Ok(())
@@ -181,16 +235,16 @@ impl<'a> MetadataOperations<'a> {
 
 	/// Get file modification time from metadata
 	pub async fn get_file_mtime(&self, file_path: &str) -> Result<Option<u64>> {
-		if !self.table_ops.table_exists("file_metadata").await? {
+		if !self.table_ops.table_exists(tables::FILE_METADATA).await? {
 			return Ok(None);
 		}
 
-		let table = self.db.open_table("file_metadata").execute().await?;
+		let table = self.db.open_table(tables::FILE_METADATA).execute().await?;
 
 		// Query for the specific file
 		let mut results = table
 			.query()
-			.only_if(format!("path = '{}'", file_path))
+			.only_if(format!("path = '{}'", escape_single_quotes(file_path)))
 			.select(Select::Columns(vec!["mtime".to_string()]))
 			.limit(1)
 			.execute()
@@ -217,11 +271,11 @@ impl<'a> MetadataOperations<'a> {
 	pub async fn get_all_file_metadata(&self) -> Result<std::collections::HashMap<String, u64>> {
 		let mut metadata_map = std::collections::HashMap::new();
 
-		if !self.table_ops.table_exists("file_metadata").await? {
+		if !self.table_ops.table_exists(tables::FILE_METADATA).await? {
 			return Ok(metadata_map);
 		}
 
-		let table = self.db.open_table("file_metadata").execute().await?;
+		let table = self.db.open_table(tables::FILE_METADATA).execute().await?;
 
 		// Query for all file metadata
 		let mut results = table
@@ -257,202 +311,5 @@ impl<'a> MetadataOperations<'a> {
 		}
 
 		Ok(metadata_map)
-	}
-
-	/// Clear git metadata table to force full re-scan
-	pub async fn clear_git_metadata(&self) -> Result<()> {
-		self.table_ops.clear_table("git_metadata").await
-	}
-
-	/// Create git metadata table
-	async fn create_git_metadata_table(&self) -> Result<()> {
-		let schema = Arc::new(Schema::new(vec![
-			Field::new("commit_hash", DataType::Utf8, false),
-			Field::new("indexed_at", DataType::Int64, false),
-		]));
-
-		self.table_ops
-			.create_table_with_schema("git_metadata", schema)
-			.await
-	}
-
-	/// Create file metadata table
-	async fn create_file_metadata_table(&self) -> Result<()> {
-		let schema = Arc::new(Schema::new(vec![
-			Field::new("path", DataType::Utf8, false),
-			Field::new("mtime", DataType::Int64, false),
-			Field::new("indexed_at", DataType::Int64, false),
-		]));
-
-		self.table_ops
-			.create_table_with_schema("file_metadata", schema)
-			.await
-	}
-
-	/// Get the last GraphRAG commit hash
-	pub async fn get_graphrag_last_commit_hash(&self) -> Result<Option<String>> {
-		// Check if table exists
-		if !self.table_ops.table_exists("graphrag_git_metadata").await? {
-			return Ok(None);
-		}
-
-		let table = self
-			.db
-			.open_table("graphrag_git_metadata")
-			.execute()
-			.await?;
-
-		// Get the most recent commit hash
-		let mut results = table
-			.query()
-			.select(Select::Columns(vec!["commit_hash".to_string()]))
-			.limit(1)
-			.execute()
-			.await?;
-
-		// Process results
-		while let Some(batch) = results.try_next().await? {
-			if batch.num_rows() > 0 {
-				if let Some(column) = batch.column_by_name("commit_hash") {
-					if let Some(hash_array) = column.as_any().downcast_ref::<StringArray>() {
-						if let Some(hash) = hash_array.iter().next() {
-							return Ok(hash.map(|s| s.to_string()));
-						}
-					}
-				}
-			}
-		}
-
-		Ok(None)
-	}
-
-	/// Store GraphRAG git metadata (commit hash and timestamp)
-	pub async fn store_graphrag_commit_hash(&self, commit_hash: &str) -> Result<()> {
-		// Check if table exists, create if not
-		if !self.table_ops.table_exists("graphrag_git_metadata").await? {
-			self.create_graphrag_git_metadata_table().await?;
-		}
-
-		// Check if the commit hash is already stored
-		if let Ok(Some(existing_hash)) = self.get_graphrag_last_commit_hash().await {
-			if existing_hash == commit_hash {
-				// Same commit hash, no need to update
-				return Ok(());
-			}
-		}
-
-		// Create a record with the current timestamp
-		let schema = Arc::new(Schema::new(vec![
-			Field::new("commit_hash", DataType::Utf8, false),
-			Field::new("indexed_at", DataType::Int64, false),
-		]));
-
-		let commit_hashes = vec![commit_hash];
-		let timestamps = vec![chrono::Utc::now().timestamp()];
-
-		let batch = RecordBatch::try_new(
-			schema,
-			vec![
-				Arc::new(StringArray::from(commit_hashes)),
-				Arc::new(Int64Array::from(timestamps)),
-			],
-		)?;
-
-		// Only clear and store if we have a different commit hash
-		self.table_ops.clear_table("graphrag_git_metadata").await?;
-		self.table_ops
-			.store_batch("graphrag_git_metadata", batch)
-			.await?;
-
-		Ok(())
-	}
-
-	/// Create GraphRAG git metadata table
-	async fn create_graphrag_git_metadata_table(&self) -> Result<()> {
-		let schema = Arc::new(Schema::new(vec![
-			Field::new("commit_hash", DataType::Utf8, false),
-			Field::new("indexed_at", DataType::Int64, false),
-		]));
-
-		self.table_ops
-			.create_table_with_schema("graphrag_git_metadata", schema)
-			.await
-	}
-
-	/// Get the last commits commit hash
-	pub async fn get_commits_last_commit_hash(&self) -> Result<Option<String>> {
-		if !self.table_ops.table_exists("commits_git_metadata").await? {
-			return Ok(None);
-		}
-
-		let table = self.db.open_table("commits_git_metadata").execute().await?;
-
-		let mut results = table
-			.query()
-			.select(Select::Columns(vec!["commit_hash".to_string()]))
-			.limit(1)
-			.execute()
-			.await?;
-
-		while let Some(batch) = results.try_next().await? {
-			if batch.num_rows() > 0 {
-				if let Some(column) = batch.column_by_name("commit_hash") {
-					if let Some(hash_array) = column.as_any().downcast_ref::<StringArray>() {
-						if let Some(hash) = hash_array.iter().next() {
-							return Ok(hash.map(|s| s.to_string()));
-						}
-					}
-				}
-			}
-		}
-
-		Ok(None)
-	}
-
-	/// Store commits git metadata (commit hash and timestamp)
-	pub async fn store_commits_last_commit_hash(&self, commit_hash: &str) -> Result<()> {
-		if !self.table_ops.table_exists("commits_git_metadata").await? {
-			self.create_commits_git_metadata_table().await?;
-		}
-
-		if let Ok(Some(existing_hash)) = self.get_commits_last_commit_hash().await {
-			if existing_hash == commit_hash {
-				return Ok(());
-			}
-		}
-
-		let schema = Arc::new(Schema::new(vec![
-			Field::new("commit_hash", DataType::Utf8, false),
-			Field::new("indexed_at", DataType::Int64, false),
-		]));
-
-		let commit_hashes = vec![commit_hash];
-		let timestamps = vec![chrono::Utc::now().timestamp()];
-
-		let batch = RecordBatch::try_new(
-			schema,
-			vec![
-				Arc::new(StringArray::from(commit_hashes)),
-				Arc::new(Int64Array::from(timestamps)),
-			],
-		)?;
-
-		self.table_ops.clear_table("commits_git_metadata").await?;
-		self.table_ops
-			.store_batch("commits_git_metadata", batch)
-			.await?;
-
-		Ok(())
-	}
-
-	async fn create_commits_git_metadata_table(&self) -> Result<()> {
-		let schema = Arc::new(Schema::new(vec![
-			Field::new("commit_hash", DataType::Utf8, false),
-			Field::new("indexed_at", DataType::Int64, false),
-		]));
-
-		self.table_ops
-			.create_table_with_schema("commits_git_metadata", schema)
-			.await
 	}
 }

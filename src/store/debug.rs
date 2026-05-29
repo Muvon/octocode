@@ -25,8 +25,8 @@ use lancedb::{
 };
 
 use crate::store::{
-	batch_converter::BatchConverter, table_ops::TableOperations, CodeBlock, DocumentBlock,
-	TextBlock,
+	batch_converter::BatchConverter, sql::escape_single_quotes, table_ops::TableOperations, tables,
+	CodeBlock, DocumentBlock, TextBlock,
 };
 
 /// Debug and inspection operations for the database
@@ -50,7 +50,11 @@ impl<'a> DebugOperations<'a> {
 		let table_names = self.db.table_names().execute().await?;
 		let mut total_files = 0;
 
-		for table_name in &["code_blocks", "text_blocks", "document_blocks"] {
+		for table_name in &[
+			tables::CODE_BLOCKS,
+			tables::TEXT_BLOCKS,
+			tables::DOCUMENT_BLOCKS,
+		] {
 			if table_names.contains(&table_name.to_string()) {
 				println!("\n📁 Files in {} table:", table_name);
 				let table = self.db.open_table(*table_name).execute().await?;
@@ -110,7 +114,7 @@ impl<'a> DebugOperations<'a> {
 		println!("{}", "=".repeat(80));
 
 		// Check code_blocks table
-		if table_names.contains(&"code_blocks".to_string()) {
+		if table_names.contains(&tables::CODE_BLOCKS.to_string()) {
 			if let Ok(chunks) = self.get_file_code_blocks(file_path).await {
 				if !chunks.is_empty() {
 					found_in_any_table = true;
@@ -133,7 +137,7 @@ impl<'a> DebugOperations<'a> {
 		}
 
 		// Check text_blocks table
-		if table_names.contains(&"text_blocks".to_string()) {
+		if table_names.contains(&tables::TEXT_BLOCKS.to_string()) {
 			if let Ok(chunks) = self.get_file_text_blocks(file_path).await {
 				if !chunks.is_empty() {
 					found_in_any_table = true;
@@ -154,7 +158,7 @@ impl<'a> DebugOperations<'a> {
 		}
 
 		// Check document_blocks table
-		if table_names.contains(&"document_blocks".to_string()) {
+		if table_names.contains(&tables::DOCUMENT_BLOCKS.to_string()) {
 			if let Ok(chunks) = self.get_file_document_blocks(file_path).await {
 				if !chunks.is_empty() {
 					found_in_any_table = true;
@@ -194,11 +198,11 @@ impl<'a> DebugOperations<'a> {
 
 	/// Get all code blocks for a specific file
 	async fn get_file_code_blocks(&self, file_path: &str) -> Result<Vec<CodeBlock>> {
-		let table = self.db.open_table("code_blocks").execute().await?;
+		let table = self.db.open_table(tables::CODE_BLOCKS).execute().await?;
 
 		let mut results = table
 			.query()
-			.only_if(format!("path = '{}'", file_path))
+			.only_if(format!("path = '{}'", escape_single_quotes(file_path)))
 			.execute()
 			.await?;
 
@@ -218,11 +222,11 @@ impl<'a> DebugOperations<'a> {
 
 	/// Get all text blocks for a specific file
 	async fn get_file_text_blocks(&self, file_path: &str) -> Result<Vec<TextBlock>> {
-		let table = self.db.open_table("text_blocks").execute().await?;
+		let table = self.db.open_table(tables::TEXT_BLOCKS).execute().await?;
 
 		let mut results = table
 			.query()
-			.only_if(format!("path = '{}'", file_path))
+			.only_if(format!("path = '{}'", escape_single_quotes(file_path)))
 			.execute()
 			.await?;
 
@@ -242,11 +246,15 @@ impl<'a> DebugOperations<'a> {
 
 	/// Get all document blocks for a specific file
 	async fn get_file_document_blocks(&self, file_path: &str) -> Result<Vec<DocumentBlock>> {
-		let table = self.db.open_table("document_blocks").execute().await?;
+		let table = self
+			.db
+			.open_table(tables::DOCUMENT_BLOCKS)
+			.execute()
+			.await?;
 
 		let mut results = table
 			.query()
-			.only_if(format!("path = '{}'", file_path))
+			.only_if(format!("path = '{}'", escape_single_quotes(file_path)))
 			.execute()
 			.await?;
 
