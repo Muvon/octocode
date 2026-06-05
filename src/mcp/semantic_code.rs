@@ -19,6 +19,7 @@ use tracing::debug;
 use crate::config::Config;
 use crate::indexer::search::{
 	search_codebase_with_details_multi_query_text, search_codebase_with_details_text,
+	DetailSearchOptions,
 };
 use crate::indexer::{extract_file_signatures, render_signatures_text, NoindexWalker, PathUtils};
 use crate::mcp::types::{McpError, McpTool};
@@ -303,32 +304,21 @@ impl SemanticCodeProvider {
 		// Search the project at its known path. The store and branch context are
 		// resolved from `working_directory`, so there's no process-wide CWD change
 		// and concurrent searches across different repos can't race.
+		let options = DetailSearchOptions {
+			mode,
+			detail_level,
+			max_results,
+			similarity_threshold,
+			language_filter: language_filter.as_deref(),
+			config: &self.config,
+			working_directory: &self.working_directory,
+		};
 		let results = if queries.len() == 1 {
 			// Single query - use text function for token efficiency
-			search_codebase_with_details_text(
-				&queries[0],
-				mode,
-				detail_level,
-				max_results,
-				similarity_threshold,
-				language_filter.as_deref(),
-				&self.config,
-				&self.working_directory,
-			)
-			.await
+			search_codebase_with_details_text(&queries[0], &options).await
 		} else {
 			// Multi-query - use text function for token efficiency
-			search_codebase_with_details_multi_query_text(
-				&queries,
-				mode,
-				detail_level,
-				max_results,
-				similarity_threshold,
-				language_filter.as_deref(),
-				&self.config,
-				&self.working_directory,
-			)
-			.await
+			search_codebase_with_details_multi_query_text(&queries, &options).await
 		};
 
 		match results {
