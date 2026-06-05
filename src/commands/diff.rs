@@ -251,13 +251,15 @@ async fn gather_diff_context(store: &Store, changed_files: &[String], config: &C
 			.join(" ");
 		if let Ok(related) = indexer::search::search_codebase_with_details_text(
 			&query,
-			"code",
-			"signatures",
-			5,
-			0.3,
-			None,
-			config,
-			std::path::Path::new("."),
+			&indexer::search::DetailSearchOptions {
+				mode: "code",
+				detail_level: "signatures",
+				max_results: 5,
+				similarity_threshold: 0.3,
+				language_filter: None,
+				config,
+				working_directory: std::path::Path::new("."),
+			},
 		)
 		.await
 		{

@@ -138,13 +138,15 @@ async fn resolve_target(
 	// Case 3: treat as search query
 	let search_result = indexer::search::search_codebase_with_details_text(
 		target,
-		"code",
-		"full",
-		3,
-		config.search.similarity_threshold,
-		None,
-		config,
-		std::path::Path::new("."),
+		&indexer::search::DetailSearchOptions {
+			mode: "code",
+			detail_level: "full",
+			max_results: 3,
+			similarity_threshold: config.search.similarity_threshold,
+			language_filter: None,
+			config,
+			working_directory: std::path::Path::new("."),
+		},
 	)
 	.await?;
 
@@ -211,13 +213,15 @@ async fn gather_context(
 
 	if let Ok(related) = indexer::search::search_codebase_with_details_text(
 		&query,
-		"code",
-		"signatures",
-		5,
-		0.3, // low threshold to find related code
-		None,
-		config,
-		std::path::Path::new("."),
+		&indexer::search::DetailSearchOptions {
+			mode: "code",
+			detail_level: "signatures",
+			max_results: 5,
+			similarity_threshold: 0.3, // low threshold to find related code
+			language_filter: None,
+			config,
+			working_directory: std::path::Path::new("."),
+		},
 	)
 	.await
 	{

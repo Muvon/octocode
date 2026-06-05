@@ -736,18 +736,33 @@ fn fuse_all_mode_results(
 /// Forwards to the multi-query implementation with a one-element slice so all
 /// search behavior (branch awareness, hybrid scoring, RRF fusion across
 /// modalities, reranking) lives in a single code path.
+/// Bundled parameters for the detail-level search entrypoints (MCP + CLI).
+/// Grouped into a struct so the public functions stay within a sane argument
+/// count and call sites read by field name.
+#[derive(Clone, Copy)]
+pub struct DetailSearchOptions<'a> {
+	pub mode: &'a str,
+	pub detail_level: &'a str,
+	pub max_results: usize,
+	pub similarity_threshold: f32,
+	pub language_filter: Option<&'a str>,
+	pub config: &'a Config,
+	pub working_directory: &'a std::path::Path,
+}
+
 pub async fn search_codebase_with_details_text(
 	query: &str,
-	mode: &str,
-	detail_level: &str,
-	max_results: usize,
-	similarity_threshold: f32,
-	language_filter: Option<&str>,
-	config: &Config,
-	working_directory: &std::path::Path,
+	options: &DetailSearchOptions<'_>,
 ) -> Result<String> {
-	search_codebase_with_details_multi_query_text(
-		&[query.to_string()],
+	search_codebase_with_details_multi_query_text(&[query.to_string()], options).await
+}
+
+// Enhanced search function for MCP server with multi-query support and detail level control - returns text results
+pub async fn search_codebase_with_details_multi_query_text(
+	queries: &[String],
+	options: &DetailSearchOptions<'_>,
+) -> Result<String> {
+	let DetailSearchOptions {
 		mode,
 		detail_level,
 		max_results,
@@ -755,21 +770,8 @@ pub async fn search_codebase_with_details_text(
 		language_filter,
 		config,
 		working_directory,
-	)
-	.await
-}
+	} = *options;
 
-// Enhanced search function for MCP server with multi-query support and detail level control - returns text results
-pub async fn search_codebase_with_details_multi_query_text(
-	queries: &[String],
-	mode: &str,
-	detail_level: &str,
-	max_results: usize,
-	similarity_threshold: f32,
-	language_filter: Option<&str>,
-	config: &Config,
-	working_directory: &std::path::Path,
-) -> Result<String> {
 	// Open the project's store by its known path (no current-directory dependency).
 	let store = Store::new_at(working_directory).await?;
 
