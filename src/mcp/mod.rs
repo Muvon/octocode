@@ -22,10 +22,11 @@
 pub mod graphrag;
 pub mod logging;
 pub mod lsp;
-pub mod proxy;
+pub mod multi;
 pub mod semantic_code;
 pub mod server;
 pub mod types;
 pub mod watcher;
 
+pub use multi::MultiServer;
 pub use server::McpServer;

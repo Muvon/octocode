@@ -35,9 +35,13 @@ use crate::store::Store;
 use crate::watcher_config::{DEFAULT_ADDITIONAL_DELAY_MS, MCP_DEFAULT_DEBOUNCE_MS};
 use anyhow::Result;
 use rmcp::{
-	handler::server::{router::tool::ToolRouter, wrapper::Parameters},
-	model::{Implementation, ServerCapabilities, ServerInfo},
-	schemars, tool, tool_handler, tool_router, ServerHandler, ServiceExt,
+	handler::server::{router::tool::ToolRouter, tool::ToolCallContext, wrapper::Parameters},
+	model::{
+		CallToolRequestParams, CallToolResult, Implementation, ServerCapabilities, ServerInfo, Tool,
+	},
+	schemars,
+	service::RequestContext,
+	tool, tool_handler, tool_router, ErrorData, RoleServer, ServerHandler, ServiceExt,
 };
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -605,18 +609,19 @@ impl McpServer {
 		}
 	}
 
-	/// Lightweight constructor for proxy mode.
+	/// Lightweight per-repo request handler for `--multi` mode.
 	///
-	/// Creates only the providers and tool router — no store, no LSP, no
-	/// background services, no `set_current_dir`.  The proxy manages its own
-	/// lifecycle (indexing, cleanup, logging).
-	pub fn new_for_proxy(config: Config, working_directory: std::path::PathBuf) -> Result<Self> {
+	/// Builds only the providers and tool router — no store, no LSP, no
+	/// background services, no `set_current_dir`. The multi-server owns the
+	/// repo lifecycle (indexing, watcher, cleanup, logging) and routes calls
+	/// here by the injected `project` argument.
+	pub(crate) fn new_repo_core(config: Config, working_directory: std::path::PathBuf) -> Self {
 		let semantic_code = SemanticCodeProvider::new(config.clone(), working_directory.clone());
 		let graphrag = GraphRagProvider::new(config, working_directory);
 
 		let mut tool_router = Self::tool_router();
 
-		// Proxy never has LSP — remove LSP tools
+		// Multi mode never has LSP — remove LSP tools
 		for name in [
 			"lsp_goto_definition",
 			"lsp_hover",
@@ -632,13 +637,66 @@ impl McpServer {
 			tool_router.remove_route("graphrag");
 		}
 
-		Ok(Self {
+		Self {
 			semantic_code,
 			graphrag,
 			lsp: None,
-			indexer_enabled: false,
+			indexer_enabled: true,
 			tool_router,
-		})
+		}
+	}
+
+	/// Tool definitions exposed by this per-repo server. The multi-server clones
+	/// these and injects a `project` argument before serving them to clients.
+	pub(crate) fn list_tool_defs(&self) -> Vec<Tool> {
+		self.tool_router.list_all()
+	}
+
+	/// Dispatch a tool call against this server's router. Used by the
+	/// multi-server after it has resolved `project` and stripped it from args.
+	pub(crate) async fn dispatch_tool(
+		&self,
+		request: CallToolRequestParams,
+		context: RequestContext<RoleServer>,
+	) -> Result<CallToolResult, ErrorData> {
+		let tcc = ToolCallContext::new(self, request, context);
+		self.tool_router.call(tcc).await
+	}
+
+	/// Create the per-repo store and start background watcher + indexing for a
+	/// repository served under `--multi`. Returns the abort-on-drop handle
+	/// bundle; dropping it tears down the repo's background threads.
+	pub(crate) async fn start_repo_services(
+		config: Config,
+		working_directory: std::path::PathBuf,
+		no_git: bool,
+		debug: bool,
+	) -> Result<BackgroundServices> {
+		let db_path = crate::storage::get_project_database_path(&working_directory)?;
+		crate::storage::ensure_project_storage_exists(&working_directory)?;
+		let store = Arc::new(Store::new_with_path(db_path).await?);
+		store.initialize_collections().await?;
+
+		// One-shot initial index so a freshly-accessed repo is searchable without
+		// waiting for a file change. Incremental and lock-guarded, so it's cheap
+		// when already indexed and safe against the watcher-triggered reindex.
+		{
+			let store = store.clone();
+			let config = config.clone();
+			let working_directory = working_directory.clone();
+			tokio::spawn(async move {
+				if let Err(e) = perform_indexing(&store, &config, &working_directory, no_git).await
+				{
+					warn!(
+						"Initial index failed for {}: {}",
+						working_directory.display(),
+						e
+					);
+				}
+			});
+		}
+
+		start_background_services(config, store, working_directory, no_git, debug, None).await
 	}
 
 	/// Create a new MCP server instance.
@@ -1370,7 +1428,7 @@ fn build_diagnostic(pattern: &str, language: &str) -> String {
 // Background services setup (preserves all watcher + indexing logic)
 // ---------------------------------------------------------------------------
 
-async fn start_background_services(
+pub(crate) async fn start_background_services(
 	config: Config,
 	store: Arc<Store>,
 	working_directory: std::path::PathBuf,
