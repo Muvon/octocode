@@ -277,28 +277,37 @@ Search or rewrite code by AST structure using ast-grep pattern syntax. Complemen
 }
 ```
 
-## MCP Proxy Server
+## Multi-Repository Mode
 
-For managing multiple repositories, use the MCP proxy server:
+To serve several repositories from one MCP endpoint, run `mcp` with `--multi`.
+It scans the immediate subdirectories of `--path` for git repositories and
+exposes the regular tool set, with every tool gaining a required `project`
+argument (injected into the schema and description) that selects the target
+repository by its subdirectory name. This works over stdio and HTTP and
+replaces the former `mcp-proxy` command.
 
 ```bash
-# Start proxy server
-octocode mcp-proxy --bind "127.0.0.1:8080" --path /path/to/parent/directory
+# Multi-repo over stdio
+octocode mcp --multi --path /path/to/parent/directory
+
+# Multi-repo over HTTP
+octocode mcp --multi --bind "127.0.0.1:8080" --path /workspace
 ```
 
 **Features:**
-- Automatically discovers git repositories in the specified directory
-- Creates MCP server instances for each repository
-- Provides unified HTTP interface for multiple projects
-- Supports dynamic repository addition/removal
+- Discovers git repositories one level under the specified directory
+- Each repository gets its own store and background watcher/indexing threads,
+  built lazily on first use and reaped when idle
+- Maps to the same per-project storage the single-repo `mcp` command uses
+- A single endpoint (stdio or HTTP); pick the repo per call via `project`
 
-**Configuration:**
+**Configuration (stdio):**
 ```json
 {
   "mcpServers": {
-    "octocode-proxy": {
+    "octocode-multi": {
       "command": "octocode",
-      "args": ["mcp-proxy", "--bind", "127.0.0.1:8080", "--path", "/workspace"]
+      "args": ["mcp", "--multi", "--path", "/workspace"]
     }
   }
 }

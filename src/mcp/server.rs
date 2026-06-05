@@ -217,6 +217,10 @@ impl Drop for BackgroundServices {
 /// MCP Server implementation using rmcp SDK.
 #[derive(Clone)]
 pub struct McpServer {
+	/// Directory this server serves. Tools that scan the filesystem
+	/// (e.g. structural_search) resolve paths against this, not the process CWD,
+	/// so multiple per-repo servers can run concurrently under `--multi`.
+	working_directory: std::path::PathBuf,
 	semantic_code: SemanticCodeProvider,
 	graphrag: Option<GraphRagProvider>,
 	lsp: Option<Arc<Mutex<crate::mcp::lsp::LspProvider>>>,
@@ -433,7 +437,7 @@ impl McpServer {
 			params.pattern, params.language
 		);
 
-		let current_dir = std::env::current_dir().map_err(|e| e.to_string())?;
+		let current_dir = self.working_directory.clone();
 		let max_results = params.max_results.unwrap_or(50);
 		let context = params.context.unwrap_or(0);
 
@@ -617,7 +621,7 @@ impl McpServer {
 	/// here by the injected `project` argument.
 	pub(crate) fn new_repo_core(config: Config, working_directory: std::path::PathBuf) -> Self {
 		let semantic_code = SemanticCodeProvider::new(config.clone(), working_directory.clone());
-		let graphrag = GraphRagProvider::new(config, working_directory);
+		let graphrag = GraphRagProvider::new(config, working_directory.clone());
 
 		let mut tool_router = Self::tool_router();
 
@@ -638,6 +642,7 @@ impl McpServer {
 		}
 
 		Self {
+			working_directory,
 			semantic_code,
 			graphrag,
 			lsp: None,
@@ -791,6 +796,7 @@ impl McpServer {
 		}
 
 		let server = Self {
+			working_directory: working_directory.clone(),
 			semantic_code,
 			graphrag,
 			lsp,

@@ -16,6 +16,7 @@ use anyhow::Result;
 use clap::Args;
 
 use octocode::config::Config;
+use octocode::indexer;
 use octocode::mcp::{McpServer, MultiServer};
 
 #[derive(Args, Clone)]
@@ -74,6 +75,21 @@ pub async fn run(args: McpArgs) -> Result<()> {
 			Some(bind_addr) => server.run_http(&bind_addr).await,
 			None => server.run_stdio().await,
 		};
+	}
+
+	// Single mode requires a git repository unless --no-git is passed (or
+	// require_git is disabled in config). Refuse to start outside a git repo
+	// instead of silently serving with indexing disabled.
+	if config.index.require_git
+		&& !args.no_git
+		&& !indexer::git::is_git_repo_root(&working_directory)
+	{
+		return Err(anyhow::anyhow!(
+			"'{}' is not a git repository. Run `octocode mcp` from a git repo root, \
+			 pass --no-git to serve a non-git directory, or use --multi to serve \
+			 repositories found under this path.",
+			working_directory.display()
+		));
 	}
 
 	let (server, bg) = McpServer::new(

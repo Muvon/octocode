@@ -185,15 +185,31 @@ impl Store {
 	/// Create a new Store for the current project (default branch database).
 	pub async fn new() -> Result<Self> {
 		let current_dir = std::env::current_dir()?;
-		let index_path = crate::storage::get_project_database_path(&current_dir)?;
-		crate::storage::ensure_project_storage_exists(&current_dir)?;
+		Self::new_at(&current_dir).await
+	}
+
+	/// Open the main project store for an explicit working directory.
+	/// Resolves the database by the project's git remote / path hash — no
+	/// dependency on the process current directory.
+	pub async fn new_at(working_directory: &std::path::Path) -> Result<Self> {
+		let index_path = crate::storage::get_project_database_path(working_directory)?;
+		crate::storage::ensure_project_storage_exists(working_directory)?;
 		Self::new_with_path(index_path).await
 	}
 
-	/// Create a new Store for a specific branch's delta database.
+	/// Create a new Store for a specific branch's delta database (current directory).
 	pub async fn new_for_branch(branch_name: &str) -> Result<Self> {
 		let current_dir = std::env::current_dir()?;
-		let index_path = crate::storage::get_branch_database_path(&current_dir, branch_name)?;
+		Self::new_for_branch_at(&current_dir, branch_name).await
+	}
+
+	/// Open a branch delta store for an explicit working directory — no
+	/// dependency on the process current directory.
+	pub async fn new_for_branch_at(
+		working_directory: &std::path::Path,
+		branch_name: &str,
+	) -> Result<Self> {
+		let index_path = crate::storage::get_branch_database_path(working_directory, branch_name)?;
 		Self::new_with_path(index_path).await
 	}
 

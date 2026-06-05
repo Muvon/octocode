@@ -144,6 +144,7 @@ async fn resolve_target(
 		config.search.similarity_threshold,
 		None,
 		config,
+		std::path::Path::new("."),
 	)
 	.await?;
 
@@ -216,6 +217,7 @@ async fn gather_context(
 		0.3, // low threshold to find related code
 		None,
 		config,
+		std::path::Path::new("."),
 	)
 	.await
 	{

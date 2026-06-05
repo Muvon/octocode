@@ -406,22 +406,28 @@ octocode mcp --path /path/to/project --debug
 - `structural_search` - AST-based structural code search using ast-grep patterns
 - `lsp_*` - LSP integration tools (when --with-lsp is used)
 
-### `octocode mcp-proxy`
+### `octocode mcp --multi`
 
-Start MCP proxy server for multiple repositories.
+Serve every git repository found one level under `--path` from a single MCP
+endpoint (works over both stdio and HTTP). This replaces the former
+`mcp-proxy` command.
 
 ```bash
-# Start proxy server
-octocode mcp-proxy --bind "127.0.0.1:8080" --path /path/to/parent/directory
+# Multi-repo over stdio (default transport)
+octocode mcp --multi --path /path/to/parent/directory
 
-# Custom configuration
-octocode mcp-proxy --bind "0.0.0.0:9000" --path /workspace --debug
+# Multi-repo over HTTP
+octocode mcp --multi --bind "127.0.0.1:8080" --path /workspace --debug
 ```
 
-**Features:**
-- Automatically discovers git repositories
-- Creates MCP instances for each repository
-- Provides unified access to multiple projects
+**How it works:**
+- Scans the immediate subdirectories of `--path` for git repositories.
+- Every tool gains a required `project` argument (injected into the tool's
+  schema and description only in this mode) that names the target repository,
+  using the subdirectory name as the key.
+- Each repository is served by its own lazily-built handler with its own store
+  and background watcher/indexing threads, mapped to the same per-project
+  storage the single-repo `mcp` command uses. Idle handlers are reaped.
 
 ## Knowledge Graph Commands
 

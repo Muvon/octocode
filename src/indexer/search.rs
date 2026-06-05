@@ -616,10 +616,12 @@ pub fn format_combined_search_results_as_text(
 /// override mapping is stale — we drop it and search main-only rather than
 /// silently surface mis-overlaid results. v1 manifests (no `base_db_commit`)
 /// are grandfathered through; a re-index upgrades them to v2.
-pub async fn detect_branch_search_context(main_store: &Store) -> Option<BranchSearchContext> {
-	let current_dir = std::env::current_dir().ok()?;
-	let branch_name = crate::indexer::branch::detect_branch_context(&current_dir)?;
-	let branch_dir = crate::storage::get_branch_dir(&current_dir, &branch_name).ok()?;
+pub async fn detect_branch_search_context(
+	main_store: &Store,
+	working_directory: &std::path::Path,
+) -> Option<BranchSearchContext> {
+	let branch_name = crate::indexer::branch::detect_branch_context(working_directory)?;
+	let branch_dir = crate::storage::get_branch_dir(working_directory, &branch_name).ok()?;
 	let manifest = crate::indexer::branch::load_manifest(&branch_dir).ok()??;
 
 	let main_commit = main_store.get_last_commit_hash().await.ok().flatten();
@@ -633,7 +635,9 @@ pub async fn detect_branch_search_context(main_store: &Store) -> Option<BranchSe
 		return None;
 	}
 
-	let branch_store = Store::new_for_branch(&branch_name).await.ok()?;
+	let branch_store = Store::new_for_branch_at(working_directory, &branch_name)
+		.await
+		.ok()?;
 	Some(BranchSearchContext {
 		store: branch_store,
 		manifest,
@@ -740,6 +744,7 @@ pub async fn search_codebase_with_details_text(
 	similarity_threshold: f32,
 	language_filter: Option<&str>,
 	config: &Config,
+	working_directory: &std::path::Path,
 ) -> Result<String> {
 	search_codebase_with_details_multi_query_text(
 		&[query.to_string()],
@@ -749,6 +754,7 @@ pub async fn search_codebase_with_details_text(
 		similarity_threshold,
 		language_filter,
 		config,
+		working_directory,
 	)
 	.await
 }
@@ -762,12 +768,13 @@ pub async fn search_codebase_with_details_multi_query_text(
 	similarity_threshold: f32,
 	language_filter: Option<&str>,
 	config: &Config,
+	working_directory: &std::path::Path,
 ) -> Result<String> {
-	// Initialize store
-	let store = Store::new().await?;
+	// Open the project's store by its known path (no current-directory dependency).
+	let store = Store::new_at(working_directory).await?;
 
 	// Detect branch context for branch-aware search
-	let branch_ctx = detect_branch_search_context(&store).await;
+	let branch_ctx = detect_branch_search_context(&store, working_directory).await;
 
 	// Validate queries (same as CLI)
 	if queries.is_empty() {
