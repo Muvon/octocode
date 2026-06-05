@@ -104,39 +104,54 @@ fn get_git_remote_url(project_path: &Path) -> Result<String> {
 	Err(anyhow::anyhow!("No git remote found"))
 }
 
-/// Normalize git URL to be consistent regardless of protocol
-/// e.g., https://github.com/user/repo.git and git@github.com:user/repo.git
-/// both become github.com/user/repo
+/// Normalize a git URL to a stable identity (`host/path`) for the same repository
+/// regardless of protocol or embedded credentials.
+///
+/// All of these collapse to `github.com/user/repo`:
+///   https://github.com/user/repo.git
+///   git@github.com:user/repo.git
+///   ssh://git@github.com/user/repo
+///   https://x-access-token:TOKEN@github.com/user/repo.git
+///
+/// Credentials matter here because CI/token helpers rewrite `origin` to embed a
+/// rotating token (`x-access-token:gho_…@`). If the token leaked into the hash,
+/// the same repo would map to a different database every time the token changed.
 fn normalize_git_url(url: &str) -> String {
 	let url = url.trim();
 
 	// Remove .git suffix if present
-	let url = if let Some(stripped) = url.strip_suffix(".git") {
-		stripped
-	} else {
-		url
-	};
+	let url = url.strip_suffix(".git").unwrap_or(url);
 
-	// Handle SSH format: git@host:user/repo
-	if url.contains("@") && url.contains(":") && !url.contains("://") {
-		if let Some(at_pos) = url.find('@') {
-			if let Some(colon_pos) = url[at_pos..].find(':') {
-				let host = &url[at_pos + 1..at_pos + colon_pos];
-				let path = &url[at_pos + colon_pos + 1..];
-				return format!("{}/{}", host, path);
-			}
-		}
+	// Scheme URLs (https://, http://, ssh://, git://): drop the scheme, then drop
+	// any `userinfo@` (credentials) from the authority.
+	if let Some(scheme_end) = url.find("://") {
+		return strip_userinfo(&url[scheme_end + 3..]).to_string();
 	}
 
-	// Handle HTTPS format: https://host/user/repo
-	if url.starts_with("http://") || url.starts_with("https://") {
-		if let Some(scheme_end) = url.find("://") {
-			return url[scheme_end + 3..].to_string();
+	// SSH scp-like form: [user@]host:user/repo -> host/user/repo
+	if let Some(at_pos) = url.find('@') {
+		if let Some(colon_rel) = url[at_pos..].find(':') {
+			let host = &url[at_pos + 1..at_pos + colon_rel];
+			let path = &url[at_pos + colon_rel + 1..];
+			return format!("{}/{}", host, path);
 		}
 	}
 
 	// Return as-is if we can't parse it
 	url.to_string()
+}
+
+/// Strip a leading `userinfo@` from the authority of a `host[:port]/path` string.
+/// Credentials only appear in the authority (before the first `/`), so the path
+/// is left untouched even if it somehow contains an `@`.
+fn strip_userinfo(authority_and_path: &str) -> &str {
+	let auth_end = authority_and_path
+		.find('/')
+		.unwrap_or(authority_and_path.len());
+	match authority_and_path[..auth_end].rfind('@') {
+		Some(at) => &authority_and_path[at + 1..],
+		None => authority_and_path,
+	}
 }
 
 /// Get the storage path for a specific project
@@ -241,6 +256,31 @@ mod tests {
 		assert_eq!(
 			normalize_git_url("git@github.com:user/repo"),
 			"github.com/user/repo"
+		);
+		assert_eq!(
+			normalize_git_url("ssh://git@github.com/user/repo.git"),
+			"github.com/user/repo"
+		);
+
+		// Credentials embedded in the URL must NOT affect identity: every form
+		// below is the same repo as the plain `github.com/Muvon/octofs`.
+		let want = "github.com/Muvon/octofs";
+		assert_eq!(
+			normalize_git_url("https://x-access-token:EXAMPLE_TOKEN_A@github.com/Muvon/octofs.git"),
+			want
+		);
+		assert_eq!(
+			normalize_git_url("https://user:password@github.com/Muvon/octofs"),
+			want
+		);
+		assert_eq!(
+			normalize_git_url("https://token@github.com/Muvon/octofs.git"),
+			want
+		);
+		// Token rotation must not change the mapping.
+		assert_eq!(
+			normalize_git_url("https://x-access-token:EXAMPLE_TOKEN_B@github.com/Muvon/octofs"),
+			want
 		);
 
 		// Other formats should remain unchanged
