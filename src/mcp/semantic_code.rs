@@ -300,30 +300,9 @@ impl SemanticCodeProvider {
 			queries.len()
 		);
 
-		// Change to the working directory for the search with enhanced error handling
-		let original_dir = match std::env::current_dir() {
-			Ok(dir) => dir,
-			Err(e) => {
-				return Err(McpError::internal_error(
-					format!("Failed to get current directory: {}", e),
-					"semantic_search",
-				));
-			}
-		};
-
-		if let Err(e) = std::env::set_current_dir(&self.working_directory) {
-			return Err(McpError::internal_error(
-				format!(
-					"Failed to change to working directory '{}': {}",
-					self.working_directory.display(),
-					e
-				),
-				"semantic_search",
-			)
-			.with_details(format!("Path: {}", self.working_directory.display())));
-		}
-
-		// Use the enhanced search functionality with multi-query support - TEXT FORMAT for token efficiency
+		// Search the project at its known path. The store and branch context are
+		// resolved from `working_directory`, so there's no process-wide CWD change
+		// and concurrent searches across different repos can't race.
 		let results = if queries.len() == 1 {
 			// Single query - use text function for token efficiency
 			search_codebase_with_details_text(
@@ -334,6 +313,7 @@ impl SemanticCodeProvider {
 				similarity_threshold,
 				language_filter.as_deref(),
 				&self.config,
+				&self.working_directory,
 			)
 			.await
 		} else {
@@ -346,19 +326,10 @@ impl SemanticCodeProvider {
 				similarity_threshold,
 				language_filter.as_deref(),
 				&self.config,
+				&self.working_directory,
 			)
 			.await
 		};
-
-		// Restore original directory with enhanced error handling
-		if let Err(e) = std::env::set_current_dir(&original_dir) {
-			// Log error but don't fail the operation
-			debug!(
-				error = %e,
-				original_dir = %original_dir.display(),
-				"Failed to restore original directory"
-			);
-		}
 
 		match results {
 			Ok(output) => Ok(output),

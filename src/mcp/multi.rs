@@ -94,7 +94,7 @@ impl MultiServer {
 	) -> Result<Self> {
 		init_mcp_logging(root_path.clone(), debug)?;
 
-		let repos = discover_repos(&root_path)?;
+		let repos = discover_repos(&root_path, no_git)?;
 		let mut keys: Vec<String> = repos.keys().cloned().collect();
 		keys.sort();
 
@@ -273,7 +273,7 @@ impl ServerHandler for MultiServer {
 	}
 
 	fn get_tool(&self, name: &str) -> Option<Tool> {
-		self.tools.iter().find(|t| t.name == name).cloned()
+		self.tools.iter().find(|t| t.name.as_ref() == name).cloned()
 	}
 
 	async fn call_tool(
@@ -312,19 +312,30 @@ impl ServerHandler for MultiServer {
 // Helpers
 // ---------------------------------------------------------------------------
 
-/// Find git repositories in the immediate children of `root` (one level deep).
-/// Each repo is keyed by its directory name.
-fn discover_repos(root: &Path) -> Result<HashMap<String, PathBuf>> {
+/// Discover projects in the immediate children of `root` (one level deep),
+/// keyed by directory name. Default mode requires each child to be a git repo
+/// (contains `.git`); `--no-git` treats every (non-hidden) subdirectory as a
+/// project, matching how single-repo `mcp --no-git` indexes outside git.
+fn discover_repos(root: &Path, no_git: bool) -> Result<HashMap<String, PathBuf>> {
 	let mut repos = HashMap::new();
 
 	for entry in std::fs::read_dir(root)?.flatten() {
 		let path = entry.path();
-		if !path.is_dir() || !path.join(".git").exists() {
+		if !path.is_dir() {
 			continue;
 		}
-		if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-			repos.insert(name.to_string(), path);
+		let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+			continue;
+		};
+		// Skip hidden directories (.git, .cache, …) in both modes.
+		if name.starts_with('.') {
+			continue;
 		}
+		// Default mode requires a git repo; --no-git accepts any subdirectory.
+		if !no_git && !path.join(".git").exists() {
+			continue;
+		}
+		repos.insert(name.to_string(), path.to_path_buf());
 	}
 
 	Ok(repos)
@@ -369,7 +380,7 @@ fn inject_project_arg(mut tools: Vec<Tool>, keys: &[String]) -> Vec<Tool> {
 
 		match schema.get_mut("required") {
 			Some(Value::Array(required)) => {
-				if !required.iter().any(|v| v == "project") {
+				if !required.iter().any(|v| v.as_str() == Some("project")) {
 					required.push(json!("project"));
 				}
 			}

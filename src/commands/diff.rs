@@ -257,6 +257,7 @@ async fn gather_diff_context(store: &Store, changed_files: &[String], config: &C
 			0.3,
 			None,
 			config,
+			std::path::Path::new("."),
 		)
 		.await
 		{

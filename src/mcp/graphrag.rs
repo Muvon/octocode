@@ -263,25 +263,10 @@ impl GraphRagProvider {
 			"Executing GraphRAG operation"
 		);
 
-		// Change to the working directory for the operation
-		let original_dir = std::env::current_dir().map_err(|e| {
-			McpError::internal_error(
-				format!("Failed to get current directory: {}", e),
-				"graphrag",
-			)
-		})?;
-		std::env::set_current_dir(&self.working_directory).map_err(|e| {
-			McpError::internal_error(format!("Failed to change directory: {}", e), "graphrag")
-		})?;
-
-		// Execute the GraphRAG operation using CLI logic
+		// Execute the GraphRAG operation. All stores are resolved from
+		// `self.working_directory`, so there's no process-wide CWD change.
 		let result = self.execute_graphrag_operation(&args).await.map_err(|e| {
 			McpError::internal_error(format!("GraphRAG operation failed: {}", e), "graphrag")
-		})?;
-
-		// Restore original directory
-		std::env::set_current_dir(&original_dir).map_err(|e| {
-			McpError::internal_error(format!("Failed to restore directory: {}", e), "graphrag")
 		})?;
 
 		Ok(result)
@@ -306,15 +291,18 @@ impl GraphRagProvider {
 		// reindexing; re-check coherence on every call rather than trusting
 		// the snapshot we took at provider construction.
 		if let Some(ref manifest) = self.branch_manifest {
-			let main_commit = match crate::store::Store::new().await {
+			let main_commit = match crate::store::Store::new_at(&self.working_directory).await {
 				Ok(s) => s.get_last_commit_hash().await.ok().flatten(),
 				Err(_) => None,
 			};
 			if crate::indexer::branch::manifest_is_coherent_with(manifest, main_commit.as_deref()) {
 				let overridden = manifest.overridden_paths();
 				graph_builder.apply_branch_filter(&overridden).await;
-				if let Ok(branch_store) =
-					crate::store::Store::new_for_branch(&manifest.branch_name).await
+				if let Ok(branch_store) = crate::store::Store::new_for_branch_at(
+					&self.working_directory,
+					&manifest.branch_name,
+				)
+				.await
 				{
 					if let Err(e) = graph_builder.merge_branch_graph(&branch_store).await {
 						tracing::warn!(error = %e, "Failed to merge branch GraphRAG data");
