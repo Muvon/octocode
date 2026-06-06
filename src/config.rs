@@ -259,13 +259,13 @@ impl Default for Config {
 
 impl Config {
 	pub fn load() -> Result<Self> {
-		let config_path = Self::get_system_config_path()?;
+		let config_path = Self::get_config_path()?;
 
 		let config = if config_path.exists() {
 			let content = fs::read_to_string(&config_path)?;
 			toml::from_str(&content)?
 		} else {
-			// Load from template first, then save to system config
+			// Load from template first, then save to config path
 			let template_config = Self::load_from_template()?;
 
 			// Ensure the parent directory exists
@@ -308,7 +308,7 @@ impl Config {
 	}
 
 	pub fn save(&self) -> Result<()> {
-		let config_path = Self::get_system_config_path()?;
+		let config_path = Self::get_config_path()?;
 
 		// Ensure the parent directory exists
 		if let Some(parent) = config_path.parent() {
@@ -320,6 +320,16 @@ impl Config {
 		let toml_content = toml::to_string_pretty(self)?;
 		fs::write(config_path, toml_content)?;
 		Ok(())
+	}
+
+	/// Get the active config file path.
+	/// Checks `OCTOCODE_CONFIG_PATH` environment variable first;
+	/// falls back to the system-wide config path.
+	pub fn get_config_path() -> Result<PathBuf> {
+		if let Ok(env_path) = std::env::var("OCTOCODE_CONFIG_PATH") {
+			return Ok(PathBuf::from(env_path));
+		}
+		Self::get_system_config_path()
 	}
 
 	/// Get the system-wide config file path

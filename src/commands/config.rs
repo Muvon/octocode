@@ -73,7 +73,7 @@ pub fn execute(args: &ConfigArgs, mut config: Config) -> Result<()> {
 		println!();
 
 		// Show configuration file location
-		if let Ok(config_path) = Config::get_system_config_path() {
+		if let Ok(config_path) = Config::get_config_path() {
 			println!("📄 Configuration file: {}", config_path.display());
 			if config_path.exists() {
 				println!("   Status: ✅ Found");
