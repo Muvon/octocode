@@ -1,5 +1,41 @@
 # Changelog
 
+## [0.16.0] - 2026-06-07
+
+### 📋 Release Summary
+
+This release introduces a new multi-repository server mode, replacing the previous mcp-proxy (2c3c5600, 1855284a), and expands language support to include Swift for both indexing and grep (dfb2c5b6, 8f2565c4). Users can now specify custom configuration paths via environment variables (f2d05d52) alongside general improvements to storage security and build stability (0c4f42aa, 489c0c7e, ee85729c).
+
+
+### 🚨 Breaking Changes
+
+⚠️ **Important**: This release contains breaking changes that may require code updates.
+
+- **mcp**: replace mcp-proxy with multi-repo mode `2c3c5600`
+
+### ✨ New Features & Enhancements
+
+- **config**: allow custom config path via env var `f2d05d52`
+- **mcp**: implement multi-repository server mode `1855284a`
+- **indexer**: add Swift language support `dfb2c5b6`
+- **grep**: add Swift language support `8f2565c4`
+
+### 🔧 Improvements & Optimizations
+
+- **storage**: remove normalize_git_url test `595d0d66`
+- **storage**: delegate project identification to octolib `a185f09e`
+- **indexer**: introduce DetailSearchOptions struct `9c5f5af2`
+- **store**: centralize table names and secure SQL queries `ee85729c`
+
+### 🐛 Bug Fixes & Stability
+
+- **storage**: ignore git URL credentials during normalization `0c4f42aa`
+- **build**: correct onnxruntime architecture name `489c0c7e`
+
+### 🔄 Other Changes
+
+3 maintenance, dependency, and tooling updates not listed individually.
+
 ## [0.15.0] - 2026-05-22
 
 ### 📋 Release Summary
