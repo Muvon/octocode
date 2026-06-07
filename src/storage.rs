@@ -13,10 +13,8 @@
 // limitations under the License.
 
 use anyhow::Result;
-use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 /// Get the system-wide storage directory for Octocode
 /// Following XDG Base Directory specification on Unix-like systems
@@ -55,105 +53,11 @@ pub fn get_system_storage_dir() -> Result<PathBuf> {
 	Ok(base_dir)
 }
 
-/// Get the project identifier for a given directory
-/// First tries to get Git remote URL, falls back to path hash
+/// Get the project identifier for a given directory.
+/// Delegates to octolib::utils::path_to_id — single canonical implementation.
 pub fn get_project_identifier(project_path: &Path) -> Result<String> {
-	// Try to get git remote URL first
-	if let Ok(git_remote) = get_git_remote_url(project_path) {
-		// Create a hash from the git remote URL
-		let mut hasher = Sha256::new();
-		hasher.update(git_remote.as_bytes());
-		let result = hasher.finalize();
-		return Ok(format!("{:x}", result)[..16].to_string()); // Use first 16 chars
-	}
-
-	// Fallback to absolute path hash
-	let absolute_path = project_path.canonicalize().or_else(|_| {
-		// If canonicalize fails, try to get absolute path manually
-		if project_path.is_absolute() {
-			Ok(project_path.to_path_buf())
-		} else {
-			std::env::current_dir().map(|cwd| cwd.join(project_path))
-		}
-	})?;
-
-	let mut hasher = Sha256::new();
-	hasher.update(absolute_path.to_string_lossy().as_bytes());
-	let result = hasher.finalize();
-	Ok(format!("{:x}", result)[..16].to_string()) // Use first 16 chars
+	Ok(octolib::utils::path_to_id(project_path))
 }
-
-/// Try to get the Git remote URL for a project
-fn get_git_remote_url(project_path: &Path) -> Result<String> {
-	let output = Command::new("git")
-		.arg("-C")
-		.arg(project_path)
-		.arg("remote")
-		.arg("get-url")
-		.arg("origin")
-		.output()?;
-
-	if output.status.success() {
-		let url = String::from_utf8(output.stdout)?.trim().to_string();
-
-		if !url.is_empty() {
-			return Ok(normalize_git_url(&url));
-		}
-	}
-
-	Err(anyhow::anyhow!("No git remote found"))
-}
-
-/// Normalize a git URL to a stable identity (`host/path`) for the same repository
-/// regardless of protocol or embedded credentials.
-///
-/// All of these collapse to `github.com/user/repo`:
-///   https://github.com/user/repo.git
-///   git@github.com:user/repo.git
-///   ssh://git@github.com/user/repo
-///   https://x-access-token:TOKEN@github.com/user/repo.git
-///
-/// Credentials matter here because CI/token helpers rewrite `origin` to embed a
-/// rotating token (`x-access-token:gho_…@`). If the token leaked into the hash,
-/// the same repo would map to a different database every time the token changed.
-fn normalize_git_url(url: &str) -> String {
-	let url = url.trim();
-
-	// Remove .git suffix if present
-	let url = url.strip_suffix(".git").unwrap_or(url);
-
-	// Scheme URLs (https://, http://, ssh://, git://): drop the scheme, then drop
-	// any `userinfo@` (credentials) from the authority.
-	if let Some(scheme_end) = url.find("://") {
-		return strip_userinfo(&url[scheme_end + 3..]).to_string();
-	}
-
-	// SSH scp-like form: [user@]host:user/repo -> host/user/repo
-	if let Some(at_pos) = url.find('@') {
-		if let Some(colon_rel) = url[at_pos..].find(':') {
-			let host = &url[at_pos + 1..at_pos + colon_rel];
-			let path = &url[at_pos + colon_rel + 1..];
-			return format!("{}/{}", host, path);
-		}
-	}
-
-	// Return as-is if we can't parse it
-	url.to_string()
-}
-
-/// Strip a leading `userinfo@` from the authority of a `host[:port]/path` string.
-/// Credentials only appear in the authority (before the first `/`), so the path
-/// is left untouched even if it somehow contains an `@`.
-fn strip_userinfo(authority_and_path: &str) -> &str {
-	let auth_end = authority_and_path
-		.find('/')
-		.unwrap_or(authority_and_path.len());
-	match authority_and_path[..auth_end].rfind('@') {
-		Some(at) => &authority_and_path[at + 1..],
-		None => authority_and_path,
-	}
-}
-
 /// Get the storage path for a specific project
 pub fn get_project_storage_path(project_path: &Path) -> Result<PathBuf> {
 	let system_dir = get_system_storage_dir()?;
