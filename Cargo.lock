@@ -4784,9 +4784,9 @@ dependencies = [
 
 [[package]]
 name = "octolib"
-version = "0.22.0"
+version = "0.23.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3b0dd9240374ad29807a2ac3683deec13071a25a8d44fda292037466c11b9132"
+checksum = "a88144f5a2ad7b33d282495b5fc3d7eb49c9ecddeead64850301ddb5514420ad"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -4797,11 +4797,13 @@ dependencies = [
  "candle-transformers",
  "dirs",
  "fastembed",
+ "hex",
  "hf-hub 0.4.3",
  "jsonwebtoken",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
+ "sha2",
  "thiserror 2.0.18",
  "tiktoken-rs",
  "tokenizers",
