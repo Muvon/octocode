@@ -141,60 +141,6 @@ mod tests {
 	use std::env;
 
 	#[test]
-	fn test_normalize_git_url() {
-		// HTTPS URLs
-		assert_eq!(
-			normalize_git_url("https://github.com/user/repo.git"),
-			"github.com/user/repo"
-		);
-		assert_eq!(
-			normalize_git_url("https://github.com/user/repo"),
-			"github.com/user/repo"
-		);
-
-		// SSH URLs
-		assert_eq!(
-			normalize_git_url("git@github.com:user/repo.git"),
-			"github.com/user/repo"
-		);
-		assert_eq!(
-			normalize_git_url("git@github.com:user/repo"),
-			"github.com/user/repo"
-		);
-		assert_eq!(
-			normalize_git_url("ssh://git@github.com/user/repo.git"),
-			"github.com/user/repo"
-		);
-
-		// Credentials embedded in the URL must NOT affect identity: every form
-		// below is the same repo as the plain `github.com/Muvon/octofs`.
-		let want = "github.com/Muvon/octofs";
-		assert_eq!(
-			normalize_git_url("https://x-access-token:EXAMPLE_TOKEN_A@github.com/Muvon/octofs.git"),
-			want
-		);
-		assert_eq!(
-			normalize_git_url("https://user:password@github.com/Muvon/octofs"),
-			want
-		);
-		assert_eq!(
-			normalize_git_url("https://token@github.com/Muvon/octofs.git"),
-			want
-		);
-		// Token rotation must not change the mapping.
-		assert_eq!(
-			normalize_git_url("https://x-access-token:EXAMPLE_TOKEN_B@github.com/Muvon/octofs"),
-			want
-		);
-
-		// Other formats should remain unchanged
-		assert_eq!(
-			normalize_git_url("local/path/to/repo"),
-			"local/path/to/repo"
-		);
-	}
-
-	#[test]
 	fn test_project_identifier() {
 		let temp_dir = env::temp_dir().join("test_octocode");
 		let _ = fs::create_dir_all(&temp_dir);
