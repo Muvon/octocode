@@ -1,4 +1,4 @@
-# Copyright 2025 Muvon Un Limited
+# Copyright 2026 Muvon Un Limited
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -12,81 +12,44 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Multi-stage Dockerfile for octocode
-# Stage 1: Build
-FROM rust:1.95-slim AS builder
-
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
-		pkg-config \
-		protobuf-compiler \
-		libssl-dev \
-		curl \
-		unzip \
-		&& rm -rf /var/lib/apt/lists/*
-
-# Download prebuilt static ONNX Runtime (csukuangfj/onnxruntime-libs).
-# ort-sys's single-file shortcut links libonnxruntime.a directly; built
-# against glibc 2.17 so it works on debian bookworm and older.
-ENV ORT_VERSION=1.24.2
-RUN set -eu; \
-		case "$(uname -m)" in \
-			x86_64)  ORT_ARCH=x64 ;; \
-			aarch64) ORT_ARCH=aarch64 ;; \
-			*) echo "unsupported arch $(uname -m)"; exit 1 ;; \
-		esac; \
-		ORT_ASSET="onnxruntime-linux-${ORT_ARCH}-static_lib-${ORT_VERSION}-glibc2_17"; \
-		curl -fsSL "https://github.com/csukuangfj/onnxruntime-libs/releases/download/v${ORT_VERSION}/${ORT_ASSET}.zip" -o /tmp/ort.zip; \
-		unzip -q /tmp/ort.zip -d /opt; \
-		ln -s "/opt/${ORT_ASSET}/lib" /opt/ort-lib; \
-		rm /tmp/ort.zip
-ENV ORT_LIB_LOCATION=/opt/ort-lib
-
-# Create app directory
-WORKDIR /app
-
-# Copy manifests first for dependency caching layer
-COPY Cargo.toml Cargo.lock ./
-
-# Create a dummy main.rs to build and cache dependencies
-RUN mkdir -p src && echo 'fn main() {}' > src/main.rs
-
-# Build dependencies only (cached via BuildKit mount)
-RUN --mount=type=cache,target=/usr/local/cargo/registry \
-	--mount=type=cache,target=/app/target \
-	cargo build --release 2>/dev/null || true
-
-# Remove dummy source and copy real source code + config templates
-RUN rm -rf src
-COPY src ./src
-COPY config-templates ./config-templates
-
-# Build the application (dependencies hit cache, only source recompiled)
-RUN --mount=type=cache,target=/usr/local/cargo/registry \
-	--mount=type=cache,target=/app/target \
-	touch src/main.rs && cargo build --release
-
-# Copy binary out of cache mount to a known location
-RUN --mount=type=cache,target=/app/target \
-	cp target/release/octocode /app/octocode-bin
-
-# Stage 2: Runtime
+# Single-stage Dockerfile for octocode — downloads pre-built static binary
+# from GitHub Releases instead of compiling from source.
+# Build with: docker build --build-arg OCTOCODE_VERSION=0.14.0 .
 FROM debian:bookworm-slim
+
+ARG OCTOCODE_VERSION
+ARG TARGETARCH
 
 # Install runtime dependencies
 RUN apt-get update && apt-get install -y \
 		ca-certificates \
+		curl \
 		&& rm -rf /var/lib/apt/lists/* \
 		&& update-ca-certificates
+
+# Map Docker TARGETARCH to the release asset target triple
+# amd64 → x86_64-unknown-linux-musl
+# arm64 → aarch64-unknown-linux-musl
+RUN set -eu; \
+		case "${TARGETARCH}" in \
+			amd64)  ASSET_TARGET="x86_64-unknown-linux-musl" ;; \
+			arm64)  ASSET_TARGET="aarch64-unknown-linux-musl" ;; \
+			*) echo "unsupported arch ${TARGETARCH}"; exit 1 ;; \
+		esac; \
+		ASSET="octocode-${OCTOCODE_VERSION}-${ASSET_TARGET}.tar.gz"; \
+		URL="https://github.com/muvon/octocode/releases/download/${OCTOCODE_VERSION}/${ASSET}"; \
+		echo "Downloading ${URL}"; \
+		curl -fsSL "${URL}" -o /tmp/octocode.tar.gz; \
+		tar xzf /tmp/octocode.tar.gz -C /tmp; \
+		mv /tmp/octocode /usr/local/bin/octocode; \
+		chmod +x /usr/local/bin/octocode; \
+		rm /tmp/octocode.tar.gz
 
 # Create a non-root user
 RUN groupadd -r octocode && useradd -r -g octocode octocode
 
 # Create app directory
 WORKDIR /app
-
-# Copy the binary from builder stage
-COPY --from=builder /app/octocode-bin /usr/local/bin/octocode
 
 # Change ownership to non-root user
 RUN chown -R octocode:octocode /app
