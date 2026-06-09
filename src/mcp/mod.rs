@@ -25,6 +25,7 @@ pub mod lsp;
 pub mod multi;
 pub mod semantic_code;
 pub mod server;
+pub mod structural;
 pub mod types;
 pub mod watcher;
 
