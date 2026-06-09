@@ -827,9 +827,9 @@ pub fn find_symbol_defs(
 ) -> Result<Vec<GrepMatch>> {
 	let def_kinds = definition_kinds(language);
 	let containers = container_kinds(language);
-	let raw: Vec<RawMatch> = dispatch_lang!(language, |lang| Ok(find_defs_with_lang(
-		lang, source, name, def_kinds, containers
-	)))?;
+	let raw: Vec<RawMatch> = dispatch_lang!(language, |lang| Ok::<_, anyhow::Error>(
+		find_defs_with_lang(lang, source, name, def_kinds, containers)
+	))?;
 	Ok(wrap_matches(file_path, raw))
 }
 
@@ -909,13 +909,9 @@ pub fn search_file_multi(
 	constraints: &[MetavarConstraint],
 ) -> Result<Vec<Vec<GrepMatch>>> {
 	let containers = container_kinds(language);
-	let raw = dispatch_lang!(language, |lang| Ok(search_multi_with_lang(
-		lang,
-		source,
-		specs,
-		containers,
-		constraints
-	)))?;
+	let raw = dispatch_lang!(language, |lang| Ok::<_, anyhow::Error>(
+		search_multi_with_lang(lang, source, specs, containers, constraints)
+	))?;
 	Ok(raw
 		.into_iter()
 		.map(|v| wrap_matches(file_path, v))
@@ -932,9 +928,9 @@ pub fn find_symbol_refs(
 ) -> Result<Vec<GrepMatch>> {
 	let def_kinds = definition_kinds(language);
 	let containers = container_kinds(language);
-	let raw: Vec<RawMatch> = dispatch_lang!(language, |lang| Ok(find_refs_with_lang(
-		lang, source, name, def_kinds, containers
-	)))?;
+	let raw: Vec<RawMatch> = dispatch_lang!(language, |lang| Ok::<_, anyhow::Error>(
+		find_refs_with_lang(lang, source, name, def_kinds, containers)
+	))?;
 	Ok(wrap_matches(file_path, raw))
 }
 
