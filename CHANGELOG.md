@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.16.1] - 2026-06-11
+
+### 📋 Release Summary
+
+This release introduces advanced structural and symbol search capabilities to the MCP server, enhancing how AI assistants navigate your codebase (47e1551f). Additionally, updates to Docker image builds and improved error handling ensure a more stable and efficient deployment experience (cd06bbec, eae97a24).
+
+
+### ✨ New Features & Enhancements
+
+- **mcp**: implement advanced structural and symbol search `47e1551f`
+
+### 🔧 Improvements & Optimizations
+
+- **docker**: use pre-built binaries for images `cd06bbec`
+
+### 🐛 Bug Fixes & Stability
+
+- **grep**: specify error type in dispatch_lang closures `eae97a24`
+
 ## [0.16.0] - 2026-06-07
 
 ### 📋 Release Summary
