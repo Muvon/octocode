@@ -87,8 +87,43 @@ pub struct SemanticSearchParams {
 #[derive(Debug, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ViewSignaturesParams {
 	/// File paths or glob patterns (e.g. 'src/main.rs', '**/*.py', 'src/**/*.ts')
+	#[serde(deserialize_with = "string_or_vec")]
 	#[schemars(length(min = 1, max = 100))]
 	pub files: Vec<String>,
+}
+
+/// Accept either a single string or an array of strings, so a bare glob
+/// pattern like 'tests/*.rs' deserializes the same as ['tests/*.rs'].
+fn string_or_vec<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
+where
+	D: serde::Deserializer<'de>,
+{
+	use serde::de::{Error, SeqAccess, Visitor};
+	use std::fmt;
+
+	struct StringOrVec;
+
+	impl<'de> Visitor<'de> for StringOrVec {
+		type Value = Vec<String>;
+
+		fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+			formatter.write_str("a string or an array of strings")
+		}
+
+		fn visit_str<E: Error>(self, value: &str) -> Result<Self::Value, E> {
+			Ok(vec![value.to_string()])
+		}
+
+		fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+			let mut out = Vec::new();
+			while let Some(item) = seq.next_element::<String>()? {
+				out.push(item);
+			}
+			Ok(out)
+		}
+	}
+
+	deserializer.deserialize_any(StringOrVec)
 }
 
 #[derive(Debug, Serialize, Deserialize, schemars::JsonSchema)]
