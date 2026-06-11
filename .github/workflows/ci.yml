@@ -12,76 +12,16 @@ env:
   SCCACHE_GHA_ENABLED: true
 
 jobs:
-  check:
-    name: Check
-    runs-on: ubuntu-latest
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-
-    - name: Install Rust
-      uses: dtolnay/rust-toolchain@1.95.0
-      with:
-        components: rustfmt, clippy
-
-    - name: Install protobuf compiler
-      uses: arduino/setup-protoc@v3
-      with:
-        repo-token: ${{ secrets.GITHUB_TOKEN }}
-
-    - name: Cache Rust artifacts
-      uses: Swatinem/rust-cache@v2
-
-    - name: Run sccache-cache
-      uses: mozilla-actions/sccache-action@v0.0.9
-
-    - name: Run cargo check
-      env:
-        RUSTC_WRAPPER: sccache
-      run: cargo check --all-targets --all-features
-
-  fmt:
-    name: Rustfmt
-    runs-on: ubuntu-latest
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-
-    - name: Install Rust
-      uses: dtolnay/rust-toolchain@1.95.0
-      with:
-        components: rustfmt
-
-    - name: Run cargo fmt
-      run: cargo fmt --all -- --check
-
-  clippy:
-    name: Clippy
-    runs-on: ubuntu-latest
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-
-    - name: Install Rust
-      uses: dtolnay/rust-toolchain@1.95.0
-      with:
-        components: clippy
-
-    - name: Install protobuf compiler
-      uses: arduino/setup-protoc@v3
-      with:
-        repo-token: ${{ secrets.GITHUB_TOKEN }}
-
-    - name: Cache Rust artifacts
-      uses: Swatinem/rust-cache@v2
-
-    - name: Run sccache-cache
-      uses: mozilla-actions/sccache-action@v0.0.9
-
-    - name: Run cargo clippy
-      env:
-        RUSTC_WRAPPER: sccache
-      run: cargo clippy --all-targets --all-features -- -D warnings
+  rust:
+    name: Rust CI
+    uses: muvon/ci-workflow/.github/workflows/rust-ci.yml@master
+    with:
+      feature-flags: '--all-features'
+      setup-protoc: true
+      # Test and coverage stay local below: need ONNX static libs + sccache
+      test: false
+      doc: false
+      coverage: false
 
   test:
     name: Test Suite
@@ -277,27 +217,6 @@ jobs:
             export RUSTFLAGS="-C link-arg=-lgcc"
             cargo build --target ${{ matrix.target }}
           '
-
-  security:
-    name: Security Audit
-    runs-on: ubuntu-latest
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-
-    - name: Install Rust
-      uses: dtolnay/rust-toolchain@1.95.0
-
-    - name: Install protobuf compiler
-      uses: arduino/setup-protoc@v3
-      with:
-        repo-token: ${{ secrets.GITHUB_TOKEN }}
-
-    - name: Install cargo-audit
-      run: cargo install cargo-audit --locked
-
-    - name: Run security audit
-      run: cargo audit
 
   coverage:
     name: Code Coverage
