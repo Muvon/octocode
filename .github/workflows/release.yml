@@ -17,119 +17,8 @@ env:
   SCCACHE_GHA_ENABLED: true
 
 jobs:
-  create-release:
-    name: Create Release
-    runs-on: ubuntu-latest
-    outputs:
-      upload_url: ${{ steps.create_release.outputs.upload_url }}
-      release_id: ${{ steps.create_release.outputs.id }}
-      version: ${{ steps.get_version.outputs.VERSION }}
-      changelog: ${{ steps.changelog.outputs.CHANGELOG }}
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-      with:
-        fetch-depth: 0  # Fetch full history for changelog generation
-
-    - name: Get version from tag
-      id: get_version
-      run: |
-        if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-          VERSION="${{ github.event.inputs.tag }}"
-        else
-          VERSION="${GITHUB_REF#refs/tags/}"
-        fi
-        echo "VERSION=${VERSION}" >> $GITHUB_OUTPUT
-        echo "VERSION_NO_V=${VERSION#v}" >> $GITHUB_OUTPUT
-
-    - name: Validate semver format
-      run: |
-        VERSION="${{ steps.get_version.outputs.VERSION }}"
-        # POSIX-compatible regex check for semver
-        case "$VERSION" in
-          [0-9]*.[0-9]*.[0-9]*)
-            # Basic semver format matched
-            ;;
-          *)
-            echo "Error: Tag '$VERSION' is not a valid semver format"
-            echo "Expected format: X.Y.Z, X.Y.Z-prerelease, or X.Y.Z+build"
-            exit 1
-            ;;
-        esac
-
-    - name: Generate changelog
-      id: changelog
-      run: |
-        # Get the previous tag
-        PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
-
-        if [ -z "$PREV_TAG" ]; then
-          CHANGELOG="Initial release"
-        else
-          # Generate changelog from commits since last tag
-          CHANGELOG=$(git log ${PREV_TAG}..HEAD --pretty=format:"- %s" --no-merges | head -20)
-          if [ -z "$CHANGELOG" ]; then
-            CHANGELOG="- No changes since last release"
-          fi
-        fi
-
-        # Escape for GitHub output (POSIX compatible)
-        CHANGELOG=$(printf '%s\n' "$CHANGELOG" | sed 's/%/%25/g; s/\r/%0D/g' | awk '{printf "%s%0A", $0}' | sed 's/%0A$//')
-        echo "CHANGELOG=$CHANGELOG" >> $GITHUB_OUTPUT
-
-    - name: Check if release exists
-      id: check_release
-      run: |
-        VERSION="${{ steps.get_version.outputs.VERSION }}"
-        if gh release view "$VERSION" >/dev/null 2>&1; then
-          echo "exists=true" >> $GITHUB_OUTPUT
-        else
-          echo "exists=false" >> $GITHUB_OUTPUT
-        fi
-      env:
-        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-    - name: Create Release
-      id: create_release
-      if: steps.check_release.outputs.exists == 'false'
-      run: |
-        VERSION="${{ steps.get_version.outputs.version }}"
-        IS_PRERELEASE="false"
-
-        # Check if this is a prerelease (contains - or is 0.x.x)
-        case "$VERSION" in
-          *-*|0.*)
-            IS_PRERELEASE="true"
-            ;;
-        esac
-
-        # Create the release as draft
-        if [ "$IS_PRERELEASE" = "true" ]; then
-          gh release create "$VERSION" \
-            --title "Release $VERSION" \
-            --notes "${{ steps.changelog.outputs.CHANGELOG }}" \
-            --draft \
-            --prerelease
-        else
-          gh release create "$VERSION" \
-            --title "Release $VERSION" \
-            --notes "${{ steps.changelog.outputs.CHANGELOG }}" \
-            --draft
-        fi
-
-        # Get release info
-        RELEASE_INFO=$(gh release view "$VERSION" --json id,uploadUrl)
-        RELEASE_ID=$(echo "$RELEASE_INFO" | jq -r '.id')
-        UPLOAD_URL=$(echo "$RELEASE_INFO" | jq -r '.uploadUrl')
-
-        echo "id=${RELEASE_ID}" >> $GITHUB_OUTPUT
-        echo "upload_url=${UPLOAD_URL}" >> $GITHUB_OUTPUT
-      env:
-        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
   build:
     name: Build ${{ matrix.target }}
-    needs: create-release
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -394,10 +283,10 @@ jobs:
         cd target/${{ matrix.target }}/release
         case "${{ matrix.target }}" in
           *windows*)
-            tar czf ../../../dist/octocode-${{ needs.create-release.outputs.version }}-${{ matrix.target }}.tar.gz octocode.exe
+            tar czf ../../../dist/octocode-${{ inputs.tag || github.ref_name }}-${{ matrix.target }}.tar.gz octocode.exe
             ;;
           *)
-            tar czf ../../../dist/octocode-${{ needs.create-release.outputs.version }}-${{ matrix.target }}.tar.gz octocode
+            tar czf ../../../dist/octocode-${{ inputs.tag || github.ref_name }}-${{ matrix.target }}.tar.gz octocode
             ;;
         esac
 
@@ -406,149 +295,36 @@ jobs:
       shell: sh
       run: |
         cd target/${{ matrix.target }}/release
-        7z a ../../../dist/octocode-${{ needs.create-release.outputs.version }}-${{ matrix.target }}.zip octocode.exe
+        7z a ../../../dist/octocode-${{ inputs.tag || github.ref_name }}-${{ matrix.target }}.zip octocode.exe
 
-    - name: Upload release asset
-      shell: sh
-      run: |
-        gh release upload "${{ needs.create-release.outputs.version }}" \
-          "./dist/octocode-${{ needs.create-release.outputs.version }}-${{ matrix.target }}.${{ matrix.archive }}" \
-          --clobber
-      env:
-        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: release-${{ matrix.target }}
+        path: dist/*
+        if-no-files-found: error
 
   publish-crate:
     name: Publish to Crates.io
-    needs: [create-release, build]
-    runs-on: ubuntu-latest
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+    needs: build
+    uses: muvon/ci-workflow/.github/workflows/rust-publish.yml@master
+    secrets: inherit
+    with:
+      tag: ${{ inputs.tag }}
+      setup-protoc: true
 
-    - name: Install Rust
-      uses: dtolnay/rust-toolchain@1.95.0
-
-    - name: Install protobuf compiler
-      uses: arduino/setup-protoc@v3
-      with:
-        repo-token: ${{ secrets.GITHUB_TOKEN }}
-
-    - name: Cache Rust artifacts
-      uses: Swatinem/rust-cache@v2
-
-    - name: Validate version matches tag
-      run: |
-        VERSION="${{ needs.create-release.outputs.version }}"
-        CARGO_VERSION=$(grep '^version = ' Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
-
-        if [ "$VERSION" != "$CARGO_VERSION" ]; then
-          echo "❌ Version mismatch!"
-          echo "Git tag: $VERSION"
-          echo "Cargo.toml: $CARGO_VERSION"
-          echo "Please update Cargo.toml version to match the git tag"
-          exit 1
-        fi
-
-        echo "✅ Version validation passed: $VERSION"
-
-    - name: Check if version already published
-      id: check_published
-      run: |
-        VERSION="${{ needs.create-release.outputs.version }}"
-
-        # Check if this version already exists on crates.io
-        if cargo search octocode --limit 1 | grep -q "octocode = \"$VERSION\""; then
-          echo "already_published=true" >> $GITHUB_OUTPUT
-          echo "⚠️  Version $VERSION already published to crates.io"
-        else
-          echo "already_published=false" >> $GITHUB_OUTPUT
-          echo "✅ Version $VERSION not yet published"
-        fi
-
-    - name: Dry run publish
-      if: steps.check_published.outputs.already_published == 'false'
-      run: |
-        echo "🔍 Running dry-run publish to validate package..."
-        cargo publish --dry-run
-      env:
-        CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-
-    - name: Publish to crates.io
-      if: steps.check_published.outputs.already_published == 'false'
-      run: |
-        echo "🚀 Publishing to crates.io..."
-        cargo publish
-        echo "✅ Successfully published to crates.io!"
-      env:
-        CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-
-    - name: Skip publishing
-      if: steps.check_published.outputs.already_published == 'true'
-      run: |
-        echo "⏭️  Skipping crates.io publish - version already exists"
-
-  finalize-release:
-    name: Finalize Release
-    needs: [create-release, build, publish-crate]
-    runs-on: ubuntu-latest
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-
-    - name: Publish release
-      run: |
-        VERSION="${{ needs.create-release.outputs.version }}"
-
-        # Update release notes with download links
-        cat > release_notes.md << EOF
-        ## 🚀 What's Changed
-
-        ${{ needs.create-release.outputs.changelog }}
-
-        ## 📦 Installation
-
-        ### Quick Install Script (Universal)
-        \`\`\`bash
-        curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/install.sh | sh
-        \`\`\`
-
-        **Works on:** Linux, macOS, Windows (Git Bash/WSL/MSYS2), and any Unix-like system
-
-        ### Manual Download
-
-        | Platform | Architecture | Download |
-        |----------|--------------|----------|
-         | Linux | x86_64 (static) | [octocode-${VERSION}-x86_64-unknown-linux-musl.tar.gz](https://github.com/${{ github.repository }}/releases/download/${VERSION}/octocode-${VERSION}-x86_64-unknown-linux-musl.tar.gz) |
-         | Linux | ARM64 (static) | [octocode-${VERSION}-aarch64-unknown-linux-musl.tar.gz](https://github.com/${{ github.repository }}/releases/download/${VERSION}/octocode-${VERSION}-aarch64-unknown-linux-musl.tar.gz) |
-         | Windows | x86_64 | [octocode-${VERSION}-x86_64-pc-windows-msvc.zip](https://github.com/${{ github.repository }}/releases/download/${VERSION}/octocode-${VERSION}-x86_64-pc-windows-msvc.zip) |
-         | Windows | ARM64 | [octocode-${VERSION}-aarch64-pc-windows-msvc.zip](https://github.com/${{ github.repository }}/releases/download/${VERSION}/octocode-${VERSION}-aarch64-pc-windows-msvc.zip) |
-         | macOS | x86_64 | [octocode-${VERSION}-x86_64-apple-darwin.tar.gz](https://github.com/${{ github.repository }}/releases/download/${VERSION}/octocode-${VERSION}-x86_64-apple-darwin.tar.gz) |
-         | macOS | ARM64 | [octocode-${VERSION}-aarch64-apple-darwin.tar.gz](https://github.com/${{ github.repository }}/releases/download/${VERSION}/octocode-${VERSION}-aarch64-apple-darwin.tar.gz) |
-
-         ### Using Cargo (from crates.io)
-         \`\`\`bash
-         cargo install octocode
-         \`\`\`
-
-         ### Using Cargo (from Git)
-         \`\`\`bash
-         cargo install --git https://github.com/${{ github.repository }}
-         \`\`\`
-         ### Verify Installation
-        \`\`\`bash
-        octocode --version
-        \`\`\`
-        EOF
-
-        # Publish the release (remove draft status)
-        gh release edit "$VERSION" --draft=false --notes-file release_notes.md
-      env:
-        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
+  release:
+    name: Create Release
+    needs: [build, publish-crate]
+    uses: muvon/ci-workflow/.github/workflows/release.yml@master
+    with:
+      tag: ${{ inputs.tag }}
+      artifacts: 'release-*'
+      draft: false
 
   notify-homebrew:
     name: Notify Homebrew Tap
-    needs: [create-release, finalize-release]
+    needs: release
     runs-on: ubuntu-latest
     steps:
       - name: Dispatch update to homebrew-tap
@@ -557,12 +333,12 @@ jobs:
             -H "Accept: application/vnd.github+json" \
             -H "Authorization: Bearer ${{ secrets.TAP_GITHUB_TOKEN }}" \
             https://api.github.com/repos/muvon/homebrew-tap/dispatches \
-            -d "{\"event_type\":\"octocode-release\",\"client_payload\":{\"version\":\"${{ needs.create-release.outputs.version }}\"}}"
+            -d "{\"event_type\":\"octocode-release\",\"client_payload\":{\"version\":\"${{ needs.release.outputs.version }}\"}}"
 
 
   docker:
     name: Build and Push Docker Images
-    needs: [create-release, build, finalize-release]
+    needs: release
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -598,7 +374,7 @@ jobs:
         platforms: ${{ matrix.platform }}
         push: true
         build-args: |
-          OCTOCODE_VERSION=${{ needs.create-release.outputs.version }}
+          OCTOCODE_VERSION=${{ needs.release.outputs.version }}
         outputs: type=image,name=ghcr.io/${{ steps.repo.outputs.repository }},push-by-digest=true,name-canonical=true,push=true
         cache-from: type=gha,scope=${{ matrix.platform }}
         cache-to: type=gha,mode=max,scope=${{ matrix.platform }}
@@ -619,7 +395,7 @@ jobs:
 
   docker-merge:
     name: Merge Docker Manifests
-    needs: [create-release, docker]
+    needs: [release, docker]
     runs-on: ubuntu-latest
     steps:
     - name: Download digests
@@ -648,7 +424,7 @@ jobs:
       run: |
         docker buildx imagetools create \
           -t ghcr.io/${{ steps.repo.outputs.repository }}:latest \
-          -t ghcr.io/${{ steps.repo.outputs.repository }}:${{ needs.create-release.outputs.version }} \
+          -t ghcr.io/${{ steps.repo.outputs.repository }}:${{ needs.release.outputs.version }} \
           $(printf 'ghcr.io/${{ steps.repo.outputs.repository }}@sha256:%s ' *)
 
     - name: Inspect image
