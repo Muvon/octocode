@@ -19,6 +19,11 @@ embeddings_batch_size = 16  # 16 files per batch - table.add() every 16 files fo
 embeddings_max_tokens_per_batch = 100000  # Keep existing token limit
 flush_frequency = 2  # Flush every 2 batches = every 32 files for coordinated persistence
 require_git = true  # Require git repository for indexing
+# When true, the MCP server runs background indexing + a file watcher to keep the index
+# fresh while serving. When false (default), MCP serves search, view_signatures, and
+# structural_search over the EXISTING index read-only and never (re)indexes in-process.
+# The `index` CLI command is unaffected — this gates only the in-process MCP indexer.
+mcp_index = false
 quantization = true  # Enable RaBitQ quantization (32x compression) vs IVF_HNSW_SQ (4x compression)
 # Contextual chunk enrichment: use LLM to generate natural language descriptions
 # of code chunks at indexing time. Descriptions are prepended to chunk content before
