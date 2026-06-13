@@ -12,9 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use serde::{Deserialize, Serialize};
-use serde_json::Value;
-
 /// MCP-compliant error builder for consistent error handling
 #[derive(Debug, Clone)]
 pub struct McpError {
@@ -68,12 +65,3 @@ impl std::fmt::Display for McpError {
 }
 
 impl std::error::Error for McpError {}
-
-/// MCP Tool definitions
-#[derive(Debug, Serialize, Deserialize)]
-pub struct McpTool {
-	pub name: String,
-	pub description: String,
-	#[serde(rename = "inputSchema")]
-	pub input_schema: Value,
-}

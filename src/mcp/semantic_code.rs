@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use anyhow::Result;
-use serde_json::{json, Value};
+use serde_json::Value;
 use tracing::debug;
 
 use crate::config::Config;
@@ -22,7 +22,7 @@ use crate::indexer::search::{
 	DetailSearchOptions,
 };
 use crate::indexer::{extract_file_signatures, render_signatures_text, NoindexWalker, PathUtils};
-use crate::mcp::types::{McpError, McpTool};
+use crate::mcp::types::McpError;
 use octolib::embedding::constants::MAX_QUERIES;
 
 /// Semantic code search tool provider
@@ -37,94 +37,6 @@ impl SemanticCodeProvider {
 		Self {
 			config,
 			working_directory,
-		}
-	}
-
-	/// Get the tool definition for semantic_search
-	pub fn get_tool_definition() -> McpTool {
-		McpTool {
-			name: "semantic_search".to_string(),
-			description: "Search codebase by meaning — finds code by what it does, not exact symbol names. Prefer an array of related terms over a single query for broader coverage.".to_string(),
-			input_schema: json!({
-				"type": "object",
-				"properties": {
-					"query": {
-						"oneOf": [
-							{
-								"type": "string",
-								"description": "Descriptive phrase about what the code does (not a symbol name)",
-								"minLength": 10,
-								"maxLength": 500
-							},
-							{
-								"type": "array",
-								"items": {
-									"type": "string",
-									"minLength": 10,
-									"maxLength": 500
-								},
-								"minItems": 1,
-								"maxItems": 5,
-								"description": "Array of related search terms — finds all related code in one call"
-							}
-						],
-						"description": "String or array of strings describing functionality to find. Array preferred for comprehensive results."
-					},
-					"mode": {
-						"type": "string",
-						"description": "Content type filter: 'code' (functions/classes), 'text' (plain text), 'docs' (markdown/README), 'commits' (git commit history), 'all' (default, excludes commits)",
-						"enum": ["code", "text", "docs", "commits", "all"],
-						"default": "all"
-					},
-					"detail_level": {
-						"type": "string",
-						"description": "Result verbosity: 'signatures' (declarations only), 'partial' (truncated, default), 'full' (complete bodies)",
-						"enum": ["signatures", "partial", "full"],
-						"default": "partial"
-					},
-					"max_results": {
-						"type": "integer",
-						"description": "Max results to return (default: 3)",
-						"minimum": 1,
-						"maximum": 20,
-						"default": 3
-					},
-					"threshold": {
-						"type": "number",
-						"description": "Similarity cutoff 0.0–1.0 (higher = stricter match)",
-						"minimum": 0.0,
-						"maximum": 1.0
-					},
-					"language": {
-						"type": "string",
-						"description": "Filter code results by language (rust, python, typescript, go, etc.)"
-					},
-				},
-				"required": ["query"],
-				"additionalProperties": false
-			}),
-		}
-	}
-
-	/// Get the tool definition for view_signatures
-	pub fn get_view_signatures_tool_definition() -> McpTool {
-		McpTool {
-			name: "view_signatures".to_string(),
-			description: "Extract function signatures, class definitions, and declarations from files without implementation bodies. Supports Rust, JS/TS, Python, Go, C++, PHP, Ruby, Bash, JSON, CSS, Svelte, Swift, Markdown.".to_string(),
-			input_schema: json!({
-				"type": "object",
-				"properties": {
-					"files": {
-						"type": "array",
-						"description": "File paths or glob patterns (e.g. 'src/main.rs', '**/*.py', 'src/**/*.ts')",
-						"items": { "type": "string" },
-						"minItems": 1,
-						"maxItems": 100
-					},
-				},
-				"required": ["files"],
-				"additionalProperties": false
-			}),
 		}
 	}
 

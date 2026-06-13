@@ -17,7 +17,6 @@
 use crate::mcp::types::McpError;
 use anyhow::Result;
 use lsp_types::*;
-use serde_json::json;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -26,7 +25,6 @@ use tracing::{debug, error, info, warn};
 
 use super::client::LspClient;
 use super::protocol::{file_path_to_uri, LspNotification, LspRequest};
-use crate::mcp::types::McpTool;
 
 /// LSP provider that manages external LSP server and exposes capabilities via MCP tools
 pub struct LspProvider {
@@ -359,100 +357,6 @@ impl LspProvider {
 
 		debug!("Closed file in LSP: {}", relative_path);
 		Ok(())
-	}
-	pub fn get_tool_definitions() -> Vec<McpTool> {
-		vec![
-			McpTool {
-				name: "lsp_goto_definition".to_string(),
-				description: "Jump to the definition of a symbol via LSP.".to_string(),
-				input_schema: json!({
-					"type": "object",
-					"properties": {
-						"file_path": { "type": "string", "description": "Relative file path" },
-						"line": { "type": "integer", "minimum": 1, "description": "1-indexed line number" },
-						"symbol": { "type": "string", "description": "Symbol name on that line" }
-					},
-					"required": ["file_path", "line", "symbol"],
-					"additionalProperties": false
-				}),
-			},
-			McpTool {
-				name: "lsp_hover".to_string(),
-				description: "Get type info and documentation for a symbol via LSP.".to_string(),
-				input_schema: json!({
-					"type": "object",
-					"properties": {
-						"file_path": { "type": "string", "description": "Relative file path" },
-						"line": { "type": "integer", "minimum": 1, "description": "1-indexed line number" },
-						"symbol": { "type": "string", "description": "Symbol name on that line" }
-					},
-					"required": ["file_path", "line", "symbol"],
-					"additionalProperties": false
-				}),
-			},
-			McpTool {
-				name: "lsp_find_references".to_string(),
-				description: "Find all usages of a symbol across the workspace via LSP."
-					.to_string(),
-				input_schema: json!({
-					"type": "object",
-					"properties": {
-						"file_path": { "type": "string", "description": "Relative file path" },
-						"line": { "type": "integer", "minimum": 1, "description": "1-indexed line number" },
-						"symbol": { "type": "string", "description": "Symbol name on that line" },
-						"include_declaration": { "type": "boolean", "default": true, "description": "Include the declaration site in results" },
-						"include_declaration": { "type": "boolean", "default": true, "description": "Include the declaration site in results" }
-					},
-					"required": ["file_path", "line", "symbol"],
-					"additionalProperties": false
-				}),
-			},
-			McpTool {
-				name: "lsp_document_symbols".to_string(),
-				description:
-					"List all symbols (functions, types, variables) defined in a file via LSP."
-						.to_string(),
-				input_schema: json!({
-					"type": "object",
-					"properties": {
-						"file_path": { "type": "string", "description": "Relative file path" },
-						"file_path": { "type": "string", "description": "Relative file path" }
-					},
-					"required": ["file_path"],
-					"additionalProperties": false
-				}),
-			},
-			McpTool {
-				name: "lsp_workspace_symbols".to_string(),
-				description: "Search for symbols by name across the entire workspace via LSP."
-					.to_string(),
-				input_schema: json!({
-					"type": "object",
-					"properties": {
-						"query": { "type": "string", "minLength": 1, "description": "Symbol name or prefix to search" },
-						"query": { "type": "string", "minLength": 1, "description": "Symbol name or prefix to search" }
-					},
-					"required": ["query"],
-					"additionalProperties": false
-				}),
-			},
-			McpTool {
-				name: "lsp_completion".to_string(),
-				description: "Get code completion suggestions at a symbol position via LSP."
-					.to_string(),
-				input_schema: json!({
-					"type": "object",
-					"properties": {
-						"file_path": { "type": "string", "description": "Relative file path" },
-						"line": { "type": "integer", "minimum": 1, "description": "1-indexed line number" },
-						"symbol": { "type": "string", "description": "Partial symbol or prefix to complete" },
-						"symbol": { "type": "string", "description": "Partial symbol or prefix to complete" }
-					},
-					"required": ["file_path", "line", "symbol"],
-					"additionalProperties": false
-				}),
-			},
-		]
 	}
 
 	/// Find symbol position on a specific line

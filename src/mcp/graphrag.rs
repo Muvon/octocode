@@ -20,7 +20,7 @@ use crate::config::Config;
 use crate::indexer::branch::BranchManifest;
 use crate::indexer::graphrag::find_node_id;
 use crate::indexer::{self, graphrag::GraphRAG};
-use crate::mcp::types::{McpError, McpTool};
+use crate::mcp::types::McpError;
 
 #[derive(Debug, Clone)]
 pub enum GraphRAGOperation {
@@ -93,57 +93,6 @@ impl GraphRagProvider {
 			})
 		} else {
 			None
-		}
-	}
-
-	/// Get the tool definition for graphrag
-	pub fn get_tool_definition() -> McpTool {
-		McpTool {
-			name: "graphrag".to_string(),
-			description: "Knowledge graph operations over the indexed codebase. Use for architectural queries: component relationships, dependency chains, data flows. For simple code lookup use semantic_search instead.".to_string(),
-			input_schema: json!({
-				"type": "object",
-				"properties": {
-					"operation": {
-						"type": "string",
-						"enum": ["search", "get-node", "get-relationships", "find-path", "overview"],
-						"description": "'search' (semantic node search), 'get-node' (node details), 'get-relationships' (node connections), 'find-path' (path between two nodes), 'overview' (graph stats)"
-					},
-					"query": {
-						"type": "string",
-						"description": "Search query for 'search' operation",
-						"minLength": 10,
-						"maxLength": 1000
-					},
-					"node_id": {
-						"type": "string",
-						"description": "Node ID for 'get-node'/'get-relationships' (format: 'path/to/file', e.g. 'src/main.rs')"
-					},
-					"source_id": {
-						"type": "string",
-						"description": "Source node ID for 'find-path'"
-					},
-					"target_id": {
-						"type": "string",
-						"description": "Target node ID for 'find-path'"
-					},
-					"max_depth": {
-						"type": "integer",
-						"description": "Max path depth for 'find-path' (default: 3)",
-						"minimum": 1,
-						"maximum": 10,
-						"default": 3
-					},
-					"format": {
-						"type": "string",
-						"enum": ["text", "json", "markdown"],
-						"description": "Output format (default: 'text')",
-						"default": "text"
-					},
-				},
-				"required": ["operation"],
-				"additionalProperties": false
-			}),
 		}
 	}
 
