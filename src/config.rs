@@ -124,7 +124,6 @@ pub struct IndexConfig {
 	/// `view_signatures`, and `structural_search` over the EXISTING index in read-only
 	/// mode and never (re)indexes in-process. The `index` CLI command is unaffected —
 	/// this gates only the in-process MCP indexer.
-	#[serde(default)]
 	pub mcp_index: bool,
 }
 
