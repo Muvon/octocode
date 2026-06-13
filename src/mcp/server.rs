@@ -61,7 +61,7 @@ const MCP_INDEX_TIMEOUT_MS: u64 = 300_000; // 5 minutes
 
 #[derive(Debug, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct SemanticSearchParams {
-	/// String or array of strings describing functionality to find. Array preferred for comprehensive results.
+	/// Describe the code by what it does or the concept behind it, not its symbol name (e.g. 'retry failed network requests', not 'fn retry'). String or array of strings; an array of related phrasings widens recall.
 	pub query: serde_json::Value,
 	/// Max results to return (default: 3)
 	#[serde(default, skip_serializing_if = "Option::is_none")]
@@ -298,7 +298,7 @@ pub struct McpServer {
 #[tool_router]
 impl McpServer {
 	#[tool(
-		description = "Search codebase by meaning. Finds code by what it does, not exact symbol names. Prefer an array of related terms over a single query for broader coverage."
+		description = "Recall-oriented search by concept or behavior — finds relevant code even when its names don't match your words. Use this when you DON'T know the symbol name and are searching by intent: e.g. \"where is authentication handled\", \"code that retries failed requests\", \"rate-limiting logic\". It favors recall over precision, so expect some loosely related hits. For a KNOWN symbol, exact string, or call sites, use structural_search instead — it is precise and cheaper. Prefer an array of related terms over a single query for broader coverage."
 	)]
 	async fn semantic_search(
 		&self,
@@ -323,7 +323,7 @@ impl McpServer {
 	}
 
 	#[tool(
-		description = "Extract function signatures, class definitions, and declarations from files without implementation bodies. Supports Rust, JS/TS, Python, Go, C++, PHP, Ruby, Bash, JSON, CSS, Svelte, Swift, Markdown."
+		description = "Map a file or area structurally: extract function signatures, class/type definitions, and declarations without implementation bodies — the cheapest way to see what code exposes. Reach for this FIRST to orient in unfamiliar code before reading full bodies. Accepts file paths or glob patterns. Supports Rust, JS/TS, Python, Go, C++, PHP, Ruby, Bash, JSON, CSS, Svelte, Swift, Markdown."
 	)]
 	async fn view_signatures(
 		&self,
@@ -495,7 +495,8 @@ impl McpServer {
 		JS/TS kinds: function_declaration, class_declaration, method_definition, import_statement, call_expression. \
 		Python kinds: function_definition, class_definition, import_statement, import_from_statement, decorated_definition. \
 		Go kinds: function_declaration, method_declaration, type_declaration, call_expression, if_statement. \
-		\n\nWhen a pattern returns zero matches the tool auto-retries with relaxed strictness, kind broadening, and language-aware context wrapping, then falls back to labeled plain-text hits plus a diagnostic — it never silently returns nothing relevant. Use `rewrite` to apply a template with metavariable substitution. Use `semantic_search` for meaning-based lookups instead of this tool."
+		\n\nWhen a pattern returns zero matches the tool auto-retries with relaxed strictness, kind broadening, and language-aware context wrapping, then falls back to labeled plain-text hits plus a diagnostic — it never silently returns nothing relevant. Use `rewrite` to apply a template with metavariable substitution. \
+		\n\nThis is the PRECISE, low-noise way to find code you can name or describe by shape — prefer it whenever you know the symbol, pattern, or usage you're after. Only when you DON'T know the name and must search by concept or behavior, reach for `semantic_search` instead."
 	)]
 	async fn structural_search(
 		&self,
