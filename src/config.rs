@@ -118,6 +118,14 @@ pub struct IndexConfig {
 	/// Number of code chunks per LLM description batch (default: 10)
 	#[serde(default = "default_contextual_batch_size")]
 	pub contextual_batch_size: usize,
+
+	/// When `true`, the MCP server runs background indexing + a file watcher to keep
+	/// the index fresh while serving. When `false` (default), MCP serves search,
+	/// `view_signatures`, and `structural_search` over the EXISTING index in read-only
+	/// mode and never (re)indexes in-process. The `index` CLI command is unaffected —
+	/// this gates only the in-process MCP indexer.
+	#[serde(default)]
+	pub mcp_index: bool,
 }
 
 impl Default for IndexConfig {
@@ -133,6 +141,7 @@ impl Default for IndexConfig {
 			contextual_descriptions: false,
 			contextual_model: "openrouter:openai/gpt-4o-mini".to_string(),
 			contextual_batch_size: 10,
+			mcp_index: false,
 		}
 	}
 }

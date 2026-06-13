@@ -151,7 +151,9 @@ impl MultiServer {
 		// keeps the first and drops the loser's background services. The initial
 		// index is lock-guarded, so the rare double-build is harmless.
 		let server = McpServer::new_repo_core(self.config.clone(), repo_path.clone());
-		let bg =
+		// Read-only unless the in-process indexer is enabled; otherwise serve the
+		// existing per-repo index without spawning a watcher/indexer.
+		let bg = if self.config.index.mcp_index {
 			McpServer::start_repo_services(self.config.clone(), repo_path, self.no_git, self.debug)
 				.await
 				.map_err(|e| {
@@ -159,7 +161,10 @@ impl MultiServer {
 						format!("Failed to start services for '{}': {}", project, e),
 						None,
 					)
-				})?;
+				})?
+		} else {
+			BackgroundServices::none()
+		};
 
 		let mut guard = self.instances.lock().await;
 		let inst = guard.entry(project.to_string()).or_insert(RepoInstance {

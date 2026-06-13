@@ -234,11 +234,37 @@ impl SemanticCodeProvider {
 		};
 
 		match results {
-			Ok(output) => Ok(output),
+			Ok(output) => Ok(self.steer_if_empty(output)),
 			Err(e) => Err(McpError::internal_error(
 				format!("Search operation failed: {}", e),
 				"semantic_search",
 			)),
+		}
+	}
+
+	/// In read-only mode (`index.mcp_index = false`) the index may be empty or stale,
+	/// so a no-match result is appended with a one-line nudge toward the structural
+	/// tools rather than leaving the model to retry semantic search fruitlessly.
+	fn steer_if_empty(&self, output: String) -> String {
+		if self.config.index.mcp_index {
+			return output;
+		}
+		let empty = matches!(
+			output.trim(),
+			"No results found."
+				| "No code results found."
+				| "No text results found."
+				| "No documentation results found."
+				| "No commit results found."
+		);
+		if empty {
+			format!(
+				"{output}\n\nThe semantic index is read-only here (index.mcp_index = false) and \
+				 may be empty or stale. Use `structural_search` for known symbols/patterns/usages \
+				 and `view_signatures` to map files, or fall back to grep."
+			)
+		} else {
+			output
 		}
 	}
 

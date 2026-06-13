@@ -258,6 +258,19 @@ pub struct BackgroundServices {
 	indexing_handle: Option<tokio::task::JoinHandle<()>>,
 }
 
+impl BackgroundServices {
+	/// An inert handle bundle — no watcher, no indexing. Used when the in-process
+	/// MCP indexer is disabled (`index.mcp_index = false`) and the server serves
+	/// the existing index read-only.
+	pub(crate) fn none() -> Self {
+		Self {
+			watcher_handle: None,
+			index_handle: None,
+			indexing_handle: None,
+		}
+	}
+}
+
 impl Drop for BackgroundServices {
 	fn drop(&mut self) {
 		if let Some(h) = self.watcher_handle.take() {
@@ -730,7 +743,7 @@ impl ServerHandler for McpServer {
 		let instructions = if self.indexer_enabled {
 			"This server provides modular AI tools: semantic code search, view signatures, and GraphRAG (if available). Use 'semantic_search' for code/documentation searches and 'graphrag' (if enabled) for relationship queries."
 		} else {
-			"WARNING: Octocode indexer is disabled: not in a git repository root. Run with --no-git to enable indexing outside git repos. Tools available: semantic_search, view_signatures, graphrag (if enabled)."
+			"NOTE: in-process indexing is disabled — Octocode is serving an EXISTING index read-only, so the semantic index may be empty or stale. Prefer 'structural_search' (find known symbols, patterns, and usages) and 'view_signatures' (map a file's declarations before reading it), plus your own grep, to navigate the code. Use 'semantic_search' only for concept/behavior lookups where you don't know the symbol name — it may return nothing if the index is empty."
 		};
 
 		ServerInfo::new(capabilities)
@@ -812,6 +825,7 @@ impl McpServer {
 	/// repo lifecycle (indexing, watcher, cleanup, logging) and routes calls
 	/// here by the injected `project` argument.
 	pub(crate) fn new_repo_core(config: Config, working_directory: std::path::PathBuf) -> Self {
+		let mcp_index = config.index.mcp_index;
 		let semantic_code = SemanticCodeProvider::new(config.clone(), working_directory.clone());
 		let graphrag = GraphRagProvider::new(config, working_directory.clone());
 
@@ -838,7 +852,7 @@ impl McpServer {
 			semantic_code,
 			graphrag,
 			lsp: None,
-			indexer_enabled: true,
+			indexer_enabled: mcp_index,
 			tool_router,
 			structural_cache: Arc::new(parking_lot::RwLock::new(None)),
 		}
@@ -952,17 +966,23 @@ impl McpServer {
 			None
 		};
 
-		// Determine if indexer should start
-		let should_start_indexer = if !no_git && config.index.require_git {
-			indexer::git::is_git_repo_root(&working_directory)
-		} else {
-			true
-		};
+		// The in-process MCP indexer is opt-in via `index.mcp_index`. When disabled,
+		// MCP serves the existing index read-only; when enabled, the usual git gate
+		// still applies.
+		let should_start_indexer = config.index.mcp_index
+			&& (no_git
+				|| !config.index.require_git
+				|| indexer::git::is_git_repo_root(&working_directory));
 
-		if !should_start_indexer {
+		if !config.index.mcp_index {
 			warn!(
-				"Indexer not started: Not in a git repository and --no-git flag not set. \
-				 Use --no-git to enable indexing outside git repos."
+				"MCP indexer disabled (index.mcp_index = false): serving the existing index \
+				 read-only. Set index.mcp_index = true to index and watch in-process."
+			);
+		} else if !should_start_indexer {
+			warn!(
+				"MCP indexer enabled but not started: not in a git repository root and --no-git \
+				 not set. Use --no-git to index outside git repos."
 			);
 		}
 
@@ -1010,11 +1030,7 @@ impl McpServer {
 			)
 			.await?
 		} else {
-			BackgroundServices {
-				watcher_handle: None,
-				index_handle: None,
-				indexing_handle: None,
-			}
+			BackgroundServices::none()
 		};
 
 		info!(
