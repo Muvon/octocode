@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.17.0] - 2026-06-17
+
+### 📋 Release Summary
+
+This release introduces support for local embedding providers and expanded configuration options for the MCP server, including flexible file signature views and an optional in-process indexing toggle (6a2282b7, a168165d, 5430285a). General system stability and performance have been improved through updated dependencies and streamlined CI workflows (7ad0102e, 344abc84, ba32e4d3, d75e06ed, 8a4eae9d).
+
+
+### ✨ New Features & Enhancements
+
+- **models**: add local embedding provider support `6a2282b7`
+- **mcp**: add optional in-process indexing toggle `a168165d`
+- **mcp**: allow single string for view signatures files `5430285a`
+
+### 🔧 Improvements & Optimizations
+
+- **mcp**: remove hardcoded tool definitions `8a4eae9d`
+- **workflow**: migrate pipelines to shared workflows `d75e06ed`
+
+### 🔄 Other Changes
+
+3 maintenance, dependency, and tooling updates not listed individually.
+
 ## [0.16.1] - 2026-06-11
 
 ### 📋 Release Summary
