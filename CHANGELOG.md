@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.17.1] - 2026-06-17
+
+### 📋 Release Summary
+
+This release includes a fix to improve the reliability of local embedding probes (4ed25fe5). These changes ensure more stable performance when processing codebase intelligence locally.
+
+
+### 🐛 Bug Fixes & Stability
+
+- **embedding**: resolve local probe issue `4ed25fe5`
+
 ## [0.17.0] - 2026-06-17
 
 ### 📋 Release Summary
