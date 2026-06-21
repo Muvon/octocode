@@ -288,6 +288,94 @@ pub async fn expand_symbols(
 	Ok(expanded_blocks)
 }
 
+/// GraphRAG file-level expansion. Pulls code blocks from files structurally
+/// related (imports/calls/extends) to the strongest retrieved hits, then lets
+/// the existing reranker score the enlarged candidate set — surfacing
+/// cross-file dependencies that dense + BM25 alone miss. File-granular because
+/// the graph is file-granular (`CodeNode.id == relative path`).
+///
+/// Best-effort: any graph error degrades to passthrough, never breaks search.
+/// Default OFF (`search.graph_expansion`); A/B on your eval before trusting it,
+/// since naive expansion can dilute precision.
+/// ponytail: hardcoded caps, not config knobs — prove the flag earns its keep
+/// before adding tuning surface.
+async fn expand_code_blocks_via_graph(
+	store: &Store,
+	config: &Config,
+	code_blocks: Vec<CodeBlock>,
+) -> Vec<CodeBlock> {
+	use crate::indexer::graphrag::types::RelationshipDirection;
+
+	// Seeds are already RRF-ranked; only expand from the strongest few.
+	const SEED_LIMIT: usize = 10;
+	const MAX_NEIGHBOR_FILES: usize = 8;
+	const BLOCKS_PER_FILE: usize = 3;
+
+	if !config.graphrag.enabled || !config.search.graph_expansion || code_blocks.is_empty() {
+		return code_blocks;
+	}
+
+	let seed_paths: HashSet<String> = code_blocks.iter().map(|b| b.path.clone()).collect();
+	let mut seen_hashes: HashSet<String> = code_blocks.iter().map(|b| b.hash.clone()).collect();
+
+	// Accumulate neighbor-file -> structural score across all seed files.
+	let mut neighbor_scores: std::collections::HashMap<String, f32> =
+		std::collections::HashMap::new();
+	for block in code_blocks.iter().take(SEED_LIMIT) {
+		let rels = match store
+			.get_node_relationships(&block.path, RelationshipDirection::Both)
+			.await
+		{
+			Ok(rels) => rels,
+			Err(e) => {
+				tracing::debug!(
+					"graph expansion: relationships for {} failed: {}",
+					block.path,
+					e
+				);
+				continue;
+			}
+		};
+		for rel in rels {
+			// The neighbor is whichever endpoint is not the seed file.
+			let neighbor = if rel.source == block.path {
+				rel.target
+			} else {
+				rel.source
+			};
+			if seed_paths.contains(&neighbor) {
+				continue;
+			}
+			*neighbor_scores.entry(neighbor).or_insert(0.0) += rel.weight * rel.confidence;
+		}
+	}
+
+	if neighbor_scores.is_empty() {
+		return code_blocks;
+	}
+
+	// Strongest structural links first.
+	let mut ranked: Vec<(String, f32)> = neighbor_scores.into_iter().collect();
+	ranked.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+	ranked.truncate(MAX_NEIGHBOR_FILES);
+
+	let mut expanded = code_blocks;
+	for (path, _score) in ranked {
+		match store.get_code_blocks_by_path(&path, BLOCKS_PER_FILE).await {
+			Ok(blocks) => {
+				for b in blocks {
+					if seen_hashes.insert(b.hash.clone()) {
+						expanded.push(b);
+					}
+				}
+			}
+			Err(e) => tracing::debug!("graph expansion: blocks for {} failed: {}", path, e),
+		}
+	}
+
+	expanded
+}
+
 // Token-efficient text formatting functions for MCP
 
 // Format code search results as text for MCP with detail level control
@@ -821,6 +909,10 @@ pub async fn search_codebase_with_details_multi_query_text(
 	// Deduplicate and merge with multi-query bonuses
 	let (mut code_blocks, mut doc_blocks, mut text_blocks, mut commit_blocks) =
 		deduplicate_and_merge_results(search_results, queries, dedup_distance_threshold);
+
+	// GraphRAG file-level expansion (default off): enrich code candidates with
+	// structurally-related files before the reranker scores the enlarged set.
+	code_blocks = expand_code_blocks_via_graph(&store, config, code_blocks).await;
 
 	// Apply reranker if enabled, then filter by similarity threshold
 	if config.search.reranker.enabled && !queries.is_empty() {
