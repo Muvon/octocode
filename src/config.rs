@@ -203,6 +203,12 @@ pub struct SearchConfig {
 
 	/// Hybrid search configuration for combining vector and keyword search
 	pub hybrid: HybridSearchConfig,
+
+	/// Expand code-search candidates with structurally-related files via the
+	/// GraphRAG graph (imports/calls/extends) before reranking. File-level,
+	/// best-effort, requires `graphrag.enabled`. Set false to disable — A/B on
+	/// your eval before enabling, since naive expansion can dilute precision.
+	pub graph_expansion: bool,
 }
 
 impl Default for SearchConfig {

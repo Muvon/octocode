@@ -1102,6 +1102,36 @@ impl Store {
 		Err(anyhow::anyhow!("Code block with hash {} not found", hash))
 	}
 
+	/// Fetch up to `limit` code blocks for a file path. Used by GraphRAG
+	/// expansion to pull candidates from structurally-related files.
+	pub async fn get_code_blocks_by_path(
+		&self,
+		path: &str,
+		limit: usize,
+	) -> Result<Vec<CodeBlock>> {
+		let table_ops = self.table_ops();
+		if !table_ops.table_exists(tables::CODE_BLOCKS).await? {
+			return Ok(Vec::new());
+		}
+
+		let table = self.get_table(tables::CODE_BLOCKS).await?;
+		let mut results = table
+			.query()
+			.only_if(format!("path = '{}'", escape_single_quotes(path)))
+			.limit(limit)
+			.execute()
+			.await?;
+
+		let mut blocks = Vec::new();
+		let converter = BatchConverter::new(self.code_vector_dim);
+		while let Some(batch) = results.try_next().await? {
+			if batch.num_rows() > 0 {
+				blocks.extend(converter.batch_to_code_blocks(&batch, None)?);
+			}
+		}
+		Ok(blocks)
+	}
+
 	pub async fn tables_exist(&self, table_names: &[&str]) -> Result<bool> {
 		let table_ops = self.table_ops();
 		table_ops.tables_exist(table_names).await

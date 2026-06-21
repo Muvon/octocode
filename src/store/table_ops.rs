@@ -436,8 +436,23 @@ impl<'a> TableOperations<'a> {
 		);
 		let start = std::time::Instant::now();
 
+		// Code-tuned FTS. The default tokenizer is built for prose and is hostile
+		// to code: English stemming mangles identifiers (`getUsers`->`getus`),
+		// stop-word removal drops real code tokens (`for`/`if`/`in`/`match`/`is`),
+		// and the 40-char cap silently drops long identifiers/paths (e.g.
+		// `search_codebase_with_details_multi_query_text`). Keep lowercasing for
+		// case-insensitive lookup; disable the rest so BM25 matches code verbatim.
+		// ponytail: lancedb 0.26 has no camelCase tokenizer — splitting camelCase
+		// would need a separate FTS column + full re-index. Do that only if
+		// locbench shows camelCase recall is still lacking.
+		const MAX_CODE_TOKEN_LEN: usize = 128;
+		let fts = FtsIndexBuilder::default()
+			.stem(false)
+			.remove_stop_words(false)
+			.max_token_length(Some(MAX_CODE_TOKEN_LEN));
+
 		table
-			.create_index(&["content"], Index::FTS(FtsIndexBuilder::default()))
+			.create_index(&["content"], Index::FTS(fts))
 			.execute()
 			.await
 			.map_err(|e| {
