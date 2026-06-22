@@ -265,6 +265,11 @@ pub async fn execute(
 			dedup_distance_threshold,
 		);
 
+	// GraphRAG file-level expansion (default off): enrich code candidates with
+	// structurally-related files before the reranker scores them. Mirrors the
+	// MCP search path so CLI and MCP have retrieval parity.
+	code_blocks = indexer::search::expand_code_blocks_via_graph(store, config, code_blocks).await;
+
 	// Apply reranker if enabled, then filter by similarity threshold
 	if config.search.reranker.enabled && !args.queries.is_empty() {
 		let query = args.queries.join(" ");

@@ -17,6 +17,7 @@ require_git = true  # Require git repository for indexing
 contextual_model = "ollama:gemini-3-flash-preview"
 contextual_descriptions = true
 contextual_batch_size = 20
+mcp_index = false
 
 [search]
 max_results = 10
@@ -26,6 +27,7 @@ output_format = "markdown"
 max_files = 10
 context_lines = 3
 search_block_max_characters = 400  # Maximum characters to display per code/text/doc block
+graph_expansion = false  # GraphRAG file-level expansion before reranking (matrix driver toggles this)
 
 [search.reranker]
 enabled = true
