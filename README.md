@@ -107,6 +107,27 @@ Source Code → Tree-sitter AST → Symbols & Relationships → Knowledge Graph
 
 **Built with Rust** for performance. **Local-first** for privacy. **Open source** (Apache 2.0) for transparency.
 
+## 📊 Retrieval Quality
+
+Octocode ships a **reproducible retrieval benchmark** ([`benchmark/`](benchmark/)): 127 curated code-search queries with line-range ground truth, run against octocode's own source (pinned at `b1771ba` so annotations never drift). The numbers below use a **fully local, no-API-key** stack — `jina-embeddings-v2-base-code` via fastembed, **no reranker** — so they are a floor, not a ceiling:
+
+| Config | Hit@5 | Hit@10 | MRR | NDCG@10 | Recall@10 |
+|---|---|---|---|---|---|
+| Dense vector only | 0.598 | 0.717 | 0.485 | 0.528 | 0.671 |
+| Hybrid, default RRF weights (0.7/0.3) | 0.598 | 0.717 | 0.485 | 0.528 | 0.671 |
+| **Hybrid, keyword-tuned (0.3/0.7)** | **0.732** | **0.835** | **0.572** | **0.620** | **0.807** |
+
+Tilting RRF fusion toward the BM25/keyword signal — which carries disproportionate weight for code's exact identifiers — lifts **Hit@5 by +22%** and **Recall@10 by +20%** at zero added cost.
+
+The benchmark also flags what _doesn't_ help here (full 6-variant matrix in [`benchmark/RESULTS.md`](benchmark/RESULTS.md)): a **generic** local cross-encoder reranker (`bge-reranker-base`) actually **regressed** results (Hit@5 0.732 → 0.598) — code retrieval needs a _code-aware_ reranker (e.g. `voyage:rerank-2.5`), not an off-the-shelf one.
+
+```bash
+git worktree add /tmp/corpus b1771ba        # pin the corpus to the ground-truth commit
+CORPUS=/tmp/corpus python3 benchmark/run_matrix.py
+```
+
+See [benchmark/README.md](benchmark/README.md) for methodology and metric definitions.
+
 ## 🚀 Quick Start
 
 ### 1. Install

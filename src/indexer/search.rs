@@ -299,7 +299,7 @@ pub async fn expand_symbols(
 /// since naive expansion can dilute precision.
 /// ponytail: hardcoded caps, not config knobs — prove the flag earns its keep
 /// before adding tuning surface.
-async fn expand_code_blocks_via_graph(
+pub async fn expand_code_blocks_via_graph(
 	store: &Store,
 	config: &Config,
 	code_blocks: Vec<CodeBlock>,

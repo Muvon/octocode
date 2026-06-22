@@ -21,6 +21,9 @@ from pathlib import Path
 SCRIPT_DIR = Path(__file__).parent
 GROUND_TRUTH_CSV = SCRIPT_DIR / "code.csv"
 
+# octocode binary to invoke; overridable via --bin to benchmark a custom build.
+BIN = "octocode"
+
 
 def parse_ground_truth(row):
     """Parse a CSV row into query + list of (path, start, end, relevance)."""
@@ -71,7 +74,7 @@ def parse_ground_truth(row):
 
 def run_search(query, mode="code", threshold=None, max_results=20):
     """Run octocode search and return parsed JSON results."""
-    cmd = ["octocode", "search", query, "--format", "json", "--mode", mode]
+    cmd = [BIN, "search", query, "--format", "json", "--mode", mode]
     if threshold is not None:
         cmd.extend(["--threshold", str(threshold)])
     try:
@@ -180,7 +183,12 @@ def main():
     parser.add_argument("--mode", default="code", help="Search mode (default: code)")
     parser.add_argument("--verbose", action="store_true", help="Show per-query details")
     parser.add_argument("--csv", default=str(GROUND_TRUTH_CSV), help="Ground truth CSV path")
+    parser.add_argument("--bin", default="octocode", help="octocode binary to invoke")
+    parser.add_argument("--json-out", default=None, help="Write metrics summary as JSON to this path")
     args = parser.parse_args()
+
+    global BIN
+    BIN = args.bin
 
     # Load ground truth
     csv_path = Path(args.csv)
@@ -295,9 +303,24 @@ def main():
         for idx, query, err in errors:
             print(f"  [{idx}] {query[:60]}... => {err}")
 
-    # Exit code: 0 if Hit@5 > 0.7, else 1
+    # Machine-readable summary for the benchmark matrix driver
+    summary = {
+        "queries": n,
+        "errors": len(errors),
+        "hit_at_5": avg(metrics["hit_at_5"]),
+        "hit_at_10": avg(metrics["hit_at_10"]),
+        "mrr": avg(metrics["mrr"]),
+        "ndcg_at_10": avg(metrics["ndcg_at_10"]),
+        "recall_at_5": avg(metrics["recall_at_5"]),
+        "recall_at_10": avg(metrics["recall_at_10"]),
+    }
+    if args.json_out:
+        with open(args.json_out, "w") as jf:
+            json.dump(summary, jf, indent=2)
+
+    # Exit code: 0 if Hit@5 > 0.7, else 1 (suppressed under --json-out so a matrix run continues)
     hit5 = avg(metrics["hit_at_5"])
-    if hit5 < 0.7:
+    if hit5 < 0.7 and not args.json_out:
         print(f"\nWARN: Hit@5 ({hit5:.3f}) is below 0.70 threshold")
         sys.exit(1)
 

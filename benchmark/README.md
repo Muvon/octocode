@@ -179,3 +179,43 @@ The last 27 queries (101-127) use **natural language that doesn't mirror code co
 | 127 | GraphRAG build from existing DB when no new files | Decision tree within indexing pipeline |
 
 If the standard queries score ~1.0 but hard queries score significantly lower, the benchmark is working correctly and exposes real retrieval weaknesses.
+
+## Variant Matrix (`run_matrix.py`)
+
+`score.py` evaluates one configuration. `run_matrix.py` sweeps **retrieval
+parameters** over a single shared index and writes a comparison table to
+[`RESULTS.md`](RESULTS.md) (+ `RESULTS.json`). It derives each variant config
+from `config.toml` by mutating only the relevant keys — no hand-maintained
+strict config — and accumulates results across runs (so a focused `ONLY=` run
+merges into the existing table).
+
+**Pin the corpus first** — ground truth is annotated against commit `b1771ba`,
+so indexing any other checkout drifts the line ranges:
+
+```bash
+git worktree add /home/box/bench_corpus b1771ba
+
+# Full local matrix (fastembed, no API key): vector-only vs hybrid weight sweep
+CORPUS=/home/box/bench_corpus \
+  OCTO_BIN=./target/release/octocode \
+  python3 benchmark/run_matrix.py
+
+# Add a local cross-encoder reranker (still no key) — reuses the index
+CORPUS=/home/box/bench_corpus OCTO_BIN=./target/release/octocode \
+  SKIP_INDEX=1 ONLY=rerank RERANK_MODEL=fastembed:bge-reranker-base \
+  python3 benchmark/run_matrix.py
+```
+
+| Env | Purpose |
+|-----|---------|
+| `CORPUS` | (required) pinned checkout to index + search |
+| `OCTO_BIN` | octocode binary (default: `octocode` on `PATH`) |
+| `SKIP_INDEX=1` | reuse the existing index (only search-time params changed) |
+| `ONLY=<substr>` | run only variants whose name matches (e.g. `rerank`) |
+| `RERANK_MODEL` | reranker model; `fastembed:bge-reranker-base` is local/no-key |
+| `CODE_MODEL` / `TEXT_MODEL` | override embedding models |
+| `VOYAGE_API_KEY` etc. | if set, enables paid-reranker variants automatically |
+
+Variants: `vector_only`, `hybrid_70_30` (default weights), `hybrid_30_70`
+(keyword-tilted), `+graph` (GraphRAG file-level expansion — only moves results
+when a reranker re-scores the enlarged set), `+rerank` (cross-encoder).
