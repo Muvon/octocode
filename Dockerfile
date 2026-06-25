@@ -45,6 +45,9 @@ RUN set -eu; \
 		chmod +x /usr/local/bin/octocode; \
 		rm /tmp/octocode.tar.gz
 
+# MCP registry ownership annotation (validated on publish to registry.modelcontextprotocol.io)
+LABEL io.modelcontextprotocol.server.name="io.github.Muvon/octocode"
+
 # Create a non-root user
 RUN groupadd -r octocode && useradd -r -g octocode octocode
 
