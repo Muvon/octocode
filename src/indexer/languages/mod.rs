@@ -20,6 +20,8 @@ use tree_sitter::Node;
 // Import all language modules
 mod bash;
 mod cpp;
+#[cfg(test)]
+mod cpp_test;
 mod css;
 mod go;
 mod java;
