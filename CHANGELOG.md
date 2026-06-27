@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.18.0] - 2026-06-27
+
+### 📋 Release Summary
+
+This release enhances code intelligence with GraphRAG file-level expansion for more comprehensive searches and introduces new benchmarking tools to measure retrieval accuracy (be7eb569, 19467d0b). Additionally, updates to the MCP server schema and core dependencies improve overall system integration and stability (c0364781, d925c575, 101297c8).
+
+
+### ✨ New Features & Enhancements
+
+- **benchmark**: implement Loc-Bench and retrieval matrix `19467d0b`
+- **search**: add GraphRAG file-level expansion `be7eb569`
+
+### 🔧 Improvements & Optimizations
+
+- **mcp**: update registry metadata and server schema `c0364781`
+
+### 🔄 Other Changes
+
+2 maintenance, dependency, and tooling updates not listed individually.
+
 ## [0.17.1] - 2026-06-17
 
 ### 📋 Release Summary
