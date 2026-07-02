@@ -37,13 +37,11 @@ impl Language for Bash {
 
 		match node.kind() {
 			"function_definition" => {
-				// Find the function name
-				for child in node.children(&mut node.walk()) {
-					if child.kind() == "name" {
-						if let Ok(name) = child.utf8_text(contents.as_bytes()) {
-							symbols.push(name.to_string());
-						}
-						break;
+				// Find the function name — exposed via the `name` field; its node
+				// kind is `word`, never the literal kind `"name"`.
+				if let Some(name_node) = node.child_by_field_name("name") {
+					if let Ok(name) = name_node.utf8_text(contents.as_bytes()) {
+						symbols.push(name.to_string());
 					}
 				}
 
@@ -136,8 +134,10 @@ impl Language for Bash {
 
 	fn extract_function_calls(&self, node: Node, contents: &str) -> Vec<String> {
 		if node.kind() == "command" {
-			// First child is the command name — skip "source" and "." (imports)
-			if let Some(cmd_node) = node.child(0) {
+			// Use the `name` field rather than child(0) — a `command` node can have
+			// leading `variable_assignment`/redirect children (e.g. `DEBUG=1 cmd`),
+			// which would otherwise be misread as the command name.
+			if let Some(cmd_node) = node.child_by_field_name("name") {
 				if let Ok(text) = cmd_node.utf8_text(contents.as_bytes()) {
 					let name = text.trim();
 					if name == "source" || name == "." {

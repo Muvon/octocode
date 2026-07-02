@@ -130,6 +130,10 @@ impl GraphBuilder {
 		let mut processed_count = 0;
 		let mut skipped_count = 0;
 		let mut batches_processed = 0;
+		// Ids of nodes actually (re)processed this run — used to scope relationship
+		// discovery to changed files instead of rediscovering (and duplicating) edges
+		// for the whole graph on every incremental run.
+		let mut processed_node_ids: HashSet<String> = HashSet::new();
 
 		// Group code blocks by file for efficient processing
 		let mut files_to_blocks: HashMap<String, Vec<&CodeBlock>> = HashMap::new();
@@ -422,7 +426,18 @@ impl GraphBuilder {
 									}
 									let failed_ids: HashSet<String> =
 										ai_batch_queue.iter().map(|f| f.file_id.clone()).collect();
-									new_nodes.retain(|n| !failed_ids.contains(&n.id));
+									// pending_embeddings grows 1:1 with new_nodes (paired by
+									// position, not id), so dropping entries from new_nodes
+									// alone would desync the embedding assignment in
+									// process_nodes_batch. Drop the same positions from both.
+									let keep: Vec<bool> = new_nodes
+										.iter()
+										.map(|n| !failed_ids.contains(&n.id))
+										.collect();
+									let mut keep_iter = keep.iter();
+									new_nodes.retain(|_| *keep_iter.next().unwrap());
+									let mut keep_iter = keep.iter();
+									pending_embeddings.retain(|_| *keep_iter.next().unwrap());
 								}
 							}
 						}
@@ -517,6 +532,7 @@ impl GraphBuilder {
 						&mut pending_embeddings,
 						&mut batches_processed,
 						&ai_descriptions, // Pass AI descriptions
+						&mut processed_node_ids,
 					)
 					.await?;
 				}
@@ -559,7 +575,17 @@ impl GraphBuilder {
 						}
 						let failed_ids: HashSet<String> =
 							ai_batch_queue.iter().map(|f| f.file_id.clone()).collect();
-						new_nodes.retain(|n| !failed_ids.contains(&n.id));
+						// See the mid-loop batch-failure handling above: pending_embeddings
+						// is paired with new_nodes by position, so both must be filtered
+						// with the same mask or the embedding assignment desyncs.
+						let keep: Vec<bool> = new_nodes
+							.iter()
+							.map(|n| !failed_ids.contains(&n.id))
+							.collect();
+						let mut keep_iter = keep.iter();
+						new_nodes.retain(|_| *keep_iter.next().unwrap());
+						let mut keep_iter = keep.iter();
+						pending_embeddings.retain(|_| *keep_iter.next().unwrap());
 					}
 				}
 			}
@@ -643,6 +669,7 @@ impl GraphBuilder {
 				&mut pending_embeddings,
 				&mut batches_processed,
 				&ai_descriptions, // Pass AI descriptions
+				&mut processed_node_ids,
 			)
 			.await?;
 		}
@@ -667,10 +694,21 @@ impl GraphBuilder {
 				*graph = loaded_graph;
 			}
 
-			// Collect all processed nodes for relationship discovery
+			// Collect only the nodes actually (re)processed this run for relationship
+			// discovery. Passing the whole graph here would rediscover relationships
+			// for every unchanged file too, and since storage is append-only, that
+			// would duplicate the relationship set on every incremental run — the
+			// discovery calls below independently fetch the full graph for the
+			// "all_nodes" side, so restricting "new_files" to real changes doesn't
+			// lose any target resolution.
 			let all_processed_nodes = {
 				let graph = self.graph.read().await;
-				graph.nodes.values().cloned().collect::<Vec<CodeNode>>()
+				graph
+					.nodes
+					.values()
+					.filter(|node| processed_node_ids.contains(&node.id))
+					.cloned()
+					.collect::<Vec<CodeNode>>()
 			};
 
 			if !all_processed_nodes.is_empty() {
@@ -1131,6 +1169,7 @@ impl GraphBuilder {
 		pending_embeddings: &mut Vec<String>,
 		batches_processed: &mut usize,
 		ai_descriptions: &HashMap<String, String>, // Add AI descriptions parameter
+		processed_node_ids: &mut HashSet<String>,
 	) -> Result<()> {
 		if nodes.is_empty() || pending_embeddings.is_empty() {
 			return Ok(());
@@ -1173,6 +1212,7 @@ impl GraphBuilder {
 		{
 			let mut graph = self.graph.write().await;
 			for node in nodes.iter() {
+				processed_node_ids.insert(node.id.clone());
 				// Check if node already exists to prevent duplicates
 				if let Some(existing_node) = graph.nodes.get(&node.id) {
 					if !self.quiet {

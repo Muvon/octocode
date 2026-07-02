@@ -133,6 +133,12 @@ pub async fn execute(config: &Config, args: &ReleaseArgs) -> Result<()> {
 
 	// Calculate new version
 	let version_calculation = if let Some(forced_version) = &args.force_version {
+		if !is_valid_semver(forced_version) {
+			return Err(anyhow::anyhow!(
+				"❌ Invalid --force-version '{}': must be a semver like 1.2.3 or 1.2.3-beta.1",
+				forced_version
+			));
+		}
 		VersionCalculation {
 			current_version: current_version.clone(),
 			new_version: forced_version.clone(),
@@ -204,12 +210,17 @@ pub async fn execute(config: &Config, args: &ReleaseArgs) -> Result<()> {
 	update_lock_files(&project_type).await?;
 	println!("✅ Updated lock files");
 
-	// Update changelog
-	update_changelog(&args.changelog, &changelog_content).await?;
+	// Update changelog — resolve against the git root, not the process cwd, so
+	// running `octocode release` from a subdirectory still finds/writes it.
+	let changelog_path = current_dir
+		.join(&args.changelog)
+		.to_string_lossy()
+		.into_owned();
+	update_changelog(&changelog_path, &changelog_content).await?;
 	println!("✅ Updated {}", args.changelog);
 
 	// Stage changes
-	stage_release_files(&args.changelog, &project_type).await?;
+	stage_release_files(&changelog_path, &project_type).await?;
 	println!("✅ Staged release files");
 
 	// Create release commit
@@ -225,7 +236,17 @@ pub async fn execute(config: &Config, args: &ReleaseArgs) -> Result<()> {
 		"\n🎉 Release {} created successfully!",
 		version_calculation.new_version
 	);
-	println!("💡 Don't forget to push with: git push origin main --tags");
+	let current_branch = Command::new("git")
+		.args(["rev-parse", "--abbrev-ref", "HEAD"])
+		.output()
+		.ok()
+		.filter(|o| o.status.success())
+		.map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+		.unwrap_or_else(|| "main".to_string());
+	println!(
+		"💡 Don't forget to push with: git push origin {} --tags",
+		current_branch
+	);
 
 	Ok(())
 }
@@ -261,12 +282,32 @@ async fn get_current_version(project_type: &ProjectType) -> Result<String> {
 	match project_type {
 		ProjectType::Rust(cargo_path) => {
 			let content = fs::read_to_string(cargo_path)?;
-			if let Some(version_line) = content
-				.lines()
-				.find(|line| line.trim_start().starts_with("version"))
-			{
-				if let Some(version) = extract_version_from_line(version_line) {
-					return Ok(version);
+			// Only consider a bare `version = "..."` key inside [package] — not
+			// `version.workspace = true` (no literal version here) and not a
+			// `version` key belonging to some other table earlier in the file.
+			let mut in_package_section = false;
+			for line in content.lines() {
+				let trimmed = line.trim();
+				if trimmed == "[package]" {
+					in_package_section = true;
+					continue;
+				}
+				if trimmed.starts_with('[') && trimmed != "[package]" {
+					in_package_section = false;
+					continue;
+				}
+				if !in_package_section {
+					continue;
+				}
+				let is_version_key = line
+					.split('=')
+					.next()
+					.map(|key| key.trim() == "version")
+					.unwrap_or(false);
+				if is_version_key {
+					if let Some(version) = extract_version_from_line(line) {
+						return Ok(version);
+					}
 				}
 			}
 		}
@@ -374,7 +415,9 @@ async fn analyze_commits(commit_range: &str) -> Result<CommitAnalysis> {
 		let hash = parts[0].to_string();
 		let author = parts[1].to_string();
 		let date = parts[2].to_string();
-		let message = parts[3].to_string();
+		// A commit subject containing its own '|' produces more than 4 parts;
+		// rejoin the remainder instead of truncating at the first embedded pipe.
+		let message = parts[3..].join("|");
 
 		let (commit_type, scope, description, breaking) = parse_conventional_commit(&message);
 
@@ -412,16 +455,39 @@ async fn analyze_commits(commit_range: &str) -> Result<CommitAnalysis> {
 	})
 }
 
+/// Validates that `version` is safe to use as a git tag name and as a bare
+/// TOML/JSON string value: digits.digits.digits core with optional
+/// -prerelease/+build metadata, restricted to ASCII alphanumerics/'.'/'-'/'+'.
+/// Rejects a leading '-' (would be parsed as a git flag) and quote/whitespace
+/// characters (would break out of a TOML/JSON string literal).
+fn is_valid_semver(version: &str) -> bool {
+	let core_end = version.find(['-', '+']).unwrap_or(version.len());
+	let core = &version[..core_end];
+	let core_valid = core.split('.').collect::<Vec<_>>().len() == 3
+		&& core
+			.split('.')
+			.all(|p| !p.is_empty() && p.chars().all(|c| c.is_ascii_digit()));
+
+	core_valid
+		&& version
+			.chars()
+			.all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '+'))
+}
+
 fn parse_conventional_commit(message: &str) -> (String, Option<String>, String, bool) {
-	let breaking = message.contains("BREAKING CHANGE") || message.contains('!');
+	let breaking_marker = message.contains("BREAKING CHANGE");
 
 	// Try to parse conventional commit format: type(scope): description
 	if let Some(colon_pos) = message.find(':') {
 		let prefix = &message[..colon_pos];
 		let description = message[colon_pos + 1..].trim().to_string();
+		// Per the conventional-commits spec, `!` only signals a breaking change
+		// immediately before the colon (e.g. `feat(api)!:`), not anywhere in the
+		// message — a description like "prevent panic!() in parser" isn't breaking.
+		let breaking = breaking_marker || prefix.trim_end().ends_with('!');
 
 		if let Some(paren_start) = prefix.find('(') {
-			if let Some(paren_end) = prefix.find(')') {
+			if let Some(paren_end) = prefix[paren_start..].find(')').map(|p| p + paren_start) {
 				let commit_type = prefix[..paren_start].trim().replace('!', "");
 				let scope = Some(prefix[paren_start + 1..paren_end].to_string());
 				return (commit_type, scope, description, breaking);
@@ -431,6 +497,8 @@ fn parse_conventional_commit(message: &str) -> (String, Option<String>, String, 
 		let commit_type = prefix.trim().replace('!', "");
 		return (commit_type, None, description, breaking);
 	}
+
+	let breaking = breaking_marker;
 
 	// Fallback: try to detect type from message start
 	let lower_message = message.to_lowercase();
@@ -489,12 +557,11 @@ async fn calculate_version_with_ai(
 
 	match call_llm_for_version_calculation(&prompt, config).await {
 		Ok(response) => {
-			// Try to parse JSON response
-			if let Ok(calculation) = serde_json::from_str::<VersionCalculation>(&response) {
-				Ok(calculation)
-			} else {
-				// Fallback to manual calculation
-				calculate_version_fallback(current_version, analysis)
+			// Try to parse JSON response; also guard against a malformed/hallucinated
+			// version string before it reaches `git tag` / Cargo.toml / package.json.
+			match serde_json::from_str::<VersionCalculation>(&response) {
+				Ok(calculation) if is_valid_semver(&calculation.new_version) => Ok(calculation),
+				_ => calculate_version_fallback(current_version, analysis),
 			}
 		}
 		Err(e) => {
@@ -511,7 +578,13 @@ fn calculate_version_fallback(
 	current_version: &str,
 	analysis: &CommitAnalysis,
 ) -> Result<VersionCalculation> {
-	let parts: Vec<&str> = current_version.split('.').collect();
+	// Bump only the major.minor.patch core; a pre-release/build suffix (e.g.
+	// "1.2.3-beta.1") is valid semver but isn't part of what gets incremented.
+	let core_version = current_version
+		.split(['-', '+'])
+		.next()
+		.unwrap_or(current_version);
+	let parts: Vec<&str> = core_version.split('.').collect();
 	if parts.len() != 3 {
 		return Err(anyhow::anyhow!(
 			"Invalid version format: {}",
@@ -1163,10 +1236,14 @@ async fn update_project_version(project_type: &ProjectType, new_version: &str) -
 
 async fn update_lock_files(project_type: &ProjectType) -> Result<()> {
 	match project_type {
-		ProjectType::Rust(_) => {
+		ProjectType::Rust(manifest) => {
 			// Update Cargo.lock by running cargo check
 			println!("🔄 Updating Cargo.lock...");
-			let output = Command::new("cargo").args(["check", "--quiet"]).output()?;
+			let dir = manifest.parent().unwrap_or(Path::new("."));
+			let output = Command::new("cargo")
+				.args(["check", "--quiet"])
+				.current_dir(dir)
+				.output()?;
 
 			if !output.status.success() {
 				return Err(anyhow::anyhow!(
@@ -1175,15 +1252,15 @@ async fn update_lock_files(project_type: &ProjectType) -> Result<()> {
 				));
 			}
 		}
-		ProjectType::Node(_) => {
+		ProjectType::Node(manifest) => {
 			// Update package-lock.json or yarn.lock
 			println!("🔄 Updating Node.js lock file...");
 
-			// Check if using yarn or npm
-			let current_dir = std::env::current_dir()?;
-			if current_dir.join("yarn.lock").exists() {
+			let dir = manifest.parent().unwrap_or(Path::new("."));
+			if dir.join("yarn.lock").exists() {
 				let output = Command::new("yarn")
 					.args(["install", "--frozen-lockfile"])
+					.current_dir(dir)
 					.output()?;
 
 				if !output.status.success() {
@@ -1195,6 +1272,7 @@ async fn update_lock_files(project_type: &ProjectType) -> Result<()> {
 			} else {
 				let output = Command::new("npm")
 					.args(["install", "--package-lock-only"])
+					.current_dir(dir)
 					.output()?;
 
 				if !output.status.success() {
@@ -1205,11 +1283,13 @@ async fn update_lock_files(project_type: &ProjectType) -> Result<()> {
 				}
 			}
 		}
-		ProjectType::Php(_) => {
+		ProjectType::Php(manifest) => {
 			// Update composer.lock
 			println!("🔄 Updating composer.lock...");
+			let dir = manifest.parent().unwrap_or(Path::new("."));
 			let output = Command::new("composer")
 				.args(["update", "--lock"])
+				.current_dir(dir)
 				.output()?;
 
 			if !output.status.success() {
@@ -1219,10 +1299,14 @@ async fn update_lock_files(project_type: &ProjectType) -> Result<()> {
 				));
 			}
 		}
-		ProjectType::Go(_) => {
+		ProjectType::Go(manifest) => {
 			// Update go.sum and go.mod
 			println!("🔄 Updating go.mod and go.sum...");
-			let output = Command::new("go").args(["mod", "tidy"]).output()?;
+			let dir = manifest.parent().unwrap_or(Path::new("."));
+			let output = Command::new("go")
+				.args(["mod", "tidy"])
+				.current_dir(dir)
+				.output()?;
 
 			if !output.status.success() {
 				return Err(anyhow::anyhow!(
@@ -1231,12 +1315,15 @@ async fn update_lock_files(project_type: &ProjectType) -> Result<()> {
 				));
 			}
 		}
-		ProjectType::Python(_) => {
+		ProjectType::Python(manifest) => {
 			// Update uv.lock if using uv, otherwise no lock file to update
 			println!("🔄 Updating Python lock file...");
-			let current_dir = std::env::current_dir()?;
-			if current_dir.join("uv.lock").exists() {
-				let output = Command::new("uv").args(["lock"]).output()?;
+			let dir = manifest.parent().unwrap_or(Path::new("."));
+			if dir.join("uv.lock").exists() {
+				let output = Command::new("uv")
+					.args(["lock"])
+					.current_dir(dir)
+					.output()?;
 				if !output.status.success() {
 					return Err(anyhow::anyhow!(
 						"Failed to update uv.lock: {}",
@@ -1328,8 +1415,15 @@ fn update_cargo_version(content: &str, new_version: &str) -> Result<String> {
 			continue;
 		}
 
-		// Look for version line in [package] section
-		if in_package_section && line.trim_start().starts_with("version") && line.contains('=') {
+		// Look for version line in [package] section. Match only a bare `version =`
+		// key, not `version.workspace = true` (a distinct, valid Cargo.toml key that
+		// starts with "version" too but must be left untouched).
+		let is_version_key = line
+			.split('=')
+			.next()
+			.map(|key| key.trim() == "version")
+			.unwrap_or(false);
+		if in_package_section && is_version_key {
 			if let Some(equals_pos) = line.find('=') {
 				let prefix = &line[..equals_pos + 1];
 				let suffix_part = &line[equals_pos + 1..];
@@ -1560,8 +1654,17 @@ async fn update_changelog(changelog_path: &str, new_content: &str) -> Result<()>
 async fn stage_release_files(changelog_path: &str, project_type: &ProjectType) -> Result<()> {
 	let mut files_to_stage = vec![changelog_path.to_string()];
 
-	// Add project files and lock files
-	let current_dir = std::env::current_dir()?;
+	// Add project files and lock files, resolved relative to the manifest's own
+	// directory (not the process cwd) so `octocode release` run from a
+	// subdirectory still finds/stages the right lock files.
+	let current_dir = match project_type {
+		ProjectType::Rust(p)
+		| ProjectType::Node(p)
+		| ProjectType::Php(p)
+		| ProjectType::Go(p)
+		| ProjectType::Python(p) => p.parent().unwrap_or(Path::new(".")).to_path_buf(),
+		ProjectType::Unknown => std::env::current_dir()?,
+	};
 	match project_type {
 		ProjectType::Rust(path) => {
 			files_to_stage.push(path.to_string_lossy().to_string());
@@ -1628,7 +1731,7 @@ async fn stage_release_files(changelog_path: &str, project_type: &ProjectType) -
 	}
 
 	for file in files_to_stage {
-		let output = Command::new("git").args(["add", &file]).output()?;
+		let output = Command::new("git").args(["add", "--", &file]).output()?;
 
 		if !output.status.success() {
 			return Err(anyhow::anyhow!(

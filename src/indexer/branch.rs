@@ -247,7 +247,9 @@ pub async fn reconcile_master_state(
 		_ => false,
 	};
 
-	let db_commit = main_store.get_last_commit_hash().await.unwrap_or(None);
+	// Propagate a real DB error instead of collapsing it into "no commit
+	// recorded yet", which would silently trigger a full reindex/resync.
+	let db_commit = main_store.get_last_commit_hash().await?;
 
 	let db_resynced_to = match &db_commit {
 		Some(db) if db == &local_ref_commit => None,

@@ -61,6 +61,7 @@ impl Language for Php {
 							"class_declaration",
 							"trait_declaration",
 							"interface_declaration",
+							"enum_declaration",
 						],
 						&["name"],
 					) {
@@ -157,11 +158,15 @@ impl Language for Php {
 			"function_definition"
 			| "method_declaration"
 			| "class_declaration"
+			| "interface_declaration"
+			| "trait_declaration"
+			| "enum_declaration"
 			| "namespace_definition" => {
 				// In PHP, all top-level items are potentially exportable
-				// Extract the name as a potential export
+				// Extract the name as a potential export. `namespace_definition`'s
+				// name field is `namespace_name`, not `name`.
 				for child in node.children(&mut node.walk()) {
-					if child.kind() == "name" {
+					if child.kind() == "name" || child.kind() == "namespace_name" {
 						if let Ok(name) = child.utf8_text(contents.as_bytes()) {
 							exports.push(name.to_string());
 							break;
@@ -248,6 +253,20 @@ impl Language for Php {
 					}
 				}
 			}
+			"enum_declaration" => {
+				// PHP 8.1 backed enums can implement interfaces (but not extend).
+				let mut cursor = node.walk();
+				for child in node.children(&mut cursor) {
+					if child.kind() == "class_interface_clause" {
+						collect_php_clause_names(
+							child,
+							contents,
+							super::TypeRelationKind::Implements,
+							&mut out,
+						);
+					}
+				}
+			}
 			_ => {}
 		}
 		out
@@ -307,6 +326,9 @@ fn parse_php_use_statement(use_text: &str) -> Option<Vec<String>> {
 	// Handle grouped: use Prefix\{A, B as C, D}
 	if let Some(brace_start) = rest.find('{') {
 		if let Some(brace_end) = rest.rfind('}') {
+			if brace_end <= brace_start {
+				return None;
+			}
 			let prefix = rest[..brace_start].trim_end_matches('\\');
 			let items = &rest[brace_start + 1..brace_end];
 			for item in items.split(',') {
@@ -484,10 +506,7 @@ fn collect_php_clause_names(
 ) {
 	let mut cursor = clause.walk();
 	for child in clause.children(&mut cursor) {
-		if matches!(
-			child.kind(),
-			"name" | "qualified_name" | "namespace_name_as_prefix" | "namespace_name"
-		) {
+		if matches!(child.kind(), "name" | "qualified_name" | "relative_name") {
 			if let Ok(text) = child.utf8_text(contents.as_bytes()) {
 				if let Some(name) = super::simple_type_name(text) {
 					out.push((kind, name));

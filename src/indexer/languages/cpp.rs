@@ -19,6 +19,19 @@ use tree_sitter::Node;
 
 pub struct Cpp {}
 
+/// Recursively unwrap pointer/reference/array/init declarators to find the
+/// underlying identifier. tree-sitter-cpp nests these via the `declarator`
+/// field (e.g. `int* p` parses as `pointer_declarator { declarator: identifier }`),
+/// and a bare `kind() == "declarator"` check never matches any real node kind.
+fn find_cpp_declarator_name<'a>(node: Node<'a>, contents: &'a str) -> Option<&'a str> {
+	match node.kind() {
+		"identifier" | "field_identifier" => node.utf8_text(contents.as_bytes()).ok(),
+		_ => node
+			.child_by_field_name("declarator")
+			.and_then(|child| find_cpp_declarator_name(child, contents)),
+	}
+}
+
 impl Language for Cpp {
 	fn name(&self) -> &'static str {
 		"cpp"
@@ -93,30 +106,23 @@ impl Language for Cpp {
 				for child in node.children(&mut node.walk()) {
 					if child.kind() == "function_declarator" {
 						found_function = true;
-						for decl_child in child.children(&mut child.walk()) {
-							if decl_child.kind() == "identifier" {
-								if let Ok(name) = decl_child.utf8_text(contents.as_bytes()) {
-									symbols.push(name.to_string());
-								}
-								break;
-							}
+						if let Some(name) = find_cpp_declarator_name(child, contents) {
+							symbols.push(name.to_string());
 						}
 						break;
 					}
 				}
 
-				// If not a function declaration, extract variable names
+				// If not a function declaration, extract variable name(s). The
+				// `declarator` field may be a bare identifier (`int x;`), an
+				// `init_declarator` (`int x = 1;`), or wrapped in pointer/reference/
+				// array declarators (`int* p;`, `int& r;`, `int arr[10];`); a
+				// declaration can also list several comma-separated declarators.
 				if !found_function {
-					for child in node.children(&mut node.walk()) {
-						if child.kind() == "init_declarator" || child.kind() == "declarator" {
-							for decl_child in child.children(&mut child.walk()) {
-								if decl_child.kind() == "identifier" {
-									if let Ok(name) = decl_child.utf8_text(contents.as_bytes()) {
-										symbols.push(name.to_string());
-									}
-									break;
-								}
-							}
+					let mut cursor = node.walk();
+					for declarator in node.children_by_field_name("declarator", &mut cursor) {
+						if let Some(name) = find_cpp_declarator_name(declarator, contents) {
+							symbols.push(name.to_string());
 						}
 					}
 				}
@@ -382,11 +388,14 @@ impl Language for Cpp {
 
 		let registry = FileRegistry::new(all_files);
 
-		if import_path.starts_with('"') && import_path.ends_with('"') {
+		if import_path.len() >= 2 && import_path.starts_with('"') && import_path.ends_with('"') {
 			// Local include: #include "header.h"
 			let header_name = &import_path[1..import_path.len() - 1];
 			self.resolve_local_include(header_name, source_file, &registry)
-		} else if import_path.starts_with('<') && import_path.ends_with('>') {
+		} else if import_path.len() >= 2
+			&& import_path.starts_with('<')
+			&& import_path.ends_with('>')
+		{
 			// System include: #include <header.h> - try to find in project
 			let header_name = &import_path[1..import_path.len() - 1];
 			registry.find_exact_file(header_name)
@@ -433,21 +442,15 @@ impl Cpp {
 
 				match child.kind() {
 					"declaration" => {
-						// Handle variable declarations
-						for decl_child in child.children(&mut child.walk()) {
-							if decl_child.kind() == "init_declarator"
-								|| decl_child.kind() == "declarator"
-							{
-								for init_child in decl_child.children(&mut decl_child.walk()) {
-									if init_child.kind() == "identifier" {
-										if let Ok(name) = init_child.utf8_text(contents.as_bytes())
-										{
-											if !symbols.contains(&name.to_string()) {
-												symbols.push(name.to_string());
-											}
-										}
-										break;
-									}
+						// Handle variable declarations (bare, initialized, pointer/
+						// reference/array, and comma-separated multi-declarators)
+						let mut decl_cursor = child.walk();
+						for declarator in
+							child.children_by_field_name("declarator", &mut decl_cursor)
+						{
+							if let Some(name) = find_cpp_declarator_name(declarator, contents) {
+								if !symbols.contains(&name.to_string()) {
+									symbols.push(name.to_string());
 								}
 							}
 						}
@@ -483,15 +486,16 @@ impl Cpp {
 
 				match child.kind() {
 					"field_declaration" => {
-						// Extract field names
-						for field_child in child.children(&mut child.walk()) {
-							if field_child.kind() == "field_identifier"
-								|| field_child.kind() == "identifier"
-							{
-								if let Ok(name) = field_child.utf8_text(contents.as_bytes()) {
-									if !symbols.contains(&name.to_string()) {
-										symbols.push(name.to_string());
-									}
+						// Extract field names, including pointer/reference/array fields
+						// and prototype-only methods (`void foo();`, `virtual ... = 0;`),
+						// whose declarator is `function_declarator`, not a bare identifier.
+						let mut field_cursor = child.walk();
+						for declarator in
+							child.children_by_field_name("declarator", &mut field_cursor)
+						{
+							if let Some(name) = find_cpp_declarator_name(declarator, contents) {
+								if !symbols.contains(&name.to_string()) {
+									symbols.push(name.to_string());
 								}
 							}
 						}
@@ -500,15 +504,9 @@ impl Cpp {
 						// Handle method definitions
 						for fn_child in child.children(&mut child.walk()) {
 							if fn_child.kind() == "function_declarator" {
-								for decl_child in fn_child.children(&mut fn_child.walk()) {
-									if decl_child.kind() == "identifier" {
-										if let Ok(name) = decl_child.utf8_text(contents.as_bytes())
-										{
-											if !symbols.contains(&name.to_string()) {
-												symbols.push(name.to_string());
-											}
-										}
-										break;
+								if let Some(name) = find_cpp_declarator_name(fn_child, contents) {
+									if !symbols.contains(&name.to_string()) {
+										symbols.push(name.to_string());
 									}
 								}
 								break;
@@ -580,12 +578,8 @@ impl Cpp {
 	fn extract_function_name(&self, node: Node, contents: &str) -> Option<String> {
 		for child in node.children(&mut node.walk()) {
 			if child.kind() == "function_declarator" {
-				for decl_child in child.children(&mut child.walk()) {
-					if decl_child.kind() == "identifier" {
-						if let Ok(name) = decl_child.utf8_text(contents.as_bytes()) {
-							return Some(name.to_string());
-						}
-					}
+				if let Some(name) = find_cpp_declarator_name(child, contents) {
+					return Some(name.to_string());
 				}
 			}
 		}
@@ -596,15 +590,10 @@ impl Cpp {
 	fn extract_variable_names(&self, node: Node, contents: &str) -> Option<Vec<String>> {
 		let mut var_names = Vec::new();
 
-		for child in node.children(&mut node.walk()) {
-			if child.kind() == "init_declarator" || child.kind() == "declarator" {
-				for decl_child in child.children(&mut child.walk()) {
-					if decl_child.kind() == "identifier" {
-						if let Ok(name) = decl_child.utf8_text(contents.as_bytes()) {
-							var_names.push(name.to_string());
-						}
-					}
-				}
+		let mut cursor = node.walk();
+		for declarator in node.children_by_field_name("declarator", &mut cursor) {
+			if let Some(name) = find_cpp_declarator_name(declarator, contents) {
+				var_names.push(name.to_string());
 			}
 		}
 

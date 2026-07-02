@@ -293,13 +293,22 @@ impl Go {
 						// Recursively process nested blocks
 						self.extract_go_variables(child, contents, symbols);
 					}
-					"if_statement" | "for_statement" | "switch_statement" => {
-						// Process blocks inside control structures
+					"if_statement"
+					| "for_statement"
+					| "expression_switch_statement"
+					| "type_switch_statement" => {
+						// Process blocks inside control structures. Switch statements
+						// don't exist as node kind "switch_statement" in tree-sitter-go.
 						for stmt_child in child.children(&mut child.walk()) {
 							if stmt_child.kind() == "block" {
 								self.extract_go_variables(stmt_child, contents, symbols);
 							}
 						}
+					}
+					"expression_case" | "default_case" | "type_case" => {
+						// Switch case bodies hold statements directly (not wrapped in
+						// a nested "block"), so recurse straight into the case node.
+						self.extract_go_variables(child, contents, symbols);
 					}
 					_ => {}
 				}
@@ -365,6 +374,8 @@ fn parse_go_import_statement(import_text: &str) -> Option<Vec<String>> {
 	// Handle single import: import "package" or import alias "package"
 	if cleaned.starts_with("import ") && !cleaned.contains('(') {
 		let rest = cleaned[7..].trim(); // Skip "import "
+								  // Strip a trailing "// comment" so it doesn't get counted as extra tokens
+		let rest = rest.split("//").next().unwrap_or(rest).trim();
 
 		let parts: Vec<&str> = rest.split_whitespace().collect();
 		let raw_path = if parts.len() == 2 {
@@ -391,6 +402,8 @@ fn parse_go_import_statement(import_text: &str) -> Option<Vec<String>> {
 					if line.is_empty() || line.starts_with("//") {
 						continue;
 					}
+					// Strip a trailing "// comment" (e.g. blank imports: `_ "pq" // driver`)
+					let line = line.split("//").next().unwrap_or(line).trim();
 
 					// Handle: alias "package" or "package"
 					let parts: Vec<&str> = line.split_whitespace().collect();

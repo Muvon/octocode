@@ -192,9 +192,12 @@ impl Language for Rust {
 					if child.kind() == "visibility_modifier" {
 						if let Ok(vis_text) = child.utf8_text(contents.as_bytes()) {
 							if vis_text.contains("pub") {
-								// Extract the item name as an export
+								// Extract the item name as an export. struct/enum/trait names
+								// are `type_identifier`; function/const/macro names are `identifier`.
 								for name_child in node.children(&mut node.walk()) {
-									if name_child.kind() == "identifier" {
+									if name_child.kind() == "identifier"
+										|| name_child.kind() == "type_identifier"
+									{
 										if let Ok(name) = name_child.utf8_text(contents.as_bytes())
 										{
 											exports.push(name.to_string());
@@ -226,12 +229,13 @@ impl Language for Rust {
 				Vec::new()
 			}
 			"macro_invocation" => {
-				// First child is the macro name (e.g. "vec", "println")
+				// First child is the macro name (e.g. "vec", "println", or a scoped
+				// path like "crate::utils::debug_log" for path-qualified macros).
 				if let Some(macro_node) = node.child(0) {
 					if let Ok(text) = macro_node.utf8_text(contents.as_bytes()) {
 						let name = text.trim().trim_end_matches('!');
 						if !name.is_empty() {
-							return vec![name.to_string()];
+							return super::extract_callee_identifiers(name);
 						}
 					}
 				}

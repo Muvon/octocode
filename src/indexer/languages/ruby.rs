@@ -31,15 +31,15 @@ impl Language for Ruby {
 	fn get_meaningful_kinds(&self) -> Vec<&'static str> {
 		// `class` and `module` are intentionally excluded so large containers don't
 		// collapse into a single chunk. Methods inside them are captured individually
-		// as `method` via recursion. `call` stays for require/load statements.
-		vec!["method", "call"]
+		// as `method`/`singleton_method` via recursion. `call` stays for require/load statements.
+		vec!["method", "singleton_method", "call"]
 	}
 
 	fn extract_symbols(&self, node: Node, contents: &str) -> Vec<String> {
 		let mut symbols = Vec::new();
 
 		match node.kind() {
-			"method" | "class" | "module" => {
+			"method" | "singleton_method" | "class" | "module" => {
 				// Find method, class, or module name
 				for child in node.children(&mut node.walk()) {
 					if child.kind() == "identifier" || child.kind() == "constant" {
@@ -52,7 +52,7 @@ impl Language for Ruby {
 
 				// For methods, extract local variables and the enclosing class/module
 				// name so queries like "Foo#bar" / "Foo.bar" resolve via BM25/dense.
-				if node.kind() == "method" {
+				if node.kind() == "method" || node.kind() == "singleton_method" {
 					if let Some(owner) = super::find_enclosing_container_name(
 						node,
 						contents,
@@ -160,16 +160,17 @@ impl Language for Ruby {
 
 	fn extract_function_calls(&self, node: Node, contents: &str) -> Vec<String> {
 		if node.kind() == "call" {
-			// Skip require/require_relative/load — those are imports
-			for child in node.children(&mut node.walk()) {
-				if child.kind() == "identifier" || child.kind() == "constant" {
-					if let Ok(text) = child.utf8_text(contents.as_bytes()) {
-						let name = text.trim();
-						if name == "require" || name == "require_relative" || name == "load" {
-							return Vec::new();
-						}
-						return super::extract_callee_identifiers(name);
+			// The `method` field is the actual callee name; for `receiver.method(...)`
+			// calls, children appear in source order (receiver, operator, method), so
+			// picking the first identifier/constant child would return the receiver.
+			if let Some(method) = node.child_by_field_name("method") {
+				if let Ok(text) = method.utf8_text(contents.as_bytes()) {
+					let name = text.trim();
+					// Skip require/require_relative/load — those are imports
+					if name == "require" || name == "require_relative" || name == "load" {
+						return Vec::new();
 					}
+					return super::extract_callee_identifiers(name);
 				}
 			}
 		}
@@ -300,8 +301,9 @@ impl Ruby {
 	// Helper to extract Ruby string literals
 	fn extract_ruby_string_literal(text: &str) -> Option<String> {
 		let text = text.trim();
-		if (text.starts_with('"') && text.ends_with('"'))
-			|| (text.starts_with('\'') && text.ends_with('\''))
+		if text.len() >= 2
+			&& ((text.starts_with('"') && text.ends_with('"'))
+				|| (text.starts_with('\'') && text.ends_with('\'')))
 		{
 			Some(text[1..text.len() - 1].to_string())
 		} else {

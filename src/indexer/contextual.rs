@@ -277,7 +277,11 @@ async fn generate_descriptions_batch(
 			let chunk_key = format!("{}", i + 1);
 			if let Some(desc) = obj.get(&chunk_key).and_then(|v| v.as_str()) {
 				let trimmed = if desc.len() > 300 {
-					format!("{}...", &desc[..297])
+					let mut end = 297;
+					while end > 0 && !desc.is_char_boundary(end) {
+						end -= 1;
+					}
+					format!("{}...", &desc[..end])
 				} else {
 					desc.to_string()
 				};

@@ -162,28 +162,79 @@ fn get_diff(
 					.collect();
 				Ok((diff, files, format!("Range: {}", target)))
 			} else {
-				// Try as commit hash first
-				let diff_result =
-					run_git(repo_path, &["diff", &format!("{}^..{}", target, target)]);
-				if let Ok(diff) = diff_result {
-					let files = run_git(
-						repo_path,
-						&["diff", "--name-only", &format!("{}^..{}", target, target)],
-					)?
-					.lines()
-					.filter(|l| !l.trim().is_empty())
-					.map(|l| l.to_string())
-					.collect();
+				// Branches take priority over the commit-hash interpretation below:
+				// `branch^` also resolves validly for any branch with a parent commit,
+				// so trying the commit-hash diff first would misread a branch name as
+				// "diff this single commit" and silently drop everything before its tip.
+				let is_branch = ["refs/heads/", "refs/remotes/"].iter().any(|prefix| {
+					Command::new("git")
+						.args([
+							"show-ref",
+							"--verify",
+							"--quiet",
+							&format!("{}{}", prefix, target),
+						])
+						.current_dir(repo_path)
+						.status()
+						.map(|s| s.success())
+						.unwrap_or(false)
+				});
 
-					// Get commit message
-					let msg = run_git(repo_path, &["log", "-1", "--format=%s", target])
-						.unwrap_or_default();
-					let label =
-						format!("Commit: {} {}", &target[..target.len().min(7)], msg.trim());
-					return Ok((diff, files, label));
+				if !is_branch {
+					// Try as commit hash
+					let diff_result =
+						run_git(repo_path, &["diff", &format!("{}^..{}", target, target)]);
+					if let Ok(diff) = diff_result {
+						let files = run_git(
+							repo_path,
+							&["diff", "--name-only", &format!("{}^..{}", target, target)],
+						)?
+						.lines()
+						.filter(|l| !l.trim().is_empty())
+						.map(|l| l.to_string())
+						.collect();
+
+						// Get commit message
+						let msg = run_git(repo_path, &["log", "-1", "--format=%s", target])
+							.unwrap_or_default();
+						let label =
+							format!("Commit: {} {}", &target[..target.len().min(7)], msg.trim());
+						return Ok((diff, files, label));
+					}
+
+					// `target^` failed — this happens for a valid commit with no parent
+					// (the repo's root commit). Diff against the empty tree instead of
+					// falling through to the branch path below, which would be empty
+					// for any commit that's an ancestor of the default branch.
+					let is_commit = Command::new("git")
+						.args([
+							"rev-parse",
+							"--verify",
+							"--quiet",
+							&format!("{}^{{commit}}", target),
+						])
+						.current_dir(repo_path)
+						.status()
+						.map(|s| s.success())
+						.unwrap_or(false);
+					if is_commit {
+						const EMPTY_TREE: &str = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+						let range = format!("{}..{}", EMPTY_TREE, target);
+						let diff = run_git(repo_path, &["diff", &range])?;
+						let files = run_git(repo_path, &["diff", "--name-only", &range])?
+							.lines()
+							.filter(|l| !l.trim().is_empty())
+							.map(|l| l.to_string())
+							.collect();
+						let msg = run_git(repo_path, &["log", "-1", "--format=%s", target])
+							.unwrap_or_default();
+						let label =
+							format!("Commit: {} {}", &target[..target.len().min(7)], msg.trim());
+						return Ok((diff, files, label));
+					}
 				}
 
-				// Try as branch name — diff against default branch
+				// Branch name (or anything else) — diff against default branch
 				let default_branch =
 					octocode::indexer::git_utils::GitUtils::get_default_branch(repo_path)?;
 				let range = format!("{}...{}", default_branch, target);
@@ -266,7 +317,8 @@ async fn gather_diff_context(store: &Store, changed_files: &[String], config: &C
 			if !related.trim().is_empty() && !related.contains("No results") {
 				context.push_str("\nRelated code signatures:\n");
 				if related.len() > 1500 {
-					context.push_str(&related[..1500]);
+					let end = floor_char_boundary(&related, 1500);
+					context.push_str(&related[..end]);
 				} else {
 					context.push_str(&related);
 				}
@@ -296,7 +348,8 @@ async fn analyze_diff(
 	// Large diff: chunk and analyze each, then combine
 	let chunks = diff_chunker::chunk_diff(diff);
 	if chunks.len() <= 1 {
-		let truncated = &diff[..max_diff_chars];
+		let end = floor_char_boundary(diff, max_diff_chars);
+		let truncated = &diff[..end];
 		return analyze_single_diff(&client, truncated, changed_files, context).await;
 	}
 
@@ -495,10 +548,20 @@ fn print_markdown(analysis: &DiffAnalysis, label: &str) {
 	}
 }
 
+/// Largest byte index <= `index` that lands on a char boundary of `s`.
+fn floor_char_boundary(s: &str, index: usize) -> usize {
+	let mut end = index.min(s.len());
+	while end > 0 && !s.is_char_boundary(end) {
+		end -= 1;
+	}
+	end
+}
+
 fn truncate_str(s: &str, max: usize) -> String {
 	if s.len() <= max {
 		s.to_string()
 	} else {
-		format!("{}...", &s[..max - 3])
+		let end = floor_char_boundary(s, max.saturating_sub(3));
+		format!("{}...", &s[..end])
 	}
 }

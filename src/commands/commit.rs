@@ -383,11 +383,18 @@ async fn rewrite_commit_message(
 			std::fs::set_permissions(&editor_file, std::fs::Permissions::from_mode(0o755))?;
 		}
 
-		// Sequence editor: marks only our target commit as 'reword', rest stay 'pick'
+		// Sequence editor: marks only our target commit as 'reword', rest stay 'pick'.
+		// The rebase-todo list abbreviates hashes to whatever length `core.abbrev`
+		// resolves to (default "auto", which grows with repo size) — a hardcoded
+		// 7-char match can silently fail to match on repos where it's longer, and
+		// `sed` still exits 0 with nothing changed. Match any abbreviation length
+		// of the target hash, and fail loudly if the substitution didn't land.
+		let hash_alternatives: Vec<&str> =
+			(4..=full_hash.len()).map(|len| &full_hash[..len]).collect();
+		let hash_pattern = hash_alternatives.join("|");
 		let seq_script = format!(
-			"#!/bin/sh\nsed -i.bak 's/^pick {}/reword {}/' \"$1\"",
-			&full_hash[..7],
-			&full_hash[..7]
+			"#!/bin/sh\nsed -E -i.bak 's/^pick ({})/reword \\1/' \"$1\"\nif ! grep -q '^reword ' \"$1\"; then\n  echo \"octocode: failed to mark {} for reword\" >&2\n  exit 1\nfi",
+			hash_pattern, full_hash
 		);
 		let seq_file = repo_path.join(".git").join("octocode_seq_editor.sh");
 		std::fs::write(&seq_file, &seq_script)?;
@@ -996,7 +1003,7 @@ async fn run_precommit_hooks(
 					println!("📂 Re-staging modified files...");
 					for file in &staged_and_modified {
 						let add_output = Command::new("git")
-							.args(["add", file.trim()])
+							.args(["add", "--", file.trim()])
 							.current_dir(repo_path)
 							.output()?;
 

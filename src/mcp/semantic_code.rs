@@ -320,17 +320,6 @@ impl SemanticCodeProvider {
 				));
 			}
 
-			// Basic path traversal protection
-			if pattern.contains("..") && (pattern.contains("../") || pattern.contains("..\\")) {
-				return Err(McpError::invalid_params(
-					format!(
-						"Invalid file pattern '{}': path traversal not allowed",
-						pattern
-					),
-					"view_signatures",
-				));
-			}
-
 			file_patterns.push(pattern.to_string());
 		}
 
@@ -345,6 +334,11 @@ impl SemanticCodeProvider {
 		let mut matching_files = std::collections::HashSet::new();
 		let mut glob_patterns = Vec::new();
 
+		let canonical_working_directory = self
+			.working_directory
+			.canonicalize()
+			.unwrap_or_else(|_| self.working_directory.clone());
+
 		for pattern in &file_patterns {
 			let pattern_path = if std::path::Path::new(pattern).is_relative() {
 				self.working_directory.join(pattern)
@@ -353,7 +347,20 @@ impl SemanticCodeProvider {
 			};
 
 			if pattern_path.is_file() {
-				// Direct file path — use it immediately, no glob walking needed
+				// Direct file path — confirm it stays within the working directory
+				// before using it, so absolute paths / ".." can't read arbitrary files.
+				let canonical_pattern_path = pattern_path
+					.canonicalize()
+					.unwrap_or_else(|_| pattern_path.clone());
+				if !canonical_pattern_path.starts_with(&canonical_working_directory) {
+					return Err(McpError::invalid_params(
+						format!(
+							"Invalid file pattern '{}': resolves outside the working directory",
+							pattern
+						),
+						"view_signatures",
+					));
+				}
 				matching_files.insert(pattern_path);
 			} else {
 				// Not a direct file — treat as glob pattern

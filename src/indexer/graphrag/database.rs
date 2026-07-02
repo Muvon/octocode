@@ -18,7 +18,7 @@ use crate::indexer::graphrag::types::{CodeGraph, CodeNode, CodeRelationship};
 use crate::indexer::graphrag::utils::cosine_similarity;
 use crate::store::Store;
 use anyhow::{Context, Result};
-use arrow::array::{Array, FixedSizeListArray, Float32Array, StringArray};
+use arrow::array::{Array, FixedSizeListArray, Float32Array, StringArray, UInt32Array};
 use arrow::datatypes::{DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
 use std::collections::HashMap;
@@ -43,6 +43,16 @@ fn extract_f32_column<'a>(batch: &'a RecordBatch, column_name: &str) -> Result<&
 		.as_any()
 		.downcast_ref::<Float32Array>()
 		.with_context(|| format!("Column '{}' is not a Float32Array", column_name))
+}
+
+/// Helper function to safely extract a UInt32Array column from a RecordBatch
+fn extract_u32_column<'a>(batch: &'a RecordBatch, column_name: &str) -> Result<&'a UInt32Array> {
+	batch
+		.column_by_name(column_name)
+		.with_context(|| format!("Column '{}' not found in batch", column_name))?
+		.as_any()
+		.downcast_ref::<UInt32Array>()
+		.with_context(|| format!("Column '{}' is not a UInt32Array", column_name))
 }
 
 /// Helper function to safely extract a FixedSizeListArray column from a RecordBatch
@@ -102,6 +112,9 @@ impl<'a> DatabaseOperations<'a> {
 		let symbols_array = extract_string_column(&node_batch, "symbols")?;
 		let imports_array = extract_string_column(&node_batch, "imports")?;
 		let exports_array = extract_string_column(&node_batch, "exports")?;
+		let functions_array = extract_string_column(&node_batch, "functions")?;
+		let size_lines_array = extract_u32_column(&node_batch, "size_lines")?;
+		let language_array = extract_string_column(&node_batch, "language")?;
 		let hash_array = extract_string_column(&node_batch, "hash")?;
 
 		// Get the embedding fixed size list array
@@ -143,6 +156,16 @@ impl<'a> DatabaseOperations<'a> {
 				serde_json::from_str(exports_array.value(i)).unwrap_or_default()
 			};
 
+			// Parse functions JSON
+			let functions: Vec<crate::indexer::graphrag::types::FunctionInfo> =
+				if functions_array.is_null(i) {
+					Vec::new()
+				} else {
+					serde_json::from_str(functions_array.value(i)).unwrap_or_default()
+				};
+
+			let size_lines = size_lines_array.value(i);
+			let language = language_array.value(i).to_string();
 			let hash = hash_array.value(i).to_string();
 
 			// Extract the embedding for this node
@@ -164,9 +187,9 @@ impl<'a> DatabaseOperations<'a> {
 				symbols,
 				imports,
 				exports,
-				functions: Vec::new(), // Default empty for nodes loaded from old schema
-				size_lines: 0,         // Default for nodes loaded from old schema
-				language: "unknown".to_string(), // Default for nodes loaded from old schema
+				functions,
+				size_lines,
+				language,
 				hash,
 				embedding,
 			};
@@ -288,6 +311,11 @@ impl<'a> DatabaseOperations<'a> {
 		let path_array = extract_string_column(&node_batch, "path")?;
 		let description_array = extract_string_column(&node_batch, "description")?;
 		let symbols_array = extract_string_column(&node_batch, "symbols")?;
+		let imports_array = extract_string_column(&node_batch, "imports")?;
+		let exports_array = extract_string_column(&node_batch, "exports")?;
+		let functions_array = extract_string_column(&node_batch, "functions")?;
+		let size_lines_array = extract_u32_column(&node_batch, "size_lines")?;
+		let language_array = extract_string_column(&node_batch, "language")?;
 		let hash_array = extract_string_column(&node_batch, "hash")?;
 
 		// Get the embedding fixed size list array
@@ -315,6 +343,30 @@ impl<'a> DatabaseOperations<'a> {
 				serde_json::from_str(symbols_array.value(i)).unwrap_or_default()
 			};
 
+			// Parse imports JSON
+			let imports: Vec<String> = if imports_array.is_null(i) {
+				Vec::new()
+			} else {
+				serde_json::from_str(imports_array.value(i)).unwrap_or_default()
+			};
+
+			// Parse exports JSON
+			let exports: Vec<String> = if exports_array.is_null(i) {
+				Vec::new()
+			} else {
+				serde_json::from_str(exports_array.value(i)).unwrap_or_default()
+			};
+
+			// Parse functions JSON
+			let functions: Vec<crate::indexer::graphrag::types::FunctionInfo> =
+				if functions_array.is_null(i) {
+					Vec::new()
+				} else {
+					serde_json::from_str(functions_array.value(i)).unwrap_or_default()
+				};
+
+			let size_lines = size_lines_array.value(i);
+			let language = language_array.value(i).to_string();
 			let hash = hash_array.value(i).to_string();
 
 			// Extract the embedding for this node
@@ -353,11 +405,11 @@ impl<'a> DatabaseOperations<'a> {
 					path,
 					description,
 					symbols,
-					imports: Vec::new(),   // Default empty for nodes loaded from old schema
-					exports: Vec::new(),   // Default empty for nodes loaded from old schema
-					functions: Vec::new(), // Default empty for nodes loaded from old schema
-					size_lines: 0,         // Default for nodes loaded from old schema
-					language: "unknown".to_string(), // Default for nodes loaded from old schema
+					imports,
+					exports,
+					functions,
+					size_lines,
+					language,
 					hash,
 					embedding,
 				};

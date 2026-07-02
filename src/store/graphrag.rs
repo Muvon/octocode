@@ -816,40 +816,31 @@ impl<'a> GraphRagOperations<'a> {
 
 		// Concatenate all batches if we have multiple
 		if all_batches.is_empty() {
-			// Return empty batch with expected schema
+			// Return empty batch with expected schema that matches the actual storage schema
 			let schema = Arc::new(Schema::new(vec![
 				Field::new("id", DataType::Utf8, false),
-				Field::new("file_path", DataType::Utf8, false),
-				Field::new("node_type", DataType::Utf8, false),
 				Field::new("name", DataType::Utf8, false),
-				Field::new("content", DataType::Utf8, false),
-				Field::new("description", DataType::Utf8, true),
+				Field::new("kind", DataType::Utf8, false),
+				Field::new("path", DataType::Utf8, false),
+				Field::new("description", DataType::Utf8, false),
+				Field::new("symbols", DataType::Utf8, true),
+				Field::new("imports", DataType::Utf8, true),
+				Field::new("exports", DataType::Utf8, true),
+				Field::new("functions", DataType::Utf8, true),
+				Field::new("size_lines", DataType::UInt32, false),
+				Field::new("language", DataType::Utf8, false),
+				Field::new("hash", DataType::Utf8, false),
 			]));
 			Ok(RecordBatch::new_empty(schema))
 		} else if all_batches.len() == 1 {
 			Ok(all_batches.into_iter().next().unwrap())
 		} else {
-			// Concatenate multiple batches
-			let schema = all_batches[0].schema();
-			let mut columns = Vec::new();
-
-			for i in 0..schema.fields().len() {
-				let _field = schema.field(i);
-				let mut column_data = Vec::new();
-
-				for batch in &all_batches {
-					if let Some(column) = batch.column(i).as_any().downcast_ref::<StringArray>() {
-						for value in column.iter() {
-							column_data.push(value);
-						}
-					}
-				}
-
-				columns
-					.push(Arc::new(StringArray::from(column_data)) as Arc<dyn arrow::array::Array>);
-			}
-
-			Ok(RecordBatch::try_new(schema, columns)?)
+			// Concatenate multiple batches, preserving every column's real type
+			// (the schema includes UInt32 and FixedSizeList columns, not just strings).
+			Ok(arrow::compute::concat_batches(
+				&all_batches[0].schema(),
+				&all_batches,
+			)?)
 		}
 	}
 

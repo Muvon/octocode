@@ -968,8 +968,12 @@ pub fn canonical_kind(intent: &str, language: &str) -> Option<&'static str> {
 
 		// ---- method (distinct from free function on some langs) ----
 		("method" | "method_definition", "javascript" | "typescript") => Some("method_definition"),
-		("method", "go" | "method_declaration") => Some("method_declaration"),
-		("method", "java" | "method_invocation") => Some("method_declaration"),
+		("method" | "method_declaration", "go") => Some("method_declaration"),
+		// NB: "method_invocation" is intentionally not an alias here — in Java's
+		// grammar that's the *call-expression* kind, already handled below in the
+		// "call expressions" section; aliasing it to a declaration kind here would
+		// shadow that arm and make it unreachable.
+		("method", "java") => Some("method_declaration"),
 
 		// ---- class / struct / trait / interface / impl ----
 		("class" | "class_declaration", "javascript" | "typescript") => Some("class_declaration"),
@@ -1202,8 +1206,8 @@ pub fn format_matches_with_context(
 				if let Some(bc) = &m.breadcrumb {
 					output.push_str(&format!("» {}\n", bc));
 				}
-				let start = m.line.saturating_sub(context + 1);
-				let end = (m.line + context).min(lines.len());
+				let start = m.line.saturating_sub(context.saturating_add(1));
+				let end = m.line.saturating_add(context).min(lines.len());
 				for (i, line) in lines.iter().enumerate().take(end).skip(start) {
 					let prefix = if i + 1 == m.line { ">" } else { " " };
 					output.push_str(&format!("{} {}:  {}\n", prefix, i + 1, line));

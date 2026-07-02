@@ -154,6 +154,7 @@ pub async fn execute(
 		indexer::index_files(store, state.clone(), config, git_repo_root.as_deref()).await?;
 
 		let _ = progress_handle.await;
+		print_indexing_summary(&state);
 		store.flush().await?;
 
 		lock.release()?;
@@ -287,7 +288,19 @@ pub async fn display_indexing_progress(state: Arc<RwLock<state::IndexState>>) {
 		tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 	}
 
-	// Final summary message
+	// The final summary is printed by the caller (see `print_indexing_summary`),
+	// not here: this task's JoinHandle is discarded with `let _ = ... .await`,
+	// and `print!`/`println!` panic on a broken output pipe — if that happened
+	// mid-loop, a summary printed only from inside this task would be lost
+	// with no visible error. Just clear the spinner line before returning.
+	print!("\r\x1b[K");
+	let _ = std::io::stdout().flush();
+}
+
+/// Print the "✓ Indexing complete!" summary from `state`. Called from the
+/// main task after the progress-display task is joined, so the summary is
+/// always shown even if that task panicked (e.g. on a broken output pipe).
+pub fn print_indexing_summary(state: &Arc<RwLock<state::IndexState>>) {
 	let final_indexed;
 	let final_skipped;
 	let final_total;
@@ -330,6 +343,15 @@ pub async fn display_indexing_progress(state: Arc<RwLock<state::IndexState>>) {
 			final_indexed, final_total, final_graphrag_blocks
 		);
 	}
+}
+
+/// True if `haystack` equals `needle` or ends with it right after a '/' path
+/// boundary — so "index.rs" matches ".../src/index.rs" but not "reindex.rs".
+fn ends_with_path_boundary(haystack: &str, needle: &str) -> bool {
+	haystack == needle
+		|| (haystack.ends_with(needle)
+			&& haystack.len() > needle.len()
+			&& haystack.as_bytes()[haystack.len() - needle.len() - 1] == b'/')
 }
 
 async fn show_graphrag_connections(store: &Store, file_path: &str) -> Result<(), anyhow::Error> {
@@ -386,10 +408,12 @@ async fn show_graphrag_connections(store: &Store, file_path: &str) -> Result<(),
 		// 2. Match after stripping "./" prefix from stored path
 		// 3. Match if user path starts with stored path
 		// 4. Match if stored path ends with user path
+		// Suffix matches are anchored to a path boundary so "index.rs" doesn't
+		// also match "reindex.rs".
 		let matches = stored_path == file_path
 			|| (stored_path.strip_prefix("./") == Some(file_path))
-			|| stored_path.ends_with(file_path)
-			|| file_path.ends_with(stored_path);
+			|| ends_with_path_boundary(stored_path, file_path)
+			|| ends_with_path_boundary(file_path, stored_path);
 
 		if matches {
 			file_nodes.push((

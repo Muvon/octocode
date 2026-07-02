@@ -133,17 +133,22 @@ impl Language for Python {
 				}
 			}
 			"function_definition" | "class_definition" => {
-				// In Python, everything at module level is "exported" by default
-				// Check if this is at module level (parent is module)
-				if let Some(parent) = node.parent() {
-					if parent.kind() == "module" {
-						// Extract the name
-						for child in node.children(&mut node.walk()) {
-							if child.kind() == "identifier" {
-								if let Ok(name) = child.utf8_text(contents.as_bytes()) {
-									exports.push(name.to_string());
-									break;
-								}
+				// In Python, everything at module level is "exported" by default.
+				// Check if this is at module level — a decorated definition's
+				// immediate parent is `decorated_definition`, not `module`, so
+				// walk up through that wrapper too.
+				let is_module_level = node.parent().is_some_and(|parent| {
+					parent.kind() == "module"
+						|| (parent.kind() == "decorated_definition"
+							&& parent.parent().is_some_and(|gp| gp.kind() == "module"))
+				});
+				if is_module_level {
+					// Extract the name
+					for child in node.children(&mut node.walk()) {
+						if child.kind() == "identifier" {
+							if let Ok(name) = child.utf8_text(contents.as_bytes()) {
+								exports.push(name.to_string());
+								break;
 							}
 						}
 					}
@@ -273,10 +278,31 @@ impl Python {
 					}
 					"for_statement" | "while_statement" | "if_statement" | "try_statement"
 					| "with_statement" => {
-						// Recursive search in nested blocks
+						// Recursive search in nested blocks, including elif/else/except/
+						// finally clauses, whose own body lives in a further-nested
+						// "block" child (they aren't "block" nodes themselves).
 						for stmt_child in child.children(&mut child.walk()) {
-							if stmt_child.kind() == "block" {
-								self.extract_python_variables(stmt_child, contents, symbols);
+							match stmt_child.kind() {
+								"block" => {
+									self.extract_python_variables(stmt_child, contents, symbols);
+								}
+								"elif_clause"
+								| "else_clause"
+								| "except_clause"
+								| "except_group_clause"
+								| "finally_clause" => {
+									for clause_child in stmt_child.children(&mut stmt_child.walk())
+									{
+										if clause_child.kind() == "block" {
+											self.extract_python_variables(
+												clause_child,
+												contents,
+												symbols,
+											);
+										}
+									}
+								}
+								_ => {}
 							}
 						}
 					}

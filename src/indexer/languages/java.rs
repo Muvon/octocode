@@ -117,14 +117,18 @@ impl Language for Java {
 		match node.kind() {
 			"import_declaration" => {
 				if let Ok(import_text) = node.utf8_text(contents.as_bytes()) {
-					// Clean up import statement
-					let import_path = import_text
+					// Clean up import statement. Must trim whitespace between
+					// "import" and "static" before checking for the "static" prefix,
+					// otherwise `import static ...` never has "static" stripped.
+					let after_import = import_text
 						.trim()
 						.strip_prefix("import")
 						.unwrap_or(import_text)
+						.trim_start();
+					let import_path = after_import
 						.strip_prefix("static")
-						.unwrap_or(import_text.strip_prefix("import").unwrap_or(import_text))
-						.trim()
+						.map(str::trim_start)
+						.unwrap_or(after_import)
 						.trim_end_matches(';')
 						.trim();
 					if !import_path.is_empty() {
@@ -324,6 +328,20 @@ impl Language for Java {
 							child,
 							contents,
 							super::TypeRelationKind::Extends,
+							&mut out,
+						);
+					}
+				}
+			}
+			// `enum Foo implements Bar { }` / `record Point(...) implements Shape { }`
+			"enum_declaration" | "record_declaration" => {
+				let mut cursor = node.walk();
+				for child in node.children(&mut cursor) {
+					if child.kind() == "super_interfaces" {
+						collect_java_clause_types(
+							child,
+							contents,
+							super::TypeRelationKind::Implements,
 							&mut out,
 						);
 					}

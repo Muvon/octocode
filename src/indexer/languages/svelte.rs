@@ -19,6 +19,34 @@ use tree_sitter::Node;
 
 pub struct Svelte {}
 
+/// Extract bound identifier names from a destructuring pattern's source text,
+/// e.g. `{ a, b: renamed, c = 1 }` -> ["a", "renamed", "c"], `[a, b]` -> ["a", "b"].
+fn extract_destructured_names(pattern: &str) -> Vec<String> {
+	let inner = pattern
+		.trim()
+		.trim_start_matches(['{', '['])
+		.trim_end_matches(['}', ']']);
+	inner
+		.split(',')
+		.filter_map(|item| {
+			let item = item.trim().trim_start_matches("...").trim();
+			// `key: renamed` -> the local binding is the name after ':'
+			let after_colon = item.split(':').next_back().unwrap_or(item).trim();
+			// `name = default` -> strip the default value
+			let name = after_colon.split('=').next().unwrap_or(after_colon).trim();
+			if !name.is_empty()
+				&& name
+					.chars()
+					.all(|c| c.is_alphanumeric() || c == '_' || c == '$')
+			{
+				Some(name.to_string())
+			} else {
+				None
+			}
+		})
+		.collect()
+}
+
 impl Language for Svelte {
 	fn name(&self) -> &'static str {
 		"svelte"
@@ -223,9 +251,6 @@ impl Svelte {
 		contents: &str,
 		symbols: &mut Vec<String>,
 	) {
-		// Only extract from elements that have Svelte-specific attributes
-		let mut has_svelte_attributes = false;
-
 		// Check for Svelte-specific attributes
 		for child in node.children(&mut node.walk()) {
 			if child.kind() == "start_tag" {
@@ -240,7 +265,6 @@ impl Svelte {
 										|| attr_name.starts_with("use:")
 										|| attr_name.starts_with("transition:")
 									{
-										has_svelte_attributes = true;
 										// Extract the directive name
 										symbols.push(attr_name.to_string());
 									}
@@ -256,7 +280,6 @@ impl Svelte {
 								&& !self.is_html_tag(tag_name)
 							{
 								symbols.push(tag_name.to_string());
-								has_svelte_attributes = true;
 							}
 						}
 					}
@@ -264,8 +287,15 @@ impl Svelte {
 			}
 		}
 
-		// Only recurse if this element has meaningful Svelte content
-		if !has_svelte_attributes {}
+		// Recurse into child elements so nested components/directives (e.g. a
+		// <Button on:click> inside a plain wrapper <div>) are still captured —
+		// the top-level region walker doesn't revisit an "element" node's
+		// children once it has already matched a meaningful region here.
+		for child in node.children(&mut node.walk()) {
+			if child.kind() == "element" {
+				self.extract_meaningful_element_symbols(child, contents, symbols);
+			}
+		}
 	}
 
 	/// Extract JavaScript patterns from text content
@@ -282,20 +312,16 @@ impl Svelte {
 					symbols.push(name);
 				}
 			}
-			// Extract variable declarations: let/const/var name =
+			// Extract variable declarations: let/const/var name = (or destructured)
 			else if line.starts_with("let ")
 				|| line.starts_with("const ")
 				|| line.starts_with("var ")
 			{
-				if let Some(name) = self.extract_variable_name(line) {
-					symbols.push(name);
-				}
+				symbols.extend(self.extract_variable_name(line));
 			}
-			// Extract export declarations: export let name =
+			// Extract export declarations: export let name = (or destructured)
 			else if line.starts_with("export let ") || line.starts_with("export const ") {
-				if let Some(name) = self.extract_export_name(line) {
-					symbols.push(name);
-				}
+				symbols.extend(self.extract_export_name(line));
 			}
 			// Extract reactive statements: $: name =
 			else if line.trim_start().starts_with("$:") {
@@ -344,30 +370,69 @@ impl Svelte {
 		None
 	}
 
-	/// Extract variable name from variable declaration line
-	fn extract_variable_name(&self, line: &str) -> Option<String> {
-		// let name = or const name = or var name =
-		let parts: Vec<&str> = line.split_whitespace().collect();
-		if parts.len() >= 4 && (parts[0] == "let" || parts[0] == "const" || parts[0] == "var") {
-			let name = parts[1].trim_end_matches('=').trim_end_matches(',').trim();
-			if !name.is_empty() && !self.is_svelte_keyword(name) {
-				return Some(name.to_string());
-			}
+	/// Extract variable name(s) from a variable declaration line
+	fn extract_variable_name(&self, line: &str) -> Vec<String> {
+		// let name = ... / const name = ... / var name = ...
+		// let { a, b } = ... / const [a, b] = ... (destructuring, e.g. Svelte 5 `$props()`)
+		let mut tokens = line.splitn(2, char::is_whitespace);
+		let keyword = tokens.next().unwrap_or("");
+		if !matches!(keyword, "let" | "const" | "var") {
+			return Vec::new();
 		}
-		None
+		let rest = tokens.next().unwrap_or("").trim();
+
+		if rest.starts_with('{') || rest.starts_with('[') {
+			let pattern = rest.split('=').next().unwrap_or(rest);
+			return extract_destructured_names(pattern);
+		}
+
+		let name = rest
+			.split_whitespace()
+			.next()
+			.unwrap_or("")
+			.trim_end_matches('=')
+			.trim_end_matches(',')
+			.trim();
+		if rest.split_whitespace().count() >= 3 && !name.is_empty() && !self.is_svelte_keyword(name)
+		{
+			vec![name.to_string()]
+		} else {
+			Vec::new()
+		}
 	}
 
-	/// Extract export name from export declaration line
-	fn extract_export_name(&self, line: &str) -> Option<String> {
-		// export let name = or export const name =
-		let parts: Vec<&str> = line.split_whitespace().collect();
-		if parts.len() >= 5 && parts[0] == "export" && (parts[1] == "let" || parts[1] == "const") {
-			let name = parts[2].trim_end_matches('=').trim_end_matches(',').trim();
-			if !name.is_empty() && !self.is_svelte_keyword(name) {
-				return Some(name.to_string());
-			}
+	/// Extract export name(s) from an export declaration line
+	fn extract_export_name(&self, line: &str) -> Vec<String> {
+		// export let name = ... / export const name = ...
+		// export let { a, b } = ... / export const [a, b] = ... (destructuring)
+		let Some(after_export) = line.strip_prefix("export ") else {
+			return Vec::new();
+		};
+		let mut tokens = after_export.splitn(2, char::is_whitespace);
+		let keyword = tokens.next().unwrap_or("");
+		if !matches!(keyword, "let" | "const") {
+			return Vec::new();
 		}
-		None
+		let rest = tokens.next().unwrap_or("").trim();
+
+		if rest.starts_with('{') || rest.starts_with('[') {
+			let pattern = rest.split('=').next().unwrap_or(rest);
+			return extract_destructured_names(pattern);
+		}
+
+		let name = rest
+			.split_whitespace()
+			.next()
+			.unwrap_or("")
+			.trim_end_matches('=')
+			.trim_end_matches(',')
+			.trim();
+		if rest.split_whitespace().count() >= 3 && !name.is_empty() && !self.is_svelte_keyword(name)
+		{
+			vec![name.to_string()]
+		} else {
+			Vec::new()
+		}
 	}
 
 	/// Extract reactive variable name from reactive statement
@@ -443,8 +508,28 @@ impl Svelte {
 			// Remove <script> and </script> tags, return inner content
 			let text = text.trim();
 			if text.starts_with("<script") && text.ends_with("</script>") {
-				// Find the end of the opening tag
-				if let Some(tag_end) = text.find('>') {
+				// Find the end of the opening tag, skipping '>' characters that
+				// appear inside a quoted attribute value (e.g. `<script data-cond="a>b">`).
+				let mut tag_end = None;
+				let mut quote: Option<char> = None;
+				for (i, c) in text.char_indices() {
+					match quote {
+						Some(q) => {
+							if c == q {
+								quote = None;
+							}
+						}
+						None => match c {
+							'"' | '\'' => quote = Some(c),
+							'>' => {
+								tag_end = Some(i);
+								break;
+							}
+							_ => {}
+						},
+					}
+				}
+				if let Some(tag_end) = tag_end {
 					let inner = &text[tag_end + 1..];
 					if let Some(closing_start) = inner.rfind("</script>") {
 						return inner[..closing_start].trim().to_string();

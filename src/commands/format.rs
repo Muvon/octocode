@@ -134,7 +134,7 @@ fn commit_changes(files: &[PathBuf]) -> Result<()> {
 	// Add files to git
 	for file in files {
 		let output = Command::new("git")
-			.args(["add", &file.to_string_lossy()])
+			.args(["add", "--", &file.to_string_lossy()])
 			.output()
 			.context("Failed to execute git add command")?;
 

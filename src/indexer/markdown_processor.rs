@@ -684,19 +684,31 @@ pub fn parse_document_hierarchy(contents: &str) -> DocumentHierarchy {
 			}
 		}
 
-		// Don't treat lines starting with # as headers if we're in a code block
-		if trimmed.starts_with('#') && !parser_state.in_code_block {
-			// Finalize previous section
+		// Don't treat lines starting with # as headers if we're in a code block.
+		// CommonMark caps ATX headers at 6 `#`; anything deeper is plain text.
+		let header_level = trimmed.chars().take_while(|&c| c == '#').count();
+		if trimmed.starts_with('#') && !parser_state.in_code_block && header_level <= 6 {
+			// Finalize previous section, or preserve any preamble content that
+			// appeared before the first header so it isn't silently dropped.
 			if let Some(mut section) = current_section.take() {
 				section.content = current_content.trim().to_string();
 				section.end_line = line_num.saturating_sub(1);
 				if !section.content.is_empty() {
 					hierarchy.add_section(section);
 				}
+			} else if !current_content.trim().is_empty() {
+				hierarchy.add_section(HeaderSection {
+					level: 1,
+					content: current_content.trim().to_string(),
+					context: Vec::new(),
+					start_line: 0,
+					end_line: line_num.saturating_sub(1),
+					children: Vec::new(),
+					parent: None,
+				});
 			}
 
 			// Parse new header
-			let header_level = trimmed.chars().take_while(|&c| c == '#').count();
 			let header_title = trimmed.trim_start_matches('#').trim().to_string();
 			let header_line = format!("{} {}", "#".repeat(header_level), header_title);
 
@@ -724,13 +736,23 @@ pub fn parse_document_hierarchy(contents: &str) -> DocumentHierarchy {
 		}
 	}
 
-	// Don't forget the last section
+	// Don't forget the last section (or the entire file if it had no headers at all)
 	if let Some(mut section) = current_section {
 		section.content = current_content.trim().to_string();
 		section.end_line = lines.len().saturating_sub(1);
 		if !section.content.is_empty() {
 			hierarchy.add_section(section);
 		}
+	} else if !current_content.trim().is_empty() {
+		hierarchy.add_section(HeaderSection {
+			level: 1,
+			content: current_content.trim().to_string(),
+			context: Vec::new(),
+			start_line: 0,
+			end_line: lines.len().saturating_sub(1),
+			children: Vec::new(),
+			parent: None,
+		});
 	}
 
 	// Build parent-child relationships

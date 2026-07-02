@@ -59,8 +59,12 @@ impl Language for Swift {
 				if let Some(owner) = super::find_enclosing_container_name(
 					node,
 					contents,
-					&["class_declaration", "protocol_declaration"],
-					&["type_identifier", "simple_identifier"],
+					&[
+						"class_declaration",
+						"protocol_declaration",
+						"extension_declaration",
+					],
+					&["type_identifier", "simple_identifier", "user_type"],
 				) {
 					symbols.push(owner);
 				}
@@ -81,8 +85,12 @@ impl Language for Swift {
 				if let Some(owner) = super::find_enclosing_container_name(
 					node,
 					contents,
-					&["class_declaration", "protocol_declaration"],
-					&["type_identifier", "simple_identifier"],
+					&[
+						"class_declaration",
+						"protocol_declaration",
+						"extension_declaration",
+					],
+					&["type_identifier", "simple_identifier", "user_type"],
 				) {
 					symbols.push(owner);
 				}
@@ -98,8 +106,12 @@ impl Language for Swift {
 				if let Some(owner) = super::find_enclosing_container_name(
 					node,
 					contents,
-					&["class_declaration", "protocol_declaration"],
-					&["type_identifier", "simple_identifier"],
+					&[
+						"class_declaration",
+						"protocol_declaration",
+						"extension_declaration",
+					],
+					&["type_identifier", "simple_identifier", "user_type"],
 				) {
 					symbols.push(owner);
 				}
@@ -112,8 +124,12 @@ impl Language for Swift {
 				if let Some(owner) = super::find_enclosing_container_name(
 					node,
 					contents,
-					&["class_declaration", "protocol_declaration"],
-					&["type_identifier", "simple_identifier"],
+					&[
+						"class_declaration",
+						"protocol_declaration",
+						"extension_declaration",
+					],
+					&["type_identifier", "simple_identifier", "user_type"],
 				) {
 					symbols.push(owner);
 				}

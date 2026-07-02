@@ -40,9 +40,12 @@ pub(super) fn find_git_root() -> Result<PathBuf> {
 pub(super) fn get_git_files(git_root: &Path) -> Result<Vec<PathBuf>> {
 	let mut files = Vec::new();
 
-	// Get all tracked files
+	// Get all tracked files. `-c core.quotePath=false` stops git from C-quoting
+	// non-ASCII filenames (e.g. "文.rs" -> "\346\226\207.rs"), which otherwise
+	// doesn't match any real path once joined with git_root and silently drops
+	// the file below.
 	let output = Command::new("git")
-		.args(["ls-files"])
+		.args(["-c", "core.quotePath=false", "ls-files"])
 		.current_dir(git_root)
 		.output()
 		.context("Failed to execute 'git ls-files'")?;
@@ -63,7 +66,13 @@ pub(super) fn get_git_files(git_root: &Path) -> Result<Vec<PathBuf>> {
 
 	// Get untracked files that are not ignored
 	let output = Command::new("git")
-		.args(["status", "--porcelain", "--untracked-files=all"])
+		.args([
+			"-c",
+			"core.quotePath=false",
+			"status",
+			"--porcelain",
+			"--untracked-files=all",
+		])
 		.current_dir(git_root)
 		.output()
 		.context("Failed to execute 'git status'")?;
@@ -602,7 +611,15 @@ pub(super) fn handle_final_newline(content: &str, insert_final_newline: bool) ->
 			content.to_string()
 		}
 	} else if ends_with_newline {
-		content.trim_end_matches(&['\n', '\r'][..]).to_string()
+		// Strip exactly one trailing line terminator, not every trailing
+		// newline/blank-line — a file ending in intentional blank lines must
+		// keep all but the final redundant terminator.
+		content
+			.strip_suffix("\r\n")
+			.or_else(|| content.strip_suffix('\n'))
+			.or_else(|| content.strip_suffix('\r'))
+			.unwrap_or(content)
+			.to_string()
 	} else {
 		content.to_string()
 	}
@@ -632,7 +649,7 @@ pub(super) fn check_line_length(
 		.lines()
 		.enumerate()
 		.filter_map(|(i, line)| {
-			if line.len() > max_line_length as usize {
+			if line.chars().count() > max_line_length as usize {
 				Some(i + 1)
 			} else {
 				None

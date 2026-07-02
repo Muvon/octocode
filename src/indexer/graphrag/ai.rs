@@ -174,7 +174,7 @@ impl AIEnhancements {
 				For each relationship, provide:\n\
 				- source_path: relative path of the source file\n\
 				- target_path: relative path of the target file\n\
-				- relation_type: one of 'implements_pattern', 'dependency_injection', 'factory_creates', 'observer_pattern', 'strategy_pattern', 'adapter_pattern', 'decorator_pattern', 'architectural_dependency'\n\
+				- relation_type: one of 'configures', 'factory_creates', 'observer_pattern', 'strategy_pattern', 'adapter_pattern', 'architectural_dependency'\n\
 				- description: brief explanation of the architectural relationship\n\
 				- confidence: 0.0-1.0 confidence score\n\n\
 				Respond with JSON: {\"relationships\": [{\"source_path\": \"...\", \"target_path\": \"...\", \"relation_type\": \"...\", \"description\": \"...\", \"confidence\": 0.0}]}\n\n"
@@ -516,7 +516,8 @@ impl AIEnhancements {
 			// Validate that file_id exists in our request
 			if files.iter().any(|f| f.file_id == desc.file_id) {
 				let cleaned_desc = if desc.description.len() > 300 {
-					format!("{}...", &desc.description[0..297])
+					let truncated: String = desc.description.chars().take(297).collect();
+					format!("{}...", truncated)
 				} else {
 					desc.description
 				};
@@ -614,7 +615,8 @@ impl AIEnhancements {
 			Ok(description) => {
 				let cleaned = description.trim();
 				if cleaned.len() > 300 {
-					Ok(format!("{}...", &cleaned[0..297]))
+					let truncated: String = cleaned.chars().take(297).collect();
+					Ok(format!("{}...", truncated))
 				} else {
 					Ok(cleaned.to_string())
 				}
