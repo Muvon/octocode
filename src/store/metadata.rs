@@ -298,12 +298,16 @@ impl<'a> MetadataOperations<'a> {
 						mtime_column.as_any().downcast_ref::<Int64Array>(),
 					) {
 						for i in 0..path_array.len() {
-							if let (Some(path), Some(mtime)) = (
-								path_array.iter().nth(i).flatten(),
-								mtime_array.iter().nth(i).flatten(),
-							) {
-								metadata_map.insert(path.to_string(), mtime as u64);
+							// Index directly with `value(i)` — `iter().nth(i)` re-walks the
+							// array from the start on every iteration, making this loop
+							// O(n^2) over what is meant to be an efficient bulk load.
+							if path_array.is_null(i) || mtime_array.is_null(i) {
+								continue;
 							}
+							metadata_map.insert(
+								path_array.value(i).to_string(),
+								mtime_array.value(i) as u64,
+							);
 						}
 					}
 				}

@@ -72,7 +72,11 @@ impl IgnorePatterns {
 					// Convert gitignore patterns to simple contains checks for now
 					// This is a simplified implementation - a full implementation would use glob patterns
 					let pattern = line.trim_start_matches('/').trim_end_matches('/');
-					self.gitignore_patterns.insert(pattern.to_string());
+					// A slash-only line (e.g. "/") trims to empty; an empty pattern would
+					// match every path via `contains("")`, silently ignoring all changes.
+					if !pattern.is_empty() {
+						self.gitignore_patterns.insert(pattern.to_string());
+					}
 				}
 			}
 		}
@@ -86,7 +90,11 @@ impl IgnorePatterns {
 				let line = line.trim();
 				if !line.is_empty() && !line.starts_with('#') {
 					let pattern = line.trim_start_matches('/').trim_end_matches('/');
-					self.noindex_patterns.insert(pattern.to_string());
+					// Skip empty patterns (e.g. a slash-only line) — they would match
+					// every path via `contains("")`, silently ignoring all changes.
+					if !pattern.is_empty() {
+						self.noindex_patterns.insert(pattern.to_string());
+					}
 				}
 			}
 		}

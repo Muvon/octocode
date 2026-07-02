@@ -114,6 +114,9 @@ async fn show_logs_from_directory(log_dir: &PathBuf, args: &LogsArgs) -> Result<
 	println!("Reading from: {}", log_file.display());
 
 	if args.follow {
+		use std::io::{BufRead, BufReader};
+		use std::process::Stdio;
+
 		// Use tail -f equivalent
 		let mut cmd = Command::new("tail");
 		cmd.arg("-f")
@@ -122,12 +125,31 @@ async fn show_logs_from_directory(log_dir: &PathBuf, args: &LogsArgs) -> Result<
 			.arg(log_file);
 
 		if args.errors_only {
-			cmd.arg("|").arg("grep").arg("-i").arg("error");
-		}
-
-		let status = cmd.status()?;
-		if !status.success() {
-			eprintln!("Failed to tail log file");
+			// Filter tail's stream in-process. A shell `|` can't be expressed via
+			// Command (it runs a single program, not a pipeline), so read tail's
+			// stdout line by line and drop everything that isn't an error line.
+			cmd.stdout(Stdio::piped());
+			let mut child = cmd.spawn()?;
+			let stdout = child
+				.stdout
+				.take()
+				.ok_or_else(|| anyhow::anyhow!("Failed to capture tail output"))?;
+			for line in BufReader::new(stdout).lines() {
+				let line = line?;
+				let lower = line.to_lowercase();
+				if lower.contains("error") || lower.contains("critical") {
+					println!("{}", line);
+				}
+			}
+			let status = child.wait()?;
+			if !status.success() {
+				eprintln!("Failed to tail log file");
+			}
+		} else {
+			let status = cmd.status()?;
+			if !status.success() {
+				eprintln!("Failed to tail log file");
+			}
 		}
 	} else {
 		// Read last N lines

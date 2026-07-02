@@ -262,6 +262,7 @@ impl Store {
 			(tables::COMMIT_BLOCKS, text_vector_dim as i32),
 			(tables::GRAPHRAG_NODES, code_vector_dim as i32),
 		];
+		let mut dropped_embedding_table = false;
 		for (table_name, expected_dim) in dim_by_table {
 			if !table_names.contains(&table_name.to_string()) {
 				continue;
@@ -277,9 +278,34 @@ impl Store {
 								drop(table); // Release table handle before dropping
 								if let Err(e) = db.drop_table(table_name, &[]).await {
 									tracing::warn!("Failed to drop table {}: {}", table_name, e);
+								} else {
+									dropped_embedding_table = true;
 								}
 							}
 						}
+					}
+				}
+			}
+		}
+
+		// Dropping an embedding table above only removes the blocks — the
+		// incremental-skip state that gates repopulation survives. The indexer
+		// skips any file whose stored mtime is unchanged *before* it ever checks
+		// block existence (see file_metadata_map fast-path), and each pipeline's
+		// commit marker short-circuits its re-scan. After a dimension change that
+		// left the tables empty, that state would make the next run skip every
+		// unchanged file and leave the index permanently empty — a silent, total
+		// loss of searchable data. Clear the skip-state so the next run rebuilds.
+		if dropped_embedding_table {
+			for marker in [
+				tables::FILE_METADATA,
+				tables::GIT_METADATA,
+				tables::GRAPHRAG_GIT_METADATA,
+				tables::COMMITS_GIT_METADATA,
+			] {
+				if table_names.contains(&marker.to_string()) {
+					if let Err(e) = db.drop_table(marker, &[]).await {
+						tracing::warn!("Failed to drop stale marker table {}: {}", marker, e);
 					}
 				}
 			}

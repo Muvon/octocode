@@ -56,7 +56,7 @@ pub async fn execute(
 	user_prompt.push_str("Code:\n```\n");
 	// Truncate code to avoid token overflow
 	if code_content.len() > 6000 {
-		user_prompt.push_str(&code_content[..6000]);
+		user_prompt.push_str(truncate_at_char_boundary(&code_content, 6000));
 		user_prompt.push_str("\n... (truncated)\n");
 	} else {
 		user_prompt.push_str(&code_content);
@@ -160,6 +160,17 @@ async fn resolve_target(
 	Ok((format!("Query: {}", target), search_result, String::new()))
 }
 
+/// Truncate a string to at most `max_bytes`, backing off to the nearest UTF-8
+/// char boundary so we never slice through a multi-byte character (which would
+/// panic). Callers guarantee `s.len() > max_bytes`.
+fn truncate_at_char_boundary(s: &str, max_bytes: usize) -> &str {
+	let mut end = max_bytes.min(s.len());
+	while end > 0 && !s.is_char_boundary(end) {
+		end -= 1;
+	}
+	&s[..end]
+}
+
 /// Try to extract a specific symbol's code from file content
 fn extract_symbol_from_content(content: &str, symbol: &str) -> Option<String> {
 	// Simple heuristic: find line containing the symbol name as a definition
@@ -229,7 +240,7 @@ async fn gather_context(
 			context.push_str("Related code:\n");
 			// Truncate to avoid overwhelming the LLM
 			if related.len() > 2000 {
-				context.push_str(&related[..2000]);
+				context.push_str(truncate_at_char_boundary(&related, 2000));
 				context.push_str("\n...(truncated)\n");
 			} else {
 				context.push_str(&related);
