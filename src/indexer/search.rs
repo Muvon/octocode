@@ -1524,7 +1524,10 @@ pub async fn execute_parallel_searches(
 	let per_query_limit = if params.config.search.reranker.enabled {
 		params.config.search.reranker.top_k_candidates
 	} else {
-		(params.max_results * 2) / query_embeddings.len().max(1)
+		// `.max(1)`: integer division can floor to 0 when there are more queries
+		// than `max_results * 2` (e.g. max_results=1 with 3 queries), which would
+		// fetch nothing at all instead of at least one candidate per query.
+		((params.max_results * 2) / query_embeddings.len().max(1)).max(1)
 	};
 
 	// Over-fetch from main when branch is active (some results will be filtered out)
@@ -1708,8 +1711,6 @@ pub fn deduplicate_and_merge_results(
 					// Keep block with better score (lower distance)
 					if block.distance < existing_block.distance {
 						*existing_block = block.clone();
-						existing_block.start_line = block.start_line + 1;
-						existing_block.end_line = block.end_line + 1;
 					}
 				}
 			}
@@ -1730,8 +1731,6 @@ pub fn deduplicate_and_merge_results(
 					query_indices.push(result.query_index);
 					if block.distance < existing_block.distance {
 						*existing_block = block.clone();
-						existing_block.start_line = block.start_line + 1;
-						existing_block.end_line = block.end_line + 1;
 					}
 				}
 			}
@@ -1752,8 +1751,6 @@ pub fn deduplicate_and_merge_results(
 					query_indices.push(result.query_index);
 					if block.distance < existing_block.distance {
 						*existing_block = block.clone();
-						existing_block.start_line = block.start_line + 1;
-						existing_block.end_line = block.end_line + 1;
 					}
 				}
 			}

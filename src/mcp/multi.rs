@@ -43,7 +43,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tokio::time::{Duration, Instant};
-use tracing::debug;
+use tracing::{debug, warn};
 
 use crate::config::Config;
 use crate::mcp::logging::init_mcp_logging;
@@ -232,7 +232,15 @@ impl MultiServer {
 		debug!("Multi MCP HTTP server listening on {}", addr);
 
 		loop {
-			let (stream, remote_addr) = listener.accept().await?;
+			// Don't let one bad accept() (e.g. a client resetting mid-handshake)
+			// take down the whole server — log and keep serving.
+			let (stream, remote_addr) = match listener.accept().await {
+				Ok(conn) => conn,
+				Err(e) => {
+					warn!("Failed to accept connection: {}", e);
+					continue;
+				}
+			};
 			let service = service.clone();
 			tokio::spawn(async move {
 				let io = TokioIo::new(stream);

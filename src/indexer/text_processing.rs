@@ -86,7 +86,10 @@ impl TextProcessor {
 				next_start = end_idx;
 			}
 
-			current_line += end_idx - start_idx;
+			// Advance the 1-based line counter to `next_start`, not `end_idx`:
+			// with overlap the next chunk restarts before `end_idx`, so counting
+			// the full span here would drift every chunk's line numbers upward.
+			current_line += next_start - start_idx;
 			start_idx = next_start;
 		}
 

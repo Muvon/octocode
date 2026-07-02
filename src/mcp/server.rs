@@ -1097,7 +1097,15 @@ impl McpServer {
 		info!("MCP HTTP server listening on {}", addr);
 
 		loop {
-			let (stream, remote_addr) = listener.accept().await?;
+			// Don't let one bad accept() (e.g. a client resetting mid-handshake)
+			// take down the whole server — log and keep serving.
+			let (stream, remote_addr) = match listener.accept().await {
+				Ok(conn) => conn,
+				Err(e) => {
+					warn!("Failed to accept connection: {}", e);
+					continue;
+				}
+			};
 			debug!("Accepted connection from {}", remote_addr);
 
 			let service = service.clone();

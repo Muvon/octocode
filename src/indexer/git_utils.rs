@@ -357,7 +357,13 @@ impl GitUtils {
 
 		let diff = String::from_utf8_lossy(&output.stdout).to_string();
 		if diff.len() > max_chars {
-			Ok(diff[..max_chars].to_string())
+			// Truncate on a UTF-8 char boundary — diffs can contain multi-byte
+			// content, so slicing at a raw byte index would panic.
+			let mut end = max_chars;
+			while end > 0 && !diff.is_char_boundary(end) {
+				end -= 1;
+			}
+			Ok(diff[..end].to_string())
 		} else {
 			Ok(diff)
 		}

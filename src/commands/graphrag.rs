@@ -75,7 +75,7 @@ pub async fn execute(
 	// Check if GraphRAG is enabled in the config
 	if !config.graphrag.enabled {
 		eprintln!("Error: GraphRAG is not enabled in your configuration.");
-		eprintln!("To enable it, run:\n  octocode config --graphrag-enable true");
+		eprintln!("To enable it, run:\n  octocode config --graphrag-enabled true");
 		eprintln!("Then run 'octocode index' to build the knowledge graph.");
 		return Ok(());
 	}
