@@ -80,7 +80,7 @@ pub async fn execute(config: &Config, args: &ReviewArgs) -> Result<()> {
 		));
 	}
 
-	let staged_files = String::from_utf8(output.stdout)?;
+	let staged_files = String::from_utf8_lossy(&output.stdout).into_owned();
 	if staged_files.trim().is_empty() {
 		return Err(anyhow::anyhow!(
 			"❌ No staged changes to review. Use 'git add' or --all flag."
@@ -148,7 +148,7 @@ async fn perform_code_review_chunked(
 		));
 	}
 
-	let diff = String::from_utf8(output.stdout)?;
+	let diff = String::from_utf8_lossy(&output.stdout).into_owned();
 
 	if diff.trim().is_empty() {
 		return Err(anyhow::anyhow!("No staged changes found"));
@@ -247,73 +247,63 @@ async fn perform_code_review_chunked(
 		focus_context: &str,
 		config: &Config,
 	) -> Vec<serde_json::Value> {
-		// Limit parallel processing to prevent resource exhaustion
-		let chunk_limit = std::cmp::min(chunks.len(), diff_chunker::MAX_PARALLEL_CHUNKS);
-		let mut join_set = JoinSet::new();
+		// Bound concurrency to prevent resource exhaustion, but still process every
+		// chunk in batches — chunks beyond the limit were previously dropped silently.
+		let batch_size = std::cmp::max(diff_chunker::MAX_PARALLEL_CHUNKS, 1);
+		let total = chunks.len();
+		let mut ordered_responses: Vec<Option<serde_json::Value>> = vec![None; total];
+		let indexed: Vec<(usize, &diff_chunker::DiffChunk)> = chunks.iter().enumerate().collect();
 
-		// Process chunks in parallel batches
-		for (i, chunk) in chunks.iter().take(chunk_limit).enumerate() {
-			let chunk_content = chunk.content.clone();
-			let chunk_summary = chunk.file_summary.clone();
-			let config = config.clone();
-			let file_types = analyze_file_types(changed_files);
-			let file_stats = file_stats.to_string();
-			let focus_context = focus_context.to_string();
+		for batch in indexed.chunks(batch_size) {
+			let mut join_set = JoinSet::new();
 
-			join_set.spawn(async move {
-				println!(
-					"  Analyzing chunk {}/{}: {}",
-					i + 1,
-					chunk_limit,
-					chunk_summary
-				);
+			for &(i, chunk) in batch {
+				let chunk_content = chunk.content.clone();
+				let chunk_summary = chunk.file_summary.clone();
+				let config = config.clone();
+				let file_types = analyze_file_types(changed_files);
+				let file_stats = file_stats.to_string();
+				let focus_context = focus_context.to_string();
 
-				let chunk_prompt = create_review_prompt(
-					&chunk_content,
-					file_count,
-					additions,
-					deletions,
-					&file_types,
-					&file_stats,
-					&focus_context,
-				);
+				join_set.spawn(async move {
+					println!("  Analyzing chunk {}/{}: {}", i + 1, total, chunk_summary);
 
-				match call_llm_for_review(&chunk_prompt, &config).await {
-					Ok(response) => Ok((i, response)),
-					Err(e) => {
-						eprintln!("Warning: Chunk {} failed ({})", i + 1, e);
-						Err(e)
+					let chunk_prompt = create_review_prompt(
+						&chunk_content,
+						file_count,
+						additions,
+						deletions,
+						&file_types,
+						&file_stats,
+						&focus_context,
+					);
+
+					match call_llm_for_review(&chunk_prompt, &config).await {
+						Ok(response) => Ok((i, response)),
+						Err(e) => {
+							eprintln!("Warning: Chunk {} failed ({})", i + 1, e);
+							Err(e)
+						}
 					}
-				}
-			});
-		}
+				});
+			}
 
-		// Collect results maintaining order
-		collect_review_responses(join_set, chunk_limit).await
-	}
-
-	/// Collect review responses from parallel tasks maintaining original order
-	async fn collect_review_responses(
-		mut join_set: JoinSet<Result<(usize, serde_json::Value)>>,
-		expected_count: usize,
-	) -> Vec<serde_json::Value> {
-		let mut ordered_responses = vec![None; expected_count];
-
-		while let Some(result) = join_set.join_next().await {
-			match result {
-				Ok(Ok((index, response))) => {
-					ordered_responses[index] = Some(response);
-				}
-				Ok(Err(_)) => {
-					// Error already logged in spawn
-				}
-				Err(e) => {
-					eprintln!("Warning: Task join error: {}", e);
+			while let Some(result) = join_set.join_next().await {
+				match result {
+					Ok(Ok((index, response))) => {
+						ordered_responses[index] = Some(response);
+					}
+					Ok(Err(_)) => {
+						// Error already logged in spawn
+					}
+					Err(e) => {
+						eprintln!("Warning: Task join error: {}", e);
+					}
 				}
 			}
 		}
 
-		// Extract successful responses
+		// Extract successful responses, preserving original chunk order
 		ordered_responses.into_iter().flatten().collect()
 	}
 
@@ -511,7 +501,7 @@ fn display_review_results(review: &ReviewResult, severity_filter: &str) {
 				_ => "❓",
 			};
 
-			println!("\\n{} {} [{}]", severity_emoji, issue.title, issue.severity);
+			println!("\n{} {} [{}]", severity_emoji, issue.title, issue.severity);
 			println!("   Category: {}", issue.category);
 			if let Some(file_path) = &issue.file_path {
 				if let Some(line_num) = issue.line_number {

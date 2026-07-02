@@ -29,6 +29,9 @@ use super::protocol::{
 	LspResponse,
 };
 
+/// Max time to wait for a response to an LSP request before giving up
+const REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
 /// Progress tracking state
 #[derive(Debug, Clone)]
 pub struct ProgressState {
@@ -50,6 +53,8 @@ pub struct LspClient {
 	// Progress tracking
 	progress_states: Arc<RwLock<HashMap<String, ProgressState>>>,
 	indexing_complete: Arc<RwLock<bool>>,
+	// Set once the communication loop exits (server crashed / connection dropped)
+	connection_alive: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl LspClient {
@@ -64,7 +69,14 @@ impl LspClient {
 			working_directory,
 			progress_states: Arc::new(RwLock::new(HashMap::new())),
 			indexing_complete: Arc::new(RwLock::new(false)),
+			connection_alive: Arc::new(std::sync::atomic::AtomicBool::new(false)),
 		}
+	}
+
+	/// Whether the communication loop with the LSP server is still running.
+	/// Returns false once the server has crashed or closed its connection.
+	pub fn is_connected(&self) -> bool {
+		self.connection_alive.load(Ordering::SeqCst)
 	}
 
 	/// Start the LSP server process and communication loop
@@ -87,6 +99,7 @@ impl LspClient {
 			.stdin(std::process::Stdio::piped())
 			.stdout(std::process::Stdio::piped())
 			.stderr(std::process::Stdio::null()) // Ignore stderr to avoid noise
+			.kill_on_drop(true) // Don't leak the LSP process if the Child is ever dropped without stop()
 			.spawn()
 			.map_err(|e| anyhow::anyhow!("Failed to start LSP server '{}': {}", program, e))?;
 
@@ -105,14 +118,17 @@ impl LspClient {
 		*self.stdin.lock().await = Some(stdin);
 
 		// Start communication loop
+		self.connection_alive.store(true, Ordering::SeqCst);
 		let pending_requests = self.pending_requests.clone();
 		let progress_states = self.progress_states.clone();
 		let indexing_complete = self.indexing_complete.clone();
+		let connection_alive = self.connection_alive.clone();
 		tokio::spawn(Self::communication_loop(
 			stdout,
 			pending_requests,
 			progress_states,
 			indexing_complete,
+			connection_alive,
 		));
 
 		debug!("LSP server started successfully");
@@ -138,10 +154,25 @@ impl LspClient {
 
 		debug!("Sent LSP request: {}", request.method);
 
-		// Wait for response (no timeout - handled externally)
-		let response = rx.await.map_err(|_| {
-			anyhow::anyhow!("LSP request channel closed for method: {}", request.method)
-		})?;
+		// Wait for response, bounded so a dead/hung LSP server can't block callers forever
+		let response = match tokio::time::timeout(REQUEST_TIMEOUT, rx).await {
+			Ok(Ok(response)) => response,
+			Ok(Err(_)) => {
+				self.pending_requests.lock().await.remove(&request_id);
+				return Err(anyhow::anyhow!(
+					"LSP request channel closed for method: {}",
+					request.method
+				));
+			}
+			Err(_) => {
+				self.pending_requests.lock().await.remove(&request_id);
+				return Err(anyhow::anyhow!(
+					"LSP request timed out after {:?} for method: {}",
+					REQUEST_TIMEOUT,
+					request.method
+				));
+			}
+		};
 
 		// Check for errors in response
 		if let Some(error) = &response.error {
@@ -184,6 +215,7 @@ impl LspClient {
 		pending_requests: Arc<Mutex<HashMap<u32, oneshot::Sender<LspResponse>>>>,
 		progress_states: Arc<RwLock<HashMap<String, ProgressState>>>,
 		indexing_complete: Arc<RwLock<bool>>,
+		connection_alive: Arc<std::sync::atomic::AtomicBool>,
 	) {
 		let mut reader = BufReader::new(stdout);
 
@@ -229,6 +261,11 @@ impl LspClient {
 				}
 			}
 		}
+
+		// Drop all outstanding senders so callers waiting on rx.await fail fast
+		// instead of sitting on the full request timeout.
+		pending_requests.lock().await.clear();
+		connection_alive.store(false, Ordering::SeqCst);
 
 		debug!("LSP communication loop ended");
 	}
@@ -565,6 +602,7 @@ impl Clone for LspClient {
 			working_directory: self.working_directory.clone(),
 			progress_states: self.progress_states.clone(),
 			indexing_complete: self.indexing_complete.clone(),
+			connection_alive: self.connection_alive.clone(),
 		}
 	}
 }

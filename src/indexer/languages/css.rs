@@ -279,20 +279,23 @@ impl Css {
 
 	// Helper function to parse CSS import statements
 	fn parse_css_import(import_text: &str) -> Option<String> {
-		// Handle @import "file.css"
-		if let Some(start) = import_text.find('"') {
-			if let Some(end) = import_text[start + 1..].find('"') {
-				return Some(import_text[start + 1..start + 1 + end].to_string());
+		// Handle @import "file.css" or @import 'file.css' — this also matches the
+		// quoted forms of @import url("file.css") / url('file.css') since the
+		// quote scan isn't anchored to the start of the text.
+		for quote in ['"', '\''] {
+			if let Some(start) = import_text.find(quote) {
+				if let Some(end) = import_text[start + 1..].find(quote) {
+					return Some(import_text[start + 1..start + 1 + end].to_string());
+				}
 			}
 		}
-		// Handle @import url("file.css")
+		// Handle unquoted @import url(file.css)
 		if let Some(start) = import_text.find("url(") {
 			let url_content = &import_text[start + 4..];
-			if let Some(quote_start) = url_content.find('"') {
-				if let Some(quote_end) = url_content[quote_start + 1..].find('"') {
-					return Some(
-						url_content[quote_start + 1..quote_start + 1 + quote_end].to_string(),
-					);
+			if let Some(close) = url_content.find(')') {
+				let unquoted = url_content[..close].trim();
+				if !unquoted.is_empty() {
+					return Some(unquoted.to_string());
 				}
 			}
 		}

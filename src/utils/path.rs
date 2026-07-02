@@ -110,11 +110,19 @@ impl PathNormalizer {
 		let path_buf = Path::new(&normalized_separators);
 
 		// Always try manual component resolution first to avoid Windows UNC path issues
-		let mut components = Vec::new();
+		let mut components: Vec<String> = Vec::new();
 		for component in path_buf.components() {
 			match component {
 				std::path::Component::ParentDir => {
-					components.pop();
+					// Only cancel out a preceding real component; an unresolvable
+					// leading ".." (nothing left to pop, or already collapsed to "..")
+					// must be preserved instead of silently dropped.
+					match components.last().map(|s| s.as_str()) {
+						Some("..") | None => components.push("..".to_string()),
+						Some(_) => {
+							components.pop();
+						}
+					}
 				}
 				std::path::Component::CurDir => {
 					// Skip current directory references
@@ -259,6 +267,20 @@ mod tests {
 		assert_eq!(
 			PathNormalizer::normalize_path("src\\utils\\..\\main.rs"),
 			"src/main.rs"
+		);
+	}
+
+	#[test]
+	fn test_normalize_path_preserves_unresolvable_parent_dirs() {
+		// A leading ".." with nothing to cancel out must be preserved, not
+		// silently dropped, otherwise "../config.h" would wrongly normalize
+		// to "config.h" and could match an unrelated file of that basename.
+		assert_eq!(PathNormalizer::normalize_path("../config.h"), "../config.h");
+		assert_eq!(PathNormalizer::normalize_path("../../foo.h"), "../../foo.h");
+		// One ".." cancels "src", the second has nothing left to cancel.
+		assert_eq!(
+			PathNormalizer::normalize_path("src/../../main.rs"),
+			"../main.rs"
 		);
 	}
 }

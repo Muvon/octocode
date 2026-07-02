@@ -207,14 +207,29 @@ pub fn uri_to_file_path(uri: &Uri) -> anyhow::Result<std::path::PathBuf> {
 		.map_err(|_| anyhow::anyhow!("Failed to convert URI to file path: {}", url_str))
 }
 
-/// Convert relative path to absolute path based on working directory
+/// Convert relative path to absolute path based on working directory,
+/// rejecting any path that resolves outside of it.
 pub fn resolve_relative_path(
 	working_dir: &std::path::Path,
 	relative_path: &str,
-) -> std::path::PathBuf {
-	if std::path::Path::new(relative_path).is_absolute() {
+) -> anyhow::Result<std::path::PathBuf> {
+	let candidate = if std::path::Path::new(relative_path).is_absolute() {
 		std::path::PathBuf::from(relative_path)
 	} else {
 		working_dir.join(relative_path)
+	};
+
+	let canonical_dir = working_dir
+		.canonicalize()
+		.unwrap_or_else(|_| working_dir.to_path_buf());
+	let canonical_candidate = candidate.canonicalize().unwrap_or(candidate);
+
+	if !canonical_candidate.starts_with(&canonical_dir) {
+		anyhow::bail!(
+			"path '{}' resolves outside the working directory",
+			relative_path
+		);
 	}
+
+	Ok(canonical_candidate)
 }

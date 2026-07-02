@@ -197,17 +197,22 @@ impl Language for Lua {
 		source_file: &str,
 		all_files: &[String],
 	) -> Option<String> {
-		use crate::indexer::languages::resolution_utils::FileRegistry;
+		use crate::indexer::languages::resolution_utils::{resolve_relative_path, FileRegistry};
 
 		let registry = FileRegistry::new(all_files);
 		let base_dir = std::path::Path::new(source_file).parent()?;
 
-		// Handle relative imports (e.g., require("./module") or require("../utils"))
+		// Handle relative imports (e.g., require("./module") or require("../utils")).
+		// Pass the unstripped path to resolve_relative_path — it joins against the
+		// source file's directory and normalizes ".." itself; naively slicing off a
+		// fixed 2-byte prefix breaks "../" (leaves a leading '/', which PathBuf::join
+		// treats as absolute and discards base_dir entirely).
 		if import_path.starts_with("./") || import_path.starts_with("../") {
-			let relative_path = base_dir.join(&import_path[2..]);
-			let lua_file = format!("{}.lua", relative_path.to_string_lossy());
-			if let Some(found) = registry.find_exact_file(&lua_file) {
-				return Some(found);
+			if let Some(relative_path) = resolve_relative_path(source_file, import_path) {
+				let lua_file = format!("{}.lua", relative_path.to_string_lossy());
+				if let Some(found) = registry.find_exact_file(&lua_file) {
+					return Some(found);
+				}
 			}
 		}
 
@@ -241,7 +246,9 @@ impl Lua {
 	fn extract_lua_block_symbols(&self, node: Node, contents: &str, symbols: &mut Vec<String>) {
 		for child in node.children(&mut node.walk()) {
 			match child.kind() {
-				"local_declaration" | "assignment_statement" => {
+				// `local x = 5` parses as `variable_declaration` in tree-sitter-lua,
+				// not `local_declaration` (which isn't a real node kind).
+				"variable_declaration" | "assignment_statement" => {
 					// Extract variable names from declarations/assignments
 					for grandchild in child.children(&mut child.walk()) {
 						if grandchild.kind() == "variable_list" {

@@ -322,30 +322,18 @@ impl LlmClient {
 			}
 		}
 
-		// Look for any code block and try to parse its content
-		let mut in_code_block = false;
-		let mut code_start = 0;
-
-		for (line_num, line) in content.lines().enumerate() {
-			let trimmed = line.trim();
-			if trimmed.starts_with("```") {
-				if !in_code_block {
-					// Found code block start - set position to after this line
-					in_code_block = true;
-					// Calculate position after this line (line start + line length + newline)
-					code_start = content
-						.lines()
-						.take(line_num + 1)
-						.map(|l| l.len() + 1)
-						.sum();
-				} else {
-					// Found code block end - extract content from code_start to current position
-					let line_start = content.lines().take(line_num).map(|l| l.len() + 1).sum();
-					let code_content = &content[code_start..line_start];
+		// Look for any code block and try to parse its content.
+		// Byte offsets come directly from `find` on the real content, so this is
+		// safe for CRLF line endings and multi-byte UTF-8 (unlike reconstructing
+		// offsets from `str::lines()`, which strips `\r` and drifts on CRLF input).
+		if let Some(fence_start) = content.find("```") {
+			if let Some(line_end) = content[fence_start..].find('\n') {
+				let code_start = fence_start + line_end + 1;
+				if let Some(closing_offset) = content[code_start..].find("```") {
+					let code_content = &content[code_start..code_start + closing_offset];
 					if let Ok(parsed) = serde_json::from_str(code_content.trim()) {
 						return parsed;
 					}
-					break;
 				}
 			}
 		}
@@ -367,5 +355,41 @@ impl LlmClient {
 			"error": "Failed to parse JSON from response",
 			"raw_content": content
 		})
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn test_strip_json_from_markdown_json_fence() {
+		let content = "Sure, here you go:\n```json\n{\"a\": 1}\n```\nThanks";
+		let result = LlmClient::strip_json_from_markdown(content);
+		assert_eq!(result, serde_json::json!({"a": 1}));
+	}
+
+	#[test]
+	fn test_strip_json_from_markdown_generic_fence() {
+		let content = "text\n```\n{\"a\": 1}\n```\ntail";
+		let result = LlmClient::strip_json_from_markdown(content);
+		assert_eq!(result, serde_json::json!({"a": 1}));
+	}
+
+	#[test]
+	fn test_strip_json_from_markdown_generic_fence_crlf() {
+		// Regression test: CRLF line endings previously drifted the manually
+		// reconstructed byte offsets, truncating the JSON or panicking on a
+		// non-char-boundary slice.
+		let content = "intro\r\n```\r\n{\"a\": 1, \"b\": 2}\r\n```\r\ntail";
+		let result = LlmClient::strip_json_from_markdown(content);
+		assert_eq!(result, serde_json::json!({"a": 1, "b": 2}));
+	}
+
+	#[test]
+	fn test_strip_json_from_markdown_raw_json() {
+		let content = "{\"a\": 1}";
+		let result = LlmClient::strip_json_from_markdown(content);
+		assert_eq!(result, serde_json::json!({"a": 1}));
 	}
 }

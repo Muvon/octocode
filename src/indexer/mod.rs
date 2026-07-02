@@ -88,7 +88,7 @@ impl NoindexWalker {
 
 		// Standard git ignore settings
 		builder
-			.hidden(true) // Don't ignore all hidden files - let gitignore handle it
+			.hidden(false) // Don't ignore all hidden files - let gitignore handle it
 			.git_ignore(true) // Respect .gitignore files
 			.git_global(true) // Respect global git ignore files
 			.git_exclude(true) // Respect .git/info/exclude files
@@ -829,7 +829,11 @@ pub async fn index_branch_delta(
 						}
 
 						if let Ok(actual_mtime) = get_file_mtime(&full_path) {
-							code_file_metadata.add(file_path, actual_mtime);
+							if language == "markdown" {
+								document_file_metadata.add(file_path, actual_mtime);
+							} else {
+								code_file_metadata.add(file_path, actual_mtime);
+							}
 						}
 
 						files_processed += 1;
@@ -1464,7 +1468,11 @@ pub async fn index_files_with_quiet(
 						// Track file metadata for atomic storage after batch processing
 						if file_processed {
 							if let Ok(actual_mtime) = get_file_mtime(&full_path) {
-								code_file_metadata.add(file_path, actual_mtime);
+								if language == "markdown" {
+									document_file_metadata.add(file_path, actual_mtime);
+								} else {
+									code_file_metadata.add(file_path, actual_mtime);
+								}
 							}
 						}
 
@@ -1702,7 +1710,11 @@ pub async fn index_files_with_quiet(
 						// Track file metadata for atomic storage after batch processing
 						if file_processed {
 							if let Ok(actual_mtime) = get_file_mtime(entry.path()) {
-								code_file_metadata.add(&file_path, actual_mtime);
+								if language == "markdown" {
+									document_file_metadata.add(&file_path, actual_mtime);
+								} else {
+									code_file_metadata.add(&file_path, actual_mtime);
+								}
 							}
 						}
 

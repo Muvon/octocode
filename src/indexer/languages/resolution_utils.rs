@@ -196,9 +196,15 @@ pub fn normalize_path(path: &str) -> String {
 	for component in path_buf.components() {
 		match component {
 			std::path::Component::ParentDir => {
-				// Pop the last component if possible
-				if !components.is_empty() {
-					components.pop();
+				// Pop the last component if possible. If there's nothing left to
+				// pop (or what's left is itself an unresolved ".."), keep the ".."
+				// so the result correctly reflects an escape above the known root
+				// instead of silently resolving to a shorter, wrong path.
+				match components.last().map(String::as_str) {
+					Some("..") | None => components.push("..".to_string()),
+					_ => {
+						components.pop();
+					}
 				}
 			}
 			std::path::Component::CurDir => {

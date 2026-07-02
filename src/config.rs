@@ -35,29 +35,62 @@ pub struct LLMConfig {
 	pub description_system_prompt: String,
 }
 
-// NOTE: This Default implementation should NEVER be used in practice
-// All LLM values must come from the config template file
-// This exists only to satisfy serde's requirements for deserialization
 impl Default for LLMConfig {
 	fn default() -> Self {
-		panic!("LLM config must be loaded from template file - defaults not allowed")
+		Self {
+			description_model: "openrouter:openai/gpt-4o-mini".to_string(),
+			relationship_model: "openrouter:openai/gpt-4o-mini".to_string(),
+			ai_batch_size: 8,
+			max_batch_tokens: 16384,
+			batch_timeout_seconds: 60,
+			fallback_to_individual: true,
+			max_sample_tokens: 1500,
+			confidence_threshold: 0.6,
+			architectural_weight: 0.9,
+			relationship_system_prompt: DEFAULT_RELATIONSHIP_SYSTEM_PROMPT.to_string(),
+			description_system_prompt: DEFAULT_DESCRIPTION_SYSTEM_PROMPT.to_string(),
+		}
 	}
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+const DEFAULT_RELATIONSHIP_SYSTEM_PROMPT: &str = "You are an expert software architect specializing in code analysis. Analyze the provided code files and identify meaningful ARCHITECTURAL relationships that go beyond simple imports.
+
+Focus on these relationship types:
+- 'imports': Module/package imports and dependencies
+- 'implements': Interface implementation, trait implementation
+- 'extends': Class inheritance, module extension
+- 'calls': Function/method calls between modules
+- 'uses': Utility usage, service consumption
+- 'configures': Configuration setup, dependency injection
+- 'factory_creates': Factory pattern instantiation
+- 'observer_pattern': Event listening, callback registration
+- 'strategy_pattern': Algorithm selection, behavior delegation
+- 'adapter_pattern': Interface adaptation, wrapper usage
+- 'architectural_dependency': High-level system dependencies
+
+Respond with a JSON array of relationships. Each relationship must include:
+- source_path: relative path of source file
+- target_path: relative path of target file
+- relation_type: one of the types listed above
+- description: specific explanation of HOW the relationship works
+- confidence: 0.0-1.0 confidence score (use 0.8+ for clear relationships)
+
+Only include relationships with clear architectural significance. Avoid trivial imports.";
+
+const DEFAULT_DESCRIPTION_SYSTEM_PROMPT: &str = "You are a senior software engineer analyzing code architecture. Provide a concise 2-3 sentence description of the file's ROLE and PURPOSE in the system.
+
+Focus on:
+- What architectural layer this file belongs to (API, business logic, data access, utilities, etc.)
+- Its primary responsibility and how it contributes to the system
+- Key patterns or architectural decisions it implements
+
+Avoid listing specific functions/classes. Instead, describe the file's architectural significance and how it fits into the larger system design.";
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct GraphRAGConfig {
 	pub enabled: bool,
 	pub use_llm: bool,
 	pub llm: LLMConfig,
-}
-
-// NOTE: This Default implementation should NEVER be used in practice
-// All GraphRAG values must come from the config template file
-// This exists only to satisfy serde's requirements for deserialization
-impl Default for GraphRAGConfig {
-	fn default() -> Self {
-		panic!("GraphRAG config must be loaded from template file - defaults not allowed")
-	}
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -175,14 +208,22 @@ pub struct HybridSearchConfig {
 
 impl Default for HybridSearchConfig {
 	fn default() -> Self {
-		panic!("Hybrid search config must be loaded from template file - defaults not allowed")
+		Self {
+			enabled: true,
+			default_vector_weight: 0.6,
+			default_keyword_weight: 0.4,
+		}
 	}
 }
-// NOTE: This Default implementation should NEVER be used in practice
-// All reranker values must come from the config template file
+
 impl Default for RerankerConfig {
 	fn default() -> Self {
-		panic!("Reranker config must be loaded from template file - defaults not allowed")
+		Self {
+			enabled: true,
+			model: "fastembed:jina-reranker-v2-base-multilingual".to_string(),
+			top_k_candidates: 50,
+			final_top_k: 10,
+		}
 	}
 }
 
@@ -195,7 +236,7 @@ pub struct SearchConfig {
 	pub context_lines: usize,
 
 	/// Maximum characters to display per code/text/doc block in search results.
-	/// If 0, displays full content. Default: 1000
+	/// If 0, displays full content. Default: 400
 	pub search_block_max_characters: usize,
 
 	/// Reranker configuration for improving search result accuracy
@@ -213,7 +254,17 @@ pub struct SearchConfig {
 
 impl Default for SearchConfig {
 	fn default() -> Self {
-		panic!("Search config must be loaded from template file - defaults not allowed")
+		Self {
+			max_results: 20,
+			similarity_threshold: 0.65,
+			output_format: "markdown".to_string(),
+			max_files: 10,
+			context_lines: 3,
+			search_block_max_characters: 400,
+			reranker: RerankerConfig::default(),
+			hybrid: HybridSearchConfig::default(),
+			graph_expansion: false,
+		}
 	}
 }
 
@@ -264,7 +315,6 @@ impl Default for Config {
 			index: IndexConfig::default(),
 			search: SearchConfig::default(),
 			embedding: EmbeddingConfig::default(),
-			// This should never be reached - template loading should provide GraphRAG config
 			graphrag: GraphRAGConfig::default(),
 			commits: CommitsConfig::default(),
 		}
@@ -376,7 +426,6 @@ mod tests {
 
 	#[test]
 	fn test_default_config() {
-		// Use template loading instead of Config::default() to avoid GraphRAG panic
 		let config = Config::load_from_template().expect("Failed to load template config");
 		assert_eq!(config.version, 1);
 		assert_eq!(config.llm.model, "openrouter:openai/gpt-4o-mini");
@@ -469,9 +518,27 @@ mod tests {
 	}
 
 	#[test]
-	#[should_panic(expected = "GraphRAG config must be loaded from template file")]
-	fn test_graphrag_default_panics() {
-		// Verify that GraphRAGConfig::default() panics to enforce strict config loading
-		let _ = GraphRAGConfig::default();
+	fn test_config_default_matches_template() {
+		// `Config::default()` (used by e.g. `octocode config --reset`) must never panic,
+		// and should match the values in config-templates/default.toml.
+		let config = Config::default();
+		assert_eq!(config.search.max_results, 20);
+		assert!(!config.graphrag.enabled);
+		assert_eq!(config.graphrag.llm.ai_batch_size, 8);
+		assert_eq!(
+			config.search.reranker.model,
+			"fastembed:jina-reranker-v2-base-multilingual"
+		);
+		assert_eq!(config.search.hybrid.default_vector_weight, 0.6);
+	}
+
+	#[test]
+	fn test_toml_missing_optional_sections_uses_defaults() {
+		// A config.toml that omits whole tables (legal TOML) must fall back to
+		// sane defaults instead of panicking via serde's #[serde(default)].
+		let minimal = "version = 1\n";
+		let config: Config = toml::from_str(minimal).expect("should deserialize with defaults");
+		assert_eq!(config.search.max_results, 20);
+		assert!(!config.graphrag.enabled);
 	}
 }

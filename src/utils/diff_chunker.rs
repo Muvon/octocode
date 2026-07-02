@@ -157,13 +157,49 @@ fn split_diff_by_files(diff_content: &str) -> Vec<String> {
 		files.push(current_file);
 	}
 
-	files
+	// A single file's diff can itself exceed MAX_CHUNK_SIZE (e.g. a generated
+	// lockfile or minified asset). chunk_diff() only checks size when adding a
+	// file to an existing chunk, so an oversized file must be pre-split here,
+	// otherwise it produces one chunk far larger than the documented API limit.
+	let mut result = Vec::with_capacity(files.len());
+	for file in files {
+		if file.len() > MAX_CHUNK_SIZE {
+			result.extend(split_oversized_file_diff(&file));
+		} else {
+			result.push(file);
+		}
+	}
+	result
+}
+
+/// Split a single file's diff (already larger than MAX_CHUNK_SIZE) into
+/// line-bounded pieces no larger than MAX_CHUNK_SIZE each.
+fn split_oversized_file_diff(file_diff: &str) -> Vec<String> {
+	let mut pieces = Vec::new();
+	let mut current = String::with_capacity(MAX_CHUNK_SIZE);
+
+	for line in file_diff.lines() {
+		if !current.is_empty() && current.len() + line.len() + 1 > MAX_CHUNK_SIZE {
+			pieces.push(std::mem::take(&mut current));
+		}
+		current.push_str(line);
+		current.push('\n');
+	}
+
+	if !current.is_empty() {
+		pieces.push(current);
+	}
+
+	pieces
 }
 
 /// Extract filename from git diff header
 ///
-/// Parses the "diff --git a/path b/path" line to extract the target filename.
-/// Uses the 'b/' path which represents the new/modified file.
+/// Prefers the "+++ b/path" line: unlike the "diff --git a/path b/path" line,
+/// whitespace-splitting that line breaks for filenames containing spaces (git
+/// does not quote them there), while "+++ b/" is followed by the full path
+/// with no further tokens. Falls back to parsing "diff --git" for diffs
+/// without a "+++" line (e.g. binary files) or deleted files ("+++ /dev/null").
 ///
 /// # Arguments
 /// * `file_diff` - A single file's diff content starting with "diff --git"
@@ -171,10 +207,15 @@ fn split_diff_by_files(diff_content: &str) -> Vec<String> {
 /// # Returns
 /// Some(filename) if successfully parsed, None otherwise
 fn extract_filename(file_diff: &str) -> Option<String> {
-	// Look for the git diff header line
+	for line in file_diff.lines() {
+		if let Some(path) = line.strip_prefix("+++ b/") {
+			return Some(path.to_string());
+		}
+	}
+
+	// Fallback: parse "diff --git a/path b/path" format
 	for line in file_diff.lines() {
 		if line.starts_with("diff --git") {
-			// Parse "diff --git a/path b/path" format
 			let parts: Vec<&str> = line.split_whitespace().collect();
 			if parts.len() >= 4 {
 				// Use the 'b/' path (target file) and strip the prefix
@@ -405,6 +446,19 @@ mod tests {
 		let invalid_diff = "not a diff line\n";
 		let filename3 = extract_filename(invalid_diff);
 		assert_eq!(filename3, None);
+
+		// Filename with a space: the "diff --git" line is ambiguous
+		// (git doesn't quote spaces there), but "+++ b/" carries the full path.
+		let spaced_diff = "diff --git a/my file.rs b/my file.rs\nindex 123..456\n--- a/my file.rs\n+++ b/my file.rs\n";
+		assert_eq!(
+			extract_filename(spaced_diff),
+			Some("my file.rs".to_string())
+		);
+
+		// Deleted file: "+++ /dev/null" must not be treated as the filename.
+		let deleted_diff =
+			"diff --git a/old.rs b/old.rs\nindex 123..000\n--- a/old.rs\n+++ /dev/null\n";
+		assert_eq!(extract_filename(deleted_diff), Some("old.rs".to_string()));
 	}
 
 	#[test]
@@ -490,6 +544,35 @@ mod tests {
 			assert!(
 				chunk.content.len() <= MAX_CHUNK_SIZE * 2, // More lenient limit
 				"Chunk size {} should be reasonable",
+				chunk.content.len()
+			);
+		}
+	}
+
+	#[test]
+	fn test_single_oversized_file_is_split_into_bounded_chunks() {
+		// A single file's diff that alone exceeds MAX_CHUNK_SIZE (e.g. a generated
+		// lockfile) must still be broken into MAX_CHUNK_SIZE-bounded chunks instead
+		// of being pushed whole into one oversized chunk.
+		let huge_line_count = (MAX_CHUNK_SIZE * 3) / 20; // ~20 bytes/line -> ~3x MAX_CHUNK_SIZE total
+		let mut huge_diff = String::from("diff --git a/Cargo.lock b/Cargo.lock\nindex 123..456\n");
+		for i in 0..huge_line_count {
+			huge_diff.push_str(&format!("+line number {}\n", i));
+		}
+		assert!(huge_diff.len() > MAX_CHUNK_SIZE * 2);
+
+		let chunks = chunk_diff(&huge_diff);
+		assert!(
+			chunks.len() > 1,
+			"An oversized single-file diff must be split into multiple chunks"
+		);
+		for chunk in &chunks {
+			// Bounded chunks stay close to MAX_CHUNK_SIZE (+ small overlap/line
+			// slack); without the fix a single oversized file produced one chunk
+			// roughly 3x MAX_CHUNK_SIZE, which this bound would catch.
+			assert!(
+				chunk.content.len() <= MAX_CHUNK_SIZE * 2,
+				"Chunk size {} must stay bounded",
 				chunk.content.len()
 			);
 		}

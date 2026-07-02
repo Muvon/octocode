@@ -53,9 +53,12 @@ impl Language for TypeScript {
 			| "class_declaration"
 			| "interface_declaration"
 			| "type_alias_declaration" => {
-				// Extract name of the function, method, class, interface or type
+				// Extract name of the function, method, class, interface or type.
+				// Name-field kinds vary: `identifier` (functions), `property_identifier`
+				// (methods), `type_identifier` (classes/interfaces/type aliases) — all
+				// contain "identifier", not "name".
 				for child in node.children(&mut node.walk()) {
-					if child.kind() == "identifier" || child.kind().contains("name") {
+					if child.kind() == "identifier" || child.kind().contains("identifier") {
 						if let Ok(n) = child.utf8_text(contents.as_bytes()) {
 							symbols.push(n.to_string());
 						}
@@ -256,7 +259,8 @@ impl Language for TypeScript {
 		let mut out = Vec::new();
 		match node.kind() {
 			// `class Foo extends Bar implements Baz, Qux { }`
-			"class_declaration" | "abstract_class_declaration" => {
+			// (also matches class expressions, e.g. `export const Foo = class extends Bar {}`)
+			"class_declaration" | "abstract_class_declaration" | "class" => {
 				let mut cursor = node.walk();
 				for child in node.children(&mut cursor) {
 					if child.kind() == "class_heritage" {

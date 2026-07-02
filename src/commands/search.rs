@@ -391,11 +391,10 @@ pub async fn execute(
 			}
 		}
 		"all" => {
-			let mut final_code_results = code_blocks;
-			if args.expand {
-				println!("Expanding symbols...");
-				final_code_results = indexer::expand_symbols(store, final_code_results).await?;
-			}
+			// Already expanded above (unconditionally, for every mode) when
+			// args.expand is set — expanding again here would re-query the DB
+			// and over-expand the already-expanded set.
+			let final_code_results = code_blocks;
 
 			if args.format.is_json() {
 				let combined = serde_json::json!({
@@ -493,11 +492,17 @@ fn render_text_blocks_with_config(
 
 	println!("Found {} text blocks:\n", blocks.len());
 
-	// Group blocks by file path for better organization
+	// Group blocks by file path for better organization, preserving the
+	// relevance-ranked order files first appear in (HashMap iteration order
+	// is randomized per-process and would otherwise reorder results printed).
+	let mut file_order: Vec<String> = Vec::new();
 	let mut blocks_by_file: std::collections::HashMap<String, Vec<&octocode::store::TextBlock>> =
 		std::collections::HashMap::new();
 
 	for block in blocks {
+		if !blocks_by_file.contains_key(&block.path) {
+			file_order.push(block.path.clone());
+		}
 		blocks_by_file
 			.entry(block.path.clone())
 			.or_default()
@@ -505,7 +510,8 @@ fn render_text_blocks_with_config(
 	}
 
 	// Print results organized by file
-	for (file_path, file_blocks) in blocks_by_file.iter() {
+	for file_path in &file_order {
+		let file_blocks = &blocks_by_file[file_path];
 		println!("╔══════════════════ File: {} ══════════════════", file_path);
 
 		for (idx, block) in file_blocks.iter().enumerate() {
@@ -616,13 +622,19 @@ fn render_document_blocks_with_config(
 
 	println!("Found {} document blocks:\n", blocks.len());
 
-	// Group blocks by file path for better organization
+	// Group blocks by file path for better organization, preserving the
+	// relevance-ranked order files first appear in (HashMap iteration order
+	// is randomized per-process and would otherwise reorder results printed).
+	let mut file_order: Vec<String> = Vec::new();
 	let mut blocks_by_file: std::collections::HashMap<
 		String,
 		Vec<&octocode::store::DocumentBlock>,
 	> = std::collections::HashMap::new();
 
 	for block in blocks {
+		if !blocks_by_file.contains_key(&block.path) {
+			file_order.push(block.path.clone());
+		}
 		blocks_by_file
 			.entry(block.path.clone())
 			.or_default()
@@ -630,7 +642,8 @@ fn render_document_blocks_with_config(
 	}
 
 	// Print results organized by file
-	for (file_path, file_blocks) in blocks_by_file.iter() {
+	for file_path in &file_order {
+		let file_blocks = &blocks_by_file[file_path];
 		println!("╔══════════════════ File: {} ══════════════════", file_path);
 
 		for (idx, block) in file_blocks.iter().enumerate() {

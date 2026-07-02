@@ -114,14 +114,7 @@ impl LspProvider {
 
 		// Read file content
 		let content = match std::fs::read_to_string(absolute_path) {
-			Ok(content) => {
-				// TEMPORARY DEBUG: Use simple content that works in direct test
-				if relative_path == "src/main.rs" {
-					"fn main() {\n    println!(\"Hello, world!\");\n}".to_string()
-				} else {
-					content
-				}
-			}
+			Ok(content) => content,
 			Err(e) => {
 				debug!("Failed to read file {}: {}", relative_path, e);
 				return Err(anyhow::anyhow!("Failed to read file: {}", e));
@@ -196,7 +189,7 @@ impl LspProvider {
 
 		if !is_opened {
 			// File not opened yet, try to open it
-			let absolute_path = resolve_relative_path(&self.working_directory, relative_path);
+			let absolute_path = resolve_relative_path(&self.working_directory, relative_path)?;
 			return Self::open_single_file(
 				&self.client,
 				&self.opened_documents,
@@ -209,7 +202,7 @@ impl LspProvider {
 		}
 
 		// Read updated file content
-		let absolute_path = resolve_relative_path(&self.working_directory, relative_path);
+		let absolute_path = resolve_relative_path(&self.working_directory, relative_path)?;
 		let new_content = match std::fs::read_to_string(&absolute_path) {
 			Ok(content) => content,
 			Err(e) => {
@@ -342,7 +335,7 @@ impl LspProvider {
 		}
 
 		// Convert to URI
-		let absolute_path = resolve_relative_path(&self.working_directory, relative_path);
+		let absolute_path = resolve_relative_path(&self.working_directory, relative_path)?;
 		let uri = crate::mcp::lsp::protocol::file_path_to_uri(&absolute_path)?;
 
 		// Create didClose notification
@@ -869,7 +862,7 @@ impl LspProvider {
 	/// Non-blocking check if LSP server is ready to handle requests
 	/// This is the proper way to check LSP readiness before tool execution
 	pub fn is_ready(&self) -> bool {
-		self.initialized && self.server_capabilities.is_some()
+		self.initialized && self.server_capabilities.is_some() && self.client.is_connected()
 	}
 
 	/// Get standardized LSP not ready error message
@@ -886,7 +879,7 @@ impl LspProvider {
 	pub async fn ensure_file_opened(&self, relative_path: &str) -> Result<()> {
 		use crate::mcp::lsp::protocol::resolve_relative_path;
 
-		let absolute_path = resolve_relative_path(&self.working_directory, relative_path);
+		let absolute_path = resolve_relative_path(&self.working_directory, relative_path)?;
 		if !absolute_path.exists() {
 			return Err(anyhow::anyhow!("File does not exist: {}", relative_path));
 		}
@@ -953,7 +946,7 @@ impl LspProvider {
 	async fn update_file_content(&self, relative_path: &str, new_content: &str) -> Result<()> {
 		use crate::mcp::lsp::protocol::{resolve_relative_path, LspNotification};
 
-		let absolute_path = resolve_relative_path(&self.working_directory, relative_path);
+		let absolute_path = resolve_relative_path(&self.working_directory, relative_path)?;
 		let uri = crate::mcp::lsp::protocol::file_path_to_uri(&absolute_path)?;
 
 		// Get and increment version
@@ -1078,18 +1071,18 @@ impl LspProvider {
 			// Check character bounds for the specific line (1-indexed input)
 			let line_index = (line - 1) as usize;
 			if let Some(line_content) = lines.get(line_index) {
+				// LSP `character` is a count of UTF-16 code units, not UTF-8 bytes.
+				let line_utf16_len = line_content.encode_utf16().count();
 				debug!(
-					"Line {} has {} characters: '{}'",
-					line,
-					line_content.len(),
-					line_content
+					"Line {} has {} UTF-16 units: '{}'",
+					line, line_utf16_len, line_content
 				);
-				if character > 0 && character as usize > line_content.len() + 1 {
-					warn!("Character {} is out of bounds for line {} in file {} (line has {} characters)",
-						character, line, relative_path, line_content.len());
+				if character > 0 && character as usize > line_utf16_len + 1 {
+					warn!("Character {} is out of bounds for line {} in file {} (line has {} UTF-16 units)",
+						character, line, relative_path, line_utf16_len);
 					return Err(anyhow::anyhow!(
-						"Character {} is out of bounds for line {} in file {} (line has {} characters)",
-						character, line, relative_path, line_content.len()
+						"Character {} is out of bounds for line {} in file {} (line has {} UTF-16 units)",
+						character, line, relative_path, line_utf16_len
 					));
 				}
 			}
