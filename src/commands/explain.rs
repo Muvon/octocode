@@ -19,6 +19,7 @@ use octocode::config::Config;
 use octocode::indexer;
 use octocode::llm::{LlmClient, Message};
 use octocode::store::Store;
+use octocode::utils::truncate_at_char_boundary;
 
 use crate::commands::OutputFormat;
 
@@ -158,17 +159,6 @@ async fn resolve_target(
 	}
 
 	Ok((format!("Query: {}", target), search_result, String::new()))
-}
-
-/// Truncate a string to at most `max_bytes`, backing off to the nearest UTF-8
-/// char boundary so we never slice through a multi-byte character (which would
-/// panic). Callers guarantee `s.len() > max_bytes`.
-fn truncate_at_char_boundary(s: &str, max_bytes: usize) -> &str {
-	let mut end = max_bytes.min(s.len());
-	while end > 0 && !s.is_char_boundary(end) {
-		end -= 1;
-	}
-	&s[..end]
 }
 
 /// Try to extract a specific symbol's code from file content

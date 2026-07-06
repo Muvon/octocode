@@ -701,14 +701,50 @@ impl GraphBuilder {
 			// discovery calls below independently fetch the full graph for the
 			// "all_nodes" side, so restricting "new_files" to real changes doesn't
 			// lose any target resolution.
+			//
+			// Discovery only walks sources though, so unchanged files that import
+			// something from THIS run's nodes must also be included as sources —
+			// otherwise the edge from an existing importer to a newly added file
+			// is never discovered. The relationship filter after discovery keeps
+			// only edges touching a processed node, so these extra sources can't
+			// re-append their pre-existing edge sets.
 			let all_processed_nodes = {
 				let graph = self.graph.read().await;
-				graph
+				let mut selected = graph
 					.nodes
 					.values()
 					.filter(|node| processed_node_ids.contains(&node.id))
 					.cloned()
-					.collect::<Vec<CodeNode>>()
+					.collect::<Vec<CodeNode>>();
+
+				// Keys that imports resolve against (mirrors the symbol index and
+				// last-path-segment matching in RelationshipDiscovery).
+				let new_keys: std::collections::HashSet<&str> = selected
+					.iter()
+					.flat_map(|n| n.exports.iter().chain(n.symbols.iter()))
+					.map(|s| s.as_str())
+					.collect();
+				let imports_new = |import: &str| {
+					let clean = import
+						.trim_start_matches("import_")
+						.trim_start_matches("use_")
+						.trim_start_matches("from_");
+					let last = import
+						.rsplit([':', '.', '/'])
+						.next()
+						.unwrap_or(import)
+						.trim();
+					new_keys.contains(import) || new_keys.contains(clean) || new_keys.contains(last)
+				};
+				let importers: Vec<CodeNode> = graph
+					.nodes
+					.values()
+					.filter(|node| !processed_node_ids.contains(&node.id))
+					.filter(|node| node.imports.iter().any(|i| imports_new(i)))
+					.cloned()
+					.collect();
+				selected.extend(importers);
+				selected
 			};
 
 			if !all_processed_nodes.is_empty() {
@@ -724,6 +760,17 @@ impl GraphBuilder {
 					self.discover_relationships_efficiently(&all_processed_nodes)
 						.await?
 				};
+
+				// Storage is append-only: keep only edges that touch a node from
+				// this run, or the importer sources added above would re-append
+				// their entire pre-existing edge sets on every incremental run.
+				let all_relationships: Vec<_> = all_relationships
+					.into_iter()
+					.filter(|r| {
+						processed_node_ids.contains(&r.source)
+							|| processed_node_ids.contains(&r.target)
+					})
+					.collect();
 
 				// Store relationships in batches for incremental storage
 				if !all_relationships.is_empty() {

@@ -134,6 +134,7 @@ pub async fn execute(
 		.await?;
 
 		let _ = progress_handle.await;
+		print_indexing_summary(&state);
 		branch_store.flush().await?;
 
 		lock.release()?;

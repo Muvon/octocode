@@ -94,6 +94,11 @@ impl NoindexWalker {
 			.git_exclude(true) // Respect .git/info/exclude files
 			.follow_links(false);
 
+		// `.hidden(false)` lets gitignore decide about dotfiles, but nothing
+		// gitignores the `.git` directory itself — skip it explicitly or the
+		// walk descends into every object and ref under `.git`.
+		builder.filter_entry(|entry| entry.file_name().to_str() != Some(".git"));
+
 		// PERFORMANCE: Only add .noindex support if .noindex files actually exist
 		// Uses caching to avoid repeated file system checks during the same session
 		if Self::has_noindex_files_cached(current_dir) {

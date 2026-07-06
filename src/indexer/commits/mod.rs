@@ -201,11 +201,7 @@ async fn generate_descriptions(
 						let short_hash = &entry.hash[..8.min(entry.hash.len())];
 						if let Some(desc) = obj.get(short_hash).and_then(|v| v.as_str()) {
 							let trimmed = if desc.len() > 300 {
-								let mut end = 297;
-								while end > 0 && !desc.is_char_boundary(end) {
-									end -= 1;
-								}
-								format!("{}...", &desc[..end])
+								format!("{}...", crate::utils::truncate_at_char_boundary(desc, 297))
 							} else {
 								desc.to_string()
 							};

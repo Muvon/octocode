@@ -133,7 +133,9 @@ pub async fn execute(config: &Config, args: &ReleaseArgs) -> Result<()> {
 
 	// Calculate new version
 	let version_calculation = if let Some(forced_version) = &args.force_version {
-		if !is_valid_semver(forced_version) {
+		// Accept the conventional leading "v" (v1.2.3) by normalizing it away.
+		let forced = forced_version.strip_prefix('v').unwrap_or(forced_version);
+		if !is_valid_semver(forced) {
 			return Err(anyhow::anyhow!(
 				"❌ Invalid --force-version '{}': must be a semver like 1.2.3 or 1.2.3-beta.1",
 				forced_version
@@ -141,7 +143,7 @@ pub async fn execute(config: &Config, args: &ReleaseArgs) -> Result<()> {
 		}
 		VersionCalculation {
 			current_version: current_version.clone(),
-			new_version: forced_version.clone(),
+			new_version: forced.to_string(),
 			version_type: "forced".to_string(),
 			reasoning: "Version forced by user".to_string(),
 		}
@@ -467,11 +469,27 @@ fn is_valid_semver(version: &str) -> bool {
 		&& core
 			.split('.')
 			.all(|p| !p.is_empty() && p.chars().all(|c| c.is_ascii_digit()));
+	if !core_valid {
+		return false;
+	}
 
-	core_valid
-		&& version
-			.chars()
-			.all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '+'))
+	// Optional -prerelease / +build must be dot-separated, non-empty ASCII
+	// alphanumeric/hyphen identifiers (semver 2.0.0) — rejects "1.2.3-",
+	// "1.2.3-a..b" and similar, which would otherwise flow into git tags
+	// and manifest writes.
+	let ident_ok = |s: &str| {
+		s.split('.')
+			.all(|id| !id.is_empty() && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-'))
+	};
+	let rest = &version[core_end..];
+	let (pre, build) = match rest.strip_prefix('-') {
+		Some(r) => match r.split_once('+') {
+			Some((p, b)) => (Some(p), Some(b)),
+			None => (Some(r), None),
+		},
+		None => (None, rest.strip_prefix('+')),
+	};
+	pre.map_or(true, ident_ok) && build.map_or(true, ident_ok)
 }
 
 fn parse_conventional_commit(message: &str) -> (String, Option<String>, String, bool) {

@@ -173,20 +173,42 @@ fn split_diff_by_files(diff_content: &str) -> Vec<String> {
 }
 
 /// Split a single file's diff (already larger than MAX_CHUNK_SIZE) into
-/// line-bounded pieces no larger than MAX_CHUNK_SIZE each.
+/// line-bounded pieces no larger than MAX_CHUNK_SIZE each. The file header
+/// (everything before the first hunk) is replayed on every piece so each one
+/// still identifies its file for `extract_filename` and the reviewing LLM;
+/// a single line longer than the budget (e.g. a minified asset) is hard-split
+/// on char boundaries instead of producing an oversized piece.
 fn split_oversized_file_diff(file_diff: &str) -> Vec<String> {
-	let mut pieces = Vec::new();
-	let mut current = String::with_capacity(MAX_CHUNK_SIZE);
+	let header_len = file_diff.find("\n@@").map(|i| i + 1).unwrap_or(0);
+	let header = &file_diff[..header_len];
+	// Content budget after the replayed header, with a sane floor in case of
+	// absurdly long header lines (e.g. renames with very deep paths).
+	let budget = MAX_CHUNK_SIZE.saturating_sub(header.len()).max(256);
 
-	for line in file_diff.lines() {
-		if !current.is_empty() && current.len() + line.len() + 1 > MAX_CHUNK_SIZE {
-			pieces.push(std::mem::take(&mut current));
+	let mut pieces = Vec::new();
+	let mut current = String::from(header);
+
+	for line in file_diff[header_len..].lines() {
+		if line.len() + 1 > budget {
+			if current.len() > header.len() {
+				pieces.push(std::mem::replace(&mut current, String::from(header)));
+			}
+			let mut rest = line;
+			while !rest.is_empty() {
+				let part = crate::utils::truncate_at_char_boundary(rest, budget - 1);
+				pieces.push(format!("{}{}\n", header, part));
+				rest = &rest[part.len()..];
+			}
+			continue;
+		}
+		if current.len() + line.len() + 1 > MAX_CHUNK_SIZE && current.len() > header.len() {
+			pieces.push(std::mem::replace(&mut current, String::from(header)));
 		}
 		current.push_str(line);
 		current.push('\n');
 	}
 
-	if !current.is_empty() {
+	if current.len() > header.len() {
 		pieces.push(current);
 	}
 

@@ -32,6 +32,11 @@ use super::protocol::{
 /// Max time to wait for a response to an LSP request before giving up
 const REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
+/// Upper bound on waiting for a response while the server still reports
+/// indexing activity — rust-analyzer on a large repo legitimately queues
+/// requests behind workspace loading for minutes.
+const INDEXING_GRACE: std::time::Duration = std::time::Duration::from_secs(300);
+
 /// Progress tracking state
 #[derive(Debug, Clone)]
 pub struct ProgressState {
@@ -141,7 +146,7 @@ impl LspClient {
 		request.id = request_id;
 
 		// Create response channel
-		let (tx, rx) = oneshot::channel();
+		let (tx, mut rx) = oneshot::channel();
 
 		// Store pending request
 		{
@@ -154,23 +159,34 @@ impl LspClient {
 
 		debug!("Sent LSP request: {}", request.method);
 
-		// Wait for response, bounded so a dead/hung LSP server can't block callers forever
-		let response = match tokio::time::timeout(REQUEST_TIMEOUT, rx).await {
-			Ok(Ok(response)) => response,
-			Ok(Err(_)) => {
-				self.pending_requests.lock().await.remove(&request_id);
-				return Err(anyhow::anyhow!(
-					"LSP request channel closed for method: {}",
-					request.method
-				));
-			}
-			Err(_) => {
-				self.pending_requests.lock().await.remove(&request_id);
-				return Err(anyhow::anyhow!(
-					"LSP request timed out after {:?} for method: {}",
-					REQUEST_TIMEOUT,
-					request.method
-				));
+		// Wait for response, bounded so a dead/hung LSP server can't block
+		// callers forever. A dead server is caught fast regardless: dropping
+		// the connection clears pending_requests, which closes the channel.
+		// While the server merely reports active indexing progress, keep
+		// waiting up to INDEXING_GRACE instead of failing at the first tick.
+		let mut waited = std::time::Duration::ZERO;
+		let response = loop {
+			match tokio::time::timeout(REQUEST_TIMEOUT, &mut rx).await {
+				Ok(Ok(response)) => break response,
+				Ok(Err(_)) => {
+					self.pending_requests.lock().await.remove(&request_id);
+					return Err(anyhow::anyhow!(
+						"LSP request channel closed for method: {}",
+						request.method
+					));
+				}
+				Err(_) => {
+					waited += REQUEST_TIMEOUT;
+					if waited < INDEXING_GRACE && !self.is_ready_for_requests().await {
+						continue;
+					}
+					self.pending_requests.lock().await.remove(&request_id);
+					return Err(anyhow::anyhow!(
+						"LSP request timed out after {:?} for method: {}",
+						waited,
+						request.method
+					));
+				}
 			}
 		};
 

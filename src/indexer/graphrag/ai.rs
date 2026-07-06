@@ -516,8 +516,10 @@ impl AIEnhancements {
 			// Validate that file_id exists in our request
 			if files.iter().any(|f| f.file_id == desc.file_id) {
 				let cleaned_desc = if desc.description.len() > 300 {
-					let truncated: String = desc.description.chars().take(297).collect();
-					format!("{}...", truncated)
+					format!(
+						"{}...",
+						crate::utils::truncate_at_char_boundary(&desc.description, 297)
+					)
 				} else {
 					desc.description
 				};
@@ -615,8 +617,10 @@ impl AIEnhancements {
 			Ok(description) => {
 				let cleaned = description.trim();
 				if cleaned.len() > 300 {
-					let truncated: String = cleaned.chars().take(297).collect();
-					Ok(format!("{}...", truncated))
+					Ok(format!(
+						"{}...",
+						crate::utils::truncate_at_char_boundary(cleaned, 297)
+					))
 				} else {
 					Ok(cleaned.to_string())
 				}

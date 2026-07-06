@@ -251,7 +251,7 @@ async fn generate_descriptions_batch(
 			exports_line,
 			siblings_line,
 			sym_line,
-			truncate_code_for_context(&block.content, 1500),
+			crate::utils::truncate_at_char_boundary(&block.content, 1500),
 		));
 	}
 
@@ -277,11 +277,7 @@ async fn generate_descriptions_batch(
 			let chunk_key = format!("{}", i + 1);
 			if let Some(desc) = obj.get(&chunk_key).and_then(|v| v.as_str()) {
 				let trimmed = if desc.len() > 300 {
-					let mut end = 297;
-					while end > 0 && !desc.is_char_boundary(end) {
-						end -= 1;
-					}
-					format!("{}...", &desc[..end])
+					format!("{}...", crate::utils::truncate_at_char_boundary(desc, 297))
 				} else {
 					desc.to_string()
 				};
@@ -291,20 +287,6 @@ async fn generate_descriptions_batch(
 	}
 
 	Ok(descriptions)
-}
-
-/// Truncate code content for LLM context to avoid excessive token usage
-fn truncate_code_for_context(content: &str, max_chars: usize) -> &str {
-	if content.len() <= max_chars {
-		content
-	} else {
-		// Find a safe UTF-8 boundary
-		let mut end = max_chars;
-		while end > 0 && !content.is_char_boundary(end) {
-			end -= 1;
-		}
-		&content[..end]
-	}
 }
 
 #[cfg(test)]
@@ -463,15 +445,6 @@ mod tests {
 		// Starts with structural context (no description)
 		assert!(result.starts_with("# File: src/main.rs"));
 		assert!(result.contains("fn main()"));
-	}
-
-	#[test]
-	fn test_truncate_code_for_context() {
-		let short = "fn foo() {}";
-		assert_eq!(truncate_code_for_context(short, 1500), short);
-
-		let long = "x".repeat(2000);
-		assert_eq!(truncate_code_for_context(&long, 100).len(), 100);
 	}
 
 	#[test]

@@ -19,6 +19,22 @@ use tree_sitter::Node;
 
 pub struct Svelte {}
 
+/// Byte offset of the first `=` outside `{}`/`[]`/`()` nesting — the
+/// assignment operator — so defaults inside a destructuring pattern
+/// (`{ count = 0, name }`) are not mistaken for it.
+fn find_assignment_eq(s: &str) -> Option<usize> {
+	let mut depth = 0u32;
+	for (i, &b) in s.as_bytes().iter().enumerate() {
+		match b {
+			b'{' | b'[' | b'(' => depth += 1,
+			b'}' | b']' | b')' => depth = depth.saturating_sub(1),
+			b'=' if depth == 0 => return Some(i),
+			_ => {}
+		}
+	}
+	None
+}
+
 /// Extract bound identifier names from a destructuring pattern's source text,
 /// e.g. `{ a, b: renamed, c = 1 }` -> ["a", "renamed", "c"], `[a, b]` -> ["a", "b"].
 fn extract_destructured_names(pattern: &str) -> Vec<String> {
@@ -382,7 +398,7 @@ impl Svelte {
 		let rest = tokens.next().unwrap_or("").trim();
 
 		if rest.starts_with('{') || rest.starts_with('[') {
-			let pattern = rest.split('=').next().unwrap_or(rest);
+			let pattern = find_assignment_eq(rest).map_or(rest, |i| &rest[..i]);
 			return extract_destructured_names(pattern);
 		}
 
@@ -416,7 +432,7 @@ impl Svelte {
 		let rest = tokens.next().unwrap_or("").trim();
 
 		if rest.starts_with('{') || rest.starts_with('[') {
-			let pattern = rest.split('=').next().unwrap_or(rest);
+			let pattern = find_assignment_eq(rest).map_or(rest, |i| &rest[..i]);
 			return extract_destructured_names(pattern);
 		}
 
