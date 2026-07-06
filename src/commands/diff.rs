@@ -197,8 +197,11 @@ fn get_diff(
 						// Get commit message
 						let msg = run_git(repo_path, &["log", "-1", "--format=%s", target])
 							.unwrap_or_default();
-						let label =
-							format!("Commit: {} {}", &target[..target.len().min(7)], msg.trim());
+						let label = format!(
+							"Commit: {} {}",
+							octocode::utils::truncate_at_char_boundary(target, 7),
+							msg.trim()
+						);
 						return Ok((diff, files, label));
 					}
 
@@ -228,8 +231,11 @@ fn get_diff(
 							.collect();
 						let msg = run_git(repo_path, &["log", "-1", "--format=%s", target])
 							.unwrap_or_default();
-						let label =
-							format!("Commit: {} {}", &target[..target.len().min(7)], msg.trim());
+						let label = format!(
+							"Commit: {} {}",
+							octocode::utils::truncate_at_char_boundary(target, 7),
+							msg.trim()
+						);
 						return Ok((diff, files, label));
 					}
 				}
@@ -316,12 +322,7 @@ async fn gather_diff_context(store: &Store, changed_files: &[String], config: &C
 		{
 			if !related.trim().is_empty() && !related.contains("No results") {
 				context.push_str("\nRelated code signatures:\n");
-				if related.len() > 1500 {
-					let end = floor_char_boundary(&related, 1500);
-					context.push_str(&related[..end]);
-				} else {
-					context.push_str(&related);
-				}
+				context.push_str(octocode::utils::truncate_at_char_boundary(&related, 1500));
 			}
 		}
 	}
@@ -348,8 +349,7 @@ async fn analyze_diff(
 	// Large diff: chunk and analyze each, then combine
 	let chunks = diff_chunker::chunk_diff(diff);
 	if chunks.len() <= 1 {
-		let end = floor_char_boundary(diff, max_diff_chars);
-		let truncated = &diff[..end];
+		let truncated = octocode::utils::truncate_at_char_boundary(diff, max_diff_chars);
 		return analyze_single_diff(&client, truncated, changed_files, context).await;
 	}
 
@@ -548,20 +548,13 @@ fn print_markdown(analysis: &DiffAnalysis, label: &str) {
 	}
 }
 
-/// Largest byte index <= `index` that lands on a char boundary of `s`.
-fn floor_char_boundary(s: &str, index: usize) -> usize {
-	let mut end = index.min(s.len());
-	while end > 0 && !s.is_char_boundary(end) {
-		end -= 1;
-	}
-	end
-}
-
 fn truncate_str(s: &str, max: usize) -> String {
 	if s.len() <= max {
 		s.to_string()
 	} else {
-		let end = floor_char_boundary(s, max.saturating_sub(3));
-		format!("{}...", &s[..end])
+		format!(
+			"{}...",
+			octocode::utils::truncate_at_char_boundary(s, max.saturating_sub(3))
+		)
 	}
 }

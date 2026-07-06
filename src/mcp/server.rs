@@ -1103,6 +1103,10 @@ impl McpServer {
 				Ok(conn) => conn,
 				Err(e) => {
 					warn!("Failed to accept connection: {}", e);
+					// Back off briefly: persistent errors (e.g. EMFILE when out
+					// of file descriptors) return instantly and would otherwise
+					// spin this loop at 100% CPU.
+					tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 					continue;
 				}
 			};

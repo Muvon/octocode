@@ -700,24 +700,39 @@ impl<'a> GraphRagOperations<'a> {
 		Ok(node_ids)
 	}
 
+	/// Schema of the graphrag_nodes table, used for empty result batches so
+	/// callers see the same columns (including `embedding`) whether or not
+	/// any rows matched — an empty batch missing a column would break any
+	/// caller that extracts it or concatenates batches.
+	fn empty_nodes_schema(&self) -> Arc<Schema> {
+		Arc::new(Schema::new(vec![
+			Field::new("id", DataType::Utf8, false),
+			Field::new("name", DataType::Utf8, false),
+			Field::new("kind", DataType::Utf8, false),
+			Field::new("path", DataType::Utf8, false),
+			Field::new("description", DataType::Utf8, false),
+			Field::new("symbols", DataType::Utf8, true),
+			Field::new("imports", DataType::Utf8, true),
+			Field::new("exports", DataType::Utf8, true),
+			Field::new("functions", DataType::Utf8, true),
+			Field::new("size_lines", DataType::UInt32, false),
+			Field::new("language", DataType::Utf8, false),
+			Field::new("hash", DataType::Utf8, false),
+			Field::new(
+				"embedding",
+				DataType::FixedSizeList(
+					Arc::new(Field::new("item", DataType::Float32, true)),
+					self.code_vector_dim as i32,
+				),
+				true,
+			),
+		]))
+	}
+
 	/// Get all graph nodes via full table scan (no vector search, no limit)
 	pub async fn get_all_graph_nodes(&self) -> Result<RecordBatch> {
 		if !self.table_ops.table_exists(tables::GRAPHRAG_NODES).await? {
-			let schema = Arc::new(Schema::new(vec![
-				Field::new("id", DataType::Utf8, false),
-				Field::new("name", DataType::Utf8, false),
-				Field::new("kind", DataType::Utf8, false),
-				Field::new("path", DataType::Utf8, false),
-				Field::new("description", DataType::Utf8, false),
-				Field::new("symbols", DataType::Utf8, true),
-				Field::new("imports", DataType::Utf8, true),
-				Field::new("exports", DataType::Utf8, true),
-				Field::new("functions", DataType::Utf8, true),
-				Field::new("size_lines", DataType::UInt32, false),
-				Field::new("language", DataType::Utf8, false),
-				Field::new("hash", DataType::Utf8, false),
-			]));
-			return Ok(RecordBatch::new_empty(schema));
+			return Ok(RecordBatch::new_empty(self.empty_nodes_schema()));
 		}
 
 		let table = self.get_table(tables::GRAPHRAG_NODES).await?;
@@ -732,21 +747,7 @@ impl<'a> GraphRagOperations<'a> {
 		}
 
 		if all_batches.is_empty() {
-			let schema = Arc::new(Schema::new(vec![
-				Field::new("id", DataType::Utf8, false),
-				Field::new("name", DataType::Utf8, false),
-				Field::new("kind", DataType::Utf8, false),
-				Field::new("path", DataType::Utf8, false),
-				Field::new("description", DataType::Utf8, false),
-				Field::new("symbols", DataType::Utf8, true),
-				Field::new("imports", DataType::Utf8, true),
-				Field::new("exports", DataType::Utf8, true),
-				Field::new("functions", DataType::Utf8, true),
-				Field::new("size_lines", DataType::UInt32, false),
-				Field::new("language", DataType::Utf8, false),
-				Field::new("hash", DataType::Utf8, false),
-			]));
-			Ok(RecordBatch::new_empty(schema))
+			Ok(RecordBatch::new_empty(self.empty_nodes_schema()))
 		} else if all_batches.len() == 1 {
 			Ok(all_batches.into_iter().next().unwrap())
 		} else {
@@ -770,21 +771,7 @@ impl<'a> GraphRagOperations<'a> {
 
 		if !self.table_ops.table_exists(tables::GRAPHRAG_NODES).await? {
 			// Return empty batch with expected schema that matches the actual storage schema
-			let schema = Arc::new(Schema::new(vec![
-				Field::new("id", DataType::Utf8, false),
-				Field::new("name", DataType::Utf8, false),
-				Field::new("kind", DataType::Utf8, false),
-				Field::new("path", DataType::Utf8, false),
-				Field::new("description", DataType::Utf8, false),
-				Field::new("symbols", DataType::Utf8, true),
-				Field::new("imports", DataType::Utf8, true),
-				Field::new("exports", DataType::Utf8, true),
-				Field::new("functions", DataType::Utf8, true),
-				Field::new("size_lines", DataType::UInt32, false),
-				Field::new("language", DataType::Utf8, false),
-				Field::new("hash", DataType::Utf8, false),
-			]));
-			return Ok(RecordBatch::new_empty(schema));
+			return Ok(RecordBatch::new_empty(self.empty_nodes_schema()));
 		}
 
 		let table = self.get_table(tables::GRAPHRAG_NODES).await?;
@@ -817,21 +804,7 @@ impl<'a> GraphRagOperations<'a> {
 		// Concatenate all batches if we have multiple
 		if all_batches.is_empty() {
 			// Return empty batch with expected schema that matches the actual storage schema
-			let schema = Arc::new(Schema::new(vec![
-				Field::new("id", DataType::Utf8, false),
-				Field::new("name", DataType::Utf8, false),
-				Field::new("kind", DataType::Utf8, false),
-				Field::new("path", DataType::Utf8, false),
-				Field::new("description", DataType::Utf8, false),
-				Field::new("symbols", DataType::Utf8, true),
-				Field::new("imports", DataType::Utf8, true),
-				Field::new("exports", DataType::Utf8, true),
-				Field::new("functions", DataType::Utf8, true),
-				Field::new("size_lines", DataType::UInt32, false),
-				Field::new("language", DataType::Utf8, false),
-				Field::new("hash", DataType::Utf8, false),
-			]));
-			Ok(RecordBatch::new_empty(schema))
+			Ok(RecordBatch::new_empty(self.empty_nodes_schema()))
 		} else if all_batches.len() == 1 {
 			Ok(all_batches.into_iter().next().unwrap())
 		} else {

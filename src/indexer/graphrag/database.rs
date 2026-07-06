@@ -45,14 +45,22 @@ fn extract_f32_column<'a>(batch: &'a RecordBatch, column_name: &str) -> Result<&
 		.with_context(|| format!("Column '{}' is not a Float32Array", column_name))
 }
 
-/// Helper function to safely extract a UInt32Array column from a RecordBatch
-fn extract_u32_column<'a>(batch: &'a RecordBatch, column_name: &str) -> Result<&'a UInt32Array> {
+/// Like `extract_string_column`, but returns None when the column is absent —
+/// tables written by older octocode versions predate some columns, and their
+/// nodes must load with defaults instead of failing the whole graph.
+fn try_string_column<'a>(batch: &'a RecordBatch, column_name: &str) -> Option<&'a StringArray> {
 	batch
-		.column_by_name(column_name)
-		.with_context(|| format!("Column '{}' not found in batch", column_name))?
+		.column_by_name(column_name)?
+		.as_any()
+		.downcast_ref::<StringArray>()
+}
+
+/// Like `try_string_column`, but for UInt32 columns.
+fn try_u32_column<'a>(batch: &'a RecordBatch, column_name: &str) -> Option<&'a UInt32Array> {
+	batch
+		.column_by_name(column_name)?
 		.as_any()
 		.downcast_ref::<UInt32Array>()
-		.with_context(|| format!("Column '{}' is not a UInt32Array", column_name))
 }
 
 /// Helper function to safely extract a FixedSizeListArray column from a RecordBatch
@@ -112,9 +120,11 @@ impl<'a> DatabaseOperations<'a> {
 		let symbols_array = extract_string_column(&node_batch, "symbols")?;
 		let imports_array = extract_string_column(&node_batch, "imports")?;
 		let exports_array = extract_string_column(&node_batch, "exports")?;
-		let functions_array = extract_string_column(&node_batch, "functions")?;
-		let size_lines_array = extract_u32_column(&node_batch, "size_lines")?;
-		let language_array = extract_string_column(&node_batch, "language")?;
+		// Absent in tables written by older octocode versions — load with
+		// defaults rather than failing the whole graph until a reindex.
+		let functions_array = try_string_column(&node_batch, "functions");
+		let size_lines_array = try_u32_column(&node_batch, "size_lines");
+		let language_array = try_string_column(&node_batch, "language");
 		let hash_array = extract_string_column(&node_batch, "hash")?;
 
 		// Get the embedding fixed size list array
@@ -158,14 +168,16 @@ impl<'a> DatabaseOperations<'a> {
 
 			// Parse functions JSON
 			let functions: Vec<crate::indexer::graphrag::types::FunctionInfo> =
-				if functions_array.is_null(i) {
-					Vec::new()
-				} else {
-					serde_json::from_str(functions_array.value(i)).unwrap_or_default()
+				match functions_array {
+					Some(arr) if !arr.is_null(i) => {
+						serde_json::from_str(arr.value(i)).unwrap_or_default()
+					}
+					_ => Vec::new(),
 				};
 
-			let size_lines = size_lines_array.value(i);
-			let language = language_array.value(i).to_string();
+			let size_lines = size_lines_array.map_or(0, |arr| arr.value(i));
+			let language = language_array
+				.map_or_else(|| "unknown".to_string(), |arr| arr.value(i).to_string());
 			let hash = hash_array.value(i).to_string();
 
 			// Extract the embedding for this node
@@ -313,9 +325,11 @@ impl<'a> DatabaseOperations<'a> {
 		let symbols_array = extract_string_column(&node_batch, "symbols")?;
 		let imports_array = extract_string_column(&node_batch, "imports")?;
 		let exports_array = extract_string_column(&node_batch, "exports")?;
-		let functions_array = extract_string_column(&node_batch, "functions")?;
-		let size_lines_array = extract_u32_column(&node_batch, "size_lines")?;
-		let language_array = extract_string_column(&node_batch, "language")?;
+		// Absent in tables written by older octocode versions — load with
+		// defaults rather than failing the whole graph until a reindex.
+		let functions_array = try_string_column(&node_batch, "functions");
+		let size_lines_array = try_u32_column(&node_batch, "size_lines");
+		let language_array = try_string_column(&node_batch, "language");
 		let hash_array = extract_string_column(&node_batch, "hash")?;
 
 		// Get the embedding fixed size list array
@@ -359,14 +373,16 @@ impl<'a> DatabaseOperations<'a> {
 
 			// Parse functions JSON
 			let functions: Vec<crate::indexer::graphrag::types::FunctionInfo> =
-				if functions_array.is_null(i) {
-					Vec::new()
-				} else {
-					serde_json::from_str(functions_array.value(i)).unwrap_or_default()
+				match functions_array {
+					Some(arr) if !arr.is_null(i) => {
+						serde_json::from_str(arr.value(i)).unwrap_or_default()
+					}
+					_ => Vec::new(),
 				};
 
-			let size_lines = size_lines_array.value(i);
-			let language = language_array.value(i).to_string();
+			let size_lines = size_lines_array.map_or(0, |arr| arr.value(i));
+			let language = language_array
+				.map_or_else(|| "unknown".to_string(), |arr| arr.value(i).to_string());
 			let hash = hash_array.value(i).to_string();
 
 			// Extract the embedding for this node

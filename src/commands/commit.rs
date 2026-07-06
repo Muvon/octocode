@@ -389,11 +389,14 @@ async fn rewrite_commit_message(
 		// 7-char match can silently fail to match on repos where it's longer, and
 		// `sed` still exits 0 with nothing changed. Match any abbreviation length
 		// of the target hash, and fail loudly if the substitution didn't land.
+		// The trailing-boundary group is required: without it, `^pick abcd` also
+		// matches OTHER commits whose abbreviated hash merely starts with those 4
+		// chars, flipping them to reword and corrupting the rebase.
 		let hash_alternatives: Vec<&str> =
 			(4..=full_hash.len()).map(|len| &full_hash[..len]).collect();
 		let hash_pattern = hash_alternatives.join("|");
 		let seq_script = format!(
-			"#!/bin/sh\nsed -E -i.bak 's/^pick ({})/reword \\1/' \"$1\"\nif ! grep -q '^reword ' \"$1\"; then\n  echo \"octocode: failed to mark {} for reword\" >&2\n  exit 1\nfi",
+			"#!/bin/sh\nsed -E -i.bak 's/^pick ({})([[:space:]]|$)/reword \\1\\2/' \"$1\"\nif ! grep -q '^reword ' \"$1\"; then\n  echo \"octocode: failed to mark {} for reword\" >&2\n  exit 1\nfi",
 			hash_pattern, full_hash
 		);
 		let seq_file = repo_path.join(".git").join("octocode_seq_editor.sh");

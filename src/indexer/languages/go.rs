@@ -293,17 +293,20 @@ impl Go {
 						// Recursively process nested blocks
 						self.extract_go_variables(child, contents, symbols);
 					}
-					"if_statement"
-					| "for_statement"
-					| "expression_switch_statement"
-					| "type_switch_statement" => {
-						// Process blocks inside control structures. Switch statements
-						// don't exist as node kind "switch_statement" in tree-sitter-go.
+					"if_statement" | "for_statement" => {
+						// Process blocks inside control structures.
 						for stmt_child in child.children(&mut child.walk()) {
 							if stmt_child.kind() == "block" {
 								self.extract_go_variables(stmt_child, contents, symbols);
 							}
 						}
+					}
+					"expression_switch_statement" | "type_switch_statement" => {
+						// Switch statements hold case clauses (and an optional init
+						// statement) directly — there is no nested "block" — so
+						// recurse into the switch node itself; the case arms below
+						// then handle each case body.
+						self.extract_go_variables(child, contents, symbols);
 					}
 					"expression_case" | "default_case" | "type_case" => {
 						// Switch case bodies hold statements directly (not wrapped in
