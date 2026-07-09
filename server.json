@@ -8,22 +8,5 @@
   "repository": {
     "url": "https://github.com/muvon/octocode",
     "source": "github"
-  },
-  "packages": [
-    {
-      "registryType": "mcpb",
-      "identifier": "https://github.com/muvon/octocode/releases/download/0.18.0/octocode-0.18.0-placeholder.mcpb",
-      "fileSha256": "PLACEHOLDER",
-      "transport": { "type": "stdio" }
-    },
-    {
-      "registryType": "oci",
-      "registryBaseUrl": "https://ghcr.io",
-      "identifier": "ghcr.io/muvon/octocode:0.17.1",
-      "transport": { "type": "stdio" },
-      "packageArguments": [
-        { "type": "positional", "value": "mcp" }
-      ]
-    }
-  ]
+  }
 }
