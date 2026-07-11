@@ -489,7 +489,7 @@ fn is_valid_semver(version: &str) -> bool {
 		},
 		None => (None, rest.strip_prefix('+')),
 	};
-	pre.map_or(true, ident_ok) && build.map_or(true, ident_ok)
+	pre.is_none_or(ident_ok) && build.is_none_or(ident_ok)
 }
 
 fn parse_conventional_commit(message: &str) -> (String, Option<String>, String, bool) {
