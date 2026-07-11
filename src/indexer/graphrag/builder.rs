@@ -114,7 +114,9 @@ impl GraphBuilder {
 
 	// Generate an embedding for node content
 	async fn generate_embedding(&self, text: &str) -> Result<Vec<f32>> {
-		self.embedding_provider.generate_embedding(text).await
+		// octolib now returns (vectors, usage); GraphRAG only needs the vector.
+		let (vector, _usage) = self.embedding_provider.generate_embedding(text).await?;
+		Ok(vector)
 	}
 
 	// Process files efficiently using existing code blocks for better performance
