@@ -3,7 +3,7 @@
   "name": "io.github.Muvon/octocode",
   "title": "Octocode",
   "description": "AI-powered code indexer with semantic search and knowledge graphs",
-  "version": "0.18.0",
+  "version": "0.18.1",
   "websiteUrl": "https://octocode.muvon.io",
   "repository": {
     "url": "https://github.com/muvon/octocode",

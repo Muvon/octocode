@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.18.1] - 2026-07-11
+
+### 📋 Release Summary
+
+This release significantly improves indexer stability and overall system reliability (e42fc07f, 4bb402aa, ca8ac82e). It also streamlines the MCP registry publishing process and updates core dependencies to enhance performance and compatibility (f18181e1, 7b960333, 1918750d, 61838ab8).
+
+
+### 🔧 Improvements & Optimizations
+
+- **release**: add permissions for MCP registry publish `f18181e1`
+- **release**: simplify semver validation logic `ee222ce1`
+- **config**: remove obsolete server packages `28cef396`
+- **release**: automate MCPB bundle publishing `7b960333`
+- **indexer**: cover C++ module extensions `c8036fab`
+
+### 🐛 Bug Fixes & Stability
+
+- **core**: improve indexer stability and data handling `e42fc07f`
+- **core**: improve stability and indexing reliability `4bb402aa`
+- **core**: resolve stability and indexing issues `ca8ac82e`
+
+### 🔄 Other Changes
+
+3 maintenance, dependency, and tooling updates not listed individually.
+
 ## [0.18.0] - 2026-06-27
 
 ### 📋 Release Summary
