@@ -333,6 +333,9 @@ jobs:
   publish-mcp:
     name: Publish to MCP Registry
     needs: release
+    permissions:
+      id-token: write
+      contents: read
     uses: muvon/ci-workflow/.github/workflows/mcp-publish.yml@master
     with:
       tag: ${{ inputs.tag }}
