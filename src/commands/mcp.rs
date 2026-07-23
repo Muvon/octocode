@@ -77,10 +77,12 @@ pub async fn run(args: McpArgs) -> Result<()> {
 		};
 	}
 
-	// Single mode requires a git repository unless --no-git is passed (or
-	// require_git is disabled in config). Refuse to start outside a git repo
-	// instead of silently serving with indexing disabled.
-	if config.index.require_git
+	// The git requirement exists for the in-process indexer. Only enforce it when
+	// that indexer will actually run (index.mcp_index = true): with it off the
+	// server serves the existing index read-only, where git is irrelevant.
+	// --no-git or require_git = false in config also waive it.
+	if config.index.mcp_index
+		&& config.index.require_git
 		&& !args.no_git
 		&& !indexer::git::is_git_repo_root(&working_directory)
 	{
