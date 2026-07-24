@@ -273,6 +273,11 @@ pub struct SearchConfig {
 	/// best-effort, requires `graphrag.enabled`. Set false to disable — A/B on
 	/// your eval before enabling, since naive expansion can dilute precision.
 	pub graph_expansion: bool,
+
+	/// LLM reasoning-based selection over retrieved candidates (PageIndex-style:
+	/// reason over code structure instead of trusting similarity rank).
+	#[serde(default)]
+	pub reasoning: ReasoningConfig,
 }
 
 impl Default for SearchConfig {
@@ -287,6 +292,65 @@ impl Default for SearchConfig {
 			reranker: RerankerConfig::default(),
 			hybrid: HybridSearchConfig::default(),
 			graph_expansion: false,
+			reasoning: ReasoningConfig::default(),
+		}
+	}
+}
+
+fn default_reasoning_model() -> String {
+	"deepseek:deepseek-v4-flash".to_string()
+}
+fn default_reasoning_max_candidates() -> usize {
+	25
+}
+fn default_reasoning_final_top_k() -> usize {
+	10
+}
+fn default_reasoning_context_level() -> String {
+	"snippets".to_string()
+}
+
+/// PageIndex-style reasoning retrieval. After the deterministic retrievers gather
+/// a candidate pool, an LLM reasons over each candidate's structure (path,
+/// symbols, snippet, and — when enabled — exact `structural_search` hits and
+/// GraphRAG neighbours) and re-ranks by true relevance rather than similarity.
+/// Runs only in the semantic search path; `structural_search` itself stays a
+/// deterministic grep. Off by default.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReasoningConfig {
+	/// Enable the reasoning selection step.
+	#[serde(default)]
+	pub enabled: bool,
+	/// Model for reasoning, "provider:model" (e.g. "ollama:...", "openrouter:...").
+	#[serde(default = "default_reasoning_model")]
+	pub model: String,
+	/// How many top candidates to reason over.
+	#[serde(default = "default_reasoning_max_candidates")]
+	pub max_candidates: usize,
+	/// How many results to keep after reasoning.
+	#[serde(default = "default_reasoning_final_top_k")]
+	pub final_top_k: usize,
+	/// Per-candidate context fed to the LLM: "signatures" | "snippets" | "full".
+	#[serde(default = "default_reasoning_context_level")]
+	pub context_level: String,
+	/// Inject exact `structural_search` (ast-grep) matches into the pool.
+	#[serde(default)]
+	pub use_structural: bool,
+	/// Inject GraphRAG relationship neighbours into the pool.
+	#[serde(default)]
+	pub use_graph: bool,
+}
+
+impl Default for ReasoningConfig {
+	fn default() -> Self {
+		Self {
+			enabled: false,
+			model: default_reasoning_model(),
+			max_candidates: default_reasoning_max_candidates(),
+			final_top_k: default_reasoning_final_top_k(),
+			context_level: default_reasoning_context_level(),
+			use_structural: true,
+			use_graph: true,
 		}
 	}
 }
