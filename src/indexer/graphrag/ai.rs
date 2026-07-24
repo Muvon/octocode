@@ -95,13 +95,10 @@ impl AIEnhancements {
 			.await?;
 		relationships.extend(ai_relationships);
 
-		// Deduplicate
-		relationships.sort_by(|a, b| {
-			(a.source.clone(), a.target.clone(), a.relation_type.clone()).cmp(&(
-				b.source.clone(),
-				b.target.clone(),
-				b.relation_type.clone(),
-			))
+		// Deduplicate (borrow the fields — no per-comparison clones; unstable is
+		// fine since dedup only needs equal keys grouped together).
+		relationships.sort_unstable_by(|a, b| {
+			(&a.source, &a.target, &a.relation_type).cmp(&(&b.source, &b.target, &b.relation_type))
 		});
 		relationships.dedup_by(|a, b| {
 			a.source == b.source && a.target == b.target && a.relation_type == b.relation_type

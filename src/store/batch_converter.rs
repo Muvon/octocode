@@ -493,7 +493,7 @@ impl BatchConverter {
 		batch: &RecordBatch,
 		_embeddings: Option<&[Vec<f32>]>,
 	) -> Result<Vec<CodeBlock>> {
-		let mut code_blocks = Vec::new();
+		let mut code_blocks = Vec::with_capacity(batch.num_rows());
 
 		// Extract columns from the batch
 		let _id_array = batch
@@ -584,7 +584,7 @@ impl BatchConverter {
 		batch: &RecordBatch,
 		_embeddings: Option<&[Vec<f32>]>,
 	) -> Result<Vec<TextBlock>> {
-		let mut text_blocks = Vec::new();
+		let mut text_blocks = Vec::with_capacity(batch.num_rows());
 
 		// Extract columns from the batch
 		let path_array = batch
@@ -655,7 +655,7 @@ impl BatchConverter {
 		batch: &RecordBatch,
 		_embeddings: Option<&[Vec<f32>]>,
 	) -> Result<Vec<DocumentBlock>> {
-		let mut document_blocks = Vec::new();
+		let mut document_blocks = Vec::with_capacity(batch.num_rows());
 
 		// Extract columns from the batch
 		let path_array = batch
@@ -842,7 +842,7 @@ impl BatchConverter {
 	}
 
 	pub fn batch_to_commit_blocks(&self, batch: &RecordBatch) -> Result<Vec<CommitBlock>> {
-		let mut commit_blocks = Vec::new();
+		let mut commit_blocks = Vec::with_capacity(batch.num_rows());
 
 		let hash_array = batch
 			.column_by_name("hash")

@@ -31,11 +31,13 @@ impl RelationshipDiscovery {
 		let mut relationships = Vec::new();
 
 		// Pre-build lookup indexes for O(1) symbol resolution instead of O(N) scans
-		let mut symbol_index: std::collections::HashMap<String, Vec<&str>> =
+		// Borrow the symbol strings as keys instead of cloning them — they live in
+		// `all_nodes`, which outlives this index.
+		let mut symbol_index: std::collections::HashMap<&str, Vec<&str>> =
 			std::collections::HashMap::new();
 		for node in all_nodes {
 			for sym in node.exports.iter().chain(node.symbols.iter()) {
-				symbol_index.entry(sym.clone()).or_default().push(&node.id);
+				symbol_index.entry(sym.as_str()).or_default().push(&node.id);
 			}
 		}
 
@@ -44,6 +46,14 @@ impl RelationshipDiscovery {
 			.iter()
 			.map(|n| (n.id.as_str(), n.path.as_str()))
 			.collect();
+
+		// Build the import-resolution maps ONCE (they depend only on `all_nodes`).
+		// Rebuilding them per source file made discovery O(new_files × all_nodes).
+		let file_map: std::collections::HashMap<String, &CodeNode> = all_nodes
+			.iter()
+			.map(|node| (node.path.clone(), node))
+			.collect();
+		let all_files: Vec<String> = all_nodes.iter().map(|node| node.path.clone()).collect();
 
 		for source_file in new_files {
 			// 1. Import/Export relationships via pre-built index (O(1) per import)
@@ -92,6 +102,8 @@ impl RelationshipDiscovery {
 			Self::discover_language_specific_relationships(
 				source_file,
 				all_nodes,
+				&file_map,
+				&all_files,
 				&mut relationships,
 			);
 
@@ -160,13 +172,10 @@ impl RelationshipDiscovery {
 			}
 		}
 
-		// Deduplicate relationships
-		relationships.sort_by(|a, b| {
-			(a.source.clone(), a.target.clone(), a.relation_type.clone()).cmp(&(
-				b.source.clone(),
-				b.target.clone(),
-				b.relation_type.clone(),
-			))
+		// Deduplicate relationships (borrow the fields — no per-comparison clones;
+		// unstable is fine since dedup only needs equal keys grouped together).
+		relationships.sort_unstable_by(|a, b| {
+			(&a.source, &a.target, &a.relation_type).cmp(&(&b.source, &b.target, &b.relation_type))
 		});
 		relationships.dedup_by(|a, b| {
 			a.source == b.source && a.target == b.target && a.relation_type == b.relation_type
@@ -179,7 +188,7 @@ impl RelationshipDiscovery {
 	/// Returns matching node IDs (deduplicated).
 	fn get_import_candidates<'a>(
 		import: &str,
-		symbol_index: &'a std::collections::HashMap<String, Vec<&'a str>>,
+		symbol_index: &'a std::collections::HashMap<&'a str, Vec<&'a str>>,
 	) -> Vec<&'a str> {
 		let mut results = Vec::new();
 
@@ -225,10 +234,12 @@ impl RelationshipDiscovery {
 	fn discover_language_specific_relationships(
 		source_file: &CodeNode,
 		all_nodes: &[CodeNode],
+		file_map: &std::collections::HashMap<String, &CodeNode>,
+		all_files: &[String],
 		relationships: &mut Vec<CodeRelationship>,
 	) {
-		// First, resolve imports to create semantic relationships
-		Self::discover_import_relationships(source_file, all_nodes, relationships);
+		// First, resolve imports to create semantic relationships (shared maps).
+		Self::resolve_import_relationships(source_file, file_map, all_files, relationships);
 
 		// Then add language-specific patterns as fallback
 		match source_file.language.as_str() {
@@ -253,27 +264,35 @@ impl RelationshipDiscovery {
 		}
 	}
 
-	// Discover semantic relationships through import resolution
+	// Discover semantic relationships through import resolution.
+	// Public entry (used by tests): builds the lookup maps once then delegates.
 	pub fn discover_import_relationships(
 		source_file: &CodeNode,
 		all_nodes: &[CodeNode],
 		relationships: &mut Vec<CodeRelationship>,
 	) {
-		// Create a map for quick file lookup by path
 		let file_map: std::collections::HashMap<String, &CodeNode> = all_nodes
 			.iter()
 			.map(|node| (node.path.clone(), node))
 			.collect();
-
-		// Get all file paths for resolution
 		let all_files: Vec<String> = all_nodes.iter().map(|node| node.path.clone()).collect();
+		Self::resolve_import_relationships(source_file, &file_map, &all_files, relationships);
+	}
 
+	// Import resolution against pre-built lookup maps, shared across source files
+	// to keep discovery O(nodes) rather than O(new_files × nodes).
+	fn resolve_import_relationships(
+		source_file: &CodeNode,
+		file_map: &std::collections::HashMap<String, &CodeNode>,
+		all_files: &[String],
+		relationships: &mut Vec<CodeRelationship>,
+	) {
 		// Get language implementation for import resolution
 		if let Some(lang_impl) = crate::indexer::languages::get_language(&source_file.language) {
 			// Resolve each import to create direct relationships
 			for import_path in &source_file.imports {
 				if let Some(resolved_path) =
-					lang_impl.resolve_import(import_path, &source_file.path, &all_files)
+					lang_impl.resolve_import(import_path, &source_file.path, all_files)
 				{
 					// Find the target node
 					if let Some(target_node) = file_map.get(&resolved_path) {

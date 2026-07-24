@@ -109,17 +109,16 @@ pub async fn index_commits(
 		});
 	}
 
-	// Batch embed using text model
-	let texts: Vec<String> = commit_blocks.iter().map(|b| b.content.clone()).collect();
-
+	// Batch embed using text model. Build each chunk's text copies inside the
+	// loop so we hold at most one batch of duplicated content at a time, not all.
 	let batch_size = config.index.embeddings_batch_size;
-	for chunk_start in (0..texts.len()).step_by(batch_size) {
-		let chunk_end = (chunk_start + batch_size).min(texts.len());
-		let text_chunk = texts[chunk_start..chunk_end].to_vec();
+	for chunk_start in (0..commit_blocks.len()).step_by(batch_size) {
+		let chunk_end = (chunk_start + batch_size).min(commit_blocks.len());
 		let block_chunk = &commit_blocks[chunk_start..chunk_end];
+		let chunk_texts: Vec<String> = block_chunk.iter().map(|b| b.content.clone()).collect();
 
 		let embeddings = embedding::generate_embeddings_batch(
-			text_chunk,
+			&chunk_texts,
 			false, // text model, not code
 			config,
 			embedding::types::InputType::Document,

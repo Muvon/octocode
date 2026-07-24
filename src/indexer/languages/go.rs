@@ -245,7 +245,7 @@ impl Go {
 								for expr in var_child.children(&mut var_child.walk()) {
 									if expr.kind() == "identifier" {
 										if let Ok(name) = expr.utf8_text(contents.as_bytes()) {
-											if !symbols.contains(&name.to_string()) {
+											if !symbols.iter().any(|s| s.as_str() == name) {
 												symbols.push(name.to_string());
 											}
 										}
@@ -263,7 +263,7 @@ impl Go {
 									if spec_child.kind() == "identifier" {
 										if let Ok(name) = spec_child.utf8_text(contents.as_bytes())
 										{
-											if !symbols.contains(&name.to_string()) {
+											if !symbols.iter().any(|s| s.as_str() == name) {
 												symbols.push(name.to_string());
 											}
 										}
@@ -280,7 +280,7 @@ impl Go {
 									if spec_child.kind() == "identifier" {
 										if let Ok(name) = spec_child.utf8_text(contents.as_bytes())
 										{
-											if !symbols.contains(&name.to_string()) {
+											if !symbols.iter().any(|s| s.as_str() == name) {
 												symbols.push(name.to_string());
 											}
 										}
@@ -339,7 +339,7 @@ impl Go {
 					for field_child in child.children(&mut child.walk()) {
 						if field_child.kind() == "field_identifier" {
 							if let Ok(name) = field_child.utf8_text(contents.as_bytes()) {
-								if !symbols.contains(&name.to_string()) {
+								if !symbols.iter().any(|s| s.as_str() == name) {
 									symbols.push(name.to_string());
 								}
 							}
@@ -350,7 +350,7 @@ impl Go {
 					for method_child in child.children(&mut child.walk()) {
 						if method_child.kind() == "field_identifier" {
 							if let Ok(name) = method_child.utf8_text(contents.as_bytes()) {
-								if !symbols.contains(&name.to_string()) {
+								if !symbols.iter().any(|s| s.as_str() == name) {
 									symbols.push(name.to_string());
 								}
 							}

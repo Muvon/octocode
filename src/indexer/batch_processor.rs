@@ -102,7 +102,7 @@ pub async fn process_code_blocks_batch(
 
 	// Generate embeddings with Document input type for indexing (asymmetric retrieval)
 	let embeddings = crate::embedding::generate_embeddings_batch(
-		contents.clone(),
+		&contents,
 		true,
 		config,
 		crate::embedding::types::InputType::Document,
@@ -112,14 +112,20 @@ pub async fn process_code_blocks_batch(
 	// Store enriched contents in the `content` column so BM25/FTS sees the same
 	// signal as the dense vector ("Contextual BM25" half of Anthropic's recipe).
 	// The cross-encoder reranker, which scores on the stored content, also gets
-	// the enriched text for free.
+	// the enriched text for free. Move the enriched strings out of `contents`
+	// instead of cloning them (and skip cloning the block's old content).
 	let enriched_blocks: Vec<CodeBlock> = blocks
 		.iter()
-		.zip(contents.iter())
-		.map(|(b, enriched)| {
-			let mut nb = b.clone();
-			nb.content = enriched.clone();
-			nb
+		.zip(contents)
+		.map(|(b, enriched)| CodeBlock {
+			path: b.path.clone(),
+			language: b.language.clone(),
+			content: enriched,
+			symbols: b.symbols.clone(),
+			start_line: b.start_line,
+			end_line: b.end_line,
+			hash: b.hash.clone(),
+			distance: b.distance,
 		})
 		.collect();
 	store
@@ -151,20 +157,25 @@ pub async fn process_text_blocks_batch(
 		.map(|b| format!("# File: {}\n\n{}", b.path, b.content))
 		.collect();
 	let embeddings = crate::embedding::generate_embeddings_batch(
-		contents.clone(),
+		&contents,
 		false,
 		config,
 		crate::embedding::types::InputType::Document,
 	)
 	.await?;
 	// Store enriched content so BM25 sees the file-path prefix too.
+	// Move the enriched strings out of `contents` instead of cloning.
 	let enriched_blocks: Vec<TextBlock> = blocks
 		.iter()
-		.zip(contents.iter())
-		.map(|(b, enriched)| {
-			let mut nb = b.clone();
-			nb.content = enriched.clone();
-			nb
+		.zip(contents)
+		.map(|(b, enriched)| TextBlock {
+			path: b.path.clone(),
+			language: b.language.clone(),
+			content: enriched,
+			start_line: b.start_line,
+			end_line: b.end_line,
+			hash: b.hash.clone(),
+			distance: b.distance,
 		})
 		.collect();
 	store
@@ -204,20 +215,27 @@ pub async fn process_document_blocks_batch(
 		})
 		.collect();
 	let embeddings = crate::embedding::generate_embeddings_batch(
-		contents.clone(),
+		&contents,
 		false,
 		config,
 		crate::embedding::types::InputType::Document,
 	)
 	.await?;
 	// Store enriched content so BM25 sees the file-path + section context too.
+	// Move the enriched strings out of `contents` instead of cloning.
 	let enriched_blocks: Vec<DocumentBlock> = blocks
 		.iter()
-		.zip(contents.iter())
-		.map(|(b, enriched)| {
-			let mut nb = b.clone();
-			nb.content = enriched.clone();
-			nb
+		.zip(contents)
+		.map(|(b, enriched)| DocumentBlock {
+			path: b.path.clone(),
+			title: b.title.clone(),
+			content: enriched,
+			context: b.context.clone(),
+			level: b.level,
+			start_line: b.start_line,
+			end_line: b.end_line,
+			hash: b.hash.clone(),
+			distance: b.distance,
 		})
 		.collect();
 	store

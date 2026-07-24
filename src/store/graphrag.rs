@@ -219,16 +219,14 @@ impl<'a> GraphRagOperations<'a> {
 
 			// Build cache entries
 			for i in 0..batch.num_rows() {
-				if let (Some(source), Some(target), Some(rel_type_str)) = (
-					source_ids.value(i).to_string().into(),
-					target_ids.value(i).to_string().into(),
-					relation_types.value(i).to_string().into(),
-				) {
-					// Parse relation type
-					if let Ok(rel_type) = RelationType::from_str(&rel_type_str) {
-						self.update_cache(&source, rel_type, target);
-						total_relationships += 1;
-					}
+				// Parse relation type; only `target_id` needs an owned String.
+				if let Ok(rel_type) = RelationType::from_str(relation_types.value(i)) {
+					self.update_cache(
+						source_ids.value(i),
+						rel_type,
+						target_ids.value(i).to_string(),
+					);
+					total_relationships += 1;
 				}
 			}
 		}
@@ -492,7 +490,7 @@ impl<'a> GraphRagOperations<'a> {
 		// `Store::optimize_tables`, the LanceDB-recommended maintenance pass.
 		if let Ok(table) = self.db.open_table(tables::GRAPHRAG_NODES).execute().await {
 			let indices = table.list_indices().await?;
-			let has_index = indices.iter().any(|idx| idx.columns == vec!["embedding"]);
+			let has_index = indices.iter().any(|idx| idx.columns == ["embedding"]);
 
 			if !has_index {
 				let use_quantization = crate::config::Config::load()
@@ -556,15 +554,13 @@ impl<'a> GraphRagOperations<'a> {
 
 		// Update cache entries
 		for i in 0..rel_batch.num_rows() {
-			if let (Some(source), Some(target), Some(rel_type_str)) = (
-				source_ids.value(i).to_string().into(),
-				target_ids.value(i).to_string().into(),
-				relation_types.value(i).to_string().into(),
-			) {
-				// Parse relation type
-				if let Ok(rel_type) = RelationType::from_str(&rel_type_str) {
-					self.update_cache(&source, rel_type, target);
-				}
+			// Parse relation type; only `target_id` needs an owned String.
+			if let Ok(rel_type) = RelationType::from_str(relation_types.value(i)) {
+				self.update_cache(
+					source_ids.value(i),
+					rel_type,
+					target_ids.value(i).to_string(),
+				);
 			}
 		}
 

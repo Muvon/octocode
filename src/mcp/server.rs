@@ -689,9 +689,13 @@ fn format_structural_response(
 	let page = &matches[offset..end];
 
 	let body = if context > 0 {
-		let mut source_map = std::collections::HashMap::new();
+		// Collect the set of files actually on this page once, then scan `files`
+		// a single time — avoids the O(files × page) membership re-scan per file.
+		let needed: std::collections::HashSet<&str> =
+			page.iter().map(|m| m.file.as_str()).collect();
+		let mut source_map = std::collections::HashMap::with_capacity(needed.len());
 		for fd in files {
-			if page.iter().any(|m| m.file == fd.display) {
+			if needed.contains(fd.display.as_str()) {
 				source_map.insert(fd.display.clone(), fd.content.clone());
 			}
 		}

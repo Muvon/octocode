@@ -168,7 +168,7 @@ impl Language for Cpp {
 		if kind == "identifier" || kind == "type_identifier" || kind == "field_identifier" {
 			if let Ok(text) = node.utf8_text(contents.as_bytes()) {
 				let t = text.trim();
-				if !t.is_empty() && !symbols.contains(&t.to_string()) {
+				if !t.is_empty() && !symbols.iter().any(|s| s.as_str() == t) {
 					symbols.push(t.to_string());
 				}
 			}
@@ -449,7 +449,7 @@ impl Cpp {
 							child.children_by_field_name("declarator", &mut decl_cursor)
 						{
 							if let Some(name) = find_cpp_declarator_name(declarator, contents) {
-								if !symbols.contains(&name.to_string()) {
+								if !symbols.iter().any(|s| s.as_str() == name) {
 									symbols.push(name.to_string());
 								}
 							}
@@ -494,7 +494,7 @@ impl Cpp {
 							child.children_by_field_name("declarator", &mut field_cursor)
 						{
 							if let Some(name) = find_cpp_declarator_name(declarator, contents) {
-								if !symbols.contains(&name.to_string()) {
+								if !symbols.iter().any(|s| s.as_str() == name) {
 									symbols.push(name.to_string());
 								}
 							}
@@ -505,7 +505,7 @@ impl Cpp {
 						for fn_child in child.children(&mut child.walk()) {
 							if fn_child.kind() == "function_declarator" {
 								if let Some(name) = find_cpp_declarator_name(fn_child, contents) {
-									if !symbols.contains(&name.to_string()) {
+									if !symbols.iter().any(|s| s.as_str() == name) {
 										symbols.push(name.to_string());
 									}
 								}
@@ -526,7 +526,7 @@ impl Cpp {
 												if let Ok(name) =
 													enumerator_child.utf8_text(contents.as_bytes())
 												{
-													if !symbols.contains(&name.to_string()) {
+													if !symbols.iter().any(|s| s.as_str() == name) {
 														symbols.push(name.to_string());
 													}
 												}

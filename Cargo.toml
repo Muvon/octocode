@@ -36,7 +36,7 @@ lto = true              # Enable Link Time Optimization
 codegen-units = 1       # Reduce parallel code generation units for better optimization
 panic = "abort"         # Abort on panic for smaller binary size
 strip = true            # Strip symbols from binary
-opt-level = "z"         # Optimize for speed
+opt-level = "s"         # Optimize for size, but keep loop vectorization ("z" disables it)
 overflow-checks = false # Disable overflow checks in release mode
 
 # Cross-compilation configuration is in .cargo/config.toml

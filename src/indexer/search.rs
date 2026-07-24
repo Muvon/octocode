@@ -1210,7 +1210,7 @@ pub async fn generate_batch_embeddings_for_queries(
 		"code" => {
 			// Batch generate code embeddings for all queries
 			let code_embeddings = crate::embedding::generate_embeddings_batch(
-				queries.to_vec(),
+				queries,
 				true,
 				config,
 				crate::embedding::types::InputType::Query,
@@ -1227,7 +1227,7 @@ pub async fn generate_batch_embeddings_for_queries(
 		"docs" | "text" | "commits" => {
 			// Batch generate text embeddings for all queries
 			let text_embeddings = crate::embedding::generate_embeddings_batch(
-				queries.to_vec(),
+				queries,
 				false,
 				config,
 				crate::embedding::types::InputType::Query,
@@ -1248,7 +1248,7 @@ pub async fn generate_batch_embeddings_for_queries(
 			if code_model == text_model {
 				// Same model - generate once and reuse (efficient!)
 				let embeddings = crate::embedding::generate_embeddings_batch(
-					queries.to_vec(),
+					queries,
 					true,
 					config,
 					crate::embedding::types::InputType::Query,
@@ -1265,13 +1265,13 @@ pub async fn generate_batch_embeddings_for_queries(
 				// Different models - generate both types in parallel
 				let (code_embeddings, text_embeddings) = tokio::try_join!(
 					crate::embedding::generate_embeddings_batch(
-						queries.to_vec(),
+						queries,
 						true,
 						config,
 						crate::embedding::types::InputType::Query
 					),
 					crate::embedding::generate_embeddings_batch(
-						queries.to_vec(),
+						queries,
 						false,
 						config,
 						crate::embedding::types::InputType::Query

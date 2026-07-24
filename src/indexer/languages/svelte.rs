@@ -118,7 +118,7 @@ impl Language for Svelte {
 		{
 			if let Ok(text) = node.utf8_text(contents.as_bytes()) {
 				let text = text.trim();
-				if !text.is_empty() && !symbols.contains(&text.to_string()) {
+				if !text.is_empty() && !symbols.iter().any(|s| s.as_str() == text) {
 					// Filter out common Svelte keywords and HTML tags
 					if !self.is_svelte_keyword(text) && !self.is_html_tag(text) {
 						symbols.push(text.to_string());

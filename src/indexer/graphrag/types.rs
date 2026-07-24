@@ -162,6 +162,29 @@ pub struct CodeNode {
 	pub language: String,     // Programming language
 }
 
+impl CodeNode {
+	/// Clone this node WITHOUT its embedding vector. Relationship discovery reads
+	/// only the metadata fields, so copying the (KB-sized) embedding for every
+	/// node on every incremental run is pure waste.
+	pub fn without_embedding(&self) -> CodeNode {
+		CodeNode {
+			id: self.id.clone(),
+			name: self.name.clone(),
+			kind: self.kind.clone(),
+			path: self.path.clone(),
+			description: self.description.clone(),
+			symbols: self.symbols.clone(),
+			hash: self.hash.clone(),
+			embedding: Vec::new(),
+			imports: self.imports.clone(),
+			exports: self.exports.clone(),
+			functions: self.functions.clone(),
+			size_lines: self.size_lines,
+			language: self.language.clone(),
+		}
+	}
+}
+
 // Function-level information for better granularity. Also doubles as the
 // container for file-scope relationship data (a single synthetic entry per
 // file holds aggregate calls / extends / implements when per-function

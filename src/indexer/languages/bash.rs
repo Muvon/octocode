@@ -64,7 +64,7 @@ impl Language for Bash {
 		if kind == "variable_name" || kind == "command_name" {
 			if let Ok(text) = node.utf8_text(contents.as_bytes()) {
 				let t = text.trim();
-				if !t.is_empty() && !symbols.contains(&t.to_string()) {
+				if !t.is_empty() && !symbols.iter().any(|s| s.as_str() == t) {
 					symbols.push(t.to_string());
 				}
 			}

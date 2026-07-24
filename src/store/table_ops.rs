@@ -42,14 +42,14 @@ impl<'a> TableOperations<'a> {
 	/// Check if a table exists
 	pub async fn table_exists(&self, table_name: &str) -> Result<bool> {
 		let table_names = self.db.table_names().execute().await?;
-		Ok(table_names.contains(&table_name.to_string()))
+		Ok(table_names.iter().any(|t| t.as_str() == table_name))
 	}
 
 	/// Check if multiple tables exist
 	pub async fn tables_exist(&self, table_names: &[&str]) -> Result<bool> {
 		let existing_tables = self.db.table_names().execute().await?;
 		for &table_name in table_names {
-			if !existing_tables.contains(&table_name.to_string()) {
+			if !existing_tables.iter().any(|t| t.as_str() == table_name) {
 				return Ok(false);
 			}
 		}
@@ -60,7 +60,7 @@ impl<'a> TableOperations<'a> {
 	pub async fn clear_table(&self, table_name: &str) -> Result<()> {
 		let table_names = self.db.table_names().execute().await?;
 
-		if table_names.contains(&table_name.to_string()) {
+		if table_names.iter().any(|t| t.as_str() == table_name) {
 			if let Err(e) = self.db.drop_table(table_name, &[]).await {
 				// Log error to structured logging instead of stderr
 				tracing::warn!("Failed to drop {} table: {}", table_name, e);
@@ -231,7 +231,7 @@ impl<'a> TableOperations<'a> {
 		let existing_tables = self.db.table_names().execute().await?;
 
 		for &table_name in table_names {
-			if existing_tables.contains(&table_name.to_string()) {
+			if existing_tables.iter().any(|t| t.as_str() == table_name) {
 				let table = self.db.open_table(table_name).execute().await?;
 
 				// Query for all paths in this table
