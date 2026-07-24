@@ -21,7 +21,6 @@ use anyhow::{Context, Result};
 use arrow::array::{Array, FixedSizeListArray, Float32Array, StringArray, UInt32Array};
 use arrow::datatypes::{DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
-use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -270,14 +269,9 @@ impl<'a> DatabaseOperations<'a> {
 
 		// First, save any new nodes
 		if !new_nodes.is_empty() {
-			// Create a HashMap for the batch conversion function
-			let nodes_map: HashMap<String, CodeNode> = new_nodes
-				.iter()
-				.map(|node| (node.id.clone(), node.clone()))
-				.collect();
-
-			// Convert just these nodes to a RecordBatch
-			let nodes_batch = self.nodes_to_batch(&nodes_map).await?;
+			// Convert just these nodes to a RecordBatch (borrow directly — no
+			// need to clone every node into a throwaway map).
+			let nodes_batch = self.nodes_to_batch(new_nodes).await?;
 
 			// Store the nodes in the database (appending to existing data)
 			self.store.store_graph_nodes(nodes_batch).await?;
@@ -469,7 +463,7 @@ impl<'a> DatabaseOperations<'a> {
 	// Convert nodes to a RecordBatch for database storage with updated schema
 	async fn nodes_to_batch(
 		&self,
-		nodes: &HashMap<String, CodeNode>,
+		nodes: &[CodeNode],
 	) -> Result<arrow::record_batch::RecordBatch> {
 		// Get the vector dimension from the store
 		let vector_dim = self.store.get_code_vector_dim();
@@ -499,7 +493,7 @@ impl<'a> DatabaseOperations<'a> {
 		]));
 
 		// Prepare arrays
-		let nodes_vec: Vec<&CodeNode> = nodes.values().collect();
+		let nodes_vec: Vec<&CodeNode> = nodes.iter().collect();
 		if nodes_vec.is_empty() {
 			return Err(anyhow::anyhow!("No nodes to convert to batch"));
 		}

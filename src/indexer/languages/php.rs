@@ -89,7 +89,7 @@ impl Language for Php {
 					trimmed
 				};
 
-				if !clean_text.is_empty() && !symbols.contains(&clean_text.to_string()) {
+				if !clean_text.is_empty() && !symbols.iter().any(|s| s.as_str() == clean_text) {
 					symbols.push(clean_text.to_string());
 				}
 			}

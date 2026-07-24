@@ -328,18 +328,25 @@ impl GraphOptimizer {
 		graph: &CodeGraph,
 		limit: usize,
 	) -> Result<Vec<(CodeNode, f32)>> {
-		let mut similarities = Vec::new();
+		// Score by reference first, then clone only the top `limit` nodes — avoids
+		// cloning every node's embedding just to discard all but a handful.
+		let mut similarities: Vec<(&CodeNode, f32)> = Vec::with_capacity(graph.nodes.len());
 
 		for node in graph.nodes.values() {
 			let similarity = cosine_similarity(query_embedding, &node.embedding);
-			similarities.push((node.clone(), similarity));
+			similarities.push((node, similarity));
 		}
 
 		// Sort by similarity (highest first)
-		similarities.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+		similarities
+			.sort_unstable_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
 		// Return top matches
-		Ok(similarities.into_iter().take(limit).collect())
+		Ok(similarities
+			.into_iter()
+			.take(limit)
+			.map(|(node, similarity)| (node.clone(), similarity))
+			.collect())
 	}
 
 	/// Extract key concepts from a node and add them to the subgraph

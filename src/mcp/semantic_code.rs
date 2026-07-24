@@ -77,9 +77,8 @@ impl SemanticCodeProvider {
 		}
 
 		for (i, query) in queries.iter().enumerate() {
-			// Ensure clean UTF-8 and validate query
-			let clean_query = String::from_utf8_lossy(query.as_bytes()).to_string();
-			let query = clean_query.trim();
+			// `query` is already valid UTF-8 (it's a String); just trim.
+			let query = query.trim();
 
 			if query.len() < 3 {
 				return Err(McpError::invalid_params(
@@ -306,9 +305,8 @@ impl SemanticCodeProvider {
 				));
 			}
 
-			// Ensure clean UTF-8 for file patterns
-			let clean_pattern = String::from_utf8_lossy(pattern.as_bytes()).to_string();
-			let pattern = clean_pattern.trim();
+			// `pattern` is already valid UTF-8 (it's a String); just trim.
+			let pattern = pattern.trim();
 
 			if pattern.len() > 500 {
 				return Err(McpError::invalid_params(

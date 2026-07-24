@@ -213,7 +213,8 @@ fn extract_name(node: Node, contents: &str, lang_impl: &dyn languages::Language)
 /// Extract a preceding comment if available
 fn extract_preceding_comment(node: Node, contents: &str) -> Option<String> {
 	if let Some(parent) = node.parent() {
-		let mut siblings = Vec::new();
+		// Track only the immediately-preceding sibling instead of buffering all.
+		let mut prev: Option<Node> = None;
 		let mut cursor = parent.walk();
 
 		if cursor.goto_first_child() {
@@ -222,7 +223,7 @@ fn extract_preceding_comment(node: Node, contents: &str) -> Option<String> {
 				if current.id() == node.id() {
 					break;
 				}
-				siblings.push(current);
+				prev = Some(current);
 				if !cursor.goto_next_sibling() {
 					break;
 				}
@@ -230,7 +231,7 @@ fn extract_preceding_comment(node: Node, contents: &str) -> Option<String> {
 		}
 
 		// Check the last sibling before our node
-		if let Some(last) = siblings.last() {
+		if let Some(last) = prev {
 			if last.kind().contains("comment") {
 				if let Ok(comment) = last.utf8_text(contents.as_bytes()) {
 					// Clean up comment markers

@@ -309,15 +309,15 @@ pub fn combine_with_preceding_comments(node: Node, contents: &str) -> (String, u
 	let mut snippet = String::new();
 	if let Some(parent) = node.parent() {
 		let mut cursor = parent.walk();
-		let mut preceding = Vec::new();
+		// Track only the immediately-preceding sibling instead of buffering all.
+		let mut prev: Option<Node> = None;
 		for child in parent.children(&mut cursor) {
 			if child.id() == node.id() {
 				break;
-			} else {
-				preceding.push(child);
 			}
+			prev = Some(child);
 		}
-		if let Some(last) = preceding.last() {
+		if let Some(last) = prev {
 			let kind = last.kind();
 			if kind.contains("comment") || kind.contains("attribute") {
 				combined_start = last.start_position().row;

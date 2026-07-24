@@ -531,8 +531,8 @@ impl DocumentHierarchy {
 		section
 			.context
 			.last()
-			.unwrap_or(&"Untitled Section".to_string())
-			.to_string()
+			.cloned()
+			.unwrap_or_else(|| "Untitled Section".to_string())
 	}
 
 	fn merge_section_with_children(&self, section_idx: usize, processed: &[bool]) -> ChunkResult {

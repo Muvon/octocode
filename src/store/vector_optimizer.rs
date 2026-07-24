@@ -96,7 +96,7 @@ impl VectorOptimizer {
 		// Get table statistics
 		let row_count = table.count_rows(None).await?;
 		let indices = table.list_indices().await?;
-		let has_index = indices.iter().any(|idx| idx.columns == vec!["embedding"]);
+		let has_index = indices.iter().any(|idx| idx.columns == ["embedding"]);
 
 		if has_index {
 			tracing::debug!(

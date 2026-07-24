@@ -107,22 +107,26 @@ pub async fn process_file_differential(
 		&mut code_regions,
 	);
 
-	// Extract file-level imports/exports and the full file source for the
-	// LLM contextual-description prompt (Anthropic "situate within document").
-	let (imports, exports) =
-		walk_for_imports_exports(tree.root_node(), contents, lang_impl.as_ref());
-	let all_symbols: Vec<String> = code_regions
-		.iter()
-		.flat_map(|r| r.symbols.iter().cloned())
-		.collect();
-	file_context.insert(
-		file_path.to_string(),
-		FileContext {
-			imports,
-			exports,
-			all_symbols,
-		},
-	);
+	// Only build the contextual-description input when that feature is on;
+	// otherwise this second AST walk + symbol collect is wasted (default: off).
+	if ctx.config.index.contextual_descriptions {
+		// Extract file-level imports/exports for the LLM contextual-description
+		// prompt (Anthropic "situate within document").
+		let (imports, exports) =
+			walk_for_imports_exports(tree.root_node(), contents, lang_impl.as_ref());
+		let all_symbols: Vec<String> = code_regions
+			.iter()
+			.flat_map(|r| r.symbols.iter().cloned())
+			.collect();
+		file_context.insert(
+			file_path.to_string(),
+			FileContext {
+				imports,
+				exports,
+				all_symbols,
+			},
+		);
+	}
 
 	// If not force reindexing, get existing hashes for this file to compare
 	let existing_hashes = if force_reindex {
@@ -158,21 +162,20 @@ pub async fn process_file_differential(
 				path: file_path.to_string(),
 				hash: content_hash.clone(),
 				language: lang_impl.name().to_string(),
-				content: region.content.clone(),
-				symbols: region.symbols.clone(),
+				content: region.content,
+				symbols: region.symbols,
 				start_line: region.start_line,
 				end_line: region.end_line,
 				distance: None, // No relevance score when indexing
 			};
 
-			// Add to batch for embedding
-			code_blocks_batch.push(code_block.clone());
-
-			// Add to all code blocks for GraphRAG
+			// Only clone for the GraphRAG collection when enabled; otherwise
+			// move straight into the embedding batch (no clone).
 			if ctx.config.graphrag.enabled {
-				all_code_blocks.push(code_block);
+				all_code_blocks.push(code_block.clone());
 				graphrag_blocks_added += 1;
 			}
+			code_blocks_batch.push(code_block);
 		} else if ctx.config.graphrag.enabled {
 			// If skipping because block exists, but we need for GraphRAG, fetch from store
 			if let Ok(existing_block) = ctx.store.get_code_block_by_hash(&content_hash).await {
@@ -370,22 +373,25 @@ pub async fn process_file(
 		&mut code_regions,
 	);
 
-	// Extract file-level imports/exports + full file source for the LLM
-	// contextual-description prompt.
-	let (imports, exports) =
-		walk_for_imports_exports(tree.root_node(), contents, lang_impl.as_ref());
-	let all_symbols: Vec<String> = code_regions
-		.iter()
-		.flat_map(|r| r.symbols.iter().cloned())
-		.collect();
-	file_context.insert(
-		file_path.to_string(),
-		FileContext {
-			imports,
-			exports,
-			all_symbols,
-		},
-	);
+	// Only build the contextual-description input when that feature is on;
+	// otherwise this second AST walk + symbol collect is wasted (default: off).
+	if ctx.config.index.contextual_descriptions {
+		// Extract file-level imports/exports for the LLM contextual-description prompt.
+		let (imports, exports) =
+			walk_for_imports_exports(tree.root_node(), contents, lang_impl.as_ref());
+		let all_symbols: Vec<String> = code_regions
+			.iter()
+			.flat_map(|r| r.symbols.iter().cloned())
+			.collect();
+		file_context.insert(
+			file_path.to_string(),
+			FileContext {
+				imports,
+				exports,
+				all_symbols,
+			},
+		);
+	}
 
 	// Track the number of blocks we added to all_code_blocks for GraphRAG
 	let mut graphrag_blocks_added = 0;
@@ -410,21 +416,20 @@ pub async fn process_file(
 				path: file_path.to_string(),
 				hash: content_hash,
 				language: lang_impl.name().to_string(),
-				content: region.content.clone(),
-				symbols: region.symbols.clone(),
+				content: region.content,
+				symbols: region.symbols,
 				start_line: region.start_line,
 				end_line: region.end_line,
 				distance: None, // No relevance score when indexing
 			};
 
-			// Add to batch for embedding
-			code_blocks_batch.push(code_block.clone());
-
-			// Add to all code blocks for GraphRAG
+			// Only clone for the GraphRAG collection when enabled; otherwise
+			// move straight into the embedding batch (no clone).
 			if ctx.config.graphrag.enabled {
-				all_code_blocks.push(code_block);
+				all_code_blocks.push(code_block.clone());
 				graphrag_blocks_added += 1;
 			}
+			code_blocks_batch.push(code_block);
 		} else if ctx.config.graphrag.enabled {
 			// If skipping because block exists, but we need for GraphRAG, fetch from store
 			if let Ok(existing_block) = ctx.store.get_code_block_by_hash(&content_hash).await {

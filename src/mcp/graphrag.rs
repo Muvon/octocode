@@ -482,6 +482,17 @@ impl GraphRagProvider {
 					));
 				}
 
+				// Build a (source, target) -> relationship index once so each path
+				// hop below is an O(1) lookup instead of a linear scan of all edges.
+				// `.rev()` makes the first edge in original order win (matches the
+				// previous `.find()` first-match semantics).
+				let edge_index: std::collections::HashMap<(&str, &str), _> = graph
+					.relationships
+					.iter()
+					.rev()
+					.map(|r| ((r.source.as_str(), r.target.as_str()), r))
+					.collect();
+
 				match args.format {
 					OutputFormat::Json => {
 						// Create structured path data
@@ -520,10 +531,9 @@ impl GraphRagProvider {
 									.unwrap_or_else(|| node_id.clone());
 								if j > 0 {
 									let prev_id = &path[j - 1];
-									let rel = graph
-										.relationships
-										.iter()
-										.find(|r| r.source == *prev_id && r.target == *node_id);
+									let rel = edge_index
+										.get(&(prev_id.as_str(), node_id.as_str()))
+										.copied();
 									if let Some(rel) = rel {
 										output.push_str(&format!(" --{}-> ", rel.relation_type));
 									} else {
@@ -554,10 +564,9 @@ impl GraphRagProvider {
 									.unwrap_or_else(|| node_id.clone());
 								if j > 0 {
 									let prev_id = &path[j - 1];
-									let rel = graph
-										.relationships
-										.iter()
-										.find(|r| r.source == *prev_id && r.target == *node_id);
+									let rel = edge_index
+										.get(&(prev_id.as_str(), node_id.as_str()))
+										.copied();
 									if let Some(rel) = rel {
 										output.push_str(&format!(" --{}-> ", rel.relation_type));
 									} else {

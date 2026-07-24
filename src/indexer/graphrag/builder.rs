@@ -716,7 +716,7 @@ impl GraphBuilder {
 					.nodes
 					.values()
 					.filter(|node| processed_node_ids.contains(&node.id))
-					.cloned()
+					.map(|node| node.without_embedding())
 					.collect::<Vec<CodeNode>>();
 
 				// Keys that imports resolve against (mirrors the symbol index and
@@ -743,7 +743,7 @@ impl GraphBuilder {
 					.values()
 					.filter(|node| !processed_node_ids.contains(&node.id))
 					.filter(|node| node.imports.iter().any(|i| imports_new(i)))
-					.cloned()
+					.map(|node| node.without_embedding())
 					.collect();
 				selected.extend(importers);
 				selected
@@ -846,10 +846,14 @@ impl GraphBuilder {
 		new_files: &[CodeNode],
 	) -> Result<Vec<CodeRelationship>> {
 		if let Some(ref ai) = self.ai_enhancements {
-			// Get all nodes for context
+			// Get all nodes for context (discovery ignores embeddings — skip them)
 			let all_nodes = {
 				let graph = self.graph.read().await;
-				graph.nodes.values().cloned().collect::<Vec<CodeNode>>()
+				graph
+					.nodes
+					.values()
+					.map(|n| n.without_embedding())
+					.collect::<Vec<CodeNode>>()
 			};
 			ai.discover_relationships_with_ai_enhancement(new_files, &all_nodes)
 				.await
@@ -864,10 +868,15 @@ impl GraphBuilder {
 		&self,
 		new_files: &[CodeNode],
 	) -> Result<Vec<CodeRelationship>> {
-		// Get all nodes from the graph for relationship discovery
+		// Get all nodes from the graph for relationship discovery (discovery
+		// ignores embeddings — skip copying them).
 		let all_nodes = {
 			let graph = self.graph.read().await;
-			graph.nodes.values().cloned().collect::<Vec<CodeNode>>()
+			graph
+				.nodes
+				.values()
+				.map(|n| n.without_embedding())
+				.collect::<Vec<CodeNode>>()
 		};
 
 		RelationshipDiscovery::discover_relationships_efficiently(new_files, &all_nodes).await
@@ -1074,16 +1083,15 @@ impl GraphBuilder {
 		// Generate an embedding for the query
 		let query_embedding = self.generate_embedding(query).await?;
 
-		// Find similar nodes
+		// Find similar nodes. Hold the read guard and score by reference so we
+		// clone only the nodes that pass the threshold, not the whole graph.
 		let graph = self.graph.read().await;
-		let nodes_array = graph.nodes.values().cloned().collect::<Vec<CodeNode>>();
-		drop(graph);
 
 		// Calculate similarity to each node
 		let mut similarities: Vec<(f32, CodeNode)> = Vec::new();
 		let query_lower = query.to_lowercase();
 
-		for node in nodes_array {
+		for node in graph.nodes.values() {
 			// Calculate semantic similarity
 			let similarity = cosine_similarity(&query_embedding, &node.embedding);
 
@@ -1113,12 +1121,14 @@ impl GraphBuilder {
 					similarity
 				};
 
-				similarities.push((boosted_similarity, node));
+				similarities.push((boosted_similarity, node.clone()));
 			}
 		}
+		drop(graph);
 
 		// Sort by similarity (highest first)
-		similarities.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+		similarities
+			.sort_unstable_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
 
 		// Return the nodes (without the similarity scores)
 		let results = similarities.into_iter().map(|(_, node)| node).collect();
@@ -1245,7 +1255,7 @@ impl GraphBuilder {
 
 		// Generate embeddings in batch (same as normal indexing)
 		let embeddings = crate::embedding::generate_embeddings_batch(
-			pending_embeddings.clone(),
+			&pending_embeddings,
 			false, // Use text embeddings for GraphRAG descriptions
 			&self.config,
 			crate::embedding::types::InputType::Document,

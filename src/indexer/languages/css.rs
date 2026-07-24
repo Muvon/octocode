@@ -91,7 +91,7 @@ impl Language for Css {
 		) {
 			if let Ok(text) = node.utf8_text(contents.as_bytes()) {
 				let t = text.trim();
-				if !t.is_empty() && !symbols.contains(&t.to_string()) {
+				if !t.is_empty() && !symbols.iter().any(|s| s.as_str() == t) {
 					symbols.push(t.to_string());
 				}
 			}
@@ -243,7 +243,7 @@ impl Css {
 					"class_selector" | "id_selector" | "tag_name" | "universal_selector" => {
 						if let Ok(selector_text) = child.utf8_text(contents.as_bytes()) {
 							let selector = selector_text.trim();
-							if !selector.is_empty() && !symbols.contains(&selector.to_string()) {
+							if !selector.is_empty() && !symbols.iter().any(|s| s.as_str() == selector) {
 								symbols.push(selector.to_string());
 							}
 						}

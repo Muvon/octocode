@@ -26,7 +26,7 @@
 //! term drops when the row is absent from that side. With weights `(1.0, 1.0)`
 //! this collapses to the standard RRF defined in Cormack et al. (SIGIR 2009).
 
-use std::collections::BTreeMap;
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use arrow::array::downcast_array;
@@ -71,7 +71,7 @@ impl Reranker for WeightedRRFReranker {
 		fts_results: RecordBatch,
 	) -> lancedb::error::Result<RecordBatch> {
 		// Compute weighted RRF scores keyed by row id.
-		let mut rrf_scores: BTreeMap<u64, f32> = BTreeMap::new();
+		let mut rrf_scores: HashMap<u64, f32> = HashMap::new();
 
 		if vector_results.num_rows() > 0 {
 			let vec_ids = vector_results.column_by_name(ROW_ID).ok_or_else(|| {
@@ -171,7 +171,7 @@ fn merge_dedup(
 ) -> lancedb::error::Result<RecordBatch> {
 	use arrow::array::BooleanArray;
 	use arrow::compute::{concat_batches, filter_record_batch};
-	use std::collections::BTreeSet;
+	use std::collections::HashSet;
 
 	let combined = concat_batches(&fts_results.schema(), [vector_results, fts_results].iter())
 		.map_err(|e| lancedb::error::Error::InvalidInput {
@@ -179,7 +179,7 @@ fn merge_dedup(
 		})?;
 
 	let mut mask = BooleanArray::builder(combined.num_rows());
-	let mut seen: BTreeSet<u64> = BTreeSet::new();
+	let mut seen: HashSet<u64> = HashSet::new();
 	let row_ids =
 		combined
 			.column_by_name(ROW_ID)

@@ -139,7 +139,7 @@ pub async fn generate_embeddings(
 /// Generate batch embeddings based on configured provider (supports provider:model format)
 /// Compatibility wrapper for octocode Config with retry and exponential backoff
 pub async fn generate_embeddings_batch(
-	texts: Vec<String>,
+	texts: &[String],
 	is_code: bool,
 	config: &Config,
 	input_type: InputType,
@@ -174,7 +174,7 @@ pub async fn generate_embeddings_batch(
 		}
 
 		match octolib::embedding::generate_embeddings_batch(
-			texts.clone(),
+			texts.to_vec(),
 			provider,
 			model,
 			input_type.clone(),

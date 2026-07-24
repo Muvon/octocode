@@ -247,7 +247,7 @@ impl Python {
 							if target.kind() == "identifier" {
 								if let Ok(name) = target.utf8_text(contents.as_bytes()) {
 									if !name.starts_with("_")
-										&& !symbols.contains(&name.to_string())
+										&& !symbols.iter().any(|s| s.as_str() == name)
 									{
 										symbols.push(name.to_string());
 									}
@@ -266,7 +266,7 @@ impl Python {
 									if target.kind() == "identifier" {
 										if let Ok(name) = target.utf8_text(contents.as_bytes()) {
 											if !name.starts_with("_")
-												&& !symbols.contains(&name.to_string())
+												&& !symbols.iter().any(|s| s.as_str() == name)
 											{
 												symbols.push(name.to_string());
 											}

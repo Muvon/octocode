@@ -264,7 +264,7 @@ impl Store {
 		];
 		let mut dropped_embedding_table = false;
 		for (table_name, expected_dim) in dim_by_table {
-			if !table_names.contains(&table_name.to_string()) {
+			if !table_names.iter().any(|t| t.as_str() == table_name) {
 				continue;
 			}
 			if let Ok(table) = db.open_table(table_name).execute().await {
@@ -303,7 +303,7 @@ impl Store {
 				tables::GRAPHRAG_GIT_METADATA,
 				tables::COMMITS_GIT_METADATA,
 			] {
-				if table_names.contains(&marker.to_string()) {
+				if table_names.iter().any(|t| t.as_str() == marker) {
 					if let Err(e) = db.drop_table(marker, &[]).await {
 						tracing::warn!("Failed to drop stale marker table {}: {}", marker, e);
 					}
@@ -686,7 +686,7 @@ impl Store {
 
 		let existing = self.db.table_names().execute().await?;
 		for name in candidates {
-			if !existing.contains(&name.to_string()) {
+			if !existing.iter().any(|t| t.as_str() == name) {
 				continue;
 			}
 			let table = match self.db.open_table(name).execute().await {
@@ -758,7 +758,7 @@ impl Store {
 		if needs_vector_check {
 			if let Ok(table) = self.db.open_table(B::TABLE_NAME).execute().await {
 				let indices = table.list_indices().await?;
-				let has_vector_index = indices.iter().any(|idx| idx.columns == vec!["embedding"]);
+				let has_vector_index = indices.iter().any(|idx| idx.columns == ["embedding"]);
 
 				if has_vector_index {
 					self.vector_index_present
@@ -862,7 +862,7 @@ impl Store {
 		}
 
 		// Sort results by distance (ascending - lower distance = higher similarity)
-		all_blocks.sort_by(|a, b| match (a.distance(), b.distance()) {
+		all_blocks.sort_unstable_by(|a, b| match (a.distance(), b.distance()) {
 			(Some(dist_a), Some(dist_b)) => dist_a
 				.partial_cmp(&dist_b)
 				.unwrap_or(std::cmp::Ordering::Equal),
@@ -1386,10 +1386,10 @@ fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
 	let mut dot = 0.0_f32;
 	let mut na = 0.0_f32;
 	let mut nb = 0.0_f32;
-	for i in 0..a.len() {
-		dot += a[i] * b[i];
-		na += a[i] * a[i];
-		nb += b[i] * b[i];
+	for (x, y) in a.iter().zip(b) {
+		dot += x * y;
+		na += x * x;
+		nb += y * y;
 	}
 	let denom = na.sqrt() * nb.sqrt();
 	if denom == 0.0 {

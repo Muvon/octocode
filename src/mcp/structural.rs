@@ -363,7 +363,9 @@ fn rerank_matches(matches: &mut [GrepMatch], metavars: &[String]) {
 		return;
 	}
 	let needles: Vec<String> = metavars.iter().map(|n| n.to_ascii_lowercase()).collect();
-	matches.sort_by_key(|m| {
+	// `sort_by_cached_key` evaluates the key once per element (vs O(n log n) for
+	// `sort_by_key`), so the per-element lowercase + file clone happen only once.
+	matches.sort_by_cached_key(|m| {
 		let path_lower = m.file.to_ascii_lowercase();
 		let hit = needles
 			.iter()

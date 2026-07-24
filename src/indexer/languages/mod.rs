@@ -220,7 +220,7 @@ pub fn extract_identifiers_default<F>(
 		let trimmed = text.trim();
 		if !trimmed.is_empty()
 			&& should_include(kind, trimmed)
-			&& !symbols.contains(&trimmed.to_string())
+			&& !symbols.iter().any(|s| s.as_str() == trimmed)
 		{
 			symbols.push(trimmed.to_string());
 		}

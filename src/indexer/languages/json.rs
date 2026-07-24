@@ -59,7 +59,7 @@ impl Language for Json {
 				if let Ok(text) = node.utf8_text(contents.as_bytes()) {
 					// Strip the quotes from the string
 					let t = text.trim_matches('"').trim();
-					if !t.is_empty() && !symbols.contains(&t.to_string()) {
+					if !t.is_empty() && !symbols.iter().any(|s| s.as_str() == t) {
 						symbols.push(t.to_string());
 					}
 				}
@@ -147,7 +147,7 @@ impl Json {
 						if let Ok(text) = key_node.utf8_text(contents.as_bytes()) {
 							// Strip the quotes from the string
 							let t = text.trim_matches('"').trim();
-							if !t.is_empty() && !symbols.contains(&t.to_string()) {
+							if !t.is_empty() && !symbols.iter().any(|s| s.as_str() == t) {
 								symbols.push(t.to_string());
 							}
 						}
