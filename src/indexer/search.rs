@@ -303,6 +303,7 @@ pub async fn expand_code_blocks_via_graph(
 	store: &Store,
 	config: &Config,
 	code_blocks: Vec<CodeBlock>,
+	max_add: usize,
 ) -> Vec<CodeBlock> {
 	use crate::indexer::graphrag::types::RelationshipDirection;
 
@@ -311,7 +312,11 @@ pub async fn expand_code_blocks_via_graph(
 	const MAX_NEIGHBOR_FILES: usize = 8;
 	const BLOCKS_PER_FILE: usize = 3;
 
-	if !config.graphrag.enabled || !config.search.graph_expansion || code_blocks.is_empty() {
+	if !config.graphrag.enabled
+		|| !config.search.graph_expansion
+		|| code_blocks.is_empty()
+		|| max_add == 0
+	{
 		return code_blocks;
 	}
 
@@ -360,12 +365,20 @@ pub async fn expand_code_blocks_via_graph(
 	ranked.truncate(MAX_NEIGHBOR_FILES);
 
 	let mut expanded = code_blocks;
+	let mut added = 0usize;
 	for (path, _score) in ranked {
+		if added >= max_add {
+			break;
+		}
 		match store.get_code_blocks_by_path(&path, BLOCKS_PER_FILE).await {
 			Ok(blocks) => {
 				for b in blocks {
+					if added >= max_add {
+						break;
+					}
 					if seen_hashes.insert(b.hash.clone()) {
 						expanded.push(b);
+						added += 1;
 					}
 				}
 			}
@@ -906,13 +919,23 @@ pub async fn search_codebase_with_details_multi_query_text(
 	)
 	.await?;
 
-	// Deduplicate and merge with multi-query bonuses
+	// Deduplicate and merge via cross-query Reciprocal Rank Fusion.
 	let (mut code_blocks, mut doc_blocks, mut text_blocks, mut commit_blocks) =
-		deduplicate_and_merge_results(search_results, queries, dedup_distance_threshold);
+		deduplicate_and_merge_results(search_results, dedup_distance_threshold);
 
 	// GraphRAG file-level expansion (default off): enrich code candidates with
 	// structurally-related files before the reranker scores the enlarged set.
-	code_blocks = expand_code_blocks_via_graph(&store, config, code_blocks).await;
+	// Reserve headroom in the rerank candidate budget for the neighbors — else
+	// they land past `top_k_candidates` and the reranker truncates them away
+	// before scoring, which silently no-ops the whole expansion.
+	if config.graphrag.enabled && config.search.graph_expansion && config.search.reranker.enabled {
+		let cap = config.search.reranker.top_k_candidates;
+		let reserved = (cap / 5).max(1); // ~20% of the budget for structural neighbors
+		code_blocks.truncate(cap.saturating_sub(reserved).max(1));
+		code_blocks = expand_code_blocks_via_graph(&store, config, code_blocks, reserved).await;
+	} else {
+		code_blocks = expand_code_blocks_via_graph(&store, config, code_blocks, usize::MAX).await;
+	}
 
 	// Apply reranker if enabled, then filter by similarity threshold
 	if config.search.reranker.enabled && !queries.is_empty() {
@@ -942,12 +965,14 @@ pub async fn search_codebase_with_details_multi_query_text(
 		)
 		.await?;
 
-		// Apply similarity threshold to reranker scores (post-reranker filter)
-		let dist_thresh = 1.0 - similarity_threshold;
-		code_blocks.retain(|b| b.distance.is_none_or(|d| d <= dist_thresh));
-		doc_blocks.retain(|b| b.distance.is_none_or(|d| d <= dist_thresh));
-		text_blocks.retain(|b| b.distance.is_none_or(|d| d <= dist_thresh));
-		commit_blocks.retain(|b| b.distance.is_none_or(|d| d <= dist_thresh));
+		// Reranker scores are cross-encoder relevance, NOT cosine distance — so
+		// the cosine `similarity_threshold` must not gate them. Filter by the
+		// reranker's own floor (`min_relevance`, default 0.0 = keep final_top_k).
+		let max_dist = 1.0 - config.search.reranker.min_relevance;
+		code_blocks.retain(|b| b.distance.is_none_or(|d| d <= max_dist));
+		doc_blocks.retain(|b| b.distance.is_none_or(|d| d <= max_dist));
+		text_blocks.retain(|b| b.distance.is_none_or(|d| d <= max_dist));
+		commit_blocks.retain(|b| b.distance.is_none_or(|d| d <= max_dist));
 	} else {
 		// Apply global result limits (reranker already limits via final_top_k)
 		code_blocks.truncate(max_results);
@@ -1546,37 +1571,35 @@ pub async fn execute_parallel_searches(
 	};
 
 	let hybrid_enabled = params.config.search.hybrid.enabled;
-	let vector_weight = params.config.search.hybrid.default_vector_weight;
-	let keyword_weight = params.config.search.hybrid.default_keyword_weight;
-	let main_params = SingleQuerySearchParams {
-		mode: params.mode,
-		limit: main_limit,
-		distance_threshold,
-		language_filter: params.language_filter,
-		hybrid_enabled,
-		vector_weight,
-		keyword_weight,
-	};
-	let branch_params = SingleQuerySearchParams {
-		mode: params.mode,
-		limit: per_query_limit,
-		distance_threshold,
-		language_filter: params.language_filter,
-		hybrid_enabled,
-		vector_weight,
-		keyword_weight,
-	};
+	let auto_weight = params.config.search.hybrid.auto_weight;
+	let base_vw = params.config.search.hybrid.default_vector_weight;
+	let base_kw = params.config.search.hybrid.default_keyword_weight;
 
-	// Search main store
+	// Search main store. Weights are resolved per query so `auto_weight` can tilt
+	// identifier lookups toward BM25 without touching natural-language queries.
 	let main_futures: Vec<_> = query_embeddings
 		.iter()
 		.enumerate()
 		.map(|(index, (query_str, embeddings))| {
 			let emb = embeddings.clone();
 			let q = query_str.clone();
-			let mp = &main_params;
+			let (vector_weight, keyword_weight) = if auto_weight {
+				classify_query_weights(query_str, base_vw, base_kw)
+			} else {
+				(base_vw, base_kw)
+			};
+			let mp = SingleQuerySearchParams {
+				mode: params.mode,
+				limit: main_limit,
+				distance_threshold,
+				language_filter: params.language_filter,
+				hybrid_enabled,
+				vector_weight,
+				keyword_weight,
+			};
 			async move {
-				execute_single_search_with_embeddings(store, emb, mp, index, Some(q.as_str())).await
+				execute_single_search_with_embeddings(store, emb, &mp, index, Some(q.as_str()))
+					.await
 			}
 		})
 		.collect();
@@ -1595,12 +1618,25 @@ pub async fn execute_parallel_searches(
 		.map(|(index, (query_str, embeddings))| {
 			let emb = embeddings.clone();
 			let q = query_str.clone();
-			let bp = &branch_params;
+			let (vector_weight, keyword_weight) = if auto_weight {
+				classify_query_weights(query_str, base_vw, base_kw)
+			} else {
+				(base_vw, base_kw)
+			};
+			let bp = SingleQuerySearchParams {
+				mode: params.mode,
+				limit: per_query_limit,
+				distance_threshold,
+				language_filter: params.language_filter,
+				hybrid_enabled,
+				vector_weight,
+				keyword_weight,
+			};
 			async move {
 				execute_single_search_with_embeddings(
 					&branch.store,
 					emb,
-					bp,
+					&bp,
 					index,
 					Some(q.as_str()),
 				)
@@ -1623,69 +1659,112 @@ pub async fn execute_parallel_searches(
 	Ok(merged)
 }
 
-pub fn apply_multi_query_bonus_code(
-	block: &mut crate::store::CodeBlock,
-	query_indices: &[usize],
-	total_queries: usize,
-) {
-	if query_indices.len() > 1 && total_queries > 1 {
-		let coverage_ratio = query_indices.len() as f32 / total_queries as f32;
-		let bonus_factor = 1.0 - (coverage_ratio * 0.1).min(0.2); // Up to 20% bonus
+/// RRF dampening constant for fusing a block's ranks across sub-queries.
+const DEDUP_RRF_K: f32 = 60.0;
 
-		if let Some(distance) = block.distance {
-			block.distance = Some(distance * bonus_factor);
+/// Fuse per-query result lists into one ranking via Reciprocal Rank Fusion.
+///
+/// Each block's fused score is `sum over the queries that returned it of
+/// 1 / (DEDUP_RRF_K + rank)`, where `rank` is its 0-based position in that
+/// query's list. Lists arrive best-first from vector/hybrid search, so position
+/// == rank. This replaces the old cosine-min merge + ad-hoc multi-query bonus
+/// and closes two signal leaks:
+///   * it preserves the hybrid RRF ordering `hybrid_search` produced — the old
+///     code re-sorted by recomputed cosine, discarding the BM25 contribution;
+///   * cross-query agreement falls out naturally — a block returned by several
+///     sub-queries accumulates score.
+/// The representative block keeps its lowest (best) cosine `distance` for
+/// display and optional threshold filtering; ranking is by fused score.
+fn fuse_query_lists<B: crate::store::block_trait::BlockType>(
+	per_query: &[&[B]],
+	distance_threshold: Option<f32>,
+) -> Vec<B> {
+	use std::collections::hash_map::Entry;
+	use std::collections::HashMap;
+
+	let mut map: HashMap<String, (B, f32)> = HashMap::new();
+	for list in per_query {
+		for (rank, block) in list.iter().enumerate() {
+			let contrib = 1.0 / (DEDUP_RRF_K + rank as f32);
+			match map.entry(block.get_hash()) {
+				Entry::Vacant(e) => {
+					e.insert((block.clone(), contrib));
+				}
+				Entry::Occupied(mut e) => {
+					let (rep, score) = e.get_mut();
+					*score += contrib;
+					// Keep the representative with the better (lower) cosine.
+					let replace = match (block.distance(), rep.distance()) {
+						(Some(nb), Some(ob)) => nb < ob,
+						(Some(_), None) => true,
+						_ => false,
+					};
+					if replace {
+						let carried = *score;
+						*rep = block.clone();
+						*score = carried;
+					}
+				}
+			}
 		}
 	}
+
+	let mut ranked: Vec<(B, f32)> = map
+		.into_values()
+		.filter(|(b, _)| match distance_threshold {
+			Some(t) => b.distance().is_none_or(|d| d <= t),
+			None => true,
+		})
+		.collect();
+	// Benchmark instrument: OCTOCODE_BENCH_LEGACY_RANK reproduces the pre-tuning
+	// ordering (sort the deduped set by cosine distance, discarding the RRF/BM25
+	// contribution) so a single binary can A/B the RRF-preservation fix over one
+	// shared index. Unset (default) = tuned RRF ranking.
+	let legacy_rank = std::env::var_os("OCTOCODE_BENCH_LEGACY_RANK").is_some();
+	ranked.sort_by(|a, b| {
+		if legacy_rank {
+			// Old behaviour: order purely by cosine distance (asc).
+			a.0.distance()
+				.partial_cmp(&b.0.distance())
+				.unwrap_or(std::cmp::Ordering::Equal)
+				.then(a.0.get_hash().cmp(&b.0.get_hash()))
+		} else {
+			// Tuned: fused score desc; ties broken by cosine asc then hash for a
+			// deterministic order (HashMap drain order is otherwise unspecified).
+			b.1.partial_cmp(&a.1)
+				.unwrap_or(std::cmp::Ordering::Equal)
+				.then(
+					a.0.distance()
+						.partial_cmp(&b.0.distance())
+						.unwrap_or(std::cmp::Ordering::Equal),
+				)
+				.then(a.0.get_hash().cmp(&b.0.get_hash()))
+		}
+	});
+	ranked.into_iter().map(|(b, _)| b).collect()
 }
 
-pub fn apply_multi_query_bonus_doc(
-	block: &mut crate::store::DocumentBlock,
-	query_indices: &[usize],
-	total_queries: usize,
-) {
-	if query_indices.len() > 1 && total_queries > 1 {
-		let coverage_ratio = query_indices.len() as f32 / total_queries as f32;
-		let bonus_factor = 1.0 - (coverage_ratio * 0.1).min(0.2);
-
-		if let Some(distance) = block.distance {
-			block.distance = Some(distance * bonus_factor);
-		}
-	}
-}
-
-pub fn apply_multi_query_bonus_text(
-	block: &mut crate::store::TextBlock,
-	query_indices: &[usize],
-	total_queries: usize,
-) {
-	if query_indices.len() > 1 && total_queries > 1 {
-		let coverage_ratio = query_indices.len() as f32 / total_queries as f32;
-		let bonus_factor = 1.0 - (coverage_ratio * 0.1).min(0.2);
-
-		if let Some(distance) = block.distance {
-			block.distance = Some(distance * bonus_factor);
-		}
-	}
-}
-
-pub fn apply_multi_query_bonus_commit(
-	block: &mut crate::store::CommitBlock,
-	query_indices: &[usize],
-	total_queries: usize,
-) {
-	if query_indices.len() > 1 && total_queries > 1 {
-		let coverage_ratio = query_indices.len() as f32 / total_queries as f32;
-		let bonus_factor = 1.0 - (coverage_ratio * 0.1).min(0.2);
-
-		if let Some(distance) = block.distance {
-			block.distance = Some(distance * bonus_factor);
-		}
+/// Deterministically tilt the vector/keyword RRF weights by query shape (no
+/// LLM). Identifier / symbol-like lookups lean on BM25; natural-language
+/// queries keep the configured defaults. Rationale: BM25 owns exact identifier
+/// matches, dense vectors own paraphrased intent (see `store::weighted_rrf`).
+fn classify_query_weights(query: &str, default_vw: f32, default_kw: f32) -> (f32, f32) {
+	let q = query.trim();
+	let word_count = q.split_whitespace().count();
+	let has_symbol = q
+		.chars()
+		.any(|c| c == '_' || c == ':' || c == '(' || c == '.' || c == '<' || c == '>');
+	let mixed_case = q.chars().any(|c| c.is_lowercase()) && q.chars().any(|c| c.is_uppercase());
+	// Short + code punctuation / camelCase → identifier lookup: keyword-tilted.
+	if word_count <= 3 && (has_symbol || mixed_case) {
+		(0.3, 0.7)
+	} else {
+		(default_vw, default_kw)
 	}
 }
 
 pub fn deduplicate_and_merge_results(
 	search_results: Vec<QuerySearchResult>,
-	queries: &[String],
 	distance_threshold: Option<f32>,
 ) -> (
 	Vec<crate::store::CodeBlock>,
@@ -1693,175 +1772,31 @@ pub fn deduplicate_and_merge_results(
 	Vec<crate::store::TextBlock>,
 	Vec<crate::store::CommitBlock>,
 ) {
-	use std::cmp::Ordering;
-	use std::collections::HashMap;
-
-	// Deduplicate code blocks
-	let mut code_map: HashMap<String, (crate::store::CodeBlock, Vec<usize>)> = HashMap::new();
-
-	for result in &search_results {
-		for block in &result.code_blocks {
-			match code_map.entry(block.hash.clone()) {
-				std::collections::hash_map::Entry::Vacant(e) => {
-					e.insert((block.clone(), vec![result.query_index]));
-				}
-				std::collections::hash_map::Entry::Occupied(mut e) => {
-					let (existing_block, query_indices) = e.get_mut();
-					query_indices.push(result.query_index);
-					// Keep block with better score (lower distance)
-					if block.distance < existing_block.distance {
-						*existing_block = block.clone();
-					}
-				}
-			}
-		}
-	}
-
-	// Deduplicate document blocks
-	let mut doc_map: HashMap<String, (crate::store::DocumentBlock, Vec<usize>)> = HashMap::new();
-
-	for result in &search_results {
-		for block in &result.doc_blocks {
-			match doc_map.entry(block.hash.clone()) {
-				std::collections::hash_map::Entry::Vacant(e) => {
-					e.insert((block.clone(), vec![result.query_index]));
-				}
-				std::collections::hash_map::Entry::Occupied(mut e) => {
-					let (existing_block, query_indices) = e.get_mut();
-					query_indices.push(result.query_index);
-					if block.distance < existing_block.distance {
-						*existing_block = block.clone();
-					}
-				}
-			}
-		}
-	}
-
-	// Deduplicate text blocks
-	let mut text_map: HashMap<String, (crate::store::TextBlock, Vec<usize>)> = HashMap::new();
-
-	for result in &search_results {
-		for block in &result.text_blocks {
-			match text_map.entry(block.hash.clone()) {
-				std::collections::hash_map::Entry::Vacant(e) => {
-					e.insert((block.clone(), vec![result.query_index]));
-				}
-				std::collections::hash_map::Entry::Occupied(mut e) => {
-					let (existing_block, query_indices) = e.get_mut();
-					query_indices.push(result.query_index);
-					if block.distance < existing_block.distance {
-						*existing_block = block.clone();
-					}
-				}
-			}
-		}
-	}
-
-	// Apply multi-query bonuses and optionally filter by distance threshold
-	let mut final_code_blocks: Vec<crate::store::CodeBlock> = code_map
-		.into_values()
-		.map(|(mut block, query_indices)| {
-			apply_multi_query_bonus_code(&mut block, &query_indices, queries.len());
-			block
-		})
-		.filter(|block| {
-			match distance_threshold {
-				Some(thresh) => block.distance.is_none_or(|d| d <= thresh),
-				None => true, // No threshold when reranker will handle filtering
-			}
-		})
+	// Dedup + rank each modality by cross-query Reciprocal Rank Fusion. The
+	// per-query lists arrive best-first (vector or hybrid RRF order), so their
+	// position is the rank the fusion consumes. See `fuse_query_lists`.
+	let code_lists: Vec<&[crate::store::CodeBlock]> = search_results
+		.iter()
+		.map(|r| r.code_blocks.as_slice())
 		.collect();
-
-	let mut final_doc_blocks: Vec<crate::store::DocumentBlock> = doc_map
-		.into_values()
-		.map(|(mut block, query_indices)| {
-			apply_multi_query_bonus_doc(&mut block, &query_indices, queries.len());
-			block
-		})
-		.filter(|block| match distance_threshold {
-			Some(thresh) => block.distance.is_none_or(|d| d <= thresh),
-			None => true,
-		})
+	let doc_lists: Vec<&[crate::store::DocumentBlock]> = search_results
+		.iter()
+		.map(|r| r.doc_blocks.as_slice())
 		.collect();
-
-	let mut final_text_blocks: Vec<crate::store::TextBlock> = text_map
-		.into_values()
-		.map(|(mut block, query_indices)| {
-			apply_multi_query_bonus_text(&mut block, &query_indices, queries.len());
-			block
-		})
-		.filter(|block| match distance_threshold {
-			Some(thresh) => block.distance.is_none_or(|d| d <= thresh),
-			None => true,
-		})
+	let text_lists: Vec<&[crate::store::TextBlock]> = search_results
+		.iter()
+		.map(|r| r.text_blocks.as_slice())
 		.collect();
-
-	// Sort by relevance
-	final_code_blocks.sort_by(|a, b| match (a.distance, b.distance) {
-		(Some(dist_a), Some(dist_b)) => dist_a.partial_cmp(&dist_b).unwrap_or(Ordering::Equal),
-		(Some(_), None) => Ordering::Less,
-		(None, Some(_)) => Ordering::Greater,
-		(None, None) => Ordering::Equal,
-	});
-
-	final_doc_blocks.sort_by(|a, b| match (a.distance, b.distance) {
-		(Some(dist_a), Some(dist_b)) => dist_a.partial_cmp(&dist_b).unwrap_or(Ordering::Equal),
-		(Some(_), None) => Ordering::Less,
-		(None, Some(_)) => Ordering::Greater,
-		(None, None) => Ordering::Equal,
-	});
-
-	final_text_blocks.sort_by(|a, b| match (a.distance, b.distance) {
-		(Some(dist_a), Some(dist_b)) => dist_a.partial_cmp(&dist_b).unwrap_or(Ordering::Equal),
-		(Some(_), None) => Ordering::Less,
-		(None, Some(_)) => Ordering::Greater,
-		(None, None) => Ordering::Equal,
-	});
-
-	// Deduplicate commit blocks
-	let mut commit_map: HashMap<String, (crate::store::CommitBlock, Vec<usize>)> = HashMap::new();
-
-	for result in &search_results {
-		for block in &result.commit_blocks {
-			match commit_map.entry(block.hash.clone()) {
-				std::collections::hash_map::Entry::Vacant(e) => {
-					e.insert((block.clone(), vec![result.query_index]));
-				}
-				std::collections::hash_map::Entry::Occupied(mut e) => {
-					let (existing_block, query_indices) = e.get_mut();
-					query_indices.push(result.query_index);
-					if block.distance < existing_block.distance {
-						*existing_block = block.clone();
-					}
-				}
-			}
-		}
-	}
-
-	let mut final_commit_blocks: Vec<crate::store::CommitBlock> = commit_map
-		.into_values()
-		.map(|(mut block, query_indices)| {
-			apply_multi_query_bonus_commit(&mut block, &query_indices, queries.len());
-			block
-		})
-		.filter(|block| match distance_threshold {
-			Some(thresh) => block.distance.is_none_or(|d| d <= thresh),
-			None => true,
-		})
+	let commit_lists: Vec<&[crate::store::CommitBlock]> = search_results
+		.iter()
+		.map(|r| r.commit_blocks.as_slice())
 		.collect();
-
-	final_commit_blocks.sort_by(|a, b| match (a.distance, b.distance) {
-		(Some(dist_a), Some(dist_b)) => dist_a.partial_cmp(&dist_b).unwrap_or(Ordering::Equal),
-		(Some(_), None) => Ordering::Less,
-		(None, Some(_)) => Ordering::Greater,
-		(None, None) => Ordering::Equal,
-	});
 
 	(
-		final_code_blocks,
-		final_doc_blocks,
-		final_text_blocks,
-		final_commit_blocks,
+		fuse_query_lists(&code_lists, distance_threshold),
+		fuse_query_lists(&doc_lists, distance_threshold),
+		fuse_query_lists(&text_lists, distance_threshold),
+		fuse_query_lists(&commit_lists, distance_threshold),
 	)
 }
 
@@ -2065,25 +2000,38 @@ mod tests {
 	}
 
 	#[test]
-	fn test_apply_multi_query_bonus_commit() {
-		let mut block = crate::store::CommitBlock {
-			hash: "abc".to_string(),
-			author: "A".to_string(),
-			date: 0,
-			message: "m".to_string(),
-			content: "c".to_string(),
-			files: "[]".to_string(),
-			description: String::new(),
-			distance: Some(0.5),
-		};
+	fn test_fuse_query_lists_rewards_cross_query_agreement() {
+		// q0: [a, b]   q1: [b, c]  →  b is returned by BOTH queries and must rank
+		// first even though its cosine distance is mediocre.
+		let q0 = vec![make_code_block("a", 0.10), make_code_block("b", 0.50)];
+		let q1 = vec![make_code_block("b", 0.20), make_code_block("c", 0.15)];
+		let fused = fuse_query_lists(&[q0.as_slice(), q1.as_slice()], None);
+		assert_eq!(fused.len(), 3);
+		assert_eq!(fused[0].path, "b");
+		// Representative keeps the better (lower) cosine distance seen for b.
+		assert_eq!(fused[0].distance, Some(0.20));
+	}
 
-		// Single query match — no bonus
-		apply_multi_query_bonus_commit(&mut block, &[0], 3);
-		assert_eq!(block.distance, Some(0.5));
+	#[test]
+	fn test_fuse_query_lists_preserves_retriever_order() {
+		// Single query: fusion must preserve the incoming rank order (what
+		// hybrid/vector search produced), NOT re-sort by cosine distance —
+		// this is the RRF-preservation fix.
+		let q0 = vec![
+			make_code_block("first", 0.90), // retriever rank #1 (e.g. exact BM25 hit)
+			make_code_block("second", 0.10), // better cosine but retriever rank #2
+		];
+		let fused = fuse_query_lists(&[q0.as_slice()], None);
+		assert_eq!(fused[0].path, "first");
+		assert_eq!(fused[1].path, "second");
+	}
 
-		// Multi-query match — applies bonus
-		apply_multi_query_bonus_commit(&mut block, &[0, 1], 3);
-		assert!(block.distance.unwrap() < 0.5);
+	#[test]
+	fn test_fuse_query_lists_applies_distance_threshold() {
+		let q0 = vec![make_code_block("keep", 0.10), make_code_block("drop", 0.80)];
+		let fused = fuse_query_lists(&[q0.as_slice()], Some(0.5));
+		assert_eq!(fused.len(), 1);
+		assert_eq!(fused[0].path, "keep");
 	}
 
 	fn make_code_block(path: &str, distance: f32) -> CodeBlock {

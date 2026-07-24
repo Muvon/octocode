@@ -85,7 +85,8 @@ impl Language for Ruby {
 		if kind == "identifier" || kind == "constant" {
 			if let Ok(text) = node.utf8_text(contents.as_bytes()) {
 				let t = text.trim();
-				if !t.is_empty() && !symbols.iter().any(|s| s.as_str() == t) && !t.starts_with('@') {
+				if !t.is_empty() && !symbols.iter().any(|s| s.as_str() == t) && !t.starts_with('@')
+				{
 					symbols.push(t.to_string());
 				}
 			}
@@ -246,7 +247,9 @@ impl Ruby {
 						if assign_child.kind() == "identifier" {
 							if let Ok(name) = assign_child.utf8_text(contents.as_bytes()) {
 								// Skip instance/class variables (starting with @ or @@)
-								if !name.starts_with('@') && !symbols.iter().any(|s| s.as_str() == name) {
+								if !name.starts_with('@')
+									&& !symbols.iter().any(|s| s.as_str() == name)
+								{
 									symbols.push(name.to_string());
 								}
 							}

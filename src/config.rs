@@ -188,6 +188,12 @@ pub struct RerankerConfig {
 	pub top_k_candidates: usize,
 	/// Number of results to return after reranking
 	pub final_top_k: usize,
+	/// Minimum cross-encoder relevance (0.0-1.0) required to keep a reranked
+	/// result. The reranker score is NOT on the cosine scale, so
+	/// `search.similarity_threshold` must not be applied to it. Default 0.0 =
+	/// trust `final_top_k` and apply no floor.
+	#[serde(default)]
+	pub min_relevance: f32,
 }
 
 /// Hybrid search configuration for combining vector and keyword search.
@@ -196,6 +202,10 @@ pub struct RerankerConfig {
 /// keyword scoring, so per-field weights (path/symbols/title) would have no
 /// effect. Only the two RRF fusion weights below are wired into the search
 /// pipeline (`WeightedRRFReranker` in `store::weighted_rrf`).
+fn default_rrf_k() -> f32 {
+	60.0
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HybridSearchConfig {
 	/// Enable hybrid search (vector + keyword)
@@ -204,6 +214,16 @@ pub struct HybridSearchConfig {
 	pub default_vector_weight: f32,
 	/// Default weight for keyword (BM25) signal in RRF fusion
 	pub default_keyword_weight: f32,
+	/// RRF dampening constant k (Cormack et al. 2009; default 60). Lower k lets
+	/// the very top ranks dominate the fusion — helps exact-identifier code
+	/// queries where the rank-1 BM25 hit is usually the answer.
+	#[serde(default = "default_rrf_k")]
+	pub rrf_k: f32,
+	/// When true, tilt the vector/keyword weights per query by a deterministic
+	/// (no-LLM) shape heuristic: identifier/symbol lookups lean keyword, natural
+	/// language leans vector. Off by default (uses the fixed weights above).
+	#[serde(default)]
+	pub auto_weight: bool,
 }
 
 impl Default for HybridSearchConfig {
@@ -212,6 +232,8 @@ impl Default for HybridSearchConfig {
 			enabled: true,
 			default_vector_weight: 0.6,
 			default_keyword_weight: 0.4,
+			rrf_k: 60.0,
+			auto_weight: false,
 		}
 	}
 }
@@ -223,6 +245,7 @@ impl Default for RerankerConfig {
 			model: "fastembed:jina-reranker-v2-base-multilingual".to_string(),
 			top_k_candidates: 50,
 			final_top_k: 10,
+			min_relevance: 0.0,
 		}
 	}
 }

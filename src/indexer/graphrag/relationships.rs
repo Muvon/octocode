@@ -110,7 +110,7 @@ impl RelationshipDiscovery {
 			// 4. Function call relationships from extracted call sites
 			for function in &source_file.functions {
 				for callee in &function.calls {
-					if let Some(target_ids) = symbol_index.get(callee) {
+					if let Some(target_ids) = symbol_index.get(callee.as_str()) {
 						for &target_id in target_ids {
 							if target_id != source_file.id {
 								relationships.push(CodeRelationship {
@@ -130,7 +130,7 @@ impl RelationshipDiscovery {
 				// 5. Inheritance edges (e.g. `class Foo extends Bar`,
 				//    `trait A: B`, `class C(D)`).
 				for extended in &function.extends {
-					if let Some(target_ids) = symbol_index.get(extended) {
+					if let Some(target_ids) = symbol_index.get(extended.as_str()) {
 						for &target_id in target_ids {
 							if target_id != source_file.id {
 								relationships.push(CodeRelationship {
@@ -150,7 +150,7 @@ impl RelationshipDiscovery {
 				// 6. Interface / trait implementation edges
 				//    (e.g. `class Foo implements Bar`, `impl Trait for Type`).
 				for implemented in &function.implements {
-					if let Some(target_ids) = symbol_index.get(implemented) {
+					if let Some(target_ids) = symbol_index.get(implemented.as_str()) {
 						for &target_id in target_ids {
 							if target_id != source_file.id {
 								relationships.push(CodeRelationship {

@@ -179,6 +179,8 @@ pub struct Store {
 	quantization: bool,
 	// Cached `[search.hybrid].enabled` setting; avoids re-reading TOML on every batch.
 	hybrid_enabled: bool,
+	// Cached `[search.hybrid].rrf_k` — dampening constant for vector/FTS RRF fusion.
+	rrf_k: f32,
 }
 
 impl Store {
@@ -320,6 +322,7 @@ impl Store {
 			fts_index_present: Arc::new(RwLock::new(HashMap::new())),
 			quantization: config.index.quantization,
 			hybrid_enabled: config.search.hybrid.enabled,
+			rrf_k: config.search.hybrid.rrf_k.max(1.0),
 		})
 	}
 
@@ -1255,7 +1258,7 @@ impl Store {
 				// signal is the cleaner one.
 				let reranker =
 					std::sync::Arc::new(crate::store::weighted_rrf::WeightedRRFReranker::new(
-						60.0,
+						self.rrf_k,
 						query.vector_weight,
 						query.keyword_weight,
 					));

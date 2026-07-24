@@ -385,7 +385,8 @@ impl JavaScript {
 								if decl_child.kind() == "identifier" {
 									if let Ok(name) = decl_child.utf8_text(contents.as_bytes()) {
 										let t = name.trim();
-										if !t.is_empty() && !symbols.iter().any(|s| s.as_str() == t) {
+										if !t.is_empty() && !symbols.iter().any(|s| s.as_str() == t)
+										{
 											symbols.push(t.to_string());
 										}
 									}
