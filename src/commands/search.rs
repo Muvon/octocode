@@ -278,15 +278,27 @@ pub async fn execute(
 				.await;
 	}
 
+	// PageIndex-style reasoning selection over CODE candidates (gated). Mirrors
+	// the MCP path: when on, an LLM reasons over candidate structure and becomes
+	// the final code ranker, replacing the cross-encoder for code.
+	let reasoning_on = config.search.reasoning.enabled && !args.queries.is_empty();
+	if reasoning_on {
+		let query = args.queries.join(" ");
+		code_blocks =
+			octocode::reasoning::reason_rank_code_blocks(&query, code_blocks, config).await?;
+	}
+
 	// Apply reranker if enabled, then filter by similarity threshold
 	if config.search.reranker.enabled && !args.queries.is_empty() {
 		let query = args.queries.join(" ");
-		code_blocks = octocode::reranker::rerank_code_blocks_with_octolib(
-			&query,
-			code_blocks,
-			&config.search.reranker,
-		)
-		.await?;
+		if !reasoning_on {
+			code_blocks = octocode::reranker::rerank_code_blocks_with_octolib(
+				&query,
+				code_blocks,
+				&config.search.reranker,
+			)
+			.await?;
+		}
 		doc_blocks = octocode::reranker::rerank_doc_blocks_with_octolib(
 			&query,
 			doc_blocks,
@@ -308,15 +320,19 @@ pub async fn execute(
 
 		// Reranker scores are cross-encoder relevance, NOT cosine — filter by the
 		// reranker's own floor (`min_relevance`, default 0.0), never the cosine
-		// `similarity_threshold`.
+		// `similarity_threshold`. Code is already finalized by reasoning when on.
 		let max_dist = 1.0 - config.search.reranker.min_relevance;
-		code_blocks.retain(|b| b.distance.is_none_or(|d| d <= max_dist));
+		if !reasoning_on {
+			code_blocks.retain(|b| b.distance.is_none_or(|d| d <= max_dist));
+		}
 		doc_blocks.retain(|b| b.distance.is_none_or(|d| d <= max_dist));
 		text_blocks.retain(|b| b.distance.is_none_or(|d| d <= max_dist));
 		commit_blocks.retain(|b| b.distance.is_none_or(|d| d <= max_dist));
 	} else {
-		// Apply global result limits (reranker already limits via final_top_k)
-		code_blocks.truncate(config.search.max_results);
+		// Apply global result limits (reranker/reasoning already limit code).
+		if !reasoning_on {
+			code_blocks.truncate(config.search.max_results);
+		}
 		doc_blocks.truncate(config.search.max_results);
 		text_blocks.truncate(config.search.max_results);
 		commit_blocks.truncate(config.search.max_results);
