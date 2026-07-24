@@ -243,7 +243,9 @@ impl Css {
 					"class_selector" | "id_selector" | "tag_name" | "universal_selector" => {
 						if let Ok(selector_text) = child.utf8_text(contents.as_bytes()) {
 							let selector = selector_text.trim();
-							if !selector.is_empty() && !symbols.iter().any(|s| s.as_str() == selector) {
+							if !selector.is_empty()
+								&& !symbols.iter().any(|s| s.as_str() == selector)
+							{
 								symbols.push(selector.to_string());
 							}
 						}

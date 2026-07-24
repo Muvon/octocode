@@ -461,10 +461,7 @@ impl<'a> DatabaseOperations<'a> {
 	}
 
 	// Convert nodes to a RecordBatch for database storage with updated schema
-	async fn nodes_to_batch(
-		&self,
-		nodes: &[CodeNode],
-	) -> Result<arrow::record_batch::RecordBatch> {
+	async fn nodes_to_batch(&self, nodes: &[CodeNode]) -> Result<arrow::record_batch::RecordBatch> {
 		// Get the vector dimension from the store
 		let vector_dim = self.store.get_code_vector_dim();
 

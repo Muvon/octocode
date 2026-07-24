@@ -257,18 +257,26 @@ pub async fn execute(
 		Some(1.0 - threshold)
 	};
 
-	// Deduplicate and merge with multi-query bonuses
+	// Deduplicate and merge via cross-query Reciprocal Rank Fusion.
 	let (mut code_blocks, mut doc_blocks, mut text_blocks, mut commit_blocks) =
-		indexer::search::deduplicate_and_merge_results(
-			search_results,
-			&args.queries,
-			dedup_distance_threshold,
-		);
+		indexer::search::deduplicate_and_merge_results(search_results, dedup_distance_threshold);
 
 	// GraphRAG file-level expansion (default off): enrich code candidates with
 	// structurally-related files before the reranker scores them. Mirrors the
-	// MCP search path so CLI and MCP have retrieval parity.
-	code_blocks = indexer::search::expand_code_blocks_via_graph(store, config, code_blocks).await;
+	// MCP search path so CLI and MCP have retrieval parity. Reserve headroom in
+	// the rerank candidate budget so neighbors aren't truncated away pre-scoring.
+	if config.graphrag.enabled && config.search.graph_expansion && config.search.reranker.enabled {
+		let cap = config.search.reranker.top_k_candidates;
+		let reserved = (cap / 5).max(1);
+		code_blocks.truncate(cap.saturating_sub(reserved).max(1));
+		code_blocks =
+			indexer::search::expand_code_blocks_via_graph(store, config, code_blocks, reserved)
+				.await;
+	} else {
+		code_blocks =
+			indexer::search::expand_code_blocks_via_graph(store, config, code_blocks, usize::MAX)
+				.await;
+	}
 
 	// Apply reranker if enabled, then filter by similarity threshold
 	if config.search.reranker.enabled && !args.queries.is_empty() {
@@ -298,12 +306,14 @@ pub async fn execute(
 		)
 		.await?;
 
-		// Apply similarity threshold to reranker scores (post-reranker filter)
-		let dist_thresh = 1.0 - threshold;
-		code_blocks.retain(|b| b.distance.is_none_or(|d| d <= dist_thresh));
-		doc_blocks.retain(|b| b.distance.is_none_or(|d| d <= dist_thresh));
-		text_blocks.retain(|b| b.distance.is_none_or(|d| d <= dist_thresh));
-		commit_blocks.retain(|b| b.distance.is_none_or(|d| d <= dist_thresh));
+		// Reranker scores are cross-encoder relevance, NOT cosine — filter by the
+		// reranker's own floor (`min_relevance`, default 0.0), never the cosine
+		// `similarity_threshold`.
+		let max_dist = 1.0 - config.search.reranker.min_relevance;
+		code_blocks.retain(|b| b.distance.is_none_or(|d| d <= max_dist));
+		doc_blocks.retain(|b| b.distance.is_none_or(|d| d <= max_dist));
+		text_blocks.retain(|b| b.distance.is_none_or(|d| d <= max_dist));
+		commit_blocks.retain(|b| b.distance.is_none_or(|d| d <= max_dist));
 	} else {
 		// Apply global result limits (reranker already limits via final_top_k)
 		code_blocks.truncate(config.search.max_results);
