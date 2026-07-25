@@ -122,6 +122,10 @@ enabled = true
 default_vector_weight = 0.7
 # Weight for keyword matching signal (0.0-1.0)
 default_keyword_weight = 0.3
+# RRF dampening constant k (Cormack et al. 2009).
+rrf_k = 60.0
+# Per-query deterministic vector/keyword weight tilt (identifier vs natural-language).
+auto_weight = false
 # Weight for keyword matches in path/filename
 keyword_path_weight = 2.0
 # Weight for keyword matches in content
@@ -130,3 +134,11 @@ keyword_content_weight = 1.0
 keyword_symbols_weight = 2.5
 # Weight for keyword matches in title (document blocks only)
 keyword_title_weight = 3.0
+
+[search.reasoning]
+enabled = false
+model = "deepseek:deepseek-v4-flash"
+max_candidates = 25
+final_top_k = 10
+context_level = "full"
+reasoning_weight = 2.0

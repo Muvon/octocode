@@ -67,6 +67,30 @@ enabled = true
 default_vector_weight = 0.6
 # Weight for keyword matching signal (0.0-1.0)
 default_keyword_weight = 0.4
+# RRF dampening constant k (Cormack et al. 2009). Lower k lets the very top ranks dominate.
+rrf_k = 60.0
+# Tilt vector/keyword weights per query by a deterministic (no-LLM) shape heuristic:
+# identifier/symbol lookups lean keyword, natural-language queries lean vector.
+auto_weight = false
+
+[search.reasoning]
+# PageIndex-style reasoning retrieval: after hybrid retrieval, an LLM reasons over each
+# candidate's code (path, symbols, body) and re-ranks by true relevance, fused with the
+# hybrid rank via RRF. Benchmark lift over hybrid: MRR +36%, NDCG@10 +27%, Hit@5 +0.13.
+# Costs one LLM call per search. Off by default; leaves structural_search as pure grep.
+enabled = false
+# Reasoning model, provider:model (deepseek / openrouter / ollama / voyage / ...).
+model = "deepseek:deepseek-v4-flash"
+# How many top candidates to reason over (more is not better — 25 beat 40 on the benchmark).
+max_candidates = 25
+# How many results to keep after reasoning.
+final_top_k = 10
+# Per-candidate context fed to the LLM: "full" | "snippets" | "signatures".
+# "full" (whole code body) wins clearly — the model must see the code, not just the names.
+context_level = "full"
+# Weight of the reasoning rank vs the hybrid rank in the RRF fusion. The hybrid rank always
+# contributes as a recall floor; >1 leans on the LLM ordering. 2.0 was the benchmark optimum.
+reasoning_weight = 2.0
 
 [embedding]
 # Local models via fastembed (no API key required, downloaded on first use to system cache)

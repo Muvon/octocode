@@ -976,18 +976,6 @@ pub async fn search_codebase_with_details_multi_query_text(
 			&config.search.reranker,
 		)
 		.await?;
-
-		// Reranker scores are cross-encoder relevance, NOT cosine distance — so
-		// the cosine `similarity_threshold` must not gate them. Filter by the
-		// reranker's own floor (`min_relevance`, default 0.0 = keep final_top_k).
-		// Code is already finalized by reasoning when it ran.
-		let max_dist = 1.0 - config.search.reranker.min_relevance;
-		if !reasoning_on {
-			code_blocks.retain(|b| b.distance.is_none_or(|d| d <= max_dist));
-		}
-		doc_blocks.retain(|b| b.distance.is_none_or(|d| d <= max_dist));
-		text_blocks.retain(|b| b.distance.is_none_or(|d| d <= max_dist));
-		commit_blocks.retain(|b| b.distance.is_none_or(|d| d <= max_dist));
 	} else {
 		// Apply global result limits (reranker/reasoning already limit code).
 		if !reasoning_on {
