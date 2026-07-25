@@ -317,17 +317,6 @@ pub async fn execute(
 			&config.search.reranker,
 		)
 		.await?;
-
-		// Reranker scores are cross-encoder relevance, NOT cosine — filter by the
-		// reranker's own floor (`min_relevance`, default 0.0), never the cosine
-		// `similarity_threshold`. Code is already finalized by reasoning when on.
-		let max_dist = 1.0 - config.search.reranker.min_relevance;
-		if !reasoning_on {
-			code_blocks.retain(|b| b.distance.is_none_or(|d| d <= max_dist));
-		}
-		doc_blocks.retain(|b| b.distance.is_none_or(|d| d <= max_dist));
-		text_blocks.retain(|b| b.distance.is_none_or(|d| d <= max_dist));
-		commit_blocks.retain(|b| b.distance.is_none_or(|d| d <= max_dist));
 	} else {
 		// Apply global result limits (reranker/reasoning already limit code).
 		if !reasoning_on {

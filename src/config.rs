@@ -188,12 +188,6 @@ pub struct RerankerConfig {
 	pub top_k_candidates: usize,
 	/// Number of results to return after reranking
 	pub final_top_k: usize,
-	/// Minimum cross-encoder relevance (0.0-1.0) required to keep a reranked
-	/// result. The reranker score is NOT on the cosine scale, so
-	/// `search.similarity_threshold` must not be applied to it. Default 0.0 =
-	/// trust `final_top_k` and apply no floor.
-	#[serde(default)]
-	pub min_relevance: f32,
 }
 
 /// Hybrid search configuration for combining vector and keyword search.
@@ -202,10 +196,6 @@ pub struct RerankerConfig {
 /// keyword scoring, so per-field weights (path/symbols/title) would have no
 /// effect. Only the two RRF fusion weights below are wired into the search
 /// pipeline (`WeightedRRFReranker` in `store::weighted_rrf`).
-fn default_rrf_k() -> f32 {
-	60.0
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HybridSearchConfig {
 	/// Enable hybrid search (vector + keyword)
@@ -214,15 +204,12 @@ pub struct HybridSearchConfig {
 	pub default_vector_weight: f32,
 	/// Default weight for keyword (BM25) signal in RRF fusion
 	pub default_keyword_weight: f32,
-	/// RRF dampening constant k (Cormack et al. 2009; default 60). Lower k lets
-	/// the very top ranks dominate the fusion — helps exact-identifier code
-	/// queries where the rank-1 BM25 hit is usually the answer.
-	#[serde(default = "default_rrf_k")]
+	/// RRF dampening constant k (Cormack et al. 2009). Lower k lets the very top
+	/// ranks dominate the fusion — helps exact-identifier code queries.
 	pub rrf_k: f32,
 	/// When true, tilt the vector/keyword weights per query by a deterministic
 	/// (no-LLM) shape heuristic: identifier/symbol lookups lean keyword, natural
-	/// language leans vector. Off by default (uses the fixed weights above).
-	#[serde(default)]
+	/// language leans vector.
 	pub auto_weight: bool,
 }
 
@@ -245,7 +232,6 @@ impl Default for RerankerConfig {
 			model: "fastembed:jina-reranker-v2-base-multilingual".to_string(),
 			top_k_candidates: 50,
 			final_top_k: 10,
-			min_relevance: 0.0,
 		}
 	}
 }
@@ -276,7 +262,6 @@ pub struct SearchConfig {
 
 	/// LLM reasoning-based selection over retrieved candidates (PageIndex-style:
 	/// reason over code structure instead of trusting similarity rank).
-	#[serde(default)]
 	pub reasoning: ReasoningConfig,
 }
 
@@ -297,55 +282,26 @@ impl Default for SearchConfig {
 	}
 }
 
-fn default_reasoning_model() -> String {
-	"deepseek:deepseek-v4-flash".to_string()
-}
-fn default_reasoning_max_candidates() -> usize {
-	25
-}
-fn default_reasoning_final_top_k() -> usize {
-	10
-}
-fn default_reasoning_context_level() -> String {
-	"full".to_string()
-}
-fn default_reasoning_weight() -> f32 {
-	2.0
-}
-
-/// PageIndex-style reasoning retrieval. After the deterministic retrievers gather
-/// a candidate pool, an LLM reasons over each candidate's structure (path,
-/// symbols, snippet, and — when enabled — exact `structural_search` hits and
-/// GraphRAG neighbours) and re-ranks by true relevance rather than similarity.
-/// Runs only in the semantic search path; `structural_search` itself stays a
+/// PageIndex-style reasoning retrieval. After hybrid retrieval gathers a
+/// candidate pool, an LLM reasons over each candidate's code (path, symbols,
+/// body) and re-ranks by true relevance, fused with the hybrid rank via RRF.
+/// Runs only in the semantic search path; `structural_search` stays a
 /// deterministic grep. Off by default.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReasoningConfig {
 	/// Enable the reasoning selection step.
-	#[serde(default)]
 	pub enabled: bool,
-	/// Model for reasoning, "provider:model" (e.g. "ollama:...", "openrouter:...").
-	#[serde(default = "default_reasoning_model")]
+	/// Model for reasoning, "provider:model" (e.g. "deepseek:...", "openrouter:...").
 	pub model: String,
 	/// How many top candidates to reason over.
-	#[serde(default = "default_reasoning_max_candidates")]
 	pub max_candidates: usize,
 	/// How many results to keep after reasoning.
-	#[serde(default = "default_reasoning_final_top_k")]
 	pub final_top_k: usize,
 	/// Per-candidate context fed to the LLM: "signatures" | "snippets" | "full".
-	#[serde(default = "default_reasoning_context_level")]
 	pub context_level: String,
-	/// Inject exact `structural_search` (ast-grep) matches into the pool.
-	#[serde(default)]
-	pub use_structural: bool,
-	/// Inject GraphRAG relationship neighbours into the pool.
-	#[serde(default)]
-	pub use_graph: bool,
-	/// Weight of the reasoning rank relative to the hybrid rank when fusing
-	/// (RRF). >1 leans on the LLM ordering; the hybrid rank always contributes
-	/// as a recall floor so LLM-omitted true hits aren't lost. Default 2.0.
-	#[serde(default = "default_reasoning_weight")]
+	/// Weight of the reasoning rank relative to the hybrid rank when fusing (RRF).
+	/// >1 leans on the LLM ordering; the hybrid rank always contributes as a
+	/// recall floor so LLM-omitted true hits aren't lost.
 	pub reasoning_weight: f32,
 }
 
@@ -353,12 +309,10 @@ impl Default for ReasoningConfig {
 	fn default() -> Self {
 		Self {
 			enabled: false,
-			model: default_reasoning_model(),
-			max_candidates: default_reasoning_max_candidates(),
-			final_top_k: default_reasoning_final_top_k(),
-			context_level: default_reasoning_context_level(),
-			use_structural: true,
-			use_graph: true,
+			model: "deepseek:deepseek-v4-flash".to_string(),
+			max_candidates: 25,
+			final_top_k: 10,
+			context_level: "full".to_string(),
 			reasoning_weight: 2.0,
 		}
 	}
