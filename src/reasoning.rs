@@ -130,28 +130,39 @@ pub async fn reason_rank_code_blocks(
 	}
 
 	let n = pool.len();
-	let mut used = vec![false; n];
-	let mut out = Vec::with_capacity(n);
-	for (rank, &num) in ranked.iter().enumerate() {
-		if num >= 1 && num <= n && !used[num - 1] {
-			let mut b = pool[num - 1].clone();
-			// Distance from reasoning rank (lower = better) so the surfaced
-			// similarity and any downstream ordering stay consistent.
-			b.distance = Some((rank as f32 + 1.0) / (n as f32 + 1.0));
-			out.push(b);
-			used[num - 1] = true;
+	// Reciprocal Rank Fusion of the reasoning ranking with the original hybrid
+	// ranking. The hybrid rank (pool position) always contributes, acting as a
+	// recall floor so an LLM-omitted or LLM-demoted true hit is not lost; the
+	// reasoning rank contributes `reasoning_weight`x on top, so the model's
+	// judgement drives the head of the list. Keeps the MRR/NDCG gains of pure
+	// reasoning while recovering Recall@k.
+	const RRF_K: f32 = 60.0;
+	let rw = rc.reasoning_weight.max(0.0);
+	let mut score = vec![0.0f32; n];
+	for (i, s) in score.iter_mut().enumerate() {
+		*s += 1.0 / (RRF_K + i as f32); // hybrid contribution (always present)
+	}
+	for (rrank, &num) in ranked.iter().enumerate() {
+		if num >= 1 && num <= n {
+			score[num - 1] += rw / (RRF_K + rrank as f32); // reasoning contribution
 		}
 	}
-
-	// Preserve recall: append the candidates the model omitted (in original
-	// hybrid order) instead of dropping them. Reasoning then *reorders* rather
-	// than discards — the reasoned-relevant hits sit on top (keeping the MRR /
-	// NDCG gains) while the pruned tail still counts toward Recall@k.
-	for (i, block) in pool.iter().enumerate() {
-		if !used[i] {
-			out.push(block.clone());
-		}
-	}
+	let mut order: Vec<usize> = (0..n).collect();
+	order.sort_by(|&a, &b| {
+		score[b]
+			.partial_cmp(&score[a])
+			.unwrap_or(std::cmp::Ordering::Equal)
+	});
+	let mut out: Vec<CodeBlock> = order
+		.iter()
+		.enumerate()
+		.map(|(pos, &i)| {
+			let mut b = pool[i].clone();
+			// Distance from the fused rank so the surfaced similarity is consistent.
+			b.distance = Some((pos as f32 + 1.0) / (n as f32 + 1.0));
+			b
+		})
+		.collect();
 
 	out.truncate(rc.final_top_k.max(1));
 	Ok(out)
