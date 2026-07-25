@@ -307,7 +307,10 @@ fn default_reasoning_final_top_k() -> usize {
 	10
 }
 fn default_reasoning_context_level() -> String {
-	"snippets".to_string()
+	"full".to_string()
+}
+fn default_reasoning_weight() -> f32 {
+	2.0
 }
 
 /// PageIndex-style reasoning retrieval. After the deterministic retrievers gather
@@ -339,6 +342,11 @@ pub struct ReasoningConfig {
 	/// Inject GraphRAG relationship neighbours into the pool.
 	#[serde(default)]
 	pub use_graph: bool,
+	/// Weight of the reasoning rank relative to the hybrid rank when fusing
+	/// (RRF). >1 leans on the LLM ordering; the hybrid rank always contributes
+	/// as a recall floor so LLM-omitted true hits aren't lost. Default 2.0.
+	#[serde(default = "default_reasoning_weight")]
+	pub reasoning_weight: f32,
 }
 
 impl Default for ReasoningConfig {
@@ -351,6 +359,7 @@ impl Default for ReasoningConfig {
 			context_level: default_reasoning_context_level(),
 			use_structural: true,
 			use_graph: true,
+			reasoning_weight: 2.0,
 		}
 	}
 }

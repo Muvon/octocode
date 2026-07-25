@@ -1733,30 +1733,17 @@ fn fuse_query_lists<B: crate::store::block_trait::BlockType>(
 			None => true,
 		})
 		.collect();
-	// Benchmark instrument: OCTOCODE_BENCH_LEGACY_RANK reproduces the pre-tuning
-	// ordering (sort the deduped set by cosine distance, discarding the RRF/BM25
-	// contribution) so a single binary can A/B the RRF-preservation fix over one
-	// shared index. Unset (default) = tuned RRF ranking.
-	let legacy_rank = std::env::var_os("OCTOCODE_BENCH_LEGACY_RANK").is_some();
+	// Fused score desc; ties broken by cosine asc then hash for a deterministic
+	// order (HashMap drain order is otherwise unspecified).
 	ranked.sort_by(|a, b| {
-		if legacy_rank {
-			// Old behaviour: order purely by cosine distance (asc).
-			a.0.distance()
-				.partial_cmp(&b.0.distance())
-				.unwrap_or(std::cmp::Ordering::Equal)
-				.then(a.0.get_hash().cmp(&b.0.get_hash()))
-		} else {
-			// Tuned: fused score desc; ties broken by cosine asc then hash for a
-			// deterministic order (HashMap drain order is otherwise unspecified).
-			b.1.partial_cmp(&a.1)
-				.unwrap_or(std::cmp::Ordering::Equal)
-				.then(
-					a.0.distance()
-						.partial_cmp(&b.0.distance())
-						.unwrap_or(std::cmp::Ordering::Equal),
-				)
-				.then(a.0.get_hash().cmp(&b.0.get_hash()))
-		}
+		b.1.partial_cmp(&a.1)
+			.unwrap_or(std::cmp::Ordering::Equal)
+			.then(
+				a.0.distance()
+					.partial_cmp(&b.0.distance())
+					.unwrap_or(std::cmp::Ordering::Equal),
+			)
+			.then(a.0.get_hash().cmp(&b.0.get_hash()))
 	});
 	ranked.into_iter().map(|(b, _)| b).collect()
 }
