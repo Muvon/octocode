@@ -1,5 +1,38 @@
 # Changelog
 
+## [0.19.0] - 2026-07-26
+
+### 📋 Release Summary
+
+This release introduces advanced AI-driven search capabilities, featuring LLM-powered reasoning and improved result ranking for more accurate code retrieval (e3d03632, e467123f, 5362fb44, f5e171a9). System performance has been enhanced through optimized memory allocation and a modernized configuration system (f788fa2a, 2139c9b9, 1c3a5f75). Additionally, several fixes improve LSP process stability and expand MCP server compatibility (6fc68e5b, 7134786d).
+
+
+### ✨ New Features & Enhancements
+
+- **config**: implement atomic updates and v2 migration `2139c9b9`
+- **search**: implement reasoning retrieval and refine config `e3d03632`
+- **reasoning**: implement weighted RRF for result fusion `e467123f`
+- **search**: implement LLM reasoning for code ranking `5362fb44`
+- **search**: implement RRF and refine GraphRAG expansion `f5e171a9`
+
+### 🔧 Improvements & Optimizations
+
+- **config**: optimize loading and harden file writes `1c3a5f75`
+- **indexer**: optimize memory and allocation efficiency `f788fa2a`
+
+### 🐛 Bug Fixes & Stability
+
+- **lsp**: ensure deterministic process lifecycle and reaping `6fc68e5b`
+- **mcp**: relax git requirement for read-only index `7134786d`
+
+### 📚 Documentation & Examples
+
+- **root**: rename instructions to agents `d9f2f9d1`
+
+### 🔄 Other Changes
+
+3 maintenance, dependency, and tooling updates not listed individually.
+
 ## [0.18.1] - 2026-07-11
 
 ### 📋 Release Summary
