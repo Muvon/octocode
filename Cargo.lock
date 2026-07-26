@@ -4906,6 +4906,7 @@ dependencies = [
  "dirs",
  "dotenvy",
  "ec4rs",
+ "fs4",
  "futures",
  "globset",
  "http-body-util",
@@ -4932,6 +4933,7 @@ dependencies = [
  "time",
  "tokio",
  "toml",
+ "toml_edit",
  "tracing",
  "tracing-appender",
  "tracing-subscriber",
@@ -7146,6 +7148,7 @@ dependencies = [
  "indexmap 2.14.0",
  "toml_datetime",
  "toml_parser",
+ "toml_writer",
  "winnow",
 ]
 
