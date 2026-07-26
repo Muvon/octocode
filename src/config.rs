@@ -301,7 +301,7 @@ pub struct ReasoningConfig {
 	pub context_level: String,
 	/// Weight of the reasoning rank relative to the hybrid rank when fusing (RRF).
 	/// >1 leans on the LLM ordering; the hybrid rank always contributes as a
-	/// recall floor so LLM-omitted true hits aren't lost.
+	/// > recall floor so LLM-omitted true hits aren't lost.
 	pub reasoning_weight: f32,
 }
 

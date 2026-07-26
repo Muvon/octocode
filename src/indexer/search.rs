@@ -1678,8 +1678,8 @@ const DEDUP_RRF_K: f32 = 60.0;
 ///     code re-sorted by recomputed cosine, discarding the BM25 contribution;
 ///   * cross-query agreement falls out naturally — a block returned by several
 ///     sub-queries accumulates score.
-/// The representative block keeps its lowest (best) cosine `distance` for
-/// display and optional threshold filtering; ranking is by fused score.
+///     The representative block keeps its lowest (best) cosine `distance` for
+///     display and optional threshold filtering; ranking is by fused score.
 fn fuse_query_lists<B: crate::store::block_trait::BlockType>(
 	per_query: &[&[B]],
 	distance_threshold: Option<f32>,
