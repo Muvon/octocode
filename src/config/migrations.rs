@@ -197,6 +197,9 @@ default_keyword_weight = 0.3
 		assert!(migration
 			.content
 			.contains("# User values and comments must survive migration."));
+		assert!(migration
+			.content
+			.contains("# PageIndex-style reasoning retrieval"));
 
 		let migrated: toml::Value =
 			toml::from_str(&migration.content).expect("migrated config should be valid TOML");
@@ -237,6 +240,21 @@ default_keyword_weight = 0.3
 		assert_eq!(
 			migrated["search"]["reasoning"]["max_candidates"].as_integer(),
 			Some(25)
+		);
+	}
+
+	#[test]
+	fn migrates_v1_without_search_table() {
+		let migration = migrate("version = 1\n", super::super::DEFAULT_CONFIG_TEMPLATE)
+			.expect("minimal v1 config should migrate")
+			.expect("v1 should require migration");
+		let migrated: toml::Value = toml::from_str(&migration.content).unwrap();
+
+		assert_eq!(migrated["version"].as_integer(), Some(2));
+		assert_eq!(migrated["search"]["hybrid"]["rrf_k"].as_float(), Some(60.0));
+		assert_eq!(
+			migrated["search"]["reasoning"]["enabled"].as_bool(),
+			Some(false)
 		);
 	}
 

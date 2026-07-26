@@ -371,6 +371,19 @@ impl Config {
 	}
 
 	fn load_from_path(config_path: &Path) -> Result<Self> {
+		// Current configs are read-only. Acquire the write lock only when the file
+		// is missing or an actual migration is required.
+		if config_path.exists() {
+			let content = fs::read_to_string(config_path).with_context(|| {
+				format!("failed to read configuration at {}", config_path.display())
+			})?;
+			if migrations::migrate(&content, DEFAULT_CONFIG_TEMPLATE)?.is_none() {
+				return toml::from_str(&content).with_context(|| {
+					format!("failed to load configuration at {}", config_path.display())
+				});
+			}
+		}
+
 		with_config_lock(config_path, || Self::load_from_path_locked(config_path))
 	}
 
@@ -473,7 +486,7 @@ fn with_config_lock<T>(config_path: &Path, operation: impl FnOnce() -> Result<T>
 			config_path.display()
 		)
 	})?;
-	let lock_path = config_path.with_file_name(format!("{}.lock", file_name.to_string_lossy()));
+	let lock_path = config_path.with_file_name(format!(".{}.lock", file_name.to_string_lossy()));
 	let lock_file = OpenOptions::new()
 		.read(true)
 		.write(true)
@@ -508,7 +521,21 @@ fn write_backup_if_missing(
 		.open(&backup_path)
 	{
 		Ok(file) => file,
-		Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => return Ok(()),
+		Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+			let existing = fs::read(&backup_path).with_context(|| {
+				format!(
+					"failed to verify existing configuration backup {}",
+					backup_path.display()
+				)
+			})?;
+			if existing == content {
+				return Ok(());
+			}
+			anyhow::bail!(
+				"configuration backup {} already exists with different contents",
+				backup_path.display()
+			);
+		}
 		Err(error) => {
 			return Err(error).with_context(|| {
 				format!(
@@ -520,8 +547,9 @@ fn write_backup_if_missing(
 	};
 
 	let result = (|| -> Result<()> {
-		backup.set_permissions(permissions)?;
 		backup.write_all(content)?;
+		backup.sync_all()?;
+		backup.set_permissions(permissions)?;
 		backup.sync_all()?;
 		Ok(())
 	})();
@@ -552,11 +580,12 @@ fn atomic_write(path: &Path, content: &[u8], permissions: Option<fs::Permissions
 			.write(true)
 			.create_new(true)
 			.open(&temporary_path)?;
-		if let Some(permissions) = permissions {
-			temporary.set_permissions(permissions)?;
-		}
 		temporary.write_all(content)?;
 		temporary.sync_all()?;
+		if let Some(permissions) = permissions {
+			temporary.set_permissions(permissions)?;
+			temporary.sync_all()?;
+		}
 		drop(temporary);
 
 		fs::rename(&temporary_path, path).with_context(|| {
@@ -767,6 +796,18 @@ mod tests {
 	}
 
 	#[test]
+	fn current_config_load_does_not_create_write_lock() {
+		let temp = TempConfigDir::new();
+		let config_path = temp.config_path();
+		fs::write(&config_path, DEFAULT_CONFIG_TEMPLATE).unwrap();
+
+		let config = Config::load_from_path(&config_path).expect("current config should load");
+
+		assert_eq!(config.version, 2);
+		assert!(!config_path.with_file_name(".config.toml.lock").exists());
+	}
+
+	#[test]
 	fn load_migrates_v1_once_and_keeps_backup() {
 		let temp = TempConfigDir::new();
 		let config_path = temp.config_path();
@@ -815,6 +856,26 @@ mod tests {
 		assert!(Config::load_from_path(&config_path).is_err());
 		assert_eq!(fs::read_to_string(&config_path).unwrap(), invalid);
 		assert!(!config_path.with_file_name("config.toml.v1.bak").exists());
+	}
+
+	#[test]
+	fn conflicting_backup_prevents_migration_without_modifying_config() {
+		let temp = TempConfigDir::new();
+		let config_path = temp.config_path();
+		let backup_path = config_path.with_file_name("config.toml.v1.bak");
+		let original = released_v1_config();
+		fs::write(&config_path, &original).unwrap();
+		fs::write(&backup_path, "different previous backup").unwrap();
+
+		let error = Config::load_from_path(&config_path)
+			.expect_err("conflicting backup should stop migration");
+
+		assert!(error.to_string().contains("different contents"));
+		assert_eq!(fs::read_to_string(&config_path).unwrap(), original);
+		assert_eq!(
+			fs::read_to_string(&backup_path).unwrap(),
+			"different previous backup"
+		);
 	}
 
 	#[test]
