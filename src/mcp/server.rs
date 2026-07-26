@@ -256,6 +256,7 @@ pub struct BackgroundServices {
 	watcher_handle: Option<tokio::task::JoinHandle<()>>,
 	index_handle: Option<tokio::task::JoinHandle<()>>,
 	indexing_handle: Option<tokio::task::JoinHandle<()>>,
+	lsp_init_handle: Option<tokio::task::JoinHandle<()>>,
 }
 
 impl BackgroundServices {
@@ -267,6 +268,27 @@ impl BackgroundServices {
 			watcher_handle: None,
 			index_handle: None,
 			indexing_handle: None,
+			lsp_init_handle: None,
+		}
+	}
+
+	/// Cancel owned tasks before process-level resources are stopped.
+	/// Joining the LSP initializer matters: it prevents a cancelled startup task
+	/// from racing with shutdown and spawning a child after cleanup. The watcher
+	/// and index tasks own no subprocesses and remain abort-on-drop.
+	async fn shutdown(mut self) {
+		let background_handles = [
+			self.watcher_handle.take(),
+			self.index_handle.take(),
+			self.indexing_handle.take(),
+		];
+		for handle in background_handles.iter().flatten() {
+			handle.abort();
+		}
+
+		if let Some(handle) = self.lsp_init_handle.take() {
+			handle.abort();
+			let _ = handle.await;
 		}
 	}
 }
@@ -280,6 +302,9 @@ impl Drop for BackgroundServices {
 			h.abort();
 		}
 		if let Some(h) = self.indexing_handle.take() {
+			h.abort();
+		}
+		if let Some(h) = self.lsp_init_handle.take() {
 			h.abort();
 		}
 	}
@@ -299,6 +324,9 @@ pub struct McpServer {
 	semantic_code: SemanticCodeProvider,
 	graphrag: Option<GraphRagProvider>,
 	lsp: Option<Arc<Mutex<crate::mcp::lsp::LspProvider>>>,
+	/// Separate process handle for deterministic shutdown without waiting for
+	/// the provider mutex, which initialization may hold for several minutes.
+	lsp_client: Option<crate::mcp::lsp::client::LspClient>,
 	indexer_enabled: bool,
 	tool_router: ToolRouter<Self>,
 	/// Single-entry cache of the last structural_search evaluation. Serves
@@ -856,6 +884,7 @@ impl McpServer {
 			semantic_code,
 			graphrag,
 			lsp: None,
+			lsp_client: None,
 			indexer_enabled: mcp_index,
 			tool_router,
 			structural_cache: Arc::new(parking_lot::RwLock::new(None)),
@@ -946,28 +975,28 @@ impl McpServer {
 		let graphrag = GraphRagProvider::new(config.clone(), working_directory.clone());
 
 		// Initialize LSP provider if command is provided (lazy initialization)
-		let lsp = if let Some(command) = lsp_command {
+		let (lsp, lsp_client, mut lsp_init_handle) = if let Some(command) = lsp_command {
 			info!(
 				"LSP provider will be initialized lazily with command: {}",
 				command
 			);
-			let provider = Arc::new(Mutex::new(crate::mcp::lsp::LspProvider::new(
-				working_directory.clone(),
-				command,
-			)));
+			let provider_value =
+				crate::mcp::lsp::LspProvider::new(working_directory.clone(), command);
+			let client = provider_value.client.clone();
+			let provider = Arc::new(Mutex::new(provider_value));
 
 			// Start LSP initialization in background (non-blocking)
 			let provider_clone = provider.clone();
-			tokio::spawn(async move {
+			let init_handle = tokio::spawn(async move {
 				let mut provider_guard = provider_clone.lock().await;
 				if let Err(e) = provider_guard.start_initialization().await {
 					warn!("LSP initialization failed: {}", e);
 				}
 			});
 
-			Some(provider)
+			(Some(provider), Some(client), Some(init_handle))
 		} else {
-			None
+			(None, None, None)
 		};
 
 		// The in-process MCP indexer is opt-in via `index.mcp_index`. When disabled,
@@ -1017,14 +1046,15 @@ impl McpServer {
 			semantic_code,
 			graphrag,
 			lsp,
+			lsp_client,
 			indexer_enabled: should_start_indexer,
 			tool_router,
 			structural_cache: Arc::new(parking_lot::RwLock::new(None)),
 		};
 
 		// Start background services (watcher + indexing)
-		let bg = if should_start_indexer {
-			start_background_services(
+		let mut bg = if should_start_indexer {
+			match start_background_services(
 				config,
 				store,
 				working_directory,
@@ -1032,10 +1062,24 @@ impl McpServer {
 				debug_mode,
 				server.lsp.clone(),
 			)
-			.await?
+			.await
+			{
+				Ok(bg) => bg,
+				Err(e) => {
+					if let Some(handle) = lsp_init_handle.take() {
+						handle.abort();
+						let _ = handle.await;
+					}
+					if let Some(client) = &server.lsp_client {
+						client.stop().await?;
+					}
+					return Err(e);
+				}
+			}
 		} else {
 			BackgroundServices::none()
 		};
+		bg.lsp_init_handle = lsp_init_handle;
 
 		info!(
 			"MCP Server initialized (debug_mode={}, indexer={}, debounce={}ms, timeout={}ms, max_events={})",
@@ -1046,7 +1090,7 @@ impl McpServer {
 	}
 
 	/// Run the server using stdio transport (default MCP mode)
-	pub async fn run_stdio(self, _bg: BackgroundServices) -> Result<()> {
+	pub async fn run_stdio(self, bg: BackgroundServices) -> Result<()> {
 		// Guard against panics in tool handlers crashing the whole server
 		let original_hook = std::panic::take_hook();
 		std::panic::set_hook(Box::new(move |info| {
@@ -1059,13 +1103,30 @@ impl McpServer {
 
 		info!("Starting MCP server in stdio mode");
 
+		let lsp_client = self.lsp_client.clone();
 		let transport = rmcp::transport::io::stdio();
-		let service = self.serve(transport).await?;
+		let service = match self.serve(transport).await {
+			Ok(service) => service,
+			Err(e) => {
+				bg.shutdown().await;
+				if let Some(client) = lsp_client {
+					client.stop().await?;
+				}
+				return Err(e.into());
+			}
+		};
 
 		// Wait for the service to complete (EOF / client disconnect)
-		service.waiting().await?;
+		let service_result = service.waiting().await;
 
-		// _bg is dropped here -> background tasks aborted
+		// Stop startup/background work before the child process so initialization
+		// cannot race with shutdown. `stop` kills and waits, guaranteeing reaping.
+		bg.shutdown().await;
+		if let Some(client) = lsp_client {
+			client.stop().await?;
+		}
+
+		service_result?;
 		Ok(())
 	}
 
@@ -1279,6 +1340,7 @@ pub(crate) async fn start_background_services(
 		watcher_handle: Some(watcher_handle),
 		index_handle: Some(index_handle),
 		indexing_handle: Some(indexing_handle),
+		lsp_init_handle: None,
 	})
 }
 

@@ -1,4 +1,4 @@
-// Copyright 2025 Muvon Un Limited
+// Copyright 2026 Muvon Un Limited
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -104,7 +104,9 @@ impl LspClient {
 			.stdin(std::process::Stdio::piped())
 			.stdout(std::process::Stdio::piped())
 			.stderr(std::process::Stdio::null()) // Ignore stderr to avoid noise
-			.kill_on_drop(true) // Don't leak the LSP process if the Child is ever dropped without stop()
+			// Last-resort protection for runtime teardown; ordinary paths explicitly
+			// kill/wait or wait so the child is deterministically reaped.
+			.kill_on_drop(true)
 			.spawn()
 			.map_err(|e| anyhow::anyhow!("Failed to start LSP server '{}': {}", program, e))?;
 
@@ -130,6 +132,8 @@ impl LspClient {
 		let connection_alive = self.connection_alive.clone();
 		tokio::spawn(Self::communication_loop(
 			stdout,
+			self.process.clone(),
+			self.stdin.clone(),
 			pending_requests,
 			progress_states,
 			indexing_complete,
@@ -228,6 +232,8 @@ impl LspClient {
 	/// Communication loop for reading responses from LSP server
 	async fn communication_loop(
 		stdout: ChildStdout,
+		process: Arc<Mutex<Option<Child>>>,
+		stdin: Arc<Mutex<Option<ChildStdin>>>,
 		pending_requests: Arc<Mutex<HashMap<u32, oneshot::Sender<LspResponse>>>>,
 		progress_states: Arc<RwLock<HashMap<String, ProgressState>>>,
 		indexing_complete: Arc<RwLock<bool>>,
@@ -282,8 +288,51 @@ impl LspClient {
 		// instead of sitting on the full request timeout.
 		pending_requests.lock().await.clear();
 		connection_alive.store(false, Ordering::SeqCst);
+		Self::terminate_and_reap(&process, &stdin).await;
 
 		debug!("LSP communication loop ended");
+	}
+
+	/// Close the protocol pipe and ensure the child is collected by the OS.
+	///
+	/// Merely dropping a `tokio::process::Child` with `kill_on_drop` only asks
+	/// Tokio to reap it on a best-effort basis. Keeping all termination paths in
+	/// this helper gives both normal shutdown and an unexpected LSP stdout EOF a
+	/// strict kill-and-wait path, so an exited language server cannot remain as a
+	/// zombie while the MCP server keeps running.
+	async fn terminate_and_reap(
+		process: &Arc<Mutex<Option<Child>>>,
+		stdin: &Arc<Mutex<Option<ChildStdin>>>,
+	) {
+		// Closing stdin first lets a protocol-aware server observe EOF. If it has
+		// already exited, `try_wait` below reaps it without sending a signal.
+		*stdin.lock().await = None;
+
+		let Some(mut child) = process.lock().await.take() else {
+			return;
+		};
+
+		match child.try_wait() {
+			Ok(Some(status)) => {
+				debug!("Reaped exited LSP process with status: {}", status);
+			}
+			Ok(None) => {
+				// Tokio's async kill sends the termination signal and then waits,
+				// unlike start_kill()/kill_on_drop which do not guarantee reaping.
+				if let Err(e) = child.kill().await {
+					warn!("Failed to terminate and reap LSP process: {}", e);
+				}
+			}
+			Err(e) => {
+				warn!("Failed to query LSP process status before shutdown: {}", e);
+				if let Err(kill_error) = child.kill().await {
+					warn!(
+						"Failed to terminate and reap LSP process after status error: {}",
+						kill_error
+					);
+				}
+			}
+		}
 	}
 
 	/// Handle incoming notifications from LSP server
@@ -574,22 +623,8 @@ impl LspClient {
 	}
 	pub async fn stop(&self) -> Result<()> {
 		debug!("Stopping LSP server");
-
-		let mut process_guard = self.process.lock().await;
-		if let Some(mut process) = process_guard.take() {
-			// Try to terminate gracefully
-			if let Err(e) = process.kill().await {
-				warn!("Failed to kill LSP process: {}", e);
-			}
-
-			// Wait for process to exit
-			if let Err(e) = process.wait().await {
-				warn!("Failed to wait for LSP process: {}", e);
-			}
-		}
-
-		// Clear stdin
-		*self.stdin.lock().await = None;
+		Self::terminate_and_reap(&self.process, &self.stdin).await;
+		self.connection_alive.store(false, Ordering::SeqCst);
 
 		// Clear pending requests
 		let mut pending = self.pending_requests.lock().await;
@@ -602,8 +637,8 @@ impl LspClient {
 
 impl Drop for LspClient {
 	fn drop(&mut self) {
-		// Note: We can't call async stop() in Drop, but the process will be killed
-		// when the Child is dropped
+		// Async shutdown is performed by the MCP lifecycle and communication loop.
+		// `kill_on_drop` remains the last resort if the Tokio runtime is torn down.
 	}
 }
 
@@ -620,5 +655,29 @@ impl Clone for LspClient {
 			indexing_complete: self.indexing_complete.clone(),
 			connection_alive: self.connection_alive.clone(),
 		}
+	}
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+	use super::LspClient;
+
+	#[tokio::test]
+	async fn reaps_lsp_process_that_exits_on_its_own() {
+		let client = LspClient::new("/usr/bin/true".to_string(), std::env::temp_dir());
+		client.start().await.expect("LSP child should start");
+
+		tokio::time::timeout(std::time::Duration::from_secs(2), async {
+			loop {
+				if client.process.lock().await.is_none() {
+					break;
+				}
+				tokio::task::yield_now().await;
+			}
+		})
+		.await
+		.expect("exited LSP child should be reaped promptly");
+
+		assert!(!client.is_connected());
 	}
 }
