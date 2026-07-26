@@ -1255,7 +1255,7 @@ impl GraphBuilder {
 
 		// Generate embeddings in batch (same as normal indexing)
 		let embeddings = crate::embedding::generate_embeddings_batch(
-			&pending_embeddings,
+			pending_embeddings,
 			false, // Use text embeddings for GraphRAG descriptions
 			&self.config,
 			crate::embedding::types::InputType::Document,
