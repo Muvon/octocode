@@ -12,13 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::Result;
+use anyhow::{Context, Result};
+use fs4::FileExt;
 use serde::{Deserialize, Serialize};
-use std::fs;
-use std::path::PathBuf;
+use std::fs::{self, OpenOptions};
+use std::io::Write;
+use std::path::{Path, PathBuf};
 
 use crate::embedding::types::EmbeddingConfig;
 use crate::storage;
+
+mod migrations;
+
+const DEFAULT_CONFIG_TEMPLATE: &str = include_str!("../config-templates/default.toml");
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LLMConfig {
@@ -326,8 +332,7 @@ pub struct CommitsConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
-	/// Configuration version for future migrations
-	#[serde(default = "default_version")]
+	/// Configuration schema version
 	pub version: u32,
 
 	#[serde(default)]
@@ -349,91 +354,79 @@ pub struct Config {
 	pub commits: CommitsConfig,
 }
 
-fn default_version() -> u32 {
-	1
-}
-
 fn default_contextual_batch_size() -> usize {
 	10
 }
 
 impl Default for Config {
 	fn default() -> Self {
-		Self {
-			version: default_version(),
-			llm: LlmConfig::default(),
-			index: IndexConfig::default(),
-			search: SearchConfig::default(),
-			embedding: EmbeddingConfig::default(),
-			graphrag: GraphRAGConfig::default(),
-			commits: CommitsConfig::default(),
-		}
+		Self::load_from_template().expect("embedded default configuration must be valid")
 	}
 }
 
 impl Config {
 	pub fn load() -> Result<Self> {
 		let config_path = Self::get_config_path()?;
+		Self::load_from_path(&config_path)
+	}
 
-		let config = if config_path.exists() {
-			let content = fs::read_to_string(&config_path)?;
-			toml::from_str(&content)?
-		} else {
-			// Load from template first, then save to config path
-			let template_config = Self::load_from_template()?;
+	fn load_from_path(config_path: &Path) -> Result<Self> {
+		with_config_lock(config_path, || Self::load_from_path_locked(config_path))
+	}
 
-			// Ensure the parent directory exists
-			if let Some(parent) = config_path.parent() {
-				if !parent.exists() {
-					fs::create_dir_all(parent)?;
-				}
-			}
+	fn load_from_path_locked(config_path: &Path) -> Result<Self> {
+		if !config_path.exists() {
+			atomic_write(config_path, DEFAULT_CONFIG_TEMPLATE.as_bytes(), None)?;
+			return toml::from_str(DEFAULT_CONFIG_TEMPLATE)
+				.context("failed to parse embedded default configuration");
+		}
 
-			// Save template as the new config
-			let toml_content = toml::to_string_pretty(&template_config)?;
-			fs::write(&config_path, toml_content)?;
-			template_config
-		};
+		let original = fs::read_to_string(config_path).with_context(|| {
+			format!("failed to read configuration at {}", config_path.display())
+		})?;
+		let migration = migrations::migrate(&original, DEFAULT_CONFIG_TEMPLATE)?;
+		let content = migration
+			.as_ref()
+			.map_or(original.as_str(), |migration| migration.content.as_str());
 
-		// Environment variables are handled by octolib providers automatically
-		// No need to set API keys in config
+		// Validate the fully migrated document before changing the user's file.
+		let config: Config = toml::from_str(content).with_context(|| {
+			format!(
+				"failed to load configuration at {} after migration",
+				config_path.display()
+			)
+		})?;
+
+		if let Some(migration) = migration {
+			let permissions = fs::metadata(config_path)?.permissions();
+			write_backup_if_missing(
+				config_path,
+				migration.from_version,
+				original.as_bytes(),
+				permissions.clone(),
+			)?;
+			atomic_write(config_path, migration.content.as_bytes(), Some(permissions))?;
+			debug_assert_eq!(config.version, migration.to_version);
+		}
 
 		Ok(config)
 	}
 
 	/// Load configuration from the default template
 	pub fn load_from_template() -> Result<Self> {
-		// Try to load from embedded template first
-		let template_content = Self::get_default_template_content()?;
-		let config: Config = toml::from_str(&template_content)?;
+		let config: Config = toml::from_str(DEFAULT_CONFIG_TEMPLATE)?;
 		Ok(config)
-	}
-
-	/// Get the default template content
-	fn get_default_template_content() -> Result<String> {
-		// First try to read from config-templates/default.toml in the current directory
-		let template_path = std::path::Path::new("config-templates/default.toml");
-		if template_path.exists() {
-			return Ok(fs::read_to_string(template_path)?);
-		}
-
-		// If not found, use embedded template
-		Ok(include_str!("../config-templates/default.toml").to_string())
 	}
 
 	pub fn save(&self) -> Result<()> {
 		let config_path = Self::get_config_path()?;
-
-		// Ensure the parent directory exists
-		if let Some(parent) = config_path.parent() {
-			if !parent.exists() {
-				fs::create_dir_all(parent)?;
-			}
-		}
-
 		let toml_content = toml::to_string_pretty(self)?;
-		fs::write(config_path, toml_content)?;
-		Ok(())
+		with_config_lock(&config_path, || {
+			let permissions = fs::metadata(&config_path)
+				.ok()
+				.map(|metadata| metadata.permissions());
+			atomic_write(&config_path, toml_content.as_bytes(), permissions)
+		})
 	}
 
 	/// Get the active config file path.
@@ -470,14 +463,180 @@ impl Config {
 	}
 }
 
+fn with_config_lock<T>(config_path: &Path, operation: impl FnOnce() -> Result<T>) -> Result<T> {
+	let parent = parent_directory(config_path)?;
+	fs::create_dir_all(parent)?;
+
+	let file_name = config_path.file_name().with_context(|| {
+		format!(
+			"configuration path has no file name: {}",
+			config_path.display()
+		)
+	})?;
+	let lock_path = config_path.with_file_name(format!("{}.lock", file_name.to_string_lossy()));
+	let lock_file = OpenOptions::new()
+		.read(true)
+		.write(true)
+		.create(true)
+		.truncate(false)
+		.open(&lock_path)
+		.with_context(|| format!("failed to open configuration lock {}", lock_path.display()))?;
+	FileExt::lock_exclusive(&lock_file)
+		.with_context(|| format!("failed to lock configuration at {}", config_path.display()))?;
+
+	operation()
+}
+
+fn write_backup_if_missing(
+	config_path: &Path,
+	version: u32,
+	content: &[u8],
+	permissions: fs::Permissions,
+) -> Result<()> {
+	let file_name = config_path.file_name().with_context(|| {
+		format!(
+			"configuration path has no file name: {}",
+			config_path.display()
+		)
+	})?;
+	let backup_path =
+		config_path.with_file_name(format!("{}.v{version}.bak", file_name.to_string_lossy()));
+
+	let mut backup = match OpenOptions::new()
+		.write(true)
+		.create_new(true)
+		.open(&backup_path)
+	{
+		Ok(file) => file,
+		Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => return Ok(()),
+		Err(error) => {
+			return Err(error).with_context(|| {
+				format!(
+					"failed to create configuration backup {}",
+					backup_path.display()
+				)
+			})
+		}
+	};
+
+	let result = (|| -> Result<()> {
+		backup.set_permissions(permissions)?;
+		backup.write_all(content)?;
+		backup.sync_all()?;
+		Ok(())
+	})();
+
+	if result.is_err() {
+		drop(backup);
+		let _ = fs::remove_file(&backup_path);
+	}
+
+	result
+}
+
+fn atomic_write(path: &Path, content: &[u8], permissions: Option<fs::Permissions>) -> Result<()> {
+	let parent = parent_directory(path)?;
+	fs::create_dir_all(parent)?;
+
+	let file_name = path
+		.file_name()
+		.with_context(|| format!("configuration path has no file name: {}", path.display()))?;
+	let temporary_path = parent.join(format!(
+		".{}.{}.tmp",
+		file_name.to_string_lossy(),
+		uuid::Uuid::new_v4()
+	));
+
+	let result = (|| -> Result<()> {
+		let mut temporary = OpenOptions::new()
+			.write(true)
+			.create_new(true)
+			.open(&temporary_path)?;
+		if let Some(permissions) = permissions {
+			temporary.set_permissions(permissions)?;
+		}
+		temporary.write_all(content)?;
+		temporary.sync_all()?;
+		drop(temporary);
+
+		fs::rename(&temporary_path, path).with_context(|| {
+			format!(
+				"failed to replace configuration at {} with migrated version",
+				path.display()
+			)
+		})?;
+
+		#[cfg(unix)]
+		OpenOptions::new().read(true).open(parent)?.sync_all()?;
+
+		Ok(())
+	})();
+
+	if result.is_err() {
+		let _ = fs::remove_file(&temporary_path);
+	}
+
+	result
+}
+
+fn parent_directory(path: &Path) -> Result<&Path> {
+	match path.parent() {
+		Some(parent) if parent.as_os_str().is_empty() => Ok(Path::new(".")),
+		Some(parent) => Ok(parent),
+		None => anyhow::bail!("configuration path has no parent: {}", path.display()),
+	}
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use std::sync::Arc;
+
+	struct TempConfigDir {
+		path: PathBuf,
+	}
+
+	impl TempConfigDir {
+		fn new() -> Self {
+			let path =
+				std::env::temp_dir().join(format!("octocode-config-test-{}", uuid::Uuid::new_v4()));
+			fs::create_dir_all(&path).expect("temporary config directory should be created");
+			Self { path }
+		}
+
+		fn config_path(&self) -> PathBuf {
+			self.path.join("config.toml")
+		}
+	}
+
+	impl Drop for TempConfigDir {
+		fn drop(&mut self) {
+			let _ = fs::remove_dir_all(&self.path);
+		}
+	}
+
+	fn released_v1_config() -> String {
+		let mut document = DEFAULT_CONFIG_TEMPLATE
+			.parse::<toml_edit::DocumentMut>()
+			.expect("default template should be editable");
+		document["version"] = toml_edit::value(1);
+		let search = document["search"]
+			.as_table_mut()
+			.expect("template search config should be a table");
+		search.remove("reasoning");
+		let hybrid = search["hybrid"]
+			.as_table_mut()
+			.expect("template hybrid config should be a table");
+		hybrid.remove("rrf_k");
+		hybrid.remove("auto_weight");
+		hybrid["default_vector_weight"] = toml_edit::value(0.73);
+		document.to_string()
+	}
 
 	#[test]
 	fn test_default_config() {
 		let config = Config::load_from_template().expect("Failed to load template config");
-		assert_eq!(config.version, 1);
+		assert_eq!(config.version, 2);
 		assert_eq!(config.llm.model, "openrouter:openai/gpt-4o-mini");
 		assert_eq!(config.index.chunk_size, 2000);
 		assert_eq!(config.search.max_results, 20);
@@ -525,7 +684,7 @@ mod tests {
 		assert!(result.is_ok(), "Should be able to load from template");
 
 		let config = result.expect("Template config should load successfully");
-		assert_eq!(config.version, 1);
+		assert_eq!(config.version, 2);
 		assert_eq!(config.llm.model, "openrouter:openai/gpt-4o-mini");
 		assert_eq!(config.index.chunk_size, 2000);
 		assert_eq!(config.search.max_results, 20);
@@ -586,9 +745,104 @@ mod tests {
 	fn test_toml_missing_optional_sections_uses_defaults() {
 		// A config.toml that omits whole tables (legal TOML) must fall back to
 		// sane defaults instead of panicking via serde's #[serde(default)].
-		let minimal = "version = 1\n";
+		let minimal = "version = 2\n";
 		let config: Config = toml::from_str(minimal).expect("should deserialize with defaults");
 		assert_eq!(config.search.max_results, 20);
 		assert!(!config.graphrag.enabled);
+	}
+
+	#[test]
+	fn missing_config_is_exact_copy_of_current_template() {
+		let temp = TempConfigDir::new();
+		let config_path = temp.config_path();
+
+		let config = Config::load_from_path(&config_path).expect("config should be created");
+
+		assert_eq!(config.version, 2);
+		assert_eq!(
+			fs::read_to_string(&config_path).unwrap(),
+			DEFAULT_CONFIG_TEMPLATE
+		);
+		assert!(!config_path.with_file_name("config.toml.v1.bak").exists());
+	}
+
+	#[test]
+	fn load_migrates_v1_once_and_keeps_backup() {
+		let temp = TempConfigDir::new();
+		let config_path = temp.config_path();
+		let original = released_v1_config();
+		fs::write(&config_path, &original).unwrap();
+
+		let config = Config::load_from_path(&config_path).expect("v1 config should migrate");
+		let migrated = fs::read_to_string(&config_path).unwrap();
+
+		assert_eq!(config.version, 2);
+		assert_eq!(config.search.hybrid.default_vector_weight, 0.73);
+		assert_eq!(config.search.hybrid.rrf_k, 60.0);
+		assert!(!config.search.reasoning.enabled);
+		assert_eq!(
+			fs::read_to_string(config_path.with_file_name("config.toml.v1.bak")).unwrap(),
+			original
+		);
+
+		Config::load_from_path(&config_path).expect("v2 config should load unchanged");
+		assert_eq!(fs::read_to_string(&config_path).unwrap(), migrated);
+	}
+
+	#[test]
+	fn future_version_is_rejected_without_modifying_file() {
+		let temp = TempConfigDir::new();
+		let config_path = temp.config_path();
+		let future = DEFAULT_CONFIG_TEMPLATE.replacen("version = 2", "version = 3", 1);
+		fs::write(&config_path, &future).unwrap();
+
+		let error = Config::load_from_path(&config_path).expect_err("future config should fail");
+
+		assert!(error
+			.to_string()
+			.contains("newer than this octocode binary"));
+		assert_eq!(fs::read_to_string(&config_path).unwrap(), future);
+		assert!(!config_path.with_file_name("config.toml.v2.bak").exists());
+	}
+
+	#[test]
+	fn invalid_config_is_not_modified() {
+		let temp = TempConfigDir::new();
+		let config_path = temp.config_path();
+		let invalid = "version = 1\n[search\n";
+		fs::write(&config_path, invalid).unwrap();
+
+		assert!(Config::load_from_path(&config_path).is_err());
+		assert_eq!(fs::read_to_string(&config_path).unwrap(), invalid);
+		assert!(!config_path.with_file_name("config.toml.v1.bak").exists());
+	}
+
+	#[test]
+	fn concurrent_loaders_produce_one_valid_migration() {
+		let temp = TempConfigDir::new();
+		let config_path = Arc::new(temp.config_path());
+		fs::write(config_path.as_ref(), released_v1_config()).unwrap();
+
+		let threads: Vec<_> = (0..4)
+			.map(|_| {
+				let config_path = Arc::clone(&config_path);
+				std::thread::spawn(move || Config::load_from_path(&config_path))
+			})
+			.collect();
+
+		for thread in threads {
+			assert_eq!(
+				thread
+					.join()
+					.expect("loader should not panic")
+					.unwrap()
+					.version,
+				2
+			);
+		}
+
+		let migrated = fs::read_to_string(config_path.as_ref()).unwrap();
+		let config: Config = toml::from_str(&migrated).expect("final config should be valid");
+		assert_eq!(config.version, 2);
 	}
 }

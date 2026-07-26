@@ -1,7 +1,7 @@
 # Default configuration for Octocode
 # This file contains all default values and serves as the template for new installations
-# Version: 1 (for future migration support)
-version = 1
+# Version: 2
+version = 2
 
 [llm]
 # Model in provider:model format (e.g., "openai:gpt-4o-mini", "anthropic:claude-3-5-haiku-20241022")
