@@ -157,6 +157,10 @@ fastembed:multilingual-e5-small                       # 384 dim, supports multip
 # OpenRouter for AI features
 export OPENROUTER_API_KEY="your-openrouter-api-key"
 
+# Generic OpenAI-compatible LLM endpoint. Use the full Chat Completions URL.
+export LOCAL_API_URL="http://127.0.0.1:1234/v1/chat/completions"
+export LOCAL_API_KEY="optional-api-key"
+
 # Cloud embedding providers (if using)
 export JINA_API_KEY="your-jina-key"
 export VOYAGE_API_KEY="your-voyage-key"
@@ -193,8 +197,15 @@ max_tokens = 4000
 - `anthropic:` - Anthropic Claude models
 - `google:` - Google Gemini models
 - `deepseek:` - DeepSeek models
+- `local:` - Any OpenAI-compatible Chat Completions endpoint configured with `LOCAL_API_URL`
 
-**API Keys:** Set via environment variables (OPENAI_API_KEY, ANTHROPIC_API_KEY, OPENROUTER_API_KEY, etc.)
+**API Keys:** Set via environment variables (OPENAI_API_KEY, ANTHROPIC_API_KEY, OPENROUTER_API_KEY, LOCAL_API_KEY, etc.)
+
+For `local:`, `LOCAL_API_URL` must point to the full
+`/v1/chat/completions` endpoint. `LOCAL_API_KEY` is optional for local
+servers and can hold the required bearer key for authenticated remote
+endpoints. See the [API Keys guide](API_KEYS.md#openai-compatible-endpoints) for
+local and remote examples.
 
 ### [embedding]
 Core embedding configuration.

@@ -213,6 +213,40 @@ octocode config --model "deepseek:deepseek-chat"
 - `deepseek:deepseek-chat` - General purpose
 - `deepseek:deepseek-coder` - Code-specialized
 
+### OpenAI-Compatible Endpoints
+
+Octocode's generic `local:` LLM provider works with OpenAI-compatible Chat
+Completions endpoints, including LM Studio, vLLM, LocalAI, and remote services.
+`LOCAL_API_URL` must be the full `/v1/chat/completions` URL. The model ID
+after `local:` is passed through unchanged, including IDs that contain
+slashes.
+
+```bash
+# Local LM Studio example
+export LOCAL_API_URL="http://127.0.0.1:1234/v1/chat/completions"
+export LOCAL_API_KEY="optional-local-key"
+octocode config --model "local:google/gemma-4-12b-qat"
+```
+
+Remote endpoints use the same configuration shape. For example, AI Router is
+an independently operated hosted service that requires bearer authentication:
+
+```bash
+export LOCAL_API_URL="https://api.ai-router.dev/v1/chat/completions"
+export LOCAL_API_KEY="your-ai-router-api-key"
+octocode config --model "local:<model-id-enabled-for-your-account>"
+```
+
+See the [AI Router site](https://ai-router.dev) for service-specific account
+and API information. This example was submitted by the service operator; it is
+not an Octocode default or endorsement.
+
+The same `local:<model-id>` format can be used for `[llm].model`,
+`[index].contextual_model`, and the model fields under `[graphrag.llm]`.
+Contextual indexing and GraphRAG require structured-output support, so an
+otherwise compatible endpoint can still be rejected when the selected model's
+capabilities are not recognized.
+
 ## Platform Limitations
 
 ### Feature-Gated Providers
