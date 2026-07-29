@@ -37,7 +37,8 @@ use anyhow::Result;
 use rmcp::{
 	handler::server::{router::tool::ToolRouter, tool::ToolCallContext, wrapper::Parameters},
 	model::{
-		CallToolRequestParams, CallToolResult, Implementation, ServerCapabilities, ServerInfo, Tool,
+		CallToolRequestParams, CallToolResponse, Implementation, ProtocolVersion,
+		ServerCapabilities, ServerInfo, Tool,
 	},
 	schemars,
 	service::RequestContext,
@@ -779,6 +780,7 @@ impl ServerHandler for McpServer {
 		};
 
 		ServerInfo::new(capabilities)
+			.with_protocol_version(ProtocolVersion::V_2026_07_28)
 			.with_server_info(
 				Implementation::new("octocode-mcp", env!("CARGO_PKG_VERSION"))
 					.with_description("Semantic code search server with vector embeddings and optional GraphRAG support"),
@@ -903,7 +905,7 @@ impl McpServer {
 		&self,
 		request: CallToolRequestParams,
 		context: RequestContext<RoleServer>,
-	) -> Result<CallToolResult, ErrorData> {
+	) -> Result<CallToolResponse, ErrorData> {
 		let tcc = ToolCallContext::new(self, request, context);
 		self.tool_router.call(tcc).await
 	}

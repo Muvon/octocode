@@ -29,8 +29,8 @@ use anyhow::Result;
 use rmcp::{
 	handler::server::ServerHandler,
 	model::{
-		CallToolRequestParams, CallToolResult, Implementation, ListToolsResult,
-		PaginatedRequestParams, ServerCapabilities, ServerInfo, Tool,
+		CallToolRequestParams, CallToolResponse, Implementation, ListToolsResult,
+		PaginatedRequestParams, ProtocolVersion, ServerCapabilities, ServerInfo, Tool,
 	},
 	service::RequestContext,
 	ErrorData, RoleServer, ServiceExt,
@@ -273,6 +273,7 @@ impl ServerHandler for MultiServer {
 		);
 
 		ServerInfo::new(capabilities)
+			.with_protocol_version(ProtocolVersion::V_2026_07_28)
 			.with_server_info(
 				Implementation::new("octocode-mcp", env!("CARGO_PKG_VERSION")).with_description(
 					"Multi-repository semantic code search server with per-repo routing",
@@ -297,7 +298,7 @@ impl ServerHandler for MultiServer {
 		&self,
 		mut request: CallToolRequestParams,
 		context: RequestContext<RoleServer>,
-	) -> Result<CallToolResult, ErrorData> {
+	) -> Result<CallToolResponse, ErrorData> {
 		// Pull the routing key out of the arguments.
 		let project = request
 			.arguments
