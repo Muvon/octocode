@@ -108,7 +108,7 @@ zstd = { version = "0.13", default-features = false, features = ["zstdmt"] }
 
 # Local dependency on octolib with embedding features
 # octolib = { path = "../octolib", features = ["fastembed", "huggingface"] }
-octolib = { version = "0.26.1", default-features = false }
+octolib = { version = "0.27.0", default-features = false }
 
 # MCP SDK - official Rust implementation
 rmcp = { version = "3.0.0", features = ["server", "macros", "transport-io", "transport-streamable-http-server"] }
