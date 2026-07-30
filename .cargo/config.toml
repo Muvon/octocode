@@ -28,18 +28,17 @@ rustflags = [
 		"-C", "target-feature=+crt-static"
 ]
 
-# macOS targets (dynamic linking)
+# macOS targets (dynamic linking).
+# No `-undefined dynamic_lookup`: it defers unresolved symbols to a runtime
+# flat-namespace lookup that can never succeed for compiler-rt builtins like
+# ___isPlatformVersionAtLeast (static-archive-only), turning link-time errors
+# into dyld crashes on users' machines. zig's bundled compiler_rt resolves
+# those symbols at link time.
 [target.aarch64-apple-darwin]
-rustflags = [
-		"-C", "link-arg=-undefined",
-		"-C", "link-arg=dynamic_lookup"
-]
+rustflags = []
 
 [target.x86_64-apple-darwin]
-rustflags = [
-		"-C", "link-arg=-undefined",
-		"-C", "link-arg=dynamic_lookup"
-]
+rustflags = []
 
 # Registry configuration
 [registry]
