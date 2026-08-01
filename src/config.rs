@@ -13,10 +13,9 @@
 // limitations under the License.
 
 use anyhow::{Context, Result};
-use fs4::FileExt;
+use octolib::utils::config_file;
 use serde::{Deserialize, Serialize};
-use std::fs::{self, OpenOptions};
-use std::io::Write;
+use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::embedding::types::EmbeddingConfig;
@@ -384,12 +383,12 @@ impl Config {
 			}
 		}
 
-		with_config_lock(config_path, || Self::load_from_path_locked(config_path))
+		config_file::with_lock(config_path, || Self::load_from_path_locked(config_path))
 	}
 
 	fn load_from_path_locked(config_path: &Path) -> Result<Self> {
 		if !config_path.exists() {
-			atomic_write(config_path, DEFAULT_CONFIG_TEMPLATE.as_bytes(), None)?;
+			config_file::atomic_write(config_path, DEFAULT_CONFIG_TEMPLATE.as_bytes(), None)?;
 			return toml::from_str(DEFAULT_CONFIG_TEMPLATE)
 				.context("failed to parse embedded default configuration");
 		}
@@ -411,14 +410,7 @@ impl Config {
 		})?;
 
 		if let Some(migration) = migration {
-			let permissions = fs::metadata(config_path)?.permissions();
-			write_backup_if_missing(
-				config_path,
-				migration.from_version,
-				original.as_bytes(),
-				permissions.clone(),
-			)?;
-			atomic_write(config_path, migration.content.as_bytes(), Some(permissions))?;
+			config_file::apply_migration(config_path, original.as_bytes(), &migration)?;
 			debug_assert_eq!(config.version, migration.to_version);
 		}
 
@@ -434,11 +426,11 @@ impl Config {
 	pub fn save(&self) -> Result<()> {
 		let config_path = Self::get_config_path()?;
 		let toml_content = toml::to_string_pretty(self)?;
-		with_config_lock(&config_path, || {
+		config_file::with_lock(&config_path, || {
 			let permissions = fs::metadata(&config_path)
 				.ok()
 				.map(|metadata| metadata.permissions());
-			atomic_write(&config_path, toml_content.as_bytes(), permissions)
+			config_file::atomic_write(&config_path, toml_content.as_bytes(), permissions)
 		})
 	}
 
@@ -476,145 +468,8 @@ impl Config {
 	}
 }
 
-fn with_config_lock<T>(config_path: &Path, operation: impl FnOnce() -> Result<T>) -> Result<T> {
-	let parent = parent_directory(config_path)?;
-	fs::create_dir_all(parent)?;
-
-	let file_name = config_path.file_name().with_context(|| {
-		format!(
-			"configuration path has no file name: {}",
-			config_path.display()
-		)
-	})?;
-	let lock_path = config_path.with_file_name(format!(".{}.lock", file_name.to_string_lossy()));
-	let lock_file = OpenOptions::new()
-		.read(true)
-		.write(true)
-		.create(true)
-		.truncate(false)
-		.open(&lock_path)
-		.with_context(|| format!("failed to open configuration lock {}", lock_path.display()))?;
-	FileExt::lock_exclusive(&lock_file)
-		.with_context(|| format!("failed to lock configuration at {}", config_path.display()))?;
-
-	operation()
-}
-
-fn write_backup_if_missing(
-	config_path: &Path,
-	version: u32,
-	content: &[u8],
-	permissions: fs::Permissions,
-) -> Result<()> {
-	let file_name = config_path.file_name().with_context(|| {
-		format!(
-			"configuration path has no file name: {}",
-			config_path.display()
-		)
-	})?;
-	let backup_path =
-		config_path.with_file_name(format!("{}.v{version}.bak", file_name.to_string_lossy()));
-
-	let mut backup = match OpenOptions::new()
-		.write(true)
-		.create_new(true)
-		.open(&backup_path)
-	{
-		Ok(file) => file,
-		Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
-			let existing = fs::read(&backup_path).with_context(|| {
-				format!(
-					"failed to verify existing configuration backup {}",
-					backup_path.display()
-				)
-			})?;
-			if existing == content {
-				return Ok(());
-			}
-			anyhow::bail!(
-				"configuration backup {} already exists with different contents",
-				backup_path.display()
-			);
-		}
-		Err(error) => {
-			return Err(error).with_context(|| {
-				format!(
-					"failed to create configuration backup {}",
-					backup_path.display()
-				)
-			})
-		}
-	};
-
-	let result = (|| -> Result<()> {
-		backup.write_all(content)?;
-		backup.sync_all()?;
-		backup.set_permissions(permissions)?;
-		backup.sync_all()?;
-		Ok(())
-	})();
-
-	if result.is_err() {
-		drop(backup);
-		let _ = fs::remove_file(&backup_path);
-	}
-
-	result
-}
-
-fn atomic_write(path: &Path, content: &[u8], permissions: Option<fs::Permissions>) -> Result<()> {
-	let parent = parent_directory(path)?;
-	fs::create_dir_all(parent)?;
-
-	let file_name = path
-		.file_name()
-		.with_context(|| format!("configuration path has no file name: {}", path.display()))?;
-	let temporary_path = parent.join(format!(
-		".{}.{}.tmp",
-		file_name.to_string_lossy(),
-		uuid::Uuid::new_v4()
-	));
-
-	let result = (|| -> Result<()> {
-		let mut temporary = OpenOptions::new()
-			.write(true)
-			.create_new(true)
-			.open(&temporary_path)?;
-		temporary.write_all(content)?;
-		temporary.sync_all()?;
-		if let Some(permissions) = permissions {
-			temporary.set_permissions(permissions)?;
-			temporary.sync_all()?;
-		}
-		drop(temporary);
-
-		fs::rename(&temporary_path, path).with_context(|| {
-			format!(
-				"failed to replace configuration at {} with migrated version",
-				path.display()
-			)
-		})?;
-
-		#[cfg(unix)]
-		OpenOptions::new().read(true).open(parent)?.sync_all()?;
-
-		Ok(())
-	})();
-
-	if result.is_err() {
-		let _ = fs::remove_file(&temporary_path);
-	}
-
-	result
-}
-
-fn parent_directory(path: &Path) -> Result<&Path> {
-	match path.parent() {
-		Some(parent) if parent.as_os_str().is_empty() => Ok(Path::new(".")),
-		Some(parent) => Ok(parent),
-		None => anyhow::bail!("configuration path has no parent: {}", path.display()),
-	}
-}
+// File primitives (locking, atomic replace, versioned backup) live in
+// octolib::utils::config_file — shared verbatim with the other Octo products.
 
 #[cfg(test)]
 mod tests {

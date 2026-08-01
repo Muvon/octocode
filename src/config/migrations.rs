@@ -12,79 +12,44 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::{bail, Context, Result};
-use toml_edit::{value, DocumentMut, Item, Table};
+//! Octocode's configuration version chain.
+//!
+//! The driver (version walk, guards, table merging) lives in
+//! `octolib::utils::config_migration`; only the per-version steps are here.
 
-#[derive(Debug)]
-pub(super) struct Migration {
-	pub content: String,
-	pub from_version: u32,
-	pub to_version: u32,
+use anyhow::Result;
+use octolib::utils::config_migration::{
+	copy_item, copy_missing_item, required_table, required_table_mut, toml_edit, MigrationPlan,
+	VersionMigration,
+};
+
+pub(super) use octolib::utils::config_migration::Migration;
+
+fn plan() -> MigrationPlan {
+	MigrationPlan::new(
+		"octocode",
+		vec![VersionMigration {
+			from: 1,
+			to: 2,
+			apply: migrate_v1_to_v2,
+		}],
+	)
 }
 
 /// Upgrade an existing configuration to the version declared by the embedded
-/// default template. Each migration advances exactly one version, making the
-/// chain deterministic and preventing later migrations from duplicating older
-/// work.
+/// default template. `Ok(None)` means the file is already current and must be
+/// left untouched.
 pub(super) fn migrate(existing: &str, template: &str) -> Result<Option<Migration>> {
-	let mut document = parse_document(existing, "user configuration")?;
-	let template = parse_document(template, "embedded default configuration")?;
-
-	let from_version = document_version(&document, "user configuration")?;
-	let target_version = document_version(&template, "embedded default configuration")?;
-
-	if from_version > target_version {
-		bail!(
-			"configuration version {from_version} is newer than this octocode binary supports ({target_version})"
-		);
-	}
-
-	let mut version = from_version;
-	while version < target_version {
-		version = match version {
-			1 => {
-				migrate_v1_to_v2(&mut document, &template)?;
-				2
-			}
-			unsupported => {
-				bail!("no configuration migration exists from version {unsupported}")
-			}
-		};
-
-		document["version"] = value(i64::from(version));
-	}
-
-	if from_version == target_version {
-		return Ok(None);
-	}
-
-	Ok(Some(Migration {
-		content: document.to_string(),
-		from_version,
-		to_version: target_version,
-	}))
-}
-
-fn parse_document(content: &str, description: &str) -> Result<DocumentMut> {
-	content
-		.parse::<DocumentMut>()
-		.with_context(|| format!("failed to parse {description}"))
-}
-
-fn document_version(document: &DocumentMut, description: &str) -> Result<u32> {
-	let version = document
-		.get("version")
-		.and_then(Item::as_integer)
-		.with_context(|| format!("{description} must contain an integer 'version' field"))?;
-
-	u32::try_from(version)
-		.with_context(|| format!("{description} contains invalid version {version}"))
+	plan().migrate(existing, template)
 }
 
 /// v1 is the schema shipped in octocode 0.18.1. v2 adds reasoning search and
 /// the RRF tuning fields. Existing values always win; only missing v2 fields
 /// are copied from the v2 template.
-fn migrate_v1_to_v2(document: &mut DocumentMut, template: &DocumentMut) -> Result<()> {
+fn migrate_v1_to_v2(
+	document: &mut toml_edit::DocumentMut,
+	template: &toml_edit::DocumentMut,
+) -> Result<()> {
 	let template_search = required_table(template.as_table(), "search", "template")?;
 
 	if !document.as_table().contains_key("search") {
@@ -121,40 +86,6 @@ fn migrate_v1_to_v2(document: &mut DocumentMut, template: &DocumentMut) -> Resul
 		}
 	}
 
-	Ok(())
-}
-
-fn required_table<'a>(table: &'a Table, key: &str, description: &str) -> Result<&'a Table> {
-	table
-		.get(key)
-		.and_then(Item::as_table)
-		.with_context(|| format!("{description} must contain a '{key}' table"))
-}
-
-fn required_table_mut<'a>(
-	table: &'a mut Table,
-	key: &str,
-	description: &str,
-) -> Result<&'a mut Table> {
-	table
-		.get_mut(key)
-		.and_then(Item::as_table_mut)
-		.with_context(|| format!("{description} must contain a '{key}' table"))
-}
-
-fn copy_missing_item(target: &mut Table, source: &Table, key: &str) -> Result<()> {
-	if target.contains_key(key) {
-		return Ok(());
-	}
-
-	copy_item(target, source, key)
-}
-
-fn copy_item(target: &mut Table, source: &Table, key: &str) -> Result<()> {
-	let (formatted_key, item) = source
-		.get_key_value(key)
-		.with_context(|| format!("embedded default configuration is missing '{key}'"))?;
-	target.insert_formatted(formatted_key, item.clone());
 	Ok(())
 }
 
