@@ -93,6 +93,37 @@ pub fn fingerprint_request(parts: &[&str]) -> u64 {
 	h.finish()
 }
 
+/// One compiled `paths` filter entry: glob when the spec contains glob
+/// metacharacters, plain substring otherwise. Substring keeps the forgiving
+/// "src/mcp" style working; glob honors the documented `src/**/*.rs` style,
+/// which a substring check would silently reject (zero files, zero matches).
+enum PathSpec {
+	Substring(String),
+	Glob(globset::GlobMatcher),
+}
+
+impl PathSpec {
+	fn compile(spec: &str) -> Self {
+		if spec.contains(['*', '?', '[']) {
+			match globset::Glob::new(spec) {
+				Ok(g) => PathSpec::Glob(g.compile_matcher()),
+				// Invalid glob — fall back to substring so a stray `[` never
+				// silently empties the candidate set.
+				Err(_) => PathSpec::Substring(spec.to_string()),
+			}
+		} else {
+			PathSpec::Substring(spec.to_string())
+		}
+	}
+
+	fn matches(&self, display: &str) -> bool {
+		match self {
+			PathSpec::Substring(s) => display.contains(s.as_str()),
+			PathSpec::Glob(g) => g.is_match(display),
+		}
+	}
+}
+
 /// Collect candidate files via a parallel gitignore-aware walk. Reads file
 /// contents (needed by every later stage) and evaluates the literal-token
 /// prefilter inline. Returns files sorted by display path plus the repo stamp.
@@ -102,6 +133,10 @@ pub fn collect_file_data(
 	paths_filter: Option<&[String]>,
 	prefilter_tokens: &[String],
 ) -> (Vec<FileData>, RepoStamp) {
+	let compiled_filter: Option<Vec<PathSpec>> =
+		paths_filter.map(|ps| ps.iter().map(|p| PathSpec::compile(p)).collect());
+	// `Option<&[PathSpec]>` is Copy — safe to move into each per-thread closure.
+	let filter_ref = compiled_filter.as_deref();
 	let acc: parking_lot::Mutex<(Vec<FileData>, RepoStamp)> =
 		parking_lot::Mutex::new((Vec::new(), RepoStamp::default()));
 
@@ -131,8 +166,8 @@ pub fn collect_file_data(
 				.unwrap_or(path)
 				.to_string_lossy()
 				.to_string();
-			if let Some(filter) = paths_filter {
-				if !filter.iter().any(|p| display.contains(p)) {
+			if let Some(filter) = filter_ref {
+				if !filter.iter().any(|p| p.matches(&display)) {
 					return ignore::WalkState::Continue;
 				}
 			}
