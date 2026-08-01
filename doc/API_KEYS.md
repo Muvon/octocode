@@ -215,34 +215,39 @@ octocode config --model "deepseek:deepseek-chat"
 
 ### OpenAI-Compatible Endpoints
 
-Octocode's generic `local:` LLM provider works with OpenAI-compatible Chat
-Completions endpoints, including LM Studio, vLLM, LocalAI, and remote services.
-`LOCAL_API_URL` must be the full `/v1/chat/completions` URL. The model ID
-after `local:` is passed through unchanged, including IDs that contain
-slashes.
+Octocode's generic `local:` LLM provider works with any OpenAI-compatible Chat
+Completions endpoint, whether it runs locally or remotely. `LOCAL_API_URL` must
+be the full request URL, including `/v1/chat/completions`. The model ID after
+`local:` is sent to the endpoint unchanged, including IDs that contain slashes.
 
 ```bash
-# Local LM Studio example
-export LOCAL_API_URL="http://127.0.0.1:1234/v1/chat/completions"
-export LOCAL_API_KEY="optional-local-key"
-octocode config --model "local:google/gemma-4-12b-qat"
+# Endpoint without authentication
+export LOCAL_API_URL="http://127.0.0.1:8000/v1/chat/completions"
+octocode config --model "local:<model-id>"
 ```
 
-Remote endpoints use the same configuration shape. For example, AI Router is
-an independently operated hosted service that requires bearer authentication:
+If the endpoint requires bearer authentication, also set `LOCAL_API_KEY`:
 
 ```bash
-export LOCAL_API_URL="https://api.ai-router.dev/v1/chat/completions"
-export LOCAL_API_KEY="your-ai-router-api-key"
-octocode config --model "local:<model-id-enabled-for-your-account>"
+export LOCAL_API_URL="https://llm.example.com/v1/chat/completions"
+export LOCAL_API_KEY="your-api-key"
+octocode config --model "local:<model-id>"
 ```
 
-See the [AI Router site](https://ai-router.dev) for service-specific account
-and API information. This example was submitted by the service operator; it is
-not an Octocode default or endorsement.
+Use the same model format wherever Octocode accepts an LLM model:
 
-The same `local:<model-id>` format can be used for `[llm].model`,
-`[index].contextual_model`, and the model fields under `[graphrag.llm]`.
+```toml
+[llm]
+model = "local:<model-id>"
+
+[index]
+contextual_model = "local:<model-id>"
+
+[graphrag.llm]
+description_model = "local:<model-id>"
+relationship_model = "local:<model-id>"
+```
+
 Contextual indexing and GraphRAG require structured-output support, so an
 otherwise compatible endpoint can still be rejected when the selected model's
 capabilities are not recognized.
