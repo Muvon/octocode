@@ -1,5 +1,44 @@
 # Changelog
 
+## [0.20.0] - 2026-08-01
+
+### 📋 Release Summary
+
+This release expands GraphRAG capabilities by integrating Markdown files and supporting cross-reference links to create a more comprehensive codebase knowledge graph (039e9abc, 3388971d, e378fa07, b76c469f). Significant performance gains were achieved through relationship deduplication and updated dependencies (2de790b7, bd175192, 6478621d), while documentation was improved for LSP tools and LLM configurations (94257493, 64d74deb, 95db6db9). Several bug fixes enhance data consistency and indexing reliability across various file types (9bf71681, 3bc30517, aa68419c, 4aecc80b, 21f22491, d16e7fc1).
+
+
+### ✨ New Features & Enhancements
+
+- **graphrag**: use References type for markdown cross-links `039e9abc`
+- **indexer**: include markdown files in GraphRAG pipeline `3388971d`
+- **markdown**: extract cross-reference links as imports for GraphRAG `e378fa07`
+- **graphrag**: add References relationship type for document cross-links `b76c469f`
+
+### 🔧 Improvements & Optimizations
+
+- **graphrag**: deduplicate relationships on load (575K → 288K unique) `2de790b7`
+- **config**: migrate file and migration logic to octolib `e6f41dac`
+- **mcp**: upgrade rmcp to v3.0.0 `6478621d`
+
+### 🐛 Bug Fixes & Stability
+
+- **graphrag**: exclude markdown from symbol indexing `9bf71681`
+- **indexer**: support .markdown file extensions `3bc30517`
+- **graphrag**: finalize markdown references for current master `aa68419c`
+- **store**: concatenate all LanceDB batches when reading relationships `4aecc80b`
+- **graphrag**: route markdown nodes through path-based import resolution in efficient discovery `21f22491`
+- **graphrag**: include markdown files from document_blocks in build_from_existing_database `d16e7fc1`
+
+### 📚 Documentation & Examples
+
+- **readme**: document LSP tools and expanded language support `94257493`
+- make OpenAI-compatible setup vendor-neutral `64d74deb`
+- explain OpenAI-compatible LLM setup `95db6db9`
+
+### 🔄 Other Changes
+
+4 maintenance, dependency, and tooling updates not listed individually.
+
 ## [0.19.0] - 2026-07-26
 
 ### 📋 Release Summary
