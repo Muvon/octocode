@@ -21,7 +21,8 @@ use std::sync::LazyLock;
 use tree_sitter::Node;
 
 static MARKDOWN_LINK_RE: LazyLock<Regex> = LazyLock::new(|| {
-	Regex::new(r"\[[^\]]*\]\(([^)]+\.md)(?:#[^)]*)?\)").expect("markdown link regex must be valid")
+	Regex::new(r"\[[^\]]*\]\(([^)]+\.(?:md|markdown))(?:#[^)]*)?\)")
+		.expect("markdown link regex must be valid")
 });
 
 fn extract_markdown_links(contents: &str) -> Vec<String> {
@@ -140,14 +141,16 @@ Also check [Pool](../core-architecture/pool.md#liquidity) and
 
 External links are ignored: [Docs](https://docs.example.com/guide.md)
 Non-md links are ignored: [Image](./photo.png)
+Long extension is kept: [Long](./manual.markdown)
 "#;
 
 		let links = extract_markdown_links(content);
 
-		assert_eq!(links.len(), 3);
+		assert_eq!(links.len(), 4);
 		assert!(links.contains(&"../core-architecture/credit-suite.md".to_string()));
 		assert!(links.contains(&"../core-architecture/pool.md".to_string()));
 		assert!(links.contains(&"./adapters.md".to_string()));
+		assert!(links.contains(&"./manual.markdown".to_string()));
 		assert!(!links.iter().any(|l| l.contains("https://")));
 		assert!(!links.iter().any(|l| l.contains(".png")));
 	}
