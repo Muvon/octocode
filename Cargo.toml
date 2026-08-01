@@ -83,7 +83,6 @@ notify = { version = "8.2.0", default-features = false, features = ["crossbeam-c
 notify-debouncer-mini = "0.7.0"
 toml = "1.0.6"
 toml_edit = "0.25.13"
-fs4 = "0.8.4"
 lazy_static = "1.5.0"
 futures = { version = "0.3.32", default-features = false, features = ["std"] }
 globset = { version = "0.4.18", default-features = false }
@@ -108,7 +107,7 @@ zstd = { version = "0.13", default-features = false, features = ["zstdmt"] }
 
 # Local dependency on octolib with embedding features
 # octolib = { path = "../octolib", features = ["fastembed", "huggingface"] }
-octolib = { version = "0.27.0", default-features = false }
+octolib = { version = "0.29.0", default-features = false }
 
 # MCP SDK - official Rust implementation
 rmcp = { version = "3.0.0", features = ["server", "macros", "transport-io", "transport-streamable-http-server"] }

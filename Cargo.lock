@@ -889,9 +889,9 @@ dependencies = [
 
 [[package]]
 name = "clap"
-version = "4.6.4"
+version = "4.6.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d91e0c145792ef73a6ad36d27c75ac09f1832222a3c209689d90f534685ee5b7"
+checksum = "301b56658598e48f3648647ac6fc887be7e7108eddfa4e9b63fcf3ec58c0cadf"
 dependencies = [
  "clap_builder",
  "clap_derive",
@@ -899,9 +899,9 @@ dependencies = [
 
 [[package]]
 name = "clap_builder"
-version = "4.6.2"
+version = "4.6.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f09628afdcc538b57f3c6341e9c8e9970f18e4a481690a64974d7023bd33548b"
+checksum = "94a65403d1a1bd28f7dc68eb8506e8874808ee5eecb59298de588e2e1407a078"
 dependencies = [
  "anstream",
  "anstyle",
@@ -4911,7 +4911,6 @@ dependencies = [
  "dirs",
  "dotenvy",
  "ec4rs",
- "fs4",
  "futures",
  "globset",
  "http-body-util",
@@ -4965,9 +4964,9 @@ dependencies = [
 
 [[package]]
 name = "octolib"
-version = "0.26.2"
+version = "0.29.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2670d79e233bfa9d79e77b1a00797d21681eda596bf73cfbd91d56d2769d6774"
+checksum = "5cbe25eb147e8f869f58b0a834cfd9a79af84f1b6d0a0cd9f3ec872f40560d66"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -4978,6 +4977,7 @@ dependencies = [
  "candle-transformers",
  "dirs",
  "fastembed",
+ "fs4",
  "hex",
  "hf-hub 0.4.3",
  "jsonschema",
@@ -4990,7 +4990,9 @@ dependencies = [
  "tiktoken-rs",
  "tokenizers",
  "tokio",
+ "toml_edit",
  "tracing",
+ "uuid",
 ]
 
 [[package]]
@@ -5831,9 +5833,9 @@ dependencies = [
 
 [[package]]
 name = "rmcp"
-version = "3.0.1"
+version = "3.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3797d226787327b35b0b6f9e878fe55f3af2bb4daf916c0411079885454042f0"
+checksum = "ad26b216c966e987e80e86daf784a455c039c43d98575ceed57b8faa259e5695"
 dependencies = [
  "async-trait",
  "base64 0.23.0",
@@ -5862,9 +5864,9 @@ dependencies = [
 
 [[package]]
 name = "rmcp-macros"
-version = "3.0.1"
+version = "3.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a8f5bc0c6851a20cd627ef4b90defb79f39a261c467de52af5d38000d7979c52"
+checksum = "41bc748630c2be2a71b614c2f40d27bc0df0060696d224e1692c72345b7e0b79"
 dependencies = [
  "darling 0.23.0",
  "proc-macro2",
