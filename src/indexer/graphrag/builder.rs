@@ -723,6 +723,7 @@ impl GraphBuilder {
 				// last-path-segment matching in RelationshipDiscovery).
 				let new_keys: std::collections::HashSet<&str> = selected
 					.iter()
+					.filter(|n| n.language != "markdown")
 					.flat_map(|n| n.exports.iter().chain(n.symbols.iter()))
 					.map(|s| s.as_str())
 					.collect();

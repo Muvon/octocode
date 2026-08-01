@@ -36,6 +36,12 @@ impl RelationshipDiscovery {
 		let mut symbol_index: std::collections::HashMap<&str, Vec<&str>> =
 			std::collections::HashMap::new();
 		for node in all_nodes {
+			// Markdown "exports" are section headings — generic prose like "Config"
+			// or "Overview". Indexing them as importable symbols makes every code
+			// import whose last segment matches a heading resolve to a document.
+			if node.language == "markdown" {
+				continue;
+			}
 			for sym in node.exports.iter().chain(node.symbols.iter()) {
 				symbol_index.entry(sym.as_str()).or_default().push(&node.id);
 			}

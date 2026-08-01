@@ -173,7 +173,9 @@ pub struct StructuralSearchParams {
 	pub references: Option<String>,
 	/// Language to search (required: rust, javascript, typescript, python, go, java, cpp, php, ruby, swift, lua, bash, css, json)
 	pub language: String,
-	/// File paths or glob patterns to search (default: current directory)
+	/// Narrow the search to matching files. Each entry is either a path
+	/// substring (`src/mcp`, `server.rs`) or a glob (`src/**/*.rs`), relative
+	/// to the repo root. Default: all files of the language.
 	#[serde(default, skip_serializing_if = "Option::is_none")]
 	pub paths: Option<Vec<String>>,
 	/// Only keep matches INSIDE a node matching this kind name or pattern
@@ -602,6 +604,23 @@ impl McpServer {
 			&prefilter_tokens,
 		);
 
+		// Zero candidate files means the language/paths combination selected
+		// nothing — tell the LLM exactly which knob to turn instead of letting
+		// the strategy chain produce a generic "no matches" diagnostic.
+		if files.is_empty() {
+			let paths_desc = params
+				.paths
+				.as_ref()
+				.map(|p| format!(" matching paths {:?}", p))
+				.unwrap_or_default();
+			return Ok(format!(
+				"No {} files found{}. Check that `language` matches the file extensions \
+				 (e.g. .ts → typescript, .tsx → typescript) and that `paths` entries are \
+				 substrings or globs relative to the repo root (e.g. `src/mcp` or `src/**/*.rs`).",
+				language, paths_desc
+			));
+		}
+
 		// Rewrite mode: separate path, no caching.
 		if let Some(ref rewrite_template) = params.rewrite {
 			return self.structural_rewrite(
@@ -714,6 +733,11 @@ fn format_structural_response(
 			offset, total
 		);
 	}
+	let file_count = {
+		let files_hit: std::collections::HashSet<&str> =
+			matches.iter().map(|m| m.file.as_str()).collect();
+		files_hit.len()
+	};
 	let end = (offset + max_results).min(total);
 	let page = &matches[offset..end];
 
@@ -746,11 +770,12 @@ fn format_structural_response(
 			""
 		};
 		out.push_str(&format!(
-			"\n\nShowing {}–{} of {}{} matches.",
+			"\n\nShowing {}–{} of {}{} matches across {} files.",
 			offset + 1,
 			end,
 			total,
-			capped
+			capped,
+			file_count
 		));
 		if end < total {
 			out.push_str(&format!(
@@ -759,7 +784,7 @@ fn format_structural_response(
 			));
 		}
 	} else {
-		out.push_str(&format!("\n\n{} matches found.", total));
+		out.push_str(&format!("\n\n{} matches in {} files.", total, file_count));
 	}
 	if let Some(d) = diagnostic {
 		out.push_str("\n\n");
