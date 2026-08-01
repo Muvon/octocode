@@ -234,7 +234,7 @@ impl<'a> DatabaseOperations<'a> {
 				let source = source_array.value(i);
 				let target = target_array.value(i);
 				let rel_type = type_array.value(i);
-				let key = (source.to_string(), target.to_string(), rel_type.to_string());
+				let key = (source, target, rel_type);
 				if !seen.insert(key) {
 					dedup_count += 1;
 					continue;

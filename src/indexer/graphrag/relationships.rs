@@ -56,9 +56,9 @@ impl RelationshipDiscovery {
 
 		for source_file in new_files {
 			// 1. Import/Export relationships via pre-built index (O(1) per import)
-			if source_file.language == "markdown" {
-	Self::discover_import_relationships(source_file, all_nodes, &mut relationships);
-			} else {
+			// Markdown imports are paths, not symbols. They are resolved below by
+			// `resolve_import_relationships` and emitted only as References edges.
+			if source_file.language != "markdown" {
 				for import in &source_file.imports {
 					// Check both the raw import and cleaned versions
 					let candidates = Self::get_import_candidates(import, &symbol_index);
@@ -323,21 +323,24 @@ impl RelationshipDiscovery {
 							weight: 1.0,
 						});
 
-						// Create reverse export relationship if target exports to source
-						for export_item in &target_node.exports {
-							if import_path.contains(export_item) || export_item == "*" {
-								relationships.push(CodeRelationship {
-									source: target_node.id.clone(),
-									target: source_file.id.clone(),
-									relation_type:
-										crate::indexer::graphrag::types::RelationType::Imports,
-									description: format!(
-										"Exports {} to {}",
-										export_item, source_file.path
-									),
-									confidence: 0.9,
-									weight: 0.8,
-								});
+						// Code exports may imply a reverse edge. Markdown headings are
+						// not exports, so document links remain directional References.
+						if source_file.language != "markdown" {
+							for export_item in &target_node.exports {
+								if import_path.contains(export_item) || export_item == "*" {
+									relationships.push(CodeRelationship {
+										source: target_node.id.clone(),
+										target: source_file.id.clone(),
+										relation_type:
+											crate::indexer::graphrag::types::RelationType::Imports,
+										description: format!(
+											"Exports {} to {}",
+											export_item, source_file.path
+										),
+										confidence: 0.9,
+										weight: 0.8,
+									});
+								}
 							}
 						}
 					}

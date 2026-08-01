@@ -1,3 +1,17 @@
+// Copyright 2026 Muvon Un Limited
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 #[cfg(test)]
 mod graphrag_relationship_tests {
 	use crate::indexer::graphrag::relationships::RelationshipDiscovery;
@@ -1533,7 +1547,7 @@ function main(): void {
 			symbols: vec![],
 			imports: vec![
 				"credit-suite.md".to_string(),             // same-dir
-				"../intro/credit-accounts.md".to_string(),  // parent-dir
+				"../intro/credit-accounts.md".to_string(), // parent-dir
 			],
 			exports: vec!["Adapters".to_string()],
 			functions: vec![],
@@ -1579,12 +1593,10 @@ function main(): void {
 		let new_files = vec![source.clone()];
 
 		// Call the SAME function used at runtime
-		let relationships = RelationshipDiscovery::discover_relationships_efficiently(
-			&new_files,
-			&all_nodes,
-		)
-		.await
-		.expect("relationship discovery should succeed");
+		let relationships =
+			RelationshipDiscovery::discover_relationships_efficiently(&new_files, &all_nodes)
+				.await
+				.expect("relationship discovery should succeed");
 
 		// Find References relationships (not just sibling_module)
 		let refs: Vec<_> = relationships
@@ -1596,7 +1608,9 @@ function main(): void {
 			refs.len() >= 2,
 			"Expected at least 2 References relationships, got {}: {:?}",
 			refs.len(),
-			refs.iter().map(|r| format!("{} -> {}", r.source, r.target)).collect::<Vec<_>>()
+			refs.iter()
+				.map(|r| format!("{} -> {}", r.source, r.target))
+				.collect::<Vec<_>>()
 		);
 
 		// Verify specific edges
@@ -1611,5 +1625,12 @@ function main(): void {
 				&& r.target == "projects/docs/intro/credit-accounts.md"
 		});
 		assert!(has_accounts, "Should have reference to credit-accounts.md");
+
+		assert!(
+			relationships
+				.iter()
+				.all(|relationship| relationship.relation_type != RelationType::Imports),
+			"Markdown links must not be emitted as code import relationships"
+		);
 	}
 }

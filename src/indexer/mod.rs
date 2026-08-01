@@ -81,6 +81,19 @@ pub struct NoindexWalker;
 static NOINDEX_CACHE: OnceLock<parking_lot::RwLock<HashMap<std::path::PathBuf, bool>>> =
 	OnceLock::new();
 
+fn markdown_graphrag_block(file_path: &str, contents: &str) -> CodeBlock {
+	CodeBlock {
+		path: file_path.to_string(),
+		language: "markdown".to_string(),
+		content: contents.to_string(),
+		symbols: Vec::new(),
+		start_line: 0,
+		end_line: contents.lines().count(),
+		hash: crate::embedding::calculate_content_hash(contents),
+		distance: None,
+	}
+}
+
 impl NoindexWalker {
 	/// Creates a WalkBuilder that respects .gitignore and .noindex files
 	/// PERFORMANCE: Uses caching to avoid repeated .noindex detection
@@ -820,6 +833,10 @@ pub async fn index_branch_delta(
 								state.clone(),
 							)
 							.await?;
+
+							if config.graphrag.enabled {
+								all_code_blocks.push(markdown_graphrag_block(file_path, &contents));
+							}
 						} else {
 							process_file_differential(
 								&ctx,
@@ -1460,16 +1477,7 @@ pub async fn index_files_with_quiet(
 							// from disk and calls Markdown::extract_imports_exports for
 							// actual link extraction.
 							if config.graphrag.enabled {
-								all_code_blocks.push(CodeBlock {
-									path: file_path.to_string(),
-									language: "markdown".to_string(),
-									content: String::new(),
-									symbols: vec![],
-									start_line: 0,
-									end_line: contents.lines().count(),
-									hash: crate::embedding::calculate_content_hash(&contents),
-									distance: None,
-								});
+								all_code_blocks.push(markdown_graphrag_block(file_path, &contents));
 							}
 
 							file_processed = true;
@@ -1712,16 +1720,8 @@ pub async fn index_files_with_quiet(
 
 							// Also create a synthetic CodeBlock for GraphRAG
 							if config.graphrag.enabled {
-								all_code_blocks.push(CodeBlock {
-									path: file_path.to_string(),
-									language: "markdown".to_string(),
-									content: String::new(),
-									symbols: vec![],
-									start_line: 0,
-									end_line: contents.lines().count(),
-									hash: crate::embedding::calculate_content_hash(&contents),
-									distance: None,
-								});
+								all_code_blocks
+									.push(markdown_graphrag_block(&file_path, &contents));
 							}
 
 							file_processed = true;
@@ -2139,19 +2139,14 @@ pub async fn handle_file_change(store: &Store, file_path: &str, config: &Config)
 
 					// Update GraphRAG for this markdown file
 					if config.graphrag.enabled {
-						let md_blocks = vec![CodeBlock {
-							path: relative_file_path.to_string(),
-							language: "markdown".to_string(),
-							content: String::new(),
-							symbols: vec![],
-							start_line: 0,
-							end_line: contents.lines().count(),
-							hash: crate::embedding::calculate_content_hash(&contents),
-							distance: None,
-						}];
-						let graph_builder =
-							graphrag::GraphBuilder::new_with_quiet(config.clone(), true)
-								.await?;
+						let md_blocks =
+							vec![markdown_graphrag_block(&relative_file_path, &contents)];
+						let graph_builder = graphrag::GraphBuilder::new_with_quiet(
+							config.clone(),
+							&current_dir,
+							true,
+						)
+						.await?;
 						graph_builder
 							.process_code_blocks(&md_blocks, Some(state.clone()))
 							.await?;
@@ -2274,6 +2269,16 @@ pub async fn handle_file_change(store: &Store, file_path: &str, config: &Config)
 #[cfg(test)]
 mod context_optimization_tests {
 	use super::*;
+
+	#[test]
+	fn markdown_graphrag_blocks_preserve_content_for_change_detection() {
+		let original = markdown_graphrag_block("docs/guide.md", "# Guide\nOriginal");
+		let updated = markdown_graphrag_block("docs/guide.md", "# Guide\nUpdated");
+
+		assert_eq!(original.content, "# Guide\nOriginal");
+		assert_eq!(original.language, "markdown");
+		assert_ne!(original.hash, updated.hash);
+	}
 
 	#[test]
 	fn test_context_optimization() {
