@@ -1,4 +1,4 @@
-// Copyright 2025 Muvon Un Limited
+// Copyright 2026 Muvon Un Limited
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,7 +16,28 @@
 //! Extracts headings as signatures with smart content preview
 
 use super::Language;
+use regex::Regex;
+use std::sync::LazyLock;
 use tree_sitter::Node;
+
+static MARKDOWN_LINK_RE: LazyLock<Regex> = LazyLock::new(|| {
+	Regex::new(r"\[[^\]]*\]\(([^)]+\.md)(?:#[^)]*)?\)").expect("markdown link regex must be valid")
+});
+
+fn extract_markdown_links(contents: &str) -> Vec<String> {
+	let mut links = Vec::new();
+	for capture in MARKDOWN_LINK_RE.captures_iter(contents) {
+		if let Some(target) = capture.get(1) {
+			let path = target.as_str();
+			if !path.starts_with("http://") && !path.starts_with("https://") {
+				links.push(path.to_string());
+			}
+		}
+	}
+	links.sort_unstable();
+	links.dedup();
+	links
+}
 
 /// Markdown language implementation
 pub struct Markdown;
@@ -73,24 +94,10 @@ impl Language for Markdown {
 			return (Vec::new(), Vec::new());
 		}
 
-		let mut links = Vec::new();
 		// Match [text](path.md) — standard markdown links to .md files
 		// Skip external URLs (http:// or https://)
 		// Strip anchor fragments (#section)
-		let link_re =
-			regex::Regex::new(r"\[[^\]]*\]\(([^)]+\.md)(?:#[^)]*)?\)").unwrap();
-		for cap in link_re.captures_iter(contents) {
-			if let Some(target) = cap.get(1) {
-				let path = target.as_str();
-				if !path.starts_with("http://") && !path.starts_with("https://") {
-					links.push(path.to_string());
-				}
-			}
-		}
-
-		// Deduplicate — a doc may link to the same target multiple times
-		links.sort();
-		links.dedup();
+		let links = extract_markdown_links(contents);
 
 		// Markdown "exports" are section headings
 		let exports = self.extract_symbols(node, contents);
@@ -103,34 +110,12 @@ impl Language for Markdown {
 		source_file: &str,
 		all_files: &[String],
 	) -> Option<String> {
-		use std::path::{Component, PathBuf};
+		use super::resolution_utils::resolve_relative_path;
+		use crate::utils::path::PathNormalizer;
 
-		let source_dir = PathBuf::from(source_file)
-			.parent()
-			.map(|p| p.to_path_buf())
-			.unwrap_or_default();
-		let joined = source_dir.join(import_path);
-
-		// Normalize path components (resolve ../ and ./)
-		let normalized =
-			joined
-				.components()
-				.fold(PathBuf::new(), |mut acc, c| {
-					match c {
-						Component::ParentDir => {
-							acc.pop();
-						}
-						Component::CurDir => {}
-						Component::Normal(os) => {
-							acc.push(os);
-						}
-						_ => {}
-					}
-					acc
-				});
-
-		let normalized_str = normalized.to_string_lossy().to_string();
-		all_files.iter().find(|f| **f == normalized_str).cloned()
+		let resolved = resolve_relative_path(source_file, import_path)?;
+		PathNormalizer::find_path_in_collection(&resolved.to_string_lossy(), all_files)
+			.map(str::to_string)
 	}
 
 	fn get_file_extensions(&self) -> Vec<&'static str> {
@@ -157,18 +142,7 @@ External links are ignored: [Docs](https://docs.example.com/guide.md)
 Non-md links are ignored: [Image](./photo.png)
 "#;
 
-		// Test the regex logic directly (can't easily create tree-sitter Node in unit tests)
-		let link_re =
-			regex::Regex::new(r"\[[^\]]*\]\(([^)]+\.md)(?:#[^)]*)?\)").unwrap();
-		let mut links = Vec::new();
-		for cap in link_re.captures_iter(content) {
-			if let Some(target) = cap.get(1) {
-				let path = target.as_str();
-				if !path.starts_with("http://") && !path.starts_with("https://") {
-					links.push(path.to_string());
-				}
-			}
-		}
+		let links = extract_markdown_links(content);
 
 		assert_eq!(links.len(), 3);
 		assert!(links.contains(&"../core-architecture/credit-suite.md".to_string()));
@@ -233,7 +207,10 @@ Non-md links are ignored: [Image](./photo.png)
 		);
 		assert_eq!(
 			resolved,
-			Some("projects/gearbox/autodocs-about/docs/core-architecture/credit-suite.md".to_string()),
+			Some(
+				"projects/gearbox/autodocs-about/docs/core-architecture/credit-suite.md"
+					.to_string()
+			),
 			"Same-dir link should resolve"
 		);
 
@@ -245,17 +222,17 @@ Non-md links are ignored: [Image](./photo.png)
 		);
 		assert_eq!(
 			resolved,
-			Some("projects/gearbox/autodocs-about/docs/introduction/credit-accounts.md".to_string()),
+			Some(
+				"projects/gearbox/autodocs-about/docs/introduction/credit-accounts.md".to_string()
+			),
 			"Parent-dir link should resolve"
 		);
 	}
 
 	#[test]
 	fn test_no_links_in_empty_doc() {
-		let link_re =
-			regex::Regex::new(r"\[[^\]]*\]\(([^)]+\.md)(?:#[^)]*)?\)").unwrap();
 		let content = "# Simple heading\nNo links here.";
-		let links: Vec<_> = link_re.captures_iter(content).collect();
+		let links = extract_markdown_links(content);
 		assert!(links.is_empty());
 	}
 }

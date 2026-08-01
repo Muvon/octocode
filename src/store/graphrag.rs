@@ -479,30 +479,31 @@ impl<'a> GraphRagOperations<'a> {
 		if self.table_ops.table_exists(tables::DOCUMENT_BLOCKS).await? {
 			let doc_table = self.get_table(tables::DOCUMENT_BLOCKS).await?;
 			let mut doc_results = doc_table.query().execute().await?;
-
-			let mut seen_md_paths = std::collections::HashSet::new();
-			// Collect paths already covered by code blocks
-			for block in &all_blocks {
-				seen_md_paths.insert(block.path.clone());
-			}
+			let code_block_paths: std::collections::HashSet<String> =
+				all_blocks.iter().map(|block| block.path.clone()).collect();
+			let mut markdown_paths = std::collections::HashSet::new();
 
 			while let Some(batch) = doc_results.try_next().await? {
 				if batch.num_rows() > 0 {
 					let converter =
 						crate::store::batch_converter::BatchConverter::new(self.code_vector_dim);
 					let doc_blocks = converter.batch_to_document_blocks(&batch, None)?;
-					for doc in &doc_blocks {
-						if doc.path.ends_with(".md") && seen_md_paths.insert(doc.path.clone()) {
-							// Create a synthetic CodeBlock so GraphBuilder processes
-							// this markdown file for nodes and cross-references
+					for doc in doc_blocks {
+						let is_markdown =
+							doc.path.ends_with(".md") || doc.path.ends_with(".markdown");
+						if is_markdown && !code_block_paths.contains(&doc.path) {
+							markdown_paths.insert(doc.path.clone());
+							// Preserve every document chunk. GraphBuilder groups them by
+							// path and hashes their combined content, so markdown edits are
+							// visible to incremental GraphRAG processing.
 							all_blocks.push(crate::store::CodeBlock {
-								path: doc.path.clone(),
+								path: doc.path,
 								language: "markdown".to_string(),
-								content: String::new(),
-								symbols: vec![],
-								start_line: 0,
+								content: doc.content,
+								symbols: Vec::new(),
+								start_line: doc.start_line,
 								end_line: doc.end_line,
-								hash: doc.hash.clone(),
+								hash: doc.hash,
 								distance: None,
 							});
 						}
@@ -512,7 +513,7 @@ impl<'a> GraphRagOperations<'a> {
 
 			tracing::debug!(
 				"Added {} markdown files from document_blocks for GraphRAG",
-				seen_md_paths.len().saturating_sub(all_blocks.len())
+				markdown_paths.len()
 			);
 		}
 
