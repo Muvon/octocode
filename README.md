@@ -6,7 +6,7 @@
 
 [![GitHub stars](https://img.shields.io/github/stars/Muvon/octocode?style=social)](https://github.com/Muvon/octocode/stargazers)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
-[![Rust](https://img.shields.io/badge/Rust-1.82%2B-orange.svg)](https://www.rust-lang.org)
+[![Rust](https://img.shields.io/badge/Rust-1.95%2B-orange.svg)](https://www.rust-lang.org)
 [![Release](https://img.shields.io/github/v/release/Muvon/octocode)](https://github.com/Muvon/octocode/releases)
 
 **Give your AI assistant a brain for your codebase.** Octocode transforms your project into a navigable knowledge graph that Claude, Cursor, and other AI agents can search, understand, and navigate.
@@ -29,7 +29,7 @@
 - 🔍 **Semantic search** — Find code by meaning, not keywords
 - 🕸️ **Knowledge graph** — Navigate imports, calls, and dependencies
 - 📝 **Code signatures** — View structure without reading entire files
-- 🧠 **Persistent memory** — Remember decisions across conversations
+- 🧭 **LSP precision** — Go-to-definition, find-references, and hover docs via your language server
 
 **Works with:** Claude Desktop • Cursor • Windsurf • Any MCP-compatible AI
 
@@ -55,9 +55,9 @@ You: "What files depend on the payment module?"
 AI: *queries knowledge graph* "src/api/handlers/payment.rs imports payment/mod.rs,
     which is also used by src/workers/refund.rs and src/cron/billing.rs"
 
-You: "Remember this bug fix for future reference"
-AI: *stores in memory* "Got it. I'll remember this authentication bypass fix
-    and apply similar patterns when reviewing security code."
+You: "Find every call site of this function"
+AI: *uses LSP find-references* "process_payment() is called from 4 places:
+    checkout.rs:87, refund.rs:134, billing.rs:56, and tests/payment_test.rs:23"
 ```
 
 ## 🤔 Why Octocode?
@@ -241,6 +241,16 @@ Octocode includes a **built-in MCP server** that exposes your codebase as tools 
 | `view_signatures` | View file structure — function signatures, class definitions, imports |
 | `graphrag` | Query relationships — "what calls this function?", "what does this module import?" |
 | `structural_search` | AST pattern matching — find `.unwrap()` calls, `new` instantiations, specific patterns |
+| `lsp_goto_definition` | Jump to a symbol's definition (requires `--with-lsp`) |
+| `lsp_find_references` | Find all usages of a symbol across the workspace (requires `--with-lsp`) |
+| `lsp_hover` | Type info and documentation for a symbol (requires `--with-lsp`) |
+| `lsp_document_symbols` / `lsp_workspace_symbols` / `lsp_completion` | File symbols, workspace-wide symbol search, completions (requires `--with-lsp`) |
+
+Enable the LSP tools by starting the server with your language server:
+
+```bash
+octocode mcp --path /your/project --with-lsp="rust-analyzer"
+```
 
 ### Conversational AI Examples
 
@@ -336,6 +346,8 @@ AI: *analyzes changes* "The PR adds password hashing in src/auth/hash.rs. Howeve
 
 ## 🌐 Supported Languages
 
+16 languages with full tree-sitter AST parsing:
+
 | Language | Extensions | Features |
 |----------|------------|----------|
 | **Rust** | `.rs` | Full AST parsing, pub/use detection, module structure |
@@ -346,11 +358,13 @@ AI: *analyzes changes* "The PR adds password hashing in src/auth/hash.rs. Howeve
 | **C++** | `.cpp`, `.cc`, `.cxx`, `.c++`, `.c`, `.h`, `.hpp`, `.hxx`, `.cppm`, `.ixx`, `.mxx`, `.ccm`, `.cxxm` | Include analysis, class/function extraction, C++20 module support |
 | **Ruby** | `.rb` | Class/module extraction, method definitions |
 | **Java** | `.java` | Import analysis, class/method extraction |
+| **Swift** | `.swift` | Class/struct/protocol extraction, import analysis |
+| **Svelte** | `.svelte` | Component structure, script/style block extraction |
+| **Lua** | `.lua` | Function and table extraction |
+| **CSS** | `.css` | Rule and selector extraction |
 | **JSON** | `.json` | Structure analysis, key extraction |
 | **Bash** | `.sh`, `.bash` | Function and variable extraction |
 | **Markdown** | `.md` | Document section indexing, header extraction |
-
-*Plus: CSS, Lua, Svelte, and more via tree-sitter*
 
 ## 📚 Documentation
 
