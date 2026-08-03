@@ -1406,7 +1406,7 @@ pub(crate) async fn perform_indexing(
 	// forcing full rebuilds on every subsequent branch index.
 	let branch_context = git_repo_root
 		.as_deref()
-		.and_then(|r| indexer::branch::detect_branch_context(r));
+		.and_then(indexer::branch::detect_branch_context);
 
 	let indexing_result = match branch_context {
 		Some(branch_name) => {
