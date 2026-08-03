@@ -1399,14 +1399,46 @@ pub(crate) async fn perform_indexing(
 		None
 	};
 
-	let indexing_result = indexer::index_files_with_quiet(
-		store,
-		state.clone(),
-		config,
-		git_repo_root.as_deref(),
-		true,
-	)
-	.await;
+	// Mirror the CLI index/watch flow: on a non-default branch, index the
+	// delta into the branch store. Writing the main store from a branch
+	// checkout would replace default-branch content with branch content and
+	// stamp the main DB with the branch commit — corrupting the overlay and
+	// forcing full rebuilds on every subsequent branch index.
+	let branch_context = git_repo_root
+		.as_deref()
+		.and_then(|r| indexer::branch::detect_branch_context(r));
+
+	let indexing_result = match branch_context {
+		Some(branch_name) => {
+			async {
+				let branch_store =
+					Store::new_for_branch_at(working_directory, &branch_name).await?;
+				branch_store.initialize_collections().await?;
+				indexer::index_branch_delta(
+					store,
+					&branch_store,
+					state.clone(),
+					config,
+					git_repo_root.as_deref().unwrap(),
+					&branch_name,
+					true,
+				)
+				.await?;
+				branch_store.flush().await
+			}
+			.await
+		}
+		None => {
+			indexer::index_files_with_quiet(
+				store,
+				state.clone(),
+				config,
+				git_repo_root.as_deref(),
+				true,
+			)
+			.await
+		}
+	};
 
 	lock.release()?;
 	debug!("MCP server: released indexing lock");

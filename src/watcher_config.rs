@@ -102,6 +102,16 @@ impl IgnorePatterns {
 
 	/// Check if a path should be ignored during file watching
 	pub fn should_ignore_path(&self, path: &Path) -> bool {
+		// Never react to .git internals: git touches its metadata constantly
+		// (`git status` refreshes the index, fetch writes FETCH_HEAD, lock
+		// files come and go) and none of it changes indexable content —
+		// without this every git invocation triggers a debounced reindex.
+		// Working-tree files still change on checkout/merge, so those events
+		// arrive from the files themselves.
+		if path.components().any(|c| c.as_os_str() == ".git") {
+			return true;
+		}
+
 		let path_str = path.to_string_lossy();
 
 		// Get relative path from working directory

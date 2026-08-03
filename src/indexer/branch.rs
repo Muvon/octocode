@@ -172,9 +172,10 @@ pub struct MasterState {
 	/// against the local ref because pulling is a workspace action that
 	/// belongs to the user.
 	pub local_behind_remote: bool,
-	/// `Some(n)` if the main DB was re-indexed by reconcile because the DB
-	/// commit didn't match the local ref. `None` when no master reindex was
-	/// triggered (DB already current, or no main DB exists yet).
+	/// `Some(commit)` if reconcile baselined an empty main DB (the commit it
+	/// was stamped with — HEAD of the working tree at index time). `None`
+	/// when the main DB already existed; a stale main DB is never re-indexed
+	/// from a branch checkout.
 	pub db_resynced_to: Option<String>,
 }
 
@@ -184,14 +185,14 @@ pub struct MasterState {
 /// 1. Read the default branch name, local ref, and (best-effort) remote ref.
 /// 2. Compute the fork-point between local default branch and `HEAD`.
 /// 3. Read the main DB's last indexed commit.
-/// 4. If DB commit != local ref commit: re-index the main store so the branch
-///    DB lays on top of a coherent main snapshot. This is the "always index up
-///    to master before branching" guarantee — silent skip is what got the
-///    `conversation_compression/` files lost in the first place.
+/// 4. If the main DB is empty: run a full index as a baseline (stamped with
+///    HEAD — the branch working tree is all we can see from here). If it is
+///    non-empty but stale vs the local ref: warn only; re-indexing from a
+///    branch checkout cannot produce a default-branch snapshot.
 /// 5. Surface (don't auto-fix) `local < remote` divergence. Pulling is a
 ///    user workspace action; we won't run it implicitly.
 ///
-/// Pass `main_store` so we can resynchronize when needed.
+/// Pass `main_store` so we can baseline an empty main DB when needed.
 pub async fn reconcile_master_state(
 	main_store: &crate::store::Store,
 	state: crate::state::SharedState,
@@ -251,23 +252,36 @@ pub async fn reconcile_master_state(
 	// recorded yet", which would silently trigger a full reindex/resync.
 	let db_commit = main_store.get_last_commit_hash().await?;
 
+	// Baseline an EMPTY main DB only. When the main DB exists but sits at a
+	// different commit than the default-branch ref, we must NOT re-index it
+	// from here: the working tree is the feature branch, so a "resync" would
+	// write branch content into the main DB stamped with the branch commit —
+	// the mismatch would then be detected again on every run, forcing a full
+	// branch-delta rebuild each time. The overlay instead anchors to whatever
+	// commit the main DB actually holds (via `base_db_commit`), and we warn
+	// when that snapshot is neither the default-branch ref nor current HEAD.
 	let db_resynced_to = match &db_commit {
-		Some(db) if db == &local_ref_commit => None,
-		_ => {
+		Some(db) => {
+			let head_commit = GitUtils::get_current_commit_hash(git_repo_root).ok();
+			if db != &local_ref_commit && head_commit.as_ref() != Some(db) && !quiet {
+				eprintln!(
+					"⚠️  Main index is at {} but local '{}' is at {} — the branch \
+					 overlay stays anchored to the indexed snapshot. Checkout '{}' \
+					 and re-index to refresh the main index.",
+					&db[..db.len().min(8)],
+					branch_name,
+					&local_ref_commit[..local_ref_commit.len().min(8)],
+					branch_name,
+				);
+			}
+			None
+		}
+		None => {
 			if !quiet {
-				match &db_commit {
-					Some(prev) => println!(
-						"🔄 Main index at {} but local '{}' is at {} — resyncing main \
-						 index before computing branch delta.",
-						&prev[..prev.len().min(8)],
-						branch_name,
-						&local_ref_commit[..local_ref_commit.len().min(8)],
-					),
-					None => println!(
-						"🔄 Main index empty — running a full main index before computing \
-						 branch delta."
-					),
-				}
+				println!(
+					"🔄 Main index empty — running a full main index before computing \
+					 branch delta."
+				);
 			}
 			super::index_files_with_quiet(
 				main_store,
@@ -279,14 +293,17 @@ pub async fn reconcile_master_state(
 			.await
 			.map_err(|e| {
 				anyhow::anyhow!(
-					"Main index resync failed while preparing branch delta for '{}': {}. \
+					"Main index baseline failed while preparing branch delta for '{}': {}. \
 						 Branch indexing aborted — main DB is left in its previous state.",
 					branch_name,
 					e
 				)
 			})?;
 			main_store.flush().await?;
-			Some(local_ref_commit.clone())
+			// The baseline indexed the current working tree and was stamped
+			// with HEAD (the branch commit), not the default-branch ref —
+			// re-read what was actually stored so the manifest stays coherent.
+			main_store.get_last_commit_hash().await?
 		}
 	};
 

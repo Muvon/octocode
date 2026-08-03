@@ -599,19 +599,28 @@ pub async fn index_branch_delta(
 	let current_dir = state.read().current_directory.clone();
 
 	// Reconcile master state BEFORE computing branch delta. This guarantees:
-	//   - The main index matches the local default-branch ref (resyncs if not),
-	//     so the branch DB lays on top of a coherent main snapshot.
+	//   - An empty main DB gets a baseline index so the overlay has something
+	//     to sit on; a non-empty main DB is left untouched (re-indexing it from
+	//     a branch checkout can't produce a default-branch snapshot) and the
+	//     overlay anchors to the commit it actually holds.
 	//   - A loud warning surfaces if `origin/<default>` is ahead of local — we
 	//     don't auto-pull (workspace action), we just refuse to be silent.
-	// If the resync itself fails, the error propagates and the branch index is
-	// not written, so we never end up with a branch DB anchored to a missing
+	// If the baseline itself fails, the error propagates and the branch index
+	// is not written, so we never end up with a branch DB anchored to a missing
 	// main snapshot.
 	let master_state =
 		branch::reconcile_master_state(main_store, state.clone(), config, git_repo_root, quiet)
 			.await?;
 
 	let default_branch = master_state.branch_name.clone();
-	let base_db_commit = master_state.local_ref_commit.clone();
+	// Anchor to the commit the main DB actually holds — that's what the
+	// search-time coherence check compares against. On a feature branch it
+	// legitimately differs from the default-branch ref.
+	let base_db_commit = master_state
+		.db_resynced_to
+		.clone()
+		.or_else(|| master_state.db_commit.clone())
+		.unwrap_or_default();
 	let remote_base_observed = master_state.remote_ref_commit.clone().unwrap_or_default();
 
 	// Reset state counters that may have been advanced by a master resync
@@ -638,8 +647,8 @@ pub async fn index_branch_delta(
 	// every one of them invalidates the assumptions the branch DB was built on:
 	//   - default branch renamed (override mapping is keyed off it)
 	//   - main DB moved to a different commit (overlay would be incoherent)
-	//   - we just resynced main (any prior branch DB was built against the
-	//     stale main snapshot; throw it away rather than serve mixed content)
+	//   - main DB was just baselined from empty (any prior branch DB was
+	//     built against a snapshot that no longer exists)
 	let force_rebuild = existing_manifest.as_ref().is_some_and(|m| {
 		m.base_branch != default_branch
 			|| (!m.base_db_commit.is_empty() && m.base_db_commit != base_db_commit)
@@ -683,7 +692,8 @@ pub async fn index_branch_delta(
 	}
 
 	let branch_commit = branch::get_branch_commit(git_repo_root, "HEAD")?;
-	let base_commit = base_db_commit.clone();
+	// Manifest's legacy field: default-branch tip at index time (informational).
+	let base_commit = master_state.local_ref_commit.clone();
 
 	// Check if we can skip (same branch commit, no working changes)
 	if !force_rebuild {
@@ -707,44 +717,47 @@ pub async fn index_branch_delta(
 	// Determine which files to actually re-process
 	let files_to_process: std::collections::HashSet<String> = if !force_rebuild {
 		if let Some(ref manifest) = existing_manifest {
-			// Incremental: find what changed since last branch index
 			let old_changed: std::collections::HashSet<&str> =
 				manifest.changed_paths.iter().map(|s| s.as_str()).collect();
 			let new_changed: std::collections::HashSet<&str> =
 				changed_files.iter().map(|s| s.as_str()).collect();
 
 			// Files no longer in delta (reverted to match main) — remove from branch DB
+			let mut removed_any = false;
 			for path in old_changed.difference(&new_changed) {
-				if let Err(e) = branch_store.remove_blocks_by_path(path).await {
-					tracing::warn!(path = %path, error = %e, "Failed to remove reverted file from branch DB");
-				}
-			}
-
-			// Files to process: new in delta OR changed since last branch index
-			if manifest.branch_commit != branch_commit {
-				// Commits changed — find files modified since last indexed branch commit
-				match git::get_changed_files_since_commit(git_repo_root, &manifest.branch_commit) {
-					Ok(since_last) => {
-						let since_set: std::collections::HashSet<String> =
-							since_last.into_iter().collect();
-						// Only re-process files that are in the delta AND changed since last index
-						changed_files
-							.into_iter()
-							.filter(|f| {
-								since_set.contains(f.as_str()) || !old_changed.contains(f.as_str())
-							})
-							.collect()
+				match branch_store.remove_blocks_by_path(path).await {
+					Ok(()) => removed_any = true,
+					Err(e) => {
+						tracing::warn!(path = %path, error = %e, "Failed to remove reverted file from branch DB")
 					}
-					Err(_) => changed_files.into_iter().collect(),
 				}
-			} else {
-				// Same commit but working tree changes — process all changed files
-				changed_files.into_iter().collect()
 			}
-		} else {
-			// No existing manifest — process everything
-			changed_files.into_iter().collect()
+			// Persist removals even when nothing else needs re-processing —
+			// the batch flush below only runs when files get processed.
+			if removed_any {
+				branch_store.flush().await?;
+			}
 		}
+
+		// Re-process only delta files whose mtime moved past what the branch DB
+		// already indexed — same skip rule as the main index path (deleting a
+		// file's blocks also deletes its metadata row, so a scrubbed file is
+		// never wrongly skipped). Without this, every trigger re-embeds the
+		// ENTIRE delta: one saved file would reprocess all N changed files, and
+		// a commit would re-embed files already indexed at save time.
+		let branch_meta = branch_store.get_all_file_metadata().await?;
+		changed_files
+			.into_iter()
+			.filter(|f| {
+				match (
+					get_file_mtime(&current_dir.join(f)),
+					branch_meta.get(f.as_str()),
+				) {
+					(Ok(actual), Some(stored)) => actual > *stored,
+					_ => true,
+				}
+			})
+			.collect()
 	} else {
 		// Force rebuild — process everything
 		changed_files.into_iter().collect()
@@ -1953,11 +1966,10 @@ pub async fn index_files_with_quiet(
 		// Check if we have new blocks from this indexing run OR if GraphRAG needs building from existing database
 		let needs_graphrag_from_existing = if all_code_blocks.is_empty() {
 			// No new blocks from this run - check if we have existing blocks in database to build from
-			// This handles the case where GraphRAG is enabled after database is already indexed
-			let existing_blocks = store
-				.get_all_code_blocks_for_graphrag()
-				.await
-				.unwrap_or_default();
+			// This handles the case where GraphRAG is enabled after database is already indexed.
+			// Check the cheap row-count flag FIRST: `get_all_code_blocks_for_graphrag`
+			// loads the entire code_blocks table into memory, which on steady-state
+			// runs (all files skipped) is a large allocation for a boolean.
 			let needs_indexing = match store.graphrag_needs_indexing().await {
 				Ok(v) => v,
 				Err(e) => {
@@ -1968,7 +1980,15 @@ pub async fn index_files_with_quiet(
 					false
 				}
 			};
-			!existing_blocks.is_empty() && needs_indexing
+			if needs_indexing {
+				let existing_blocks = store
+					.get_all_code_blocks_for_graphrag()
+					.await
+					.unwrap_or_default();
+				!existing_blocks.is_empty()
+			} else {
+				false
+			}
 		} else {
 			false // We have new blocks, process them normally
 		};
