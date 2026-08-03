@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.20.1] - 2026-08-03
+
+### 📋 Release Summary
+
+This release introduces branch-aware indexing to provide more accurate codebase intelligence across different git branches (eabff34a). Additionally, improvements to the MCP server enhance how branch context is detected for a more seamless AI assistant experience (c9573f44).
+
+
+### ✨ New Features & Enhancements
+
+- **indexer**: implement branch-aware indexing `eabff34a`
+
+### 🔧 Improvements & Optimizations
+
+- **mcp**: simplify branch context detection `c9573f44`
+
 ## [0.20.0] - 2026-08-01
 
 ### 📋 Release Summary
