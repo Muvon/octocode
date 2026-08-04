@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.20.2] - 2026-08-04
+
+### 📋 Release Summary
+
+This release includes routine dependency updates to ensure optimal system stability and security (9c07b66e).
+
+
+### 🔄 Other Changes
+
+1 maintenance, dependency, and tooling update not listed individually.
+
 ## [0.20.1] - 2026-08-03
 
 ### 📋 Release Summary
