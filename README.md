@@ -4,6 +4,8 @@
 
 ### **Structural Code Intelligence for AI Agents — MCP Server + Knowledge Graph + Semantic Search**
 
+[![MCP Toplist](https://mcptoplist.com/badge/glama%2FMuvon%2Foctocode.svg)](https://mcptoplist.com/server/glama%2FMuvon%2Foctocode)
+
 [![GitHub stars](https://img.shields.io/github/stars/Muvon/octocode?style=social)](https://github.com/Muvon/octocode/stargazers)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Rust](https://img.shields.io/badge/Rust-1.95%2B-orange.svg)](https://www.rust-lang.org)
