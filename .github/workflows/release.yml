@@ -329,10 +329,19 @@ jobs:
       tag: ${{ inputs.tag }}
       artifacts: 'release-*'
       draft: false
+      npm-args: '["mcp"]'
+
+  publish-npm:
+    name: Publish to npm
+    needs: release
+    uses: muvon/ci-workflow/.github/workflows/npm-publish.yml@master
+    secrets: inherit
+    with:
+      tag: ${{ inputs.tag }}
 
   publish-mcp:
     name: Publish to MCP Registry
-    needs: release
+    needs: [release, publish-npm]
     permissions:
       id-token: write
       contents: read
