@@ -246,7 +246,7 @@ pub fn normalize_node_id(input: &str) -> String {
 }
 
 /// Find a node in the graph with fuzzy matching.
-/// Tries: exact match → normalized match → suffix match.
+/// Tries: exact match → normalized match → file suffix → unique symbol name.
 /// Returns the actual node ID stored in the graph.
 pub fn find_node_id<'a>(graph: &'a super::types::CodeGraph, input: &str) -> Option<&'a str> {
 	// 1. Exact match
@@ -282,7 +282,23 @@ pub fn find_node_id<'a>(graph: &'a super::types::CodeGraph, input: &str) -> Opti
 		}
 	}
 
-	best_match
+	if best_match.is_some() {
+		return best_match;
+	}
+
+	// 4. Bare symbol name. Resolve only when unique so overloaded/common names
+	// never silently select an arbitrary graph node.
+	let mut symbol_match = None;
+	for (key, node) in &graph.nodes {
+		if node.is_symbol_node() && node.name.eq_ignore_ascii_case(&normalized) {
+			if symbol_match.is_some() {
+				return None;
+			}
+			symbol_match = Some(key.as_str());
+		}
+	}
+
+	symbol_match
 }
 
 // Check if two symbols match (accounting for common patterns)
@@ -335,6 +351,43 @@ pub fn is_parent_child_relationship(path1: &str, path2: &str) -> bool {
 #[cfg(test)]
 mod tests {
 	use super::*;
+
+	fn symbol_node(id: &str, name: &str) -> super::super::types::CodeNode {
+		super::super::types::CodeNode {
+			id: id.to_string(),
+			name: name.to_string(),
+			kind: "function".to_string(),
+			path: id.split("::").next().unwrap_or_default().to_string(),
+			description: String::new(),
+			symbols: Vec::new(),
+			hash: String::new(),
+			embedding: Vec::new(),
+			imports: Vec::new(),
+			exports: Vec::new(),
+			functions: Vec::new(),
+			size_lines: 0,
+			language: "rust".to_string(),
+		}
+	}
+
+	#[test]
+	fn resolves_only_unique_bare_symbol_names() {
+		let mut graph = super::super::types::CodeGraph::default();
+		graph.nodes.insert(
+			"src/config.rs::parse_config".to_string(),
+			symbol_node("src/config.rs::parse_config", "parse_config"),
+		);
+		assert_eq!(
+			find_node_id(&graph, "parse_config"),
+			Some("src/config.rs::parse_config")
+		);
+
+		graph.nodes.insert(
+			"tests/config.rs::parse_config".to_string(),
+			symbol_node("tests/config.rs::parse_config", "parse_config"),
+		);
+		assert_eq!(find_node_id(&graph, "parse_config"), None);
+	}
 
 	#[test]
 	fn test_is_parent_child_relationship_cross_platform() {

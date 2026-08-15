@@ -22,10 +22,8 @@ use crate::embedding::{
 use crate::indexer::graphrag::ai::AIEnhancements;
 use crate::indexer::graphrag::database::DatabaseOperations;
 use crate::indexer::graphrag::relationships::RelationshipDiscovery;
-use crate::indexer::graphrag::symbols::{discover_symbol_relationships, extract_symbols_from_file};
-use crate::indexer::graphrag::types::{
-	CodeGraph, CodeNode, CodeRelationship, Provenance, RelationType,
-};
+use crate::indexer::graphrag::symbols::{extract_symbols_from_file, FileAstData};
+use crate::indexer::graphrag::types::{CodeGraph, CodeNode, CodeRelationship};
 use crate::indexer::graphrag::utils::{
 	cosine_similarity, detect_project_root, detect_project_root_from, to_relative_path,
 };
@@ -140,12 +138,6 @@ impl GraphBuilder {
 		// for the whole graph on every incremental run.
 		let mut processed_node_ids: HashSet<String> = HashSet::new();
 
-		// Symbol-tier accumulators (graphrag.symbols): one node per declared
-		// symbol, plus file→symbol "contains" edges.
-		let mut symbol_nodes: Vec<CodeNode> = Vec::new();
-		let mut symbol_embed_texts: Vec<String> = Vec::new();
-		let mut symbol_contains_edges: Vec<CodeRelationship> = Vec::new();
-
 		// Group code blocks by file for efficient processing
 		let mut files_to_blocks: HashMap<String, Vec<&CodeBlock>> = HashMap::new();
 		for block in code_blocks {
@@ -206,7 +198,7 @@ impl GraphBuilder {
 				}
 
 				// CRITICAL FIX: Also remove from in-memory graph to prevent duplicates.
-				// Path-based: covers the file node AND its symbol-tier nodes
+				// Path-based: covers the file node and cleans legacy persisted symbol rows.
 				// ("{path}::{symbol}") plus every edge touching them.
 				{
 					let mut graph = self.graph.write().await;
@@ -269,29 +261,30 @@ impl GraphBuilder {
 				// Unified single-pass AST extraction: imports, exports, call
 				// sites, type relations, and symbol declarations from ONE
 				// tree-sitter parse (replaces three per-file parses).
-				let (imports, exports, file_calls, file_type_rels, symbol_decls) =
-					match extract_symbols_from_file(&file_path, &language) {
-						Ok(data) => (
-							data.imports,
-							data.exports,
-							data.calls,
-							data.type_relations,
-							data.symbols,
-						),
-						Err(e) => {
-							if !self.quiet {
-								eprintln!("⚠️  AST extraction failed for {}: {}", relative_path, e);
-							}
-							// Fallback to the old heuristic if AST parsing fails
-							let (imports, exports) =
-								RelationshipDiscovery::extract_imports_exports_efficient(
-									&symbols,
-									&language,
-									&relative_path,
-								);
-							(imports, exports, Vec::new(), Vec::new(), Vec::new())
+				let ast_data = match extract_symbols_from_file(&file_path, &language) {
+					Ok(data) => data,
+					Err(e) => {
+						if !self.quiet {
+							eprintln!("⚠️  AST extraction failed for {}: {}", relative_path, e);
 						}
-					};
+						// Fallback to the old heuristic if AST parsing fails
+						let (imports, exports) =
+							RelationshipDiscovery::extract_imports_exports_efficient(
+								&symbols,
+								&language,
+								&relative_path,
+							);
+						FileAstData {
+							imports,
+							exports,
+							..FileAstData::default()
+						}
+					}
+				};
+				let imports = ast_data.imports.clone();
+				let exports = ast_data.exports.clone();
+				let file_calls = ast_data.calls.clone();
+				let file_type_rels = ast_data.type_relations.clone();
 
 				if !self.quiet && (!imports.is_empty() || !exports.is_empty()) {
 					eprintln!(
@@ -328,20 +321,22 @@ impl GraphBuilder {
 						let in_range = |line: u32| line >= func.start_line && line <= func.end_line;
 						func.extends = file_type_rels
 							.iter()
-							.filter(|(line, k, _)| {
-								*k == TypeRelationKind::Extends && in_range(*line)
+							.filter(|relation| {
+								relation.kind == TypeRelationKind::Extends
+									&& in_range(relation.line)
 							})
-							.map(|(_, _, name)| name.clone())
+							.map(|relation| relation.target_name.clone())
 							.collect();
 						func.extends.sort();
 						func.extends.dedup();
 
 						func.implements = file_type_rels
 							.iter()
-							.filter(|(line, k, _)| {
-								*k == TypeRelationKind::Implements && in_range(*line)
+							.filter(|relation| {
+								relation.kind == TypeRelationKind::Implements
+									&& in_range(relation.line)
 							})
-							.map(|(_, _, name)| name.clone())
+							.map(|relation| relation.target_name.clone())
 							.collect();
 						func.implements.sort();
 						func.implements.dedup();
@@ -353,16 +348,16 @@ impl GraphBuilder {
 
 					let mut extends: Vec<String> = file_type_rels
 						.iter()
-						.filter(|(_, k, _)| *k == TypeRelationKind::Extends)
-						.map(|(_, _, name)| name.clone())
+						.filter(|relation| relation.kind == TypeRelationKind::Extends)
+						.map(|relation| relation.target_name.clone())
 						.collect();
 					extends.sort();
 					extends.dedup();
 
 					let mut implements: Vec<String> = file_type_rels
 						.into_iter()
-						.filter(|(_, k, _)| *k == TypeRelationKind::Implements)
-						.map(|(_, _, name)| name)
+						.filter(|relation| relation.kind == TypeRelationKind::Implements)
+						.map(|relation| relation.target_name)
 						.collect();
 					implements.sort();
 					implements.dedup();
@@ -544,45 +539,6 @@ impl GraphBuilder {
 				new_nodes.push(node);
 				processed_count += 1;
 
-				// Symbol-tier nodes: one per declared symbol (graphrag.symbols).
-				if self.config.graphrag.symbols.enabled {
-					for decl in &symbol_decls {
-						let symbol_id = format!("{}::{}", relative_path, decl.name);
-						let description =
-							format!("{} {} in {}", decl.kind, decl.name, relative_path);
-						symbol_embed_texts
-							.push(format!("{}\n{}", description, decl.source_snippet));
-						symbol_nodes.push(CodeNode {
-							id: symbol_id.clone(),
-							name: decl.name.clone(),
-							kind: decl.kind.clone(),
-							path: relative_path.clone(),
-							description,
-							symbols: vec![decl.name.clone()],
-							hash: calculate_unique_content_hash(&decl.source_snippet, &symbol_id),
-							embedding: Vec::new(),
-							imports: Vec::new(),
-							exports: Vec::new(),
-							functions: Vec::new(),
-							size_lines: decl.end_line.saturating_sub(decl.start_line) + 1,
-							language: language.clone(),
-						});
-						processed_node_ids.insert(symbol_id.clone());
-						symbol_contains_edges.push(CodeRelationship {
-							source: relative_path.clone(),
-							target: symbol_id,
-							relation_type: RelationType::Contains,
-							description: format!(
-								"{} contains {} {}",
-								relative_path, decl.kind, decl.name
-							),
-							confidence: 1.0,
-							weight: RelationType::Contains.importance_weight(),
-							provenance: Provenance::Extracted,
-						});
-					}
-				}
-
 				// Update state if provided
 				if let Some(ref state) = state {
 					let mut state_guard = state.write();
@@ -738,46 +694,6 @@ impl GraphBuilder {
 			.await?;
 		}
 
-		// Persist symbol-tier nodes before relationship discovery so symbol
-		// edges can resolve against them.
-		if !symbol_nodes.is_empty() {
-			if self.config.graphrag.symbols.embed {
-				let embeddings = crate::embedding::generate_embeddings_batch(
-					&symbol_embed_texts,
-					false, // Text embeddings for GraphRAG symbol descriptions
-					&self.config,
-					crate::embedding::types::InputType::Document,
-				)
-				.await?;
-				for (node, embedding) in symbol_nodes.iter_mut().zip(embeddings.iter()) {
-					node.embedding = embedding.clone();
-				}
-			} else {
-				// Zero vectors satisfy the storage dimension check; cosine
-				// similarity with a zero vector is 0.0, so search matches
-				// these nodes by name/kind only.
-				let dim = self.store.get_code_vector_dim();
-				for node in &mut symbol_nodes {
-					node.embedding = vec![0.0; dim];
-				}
-			}
-
-			{
-				let mut graph = self.graph.write().await;
-				for node in &symbol_nodes {
-					graph.nodes.insert(node.id.clone(), node.clone());
-				}
-				graph
-					.relationships
-					.extend(symbol_contains_edges.iter().cloned());
-			}
-
-			let db_ops = DatabaseOperations::new(&self.store);
-			db_ops
-				.save_graph_incremental(&symbol_nodes, &symbol_contains_edges)
-				.await?;
-		}
-
 		// Discover relationships incrementally for processed nodes
 		// This ensures relationships are stored during processing, not just at the end
 		if processed_count > 0 {
@@ -817,6 +733,7 @@ impl GraphBuilder {
 				let mut selected = graph
 					.nodes
 					.values()
+					.filter(|node| !node.is_symbol_node())
 					.filter(|node| processed_node_ids.contains(&node.id))
 					.map(|node| node.without_embedding())
 					.collect::<Vec<CodeNode>>();
@@ -844,6 +761,7 @@ impl GraphBuilder {
 				let importers: Vec<CodeNode> = graph
 					.nodes
 					.values()
+					.filter(|node| !node.is_symbol_node())
 					.filter(|node| !processed_node_ids.contains(&node.id))
 					.filter(|node| node.imports.iter().any(|i| imports_new(i)))
 					.map(|node| node.without_embedding())
@@ -865,23 +783,6 @@ impl GraphBuilder {
 					self.discover_relationships_efficiently(&all_processed_nodes)
 						.await?
 				};
-
-				// Symbol→symbol edges (calls / extends / implements) resolved to
-				// symbol-tier nodes — pure tree-sitter + name resolution, no LLM.
-				if self.config.graphrag.symbols.enabled {
-					let all_nodes = {
-						let graph = self.graph.read().await;
-						graph
-							.nodes
-							.values()
-							.map(|n| n.without_embedding())
-							.collect::<Vec<CodeNode>>()
-					};
-					all_relationships.extend(discover_symbol_relationships(
-						&all_processed_nodes,
-						&all_nodes,
-					));
-				}
 
 				// Storage is append-only: keep only edges that touch a node from
 				// this run, or the importer sources added above would re-append
@@ -972,6 +873,7 @@ impl GraphBuilder {
 				graph
 					.nodes
 					.values()
+					.filter(|node| !node.is_symbol_node())
 					.map(|n| n.without_embedding())
 					.collect::<Vec<CodeNode>>()
 			};
@@ -995,6 +897,7 @@ impl GraphBuilder {
 			graph
 				.nodes
 				.values()
+				.filter(|node| !node.is_symbol_node())
 				.map(|n| n.without_embedding())
 				.collect::<Vec<CodeNode>>()
 		};

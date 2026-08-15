@@ -227,9 +227,8 @@ impl CodeNode {
 		}
 	}
 
-	/// True for symbol-tier nodes (`{file_path}::{symbol_name}`), created by
-	/// `graphrag.symbols`. File node ids are relative paths and never contain
-	/// `::` in practice.
+	/// True for lightweight symbol-tier nodes (`{file_path}::{symbol_name}`).
+	/// File node ids are relative paths and never contain `::` in practice.
 	pub fn is_symbol_node(&self) -> bool {
 		self.id.contains("::")
 	}

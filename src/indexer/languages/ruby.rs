@@ -52,12 +52,18 @@ impl Language for Ruby {
 					"constant" => Some(child),
 					"scope_resolution" => {
 						let mut inner = child.walk();
-						child.children(&mut inner).filter(|c| c.kind() == "constant").last()
+						child
+							.children(&mut inner)
+							.filter(|c| c.kind() == "constant")
+							.last()
 					}
 					_ => None,
 				};
 				if let Some(name_node) = name_node {
-					return name_node.utf8_text(contents.as_bytes()).ok().map(String::from);
+					return name_node
+						.utf8_text(contents.as_bytes())
+						.ok()
+						.map(String::from);
 				}
 			}
 			return None;
