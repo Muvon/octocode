@@ -307,6 +307,7 @@ impl AIEnhancements {
 					description: ai_rel.description,
 					confidence: ai_rel.confidence,
 					weight: 0.9, // High weight for AI-discovered architectural patterns
+					provenance: crate::indexer::graphrag::types::Provenance::Inferred,
 				})
 				.collect();
 			return Ok(relationships);

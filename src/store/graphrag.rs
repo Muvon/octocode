@@ -993,6 +993,11 @@ impl<'a> GraphRagOperations<'a> {
 				.downcast_ref::<arrow::array::Float32Array>()
 				.ok_or_else(|| anyhow::anyhow!("Invalid weight column type"))?;
 
+			// Absent in tables written before the provenance column existed.
+			let provenance_array = batch
+				.column_by_name("provenance")
+				.and_then(|c| c.as_any().downcast_ref::<StringArray>());
+
 			// Convert to CodeRelationship objects
 			for i in 0..batch.num_rows() {
 				let relationship = crate::indexer::graphrag::types::CodeRelationship {
@@ -1005,6 +1010,14 @@ impl<'a> GraphRagOperations<'a> {
 					description: desc_array.value(i).to_string(),
 					confidence: conf_array.value(i),
 					weight: weight_array.value(i),
+					provenance: provenance_array.map_or(
+						crate::indexer::graphrag::types::Provenance::Extracted,
+						|arr| {
+							crate::indexer::graphrag::types::Provenance::parse_or_default(
+								arr.value(i),
+							)
+						},
+					),
 				};
 				relationships.push(relationship);
 			}
@@ -1082,6 +1095,11 @@ impl<'a> GraphRagOperations<'a> {
 				.downcast_ref::<arrow::array::Float32Array>()
 				.ok_or_else(|| anyhow::anyhow!("Invalid weight column type"))?;
 
+			// Absent in tables written before the provenance column existed.
+			let provenance_array = batch
+				.column_by_name("provenance")
+				.and_then(|c| c.as_any().downcast_ref::<StringArray>());
+
 			for i in 0..batch.num_rows() {
 				let relationship = crate::indexer::graphrag::types::CodeRelationship {
 					source: source_array.value(i).to_string(),
@@ -1093,6 +1111,14 @@ impl<'a> GraphRagOperations<'a> {
 					description: desc_array.value(i).to_string(),
 					confidence: conf_array.value(i),
 					weight: weight_array.value(i),
+					provenance: provenance_array.map_or(
+						crate::indexer::graphrag::types::Provenance::Extracted,
+						|arr| {
+							crate::indexer::graphrag::types::Provenance::parse_or_default(
+								arr.value(i),
+							)
+						},
+					),
 				};
 				relationships.push(relationship);
 			}
@@ -1329,6 +1355,11 @@ impl<'a> GraphRagOperations<'a> {
 				.downcast_ref::<arrow::array::Float32Array>()
 				.ok_or_else(|| anyhow::anyhow!("Invalid weight column type"))?;
 
+			// Absent in tables written before the provenance column existed.
+			let provenance_array = batch
+				.column_by_name("provenance")
+				.and_then(|c| c.as_any().downcast_ref::<StringArray>());
+
 			for i in 0..batch.num_rows() {
 				let relationship = crate::indexer::graphrag::types::CodeRelationship {
 					source: source_array.value(i).to_string(),
@@ -1340,6 +1371,14 @@ impl<'a> GraphRagOperations<'a> {
 					description: desc_array.value(i).to_string(),
 					confidence: conf_array.value(i),
 					weight: weight_array.value(i),
+					provenance: provenance_array.map_or(
+						crate::indexer::graphrag::types::Provenance::Extracted,
+						|arr| {
+							crate::indexer::graphrag::types::Provenance::parse_or_default(
+								arr.value(i),
+							)
+						},
+					),
 				};
 				relationships.push(relationship);
 			}

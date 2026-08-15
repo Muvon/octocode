@@ -78,6 +78,7 @@ impl RelationshipDiscovery {
 								description: format!("Imports {} from {}", import, target_id),
 								confidence: 0.9,
 								weight: 1.0,
+								provenance: crate::indexer::graphrag::types::Provenance::Inferred,
 							});
 						}
 					}
@@ -104,6 +105,7 @@ impl RelationshipDiscovery {
 						description: "Hierarchical module relationship".to_string(),
 						confidence: 0.8,
 						weight: 0.7,
+						provenance: crate::indexer::graphrag::types::Provenance::Extracted,
 					});
 				}
 			}
@@ -131,6 +133,8 @@ impl RelationshipDiscovery {
 									description: format!("{} calls {}", function.name, callee),
 									confidence: 0.85,
 									weight: 0.8,
+									provenance:
+										crate::indexer::graphrag::types::Provenance::Inferred,
 								});
 							}
 						}
@@ -151,6 +155,8 @@ impl RelationshipDiscovery {
 									description: format!("{} extends {}", function.name, extended),
 									confidence: 0.9,
 									weight: 1.0,
+									provenance:
+										crate::indexer::graphrag::types::Provenance::Inferred,
 								});
 							}
 						}
@@ -174,6 +180,8 @@ impl RelationshipDiscovery {
 									),
 									confidence: 0.9,
 									weight: 1.0,
+									provenance:
+										crate::indexer::graphrag::types::Provenance::Inferred,
 								});
 							}
 						}
@@ -327,6 +335,7 @@ impl RelationshipDiscovery {
 							),
 							confidence: 0.95,
 							weight: 1.0,
+							provenance: crate::indexer::graphrag::types::Provenance::Extracted,
 						});
 
 						// Code exports may imply a reverse edge. Markdown headings are
@@ -345,6 +354,8 @@ impl RelationshipDiscovery {
 										),
 										confidence: 0.9,
 										weight: 0.8,
+										provenance:
+											crate::indexer::graphrag::types::Provenance::Inferred,
 									});
 								}
 							}
@@ -379,6 +390,7 @@ impl RelationshipDiscovery {
 					description: "Rust module declaration".to_string(),
 					confidence: 0.8,
 					weight: 0.8,
+					provenance: crate::indexer::graphrag::types::Provenance::Extracted,
 				});
 			}
 
@@ -396,6 +408,7 @@ impl RelationshipDiscovery {
 						description: "Rust crate root relationship".to_string(),
 						confidence: 0.7,
 						weight: 0.6,
+						provenance: crate::indexer::graphrag::types::Provenance::Extracted,
 					});
 				}
 			}
@@ -429,6 +442,7 @@ impl RelationshipDiscovery {
 						description: "JavaScript index module relationship".to_string(),
 						confidence: 0.7,
 						weight: 0.6,
+						provenance: crate::indexer::graphrag::types::Provenance::Extracted,
 					});
 				}
 			}
@@ -460,6 +474,7 @@ impl RelationshipDiscovery {
 						description: "Python package initialization".to_string(),
 						confidence: 0.8,
 						weight: 0.7,
+						provenance: crate::indexer::graphrag::types::Provenance::Extracted,
 					});
 				}
 			}
@@ -488,6 +503,7 @@ impl RelationshipDiscovery {
 					description: format!("Go package relationship: {}", source_package),
 					confidence: 0.8,
 					weight: 0.7,
+					provenance: crate::indexer::graphrag::types::Provenance::Extracted,
 				});
 			}
 		}
@@ -516,6 +532,7 @@ impl RelationshipDiscovery {
 					description: format!("PHP namespace relationship: {}", source_namespace),
 					confidence: 0.8,
 					weight: 0.7,
+					provenance: crate::indexer::graphrag::types::Provenance::Extracted,
 				});
 			}
 		}
