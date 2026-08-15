@@ -547,16 +547,26 @@ impl McpServer {
 		Parameters(params): Parameters<StructuralSearchParams>,
 	) -> Result<String, String> {
 		// Exactly one query mode.
-		let modes = [
-			params.pattern.is_some(),
-			params.symbol.is_some(),
-			params.references.is_some(),
+		let provided: Vec<&str> = [
+			("pattern", params.pattern.is_some()),
+			("symbol", params.symbol.is_some()),
+			("references", params.references.is_some()),
 		]
 		.iter()
-		.filter(|m| **m)
-		.count();
-		if modes != 1 {
-			return Err("Provide exactly one of `pattern`, `symbol`, or `references`.".to_string());
+		.filter(|(_, set)| *set)
+		.map(|(name, _)| *name)
+		.collect();
+		if provided.len() != 1 {
+			return Err(format!(
+				"Provide exactly one of `pattern`, `symbol`, or `references` (got: {}). \
+				 Use `symbol` to find where a name is defined, `references` to find its usages, \
+				 `pattern` for an AST/code shape — then retry with only that one field.",
+				if provided.is_empty() {
+					"none".to_string()
+				} else {
+					provided.join(", ")
+				}
+			));
 		}
 		if params.rewrite.is_some() && params.pattern.is_none() {
 			return Err("`rewrite` requires `pattern`.".to_string());

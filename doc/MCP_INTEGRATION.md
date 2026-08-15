@@ -227,13 +227,17 @@ Advanced relationship-aware GraphRAG operations for code analysis. Supports mult
 Search or rewrite code by AST structure using ast-grep pattern syntax. Complements `semantic_search`: use this for structural/syntactic patterns, `semantic_search` for meaning-based queries.
 
 **Parameters:**
-- `pattern` (string, required) - AST pattern to search for (e.g. `$FUNC.unwrap()`, `if let Some($X) = $Y { $$$ }`)
+- `pattern` (string) - AST pattern to search for (e.g. `$FUNC.unwrap()`, `if let Some($X) = $Y { $$$ }`)
+- `symbol` (string) - Find symbol DEFINITIONS by name, `*` wildcards supported (e.g. `handle_*`)
+- `references` (string) - Find symbol USAGES by name, `*` wildcards supported
 - `language` (string, required) - Language to search: rust, javascript, typescript, python, go, java, cpp, php, ruby, lua, bash, css, json
 - `paths` (array, optional) - File path substrings to filter results
 - `context` (integer, optional) - Number of context lines around matches (default: 0)
 - `max_results` (integer, optional) - Maximum number of matches to return (default: 50)
 - `rewrite` (string, optional) - Rewrite template with metavariable substitution (e.g. `$VAR.expect("reason")`)
 - `update_all` (boolean, optional) - When true, apply rewrites to files in-place. When false/absent, returns a diff preview
+
+Provide **exactly one** of `pattern`, `symbol`, or `references` — supplying two is rejected.
 
 **Search Examples:**
 
