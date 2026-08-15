@@ -91,11 +91,38 @@ Focus on:
 
 Avoid listing specific functions/classes. Instead, describe the file's architectural significance and how it fits into the larger system design.";
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GraphRAGSymbolsConfig {
+	/// Extract one graph node per declared symbol (function, class, struct,
+	/// trait, ...) via tree-sitter — no LLM required.
+	#[serde(default = "default_graphrag_symbols_enabled")]
+	pub enabled: bool,
+	/// Generate vector embeddings for symbol nodes. When false, symbol nodes
+	/// are stored with zero vectors and match by name/kind only.
+	#[serde(default)]
+	pub embed: bool,
+}
+
+impl Default for GraphRAGSymbolsConfig {
+	fn default() -> Self {
+		Self {
+			enabled: true,
+			embed: false,
+		}
+	}
+}
+
+fn default_graphrag_symbols_enabled() -> bool {
+	true
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct GraphRAGConfig {
 	pub enabled: bool,
 	pub use_llm: bool,
 	pub llm: LLMConfig,
+	#[serde(default)]
+	pub symbols: GraphRAGSymbolsConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -690,7 +717,8 @@ mod tests {
 		assert_eq!(config.search.hybrid.default_vector_weight, 0.73);
 		assert_eq!(config.search.hybrid.rrf_k, 60.0);
 		assert!(!config.search.reasoning.enabled);
-		let [backup] = siblings(&config_path, "bak").as_slice() else {
+		let backups = siblings(&config_path, "bak");
+		let [backup] = backups.as_slice() else {
 			panic!("migration should leave exactly one backup");
 		};
 		assert_eq!(fs::read_to_string(backup).unwrap(), original);
