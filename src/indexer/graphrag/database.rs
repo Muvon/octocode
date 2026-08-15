@@ -600,7 +600,7 @@ impl<'a> DatabaseOperations<'a> {
 			Field::new("description", DataType::Utf8, false),
 			Field::new("confidence", DataType::Float32, false),
 			Field::new("weight", DataType::Float32, false),
-			// Nullable so appending to pre-provenance tables auto-evolves the schema.
+			// Nullable so pre-provenance rows can be upgraded with null values.
 			Field::new("provenance", DataType::Utf8, true),
 		]));
 

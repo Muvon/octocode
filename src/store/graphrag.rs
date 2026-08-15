@@ -26,6 +26,7 @@ use crate::store::{sql::escape_single_quotes, table_ops::TableOperations, tables
 use futures::TryStreamExt;
 use lancedb::{
 	query::{ExecutableQuery, QueryBase},
+	table::NewColumnTransform,
 	Connection, DistanceType, Table,
 };
 use tokio::sync::RwLock as AsyncRwLock;
@@ -562,6 +563,30 @@ impl<'a> GraphRagOperations<'a> {
 
 	/// Store graph relationships in the database
 	pub async fn store_graph_relationships(&self, rel_batch: RecordBatch) -> Result<()> {
+		// LanceDB append requires matching schemas; it does not add nullable
+		// columns automatically. Upgrade pre-provenance derived graph tables in
+		// place before appending the new batch.
+		if self
+			.table_ops
+			.table_exists(tables::GRAPHRAG_RELATIONSHIPS)
+			.await?
+		{
+			let table = self.get_table(tables::GRAPHRAG_RELATIONSHIPS).await?;
+			let schema = table.schema().await?;
+			if schema.field_with_name("provenance").is_err() {
+				table
+					.add_columns(
+						NewColumnTransform::AllNulls(Arc::new(Schema::new(vec![Field::new(
+							"provenance",
+							DataType::Utf8,
+							true,
+						)]))),
+						None,
+					)
+					.await?;
+			}
+		}
+
 		// Store in database first
 		self.table_ops
 			.store_batch(tables::GRAPHRAG_RELATIONSHIPS, rel_batch.clone())
@@ -872,6 +897,7 @@ impl<'a> GraphRagOperations<'a> {
 				Field::new("description", DataType::Utf8, false),
 				Field::new("confidence", DataType::Float32, false),
 				Field::new("weight", DataType::Float32, false),
+				Field::new("provenance", DataType::Utf8, true),
 			]));
 			return Ok(RecordBatch::new_empty(schema));
 		}
@@ -900,6 +926,7 @@ impl<'a> GraphRagOperations<'a> {
 				Field::new("description", DataType::Utf8, false),
 				Field::new("confidence", DataType::Float32, false),
 				Field::new("weight", DataType::Float32, false),
+				Field::new("provenance", DataType::Utf8, true),
 			]));
 			Ok(RecordBatch::new_empty(schema))
 		} else if all_batches.len() == 1 {

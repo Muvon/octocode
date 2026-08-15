@@ -286,6 +286,15 @@ impl Language for Rust {
 		out
 	}
 
+	fn extract_type_relation_source(&self, node: Node, contents: &str) -> Option<String> {
+		if node.kind() == "impl_item" {
+			let type_node = node.child_by_field_name("type")?;
+			let text = type_node.utf8_text(contents.as_bytes()).ok()?;
+			return super::simple_type_name(text);
+		}
+		self.extract_declaration_name(node, contents)
+	}
+
 	fn resolve_import(
 		&self,
 		import_path: &str,

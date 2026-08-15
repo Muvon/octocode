@@ -123,6 +123,13 @@ pub trait Language: Send + Sync {
 		Vec::new()
 	}
 
+	/// Name of the declaration that owns type relationships emitted for this
+	/// node. Most languages put the declaration name directly on the same node;
+	/// languages with separate implementation blocks can override this.
+	fn extract_type_relation_source(&self, node: Node, contents: &str) -> Option<String> {
+		self.extract_declaration_name(node, contents)
+	}
+
 	/// Declared name of the symbol at this node, for symbol-level GraphRAG
 	/// nodes. Unlike `extract_symbols` (which enriches and sorts), this must
 	/// return exactly the name the declaration introduces, or None when the

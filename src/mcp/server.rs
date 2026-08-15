@@ -166,13 +166,13 @@ where
 
 #[derive(Debug, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct GraphRagParams {
-	/// 'search' (semantic node search), 'get-node' (node details), 'get-relationships' (node connections), 'find-path' (path between two nodes), 'overview' (graph stats)
+	/// 'search' (symbol/file lookup), 'get-node' (node details), 'get-relationships' (node connections), 'find-path' (path between two nodes), 'overview' (graph stats)
 	#[schemars(extend("enum" = ["search", "get-node", "get-relationships", "find-path", "overview"]))]
 	pub operation: String,
-	/// Search query for 'search' operation
+	/// Symbol, file, or architectural query for 'search'. Uses deterministic lexical lookup when GraphRAG is disabled and semantic lookup when enabled.
 	#[serde(default, skip_serializing_if = "Option::is_none")]
 	pub query: Option<String>,
-	/// Node ID for 'get-node'/'get-relationships' (format: 'path/to/file' or 'path/to/file/symbol')
+	/// Node ID for 'get-node'/'get-relationships' (format: 'path/to/file' or 'path/to/file::symbol')
 	#[serde(default, skip_serializing_if = "Option::is_none")]
 	pub node_id: Option<String>,
 	/// Source node ID for 'find-path'
@@ -405,7 +405,7 @@ pub struct McpServer {
 	/// so multiple per-repo servers can run concurrently under `--multi`.
 	working_directory: std::path::PathBuf,
 	semantic_code: SemanticCodeProvider,
-	graphrag: Option<GraphRagProvider>,
+	graphrag: GraphRagProvider,
 	lsp: Option<Arc<Mutex<crate::mcp::lsp::LspProvider>>>,
 	/// Separate process handle for deterministic shutdown without waiting for
 	/// the provider mutex, which initialization may hold for several minutes.
@@ -467,7 +467,7 @@ impl McpServer {
 	}
 
 	#[tool(
-		description = "Knowledge graph operations over the indexed codebase. Use for architectural queries: component relationships, dependency chains, data flows. For simple code lookup use semantic_search instead."
+		description = "Always-available code graph operations for symbols, calls, imports, inheritance, neighbors, and dependency paths. Builds a fast in-memory Tree-sitter graph directly from current source; when GraphRAG is enabled, persisted enrichment is overlaid on that live graph. Use structural_search for syntax/occurrence matching and semantic_search for conceptual lookup."
 	)]
 	async fn graphrag(
 		&self,
@@ -475,21 +475,14 @@ impl McpServer {
 	) -> Result<String, String> {
 		debug!("Executing graphrag with operation: {}", params.operation);
 
-		match &self.graphrag {
-			Some(provider) => {
-				let arguments = match serde_json::to_value(&params) {
-					Ok(v) => v,
-					Err(e) => return Err(format!("Failed to serialize params: {}", e)),
-				};
+		let arguments = match serde_json::to_value(&params) {
+			Ok(v) => v,
+			Err(e) => return Err(format!("Failed to serialize params: {}", e)),
+		};
 
-				match provider.execute(&arguments).await {
-					Ok(result) => Ok(result),
-					Err(e) => Err(e.to_string()),
-				}
-			}
-			None => Err(
-				"GraphRAG is not enabled in the current configuration. Please enable GraphRAG in octocode.toml to use relationship-aware search.".to_string(),
-			),
+		match self.graphrag.execute(&arguments).await {
+			Ok(result) => Ok(result),
+			Err(e) => Err(e.to_string()),
 		}
 	}
 
@@ -889,16 +882,17 @@ impl ServerHandler for McpServer {
 		let capabilities = ServerCapabilities::builder().enable_tools().build();
 
 		let instructions = if self.indexer_enabled {
-			"This server provides modular AI tools: semantic code search, view signatures, and GraphRAG (if available). Use 'semantic_search' for code/documentation searches and 'graphrag' (if enabled) for relationship queries."
+			"This server provides semantic search, structural search, signatures, and an always-available live Tree-sitter graph. Use 'graphrag' for symbol relationships and dependency paths; persisted enrichment is overlaid when enabled."
 		} else {
-			"NOTE: in-process indexing is disabled — Octocode is serving an EXISTING index read-only, so the semantic index may be empty or stale. Prefer 'structural_search' (find known symbols, patterns, and usages) and 'view_signatures' (map a file's declarations before reading it), plus your own grep, to navigate the code. Use 'semantic_search' only for concept/behavior lookups where you don't know the symbol name — it may return nothing if the index is empty."
+			"NOTE: in-process indexing is disabled, so the semantic index may be empty or stale. 'structural_search', 'view_signatures', and 'graphrag' still read current source directly; use 'graphrag' for symbol relationships and paths. Use 'semantic_search' only for conceptual lookups where you do not know the symbol name."
 		};
 
 		ServerInfo::new(capabilities)
 			.with_protocol_version(ProtocolVersion::V_2026_07_28)
 			.with_server_info(
-				Implementation::new("octocode-mcp", env!("CARGO_PKG_VERSION"))
-					.with_description("Semantic code search server with vector embeddings and optional GraphRAG support"),
+				Implementation::new("octocode-mcp", env!("CARGO_PKG_VERSION")).with_description(
+					"Semantic and structural code intelligence with an always-available code graph",
+				),
 			)
 			.with_instructions(instructions)
 	}
@@ -992,10 +986,6 @@ impl McpServer {
 			tool_router.remove_route(name);
 		}
 
-		if graphrag.is_none() {
-			tool_router.remove_route("graphrag");
-		}
-
 		Self {
 			working_directory,
 			semantic_code,
@@ -1012,6 +1002,12 @@ impl McpServer {
 	/// these and injects a `project` argument before serving them to clients.
 	pub(crate) fn list_tool_defs(&self) -> Vec<Tool> {
 		self.tool_router.list_all()
+	}
+
+	pub(crate) fn runtime_graph_cache(
+		&self,
+	) -> crate::indexer::graphrag::runtime::RuntimeGraphCache {
+		self.graphrag.runtime_cache()
 	}
 
 	/// Dispatch a tool call against this server's router. Used by the
@@ -1033,6 +1029,7 @@ impl McpServer {
 		working_directory: std::path::PathBuf,
 		no_git: bool,
 		debug: bool,
+		runtime_graph_cache: crate::indexer::graphrag::runtime::RuntimeGraphCache,
 	) -> Result<BackgroundServices> {
 		let db_path = crate::storage::get_project_database_path(&working_directory)?;
 		crate::storage::ensure_project_storage_exists(&working_directory)?;
@@ -1058,7 +1055,16 @@ impl McpServer {
 			});
 		}
 
-		start_background_services(config, store, working_directory, no_git, debug, None).await
+		start_background_services(
+			config,
+			store,
+			working_directory,
+			no_git,
+			debug,
+			None,
+			runtime_graph_cache,
+		)
+		.await
 	}
 
 	/// Create a new MCP server instance.
@@ -1153,11 +1159,6 @@ impl McpServer {
 			}
 		}
 
-		// Remove GraphRAG tool if not configured
-		if graphrag.is_none() {
-			tool_router.remove_route("graphrag");
-		}
-
 		let server = Self {
 			working_directory: working_directory.clone(),
 			semantic_code,
@@ -1178,6 +1179,7 @@ impl McpServer {
 				no_git,
 				debug_mode,
 				server.lsp.clone(),
+				server.graphrag.runtime_cache(),
 			)
 			.await
 			{
@@ -1321,6 +1323,7 @@ pub(crate) async fn start_background_services(
 	no_git: bool,
 	debug: bool,
 	lsp: Option<Arc<Mutex<crate::mcp::lsp::LspProvider>>>,
+	runtime_graph_cache: crate::indexer::graphrag::runtime::RuntimeGraphCache,
 ) -> Result<BackgroundServices> {
 	let (file_tx, file_rx) = mpsc::channel(MCP_MAX_PENDING_EVENTS);
 	let (index_tx, index_rx) = mpsc::channel(10);
@@ -1337,6 +1340,7 @@ pub(crate) async fn start_background_services(
 	let indexing_in_progress = Arc::new(AtomicBool::new(false));
 	let indexing_flag = indexing_in_progress.clone();
 	let debug_mode = debug;
+	let graph_cache = runtime_graph_cache;
 	let index_handle = tokio::spawn(async move {
 		let mut file_rx = file_rx;
 		let mut last_event_time = None::<Instant>;
@@ -1349,6 +1353,7 @@ pub(crate) async fn start_background_services(
 				event_result = file_rx.recv() => {
 					match event_result {
 						Some(_) => {
+							graph_cache.invalidate();
 							pending_events += 1;
 							last_event_time = Some(Instant::now());
 							log_watcher_event("file_change", None, pending_events as usize);

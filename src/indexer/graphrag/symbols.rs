@@ -12,18 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Symbol-tier GraphRAG: one graph node per declared symbol (function, class,
-// struct, trait, ...), derived purely from tree-sitter — zero LLM required.
+// Live structural graph extraction: one node per declared symbol (function,
+// class, struct, trait, ...), derived purely from tree-sitter with zero LLM.
 // Also hosts the unified single-pass AST extractor that replaced the three
 // separate per-file parses (imports/exports, call sites, type relations).
 
 use crate::indexer::graphrag::types::{CodeNode, CodeRelationship, Provenance, RelationType};
 use crate::indexer::languages::{self, Language, TypeRelationKind};
 use anyhow::{Context, Result};
-use std::collections::{HashMap, HashSet};
-
-/// Cap on the per-symbol source snippet kept for LLM description batches.
-const MAX_SYMBOL_SNIPPET_CHARS: usize = 500;
+use std::collections::HashMap;
 
 /// A declared symbol extracted from one tree-sitter node.
 #[derive(Debug, Clone)]
@@ -36,21 +33,73 @@ pub struct SymbolDecl {
 	pub start_line: u32,
 	/// 0-based end line of the declaration node.
 	pub end_line: u32,
-	/// Truncated source text of the declaration (for LLM description batches).
-	pub source_snippet: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct TypeRelationDecl {
+	pub line: u32,
+	pub source_name: Option<String>,
+	pub kind: TypeRelationKind,
+	pub target_name: String,
 }
 
 /// Everything the graph builder needs from ONE tree-sitter parse of a file.
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct FileAstData {
 	pub imports: Vec<String>,
 	pub exports: Vec<String>,
 	/// (0-based line, callee name) pairs.
 	pub calls: Vec<(u32, String)>,
-	/// (0-based line, kind, target name) tuples.
-	pub type_relations: Vec<(u32, TypeRelationKind, String)>,
+	pub type_relations: Vec<TypeRelationDecl>,
 	/// Declared symbols with line ranges, in source order.
 	pub symbols: Vec<SymbolDecl>,
+}
+
+/// AST-derived relationship input for one source file. Source ranges stay
+/// available until edge discovery so calls can be attributed to their owning
+/// declaration without LLM assistance or a second heuristic metadata format.
+#[derive(Debug, Clone)]
+pub struct SymbolFileData {
+	pub path: String,
+	pub language: String,
+	pub imports: Vec<String>,
+	pub calls: Vec<(u32, String)>,
+	pub type_relations: Vec<TypeRelationDecl>,
+	pub symbols: Vec<SymbolDecl>,
+}
+
+impl SymbolFileData {
+	pub fn from_ast(path: String, language: String, data: &FileAstData) -> Self {
+		Self {
+			path,
+			language,
+			imports: data.imports.clone(),
+			calls: data.calls.clone(),
+			type_relations: data.type_relations.clone(),
+			symbols: data.symbols.clone(),
+		}
+	}
+}
+
+/// Generate symbol ids for one file. The common case keeps the concise
+/// `{path}::{name}` form; only same-file name collisions receive a source-line
+/// suffix so methods with the same name never overwrite each other.
+pub fn symbol_node_ids(path: &str, symbols: &[SymbolDecl]) -> Vec<String> {
+	let mut counts: HashMap<&str, usize> = HashMap::new();
+	for symbol in symbols {
+		*counts.entry(symbol.name.as_str()).or_default() += 1;
+	}
+
+	symbols
+		.iter()
+		.map(|symbol| {
+			if counts.get(symbol.name.as_str()).copied().unwrap_or(0) > 1 {
+				format!("{}::{}@{}", path, symbol.name, symbol.start_line + 1)
+			} else {
+				format!("{}::{}", path, symbol.name)
+			}
+		})
+		.collect()
 }
 
 /// Map a tree-sitter node kind to a coarse symbol kind for the `kind` column.
@@ -107,13 +156,11 @@ pub fn extract_symbols_from_file(file_path: &str, language: &str) -> Result<File
 
 	let symbol_kinds = lang_impl.get_symbol_kinds();
 	let mut data = FileAstData::default();
-	let mut seen_names = HashSet::new();
 	walk_ast(
 		tree.root_node(),
 		&contents,
 		lang_impl.as_ref(),
 		&symbol_kinds,
-		&mut seen_names,
 		&mut data,
 	);
 	Ok(data)
@@ -127,7 +174,6 @@ fn walk_ast(
 	contents: &str,
 	lang_impl: &dyn Language,
 	symbol_kinds: &[&str],
-	seen_names: &mut HashSet<String>,
 	data: &mut FileAstData,
 ) {
 	let (imports, exports) = lang_impl.extract_imports_exports(node, contents);
@@ -138,30 +184,28 @@ fn walk_ast(
 	for callee in lang_impl.extract_function_calls(node, contents) {
 		data.calls.push((line, callee));
 	}
-	for (kind, target) in lang_impl.extract_type_relations(node, contents) {
-		data.type_relations.push((line, kind, target));
+	let type_relations = lang_impl.extract_type_relations(node, contents);
+	if !type_relations.is_empty() {
+		let source_name = lang_impl.extract_type_relation_source(node, contents);
+		for (kind, target_name) in type_relations {
+			data.type_relations.push(TypeRelationDecl {
+				line,
+				source_name: source_name.clone(),
+				kind,
+				target_name,
+			});
+		}
 	}
 
 	if symbol_kinds.contains(&node.kind()) {
 		if let Some(name) = lang_impl.extract_declaration_name(node, contents) {
 			let name = name.trim().to_string();
-			// First declaration of a name wins: duplicate names in one file
-			// (e.g. Rust methods on separate impl blocks) collapse into one
-			// stable symbol node id.
-			if !name.is_empty() && seen_names.insert(name.clone()) {
-				let text = node.utf8_text(contents.as_bytes()).unwrap_or_default();
-				let source_snippet = if text.len() > MAX_SYMBOL_SNIPPET_CHARS {
-					crate::utils::truncate_at_char_boundary(text, MAX_SYMBOL_SNIPPET_CHARS)
-						.to_string()
-				} else {
-					text.to_string()
-				};
+			if !name.is_empty() {
 				data.symbols.push(SymbolDecl {
 					kind: symbol_kind_from_node_kind(node.kind()).to_string(),
 					name,
 					start_line: node.start_position().row as u32,
 					end_line: node.end_position().row as u32,
-					source_snippet,
 				});
 			}
 		}
@@ -169,14 +213,7 @@ fn walk_ast(
 
 	let mut cursor = node.walk();
 	for child in node.children(&mut cursor) {
-		walk_ast(
-			child,
-			contents,
-			lang_impl,
-			symbol_kinds,
-			seen_names,
-			data,
-		);
+		walk_ast(child, contents, lang_impl, symbol_kinds, data);
 	}
 }
 
@@ -184,8 +221,8 @@ fn walk_ast(
 struct SymbolIndex<'a> {
 	/// Symbol name → symbol node ids declaring it (project-wide).
 	by_name: HashMap<&'a str, Vec<&'a str>>,
-	/// Owning file path → (symbol name → symbol node id).
-	by_file: HashMap<&'a str, HashMap<&'a str, &'a str>>,
+	/// Owning file path → (symbol name → symbol node ids).
+	by_file: HashMap<&'a str, HashMap<&'a str, Vec<&'a str>>>,
 }
 
 impl<'a> SymbolIndex<'a> {
@@ -207,7 +244,9 @@ impl<'a> SymbolIndex<'a> {
 				.by_file
 				.entry(node.path.as_str())
 				.or_default()
-				.insert(node.name.as_str(), node.id.as_str());
+				.entry(node.name.as_str())
+				.or_default()
+				.push(node.id.as_str());
 		}
 		index
 	}
@@ -217,33 +256,39 @@ impl<'a> SymbolIndex<'a> {
 	/// Returns (target id, provenance, confidence) triples.
 	fn resolve(
 		&self,
-		source_id: &str,
 		source_path: &str,
 		target_name: &str,
 		imported_files: &[String],
 		allow_ambiguous: bool,
 	) -> Vec<(&'a str, Provenance, f32)> {
 		// 1. Same file — direct AST fact.
-		if let Some(target) = self
+		if let Some(targets) = self
 			.by_file
 			.get(source_path)
 			.and_then(|m| m.get(target_name))
 		{
-			// Self-recursion produces no edge.
-			if *target != source_id {
-				return vec![(*target, Provenance::Extracted, 0.9)];
+			if targets.len() == 1 {
+				return vec![(targets[0], Provenance::Extracted, 0.9)];
+			}
+			if allow_ambiguous {
+				return targets
+					.iter()
+					.map(|id| (*id, Provenance::Ambiguous, 0.4))
+					.collect();
 			}
 			return Vec::new();
 		}
 
 		// 2. A file the source imports declares the target.
 		for imported in imported_files {
-			if let Some(target) = self
+			if let Some(targets) = self
 				.by_file
 				.get(imported.as_str())
 				.and_then(|m| m.get(target_name))
 			{
-				return vec![(*target, Provenance::Extracted, 0.85)];
+				if targets.len() == 1 {
+					return vec![(targets[0], Provenance::Extracted, 0.85)];
+				}
 			}
 		}
 
@@ -266,7 +311,7 @@ impl<'a> SymbolIndex<'a> {
 /// source files against the full graph. Pure tree-sitter + name resolution —
 /// no LLM. File-level edges are produced separately by `relationships.rs`.
 pub fn discover_symbol_relationships(
-	new_files: &[CodeNode],
+	new_files: &[SymbolFileData],
 	all_nodes: &[CodeNode],
 ) -> Vec<CodeRelationship> {
 	let index = SymbolIndex::build(all_nodes);
@@ -279,7 +324,7 @@ pub fn discover_symbol_relationships(
 	let mut relationships = Vec::new();
 
 	for source_file in new_files {
-		if source_file.language == "markdown" || source_file.is_symbol_node() {
+		if source_file.language == "markdown" {
 			continue;
 		}
 		let Some(lang_impl) = languages::get_language(&source_file.language) else {
@@ -293,66 +338,72 @@ pub fn discover_symbol_relationships(
 			.filter_map(|imp| lang_impl.resolve_import(imp, &source_file.path, &all_files))
 			.collect();
 
-		let Some(file_syms) = index.by_file.get(source_file.path.as_str()) else {
-			continue;
+		let symbol_ids = symbol_node_ids(&source_file.path, &source_file.symbols);
+		let owning_symbol = |line: u32, functions_only: bool| {
+			source_file
+				.symbols
+				.iter()
+				.enumerate()
+				.filter(|(_, symbol)| {
+					line >= symbol.start_line
+						&& line <= symbol.end_line
+						&& (!functions_only || symbol.kind == "function")
+				})
+				.min_by_key(|(_, symbol)| symbol.end_line.saturating_sub(symbol.start_line))
+				.map(|(index, symbol)| (symbol_ids[index].as_str(), symbol.name.as_str()))
 		};
 
-		for function in &source_file.functions {
-			// File-scope synthetic entries have no owning symbol node; the
-			// file-level graph already covers those references.
-			let Some(source_id) = file_syms.get(function.name.as_str()) else {
-				continue;
-			};
-
-			for callee in &function.calls {
+		for (line, callee) in &source_file.calls {
+			if let Some((source_id, source_name)) = owning_symbol(*line, true) {
 				for (target, provenance, confidence) in
-					index.resolve(source_id, &source_file.path, callee, &imported_files, false)
+					index.resolve(&source_file.path, callee, &imported_files, false)
 				{
 					relationships.push(CodeRelationship {
 						source: source_id.to_string(),
 						target: target.to_string(),
 						relation_type: RelationType::Calls,
-						description: format!("{} calls {}", function.name, callee),
+						description: format!("{} calls {}", source_name, callee),
 						confidence,
 						weight: 0.8,
 						provenance,
 					});
 				}
 			}
+		}
 
-			for extended in &function.extends {
+		for relation in &source_file.type_relations {
+			let owner = owning_symbol(relation.line, false).or_else(|| {
+				relation.source_name.as_deref().and_then(|name| {
+					source_file
+						.symbols
+						.iter()
+						.enumerate()
+						.filter(|(_, symbol)| symbol.name == name)
+						.min_by_key(|(_, symbol)| symbol.end_line.saturating_sub(symbol.start_line))
+						.map(|(index, symbol)| (symbol_ids[index].as_str(), symbol.name.as_str()))
+				})
+			});
+			if let Some((source_id, source_name)) = owner {
+				let relation_type = match relation.kind {
+					TypeRelationKind::Extends => RelationType::Extends,
+					TypeRelationKind::Implements => RelationType::Implements,
+				};
 				for (target, provenance, confidence) in index.resolve(
-					source_id,
 					&source_file.path,
-					extended,
+					&relation.target_name,
 					&imported_files,
 					true,
 				) {
 					relationships.push(CodeRelationship {
 						source: source_id.to_string(),
 						target: target.to_string(),
-						relation_type: RelationType::Extends,
-						description: format!("{} extends {}", function.name, extended),
-						confidence,
-						weight: 1.0,
-						provenance,
-					});
-				}
-			}
-
-			for implemented in &function.implements {
-				for (target, provenance, confidence) in index.resolve(
-					source_id,
-					&source_file.path,
-					implemented,
-					&imported_files,
-					true,
-				) {
-					relationships.push(CodeRelationship {
-						source: source_id.to_string(),
-						target: target.to_string(),
-						relation_type: RelationType::Implements,
-						description: format!("{} implements {}", function.name, implemented),
+						relation_type: relation_type.clone(),
+						description: format!(
+							"{} {} {}",
+							source_name,
+							relation_type.as_str(),
+							relation.target_name
+						),
 						confidence,
 						weight: 1.0,
 						provenance,
@@ -376,29 +427,16 @@ pub fn discover_symbol_relationships(
 mod tests {
 	use super::*;
 
-	fn function_info(
-		name: &str,
-		calls: &[&str],
-		extends: &[&str],
-	) -> crate::indexer::graphrag::types::FunctionInfo {
-		crate::indexer::graphrag::types::FunctionInfo {
+	fn declaration(name: &str, kind: &str, start_line: u32, end_line: u32) -> SymbolDecl {
+		SymbolDecl {
 			name: name.to_string(),
-			signature: String::new(),
-			start_line: 0,
-			end_line: u32::MAX,
-			calls: calls.iter().map(|s| s.to_string()).collect(),
-			called_by: Vec::new(),
-			parameters: Vec::new(),
-			return_type: None,
-			extends: extends.iter().map(|s| s.to_string()).collect(),
-			implements: Vec::new(),
+			kind: kind.to_string(),
+			start_line,
+			end_line,
 		}
 	}
 
-	fn file_node(
-		path: &str,
-		functions: Vec<crate::indexer::graphrag::types::FunctionInfo>,
-	) -> CodeNode {
+	fn file_node(path: &str) -> CodeNode {
 		CodeNode {
 			id: path.to_string(),
 			name: path.to_string(),
@@ -410,7 +448,7 @@ mod tests {
 			embedding: Vec::new(),
 			imports: Vec::new(),
 			exports: Vec::new(),
-			functions,
+			functions: Vec::new(),
 			size_lines: 0,
 			language: "rust".to_string(),
 		}
@@ -463,6 +501,10 @@ pub struct Config {
     pub name: String,
 }
 
+pub trait Named {}
+
+impl Named for Config {}
+
 impl Config {
     pub fn new() -> Self {
         Config { name: String::new() }
@@ -512,25 +554,58 @@ pub fn main_fn() {
 			"calls: {:?}",
 			data.calls
 		);
+
+		let implementation = data
+			.type_relations
+			.iter()
+			.find(|relation| relation.kind == TypeRelationKind::Implements)
+			.expect("Config implements Named relation");
+		assert_eq!(implementation.source_name.as_deref(), Some("Config"));
+		assert_eq!(implementation.target_name, "Named");
+	}
+
+	#[test]
+	fn duplicate_symbol_names_receive_distinct_stable_ids() {
+		let symbols = vec![
+			declaration("new", "function", 4, 8),
+			declaration("new", "function", 20, 24),
+			declaration("run", "function", 30, 35),
+		];
+		assert_eq!(
+			symbol_node_ids("src/lib.rs", &symbols),
+			vec!["src/lib.rs::new@5", "src/lib.rs::new@21", "src/lib.rs::run"]
+		);
 	}
 
 	#[test]
 	fn test_discover_symbol_relationships() {
 		// Files: a.rs (run calls helper + unique_fn + ambiguous `new`),
 		// b.rs and c.rs both declare `new` and `Base`.
-		let a = file_node(
-			"src/a.rs",
-			vec![function_info(
-				"run",
-				&["helper", "unique_fn", "new"],
-				&["Base"],
-			)],
-		);
-		let b = file_node("src/b.rs", Vec::new());
-		let c = file_node("src/c.rs", Vec::new());
+		let a = SymbolFileData {
+			path: "src/a.rs".to_string(),
+			language: "rust".to_string(),
+			imports: Vec::new(),
+			calls: ["helper", "unique_fn", "new"]
+				.into_iter()
+				.map(|callee| (5, callee.to_string()))
+				.collect(),
+			type_relations: vec![TypeRelationDecl {
+				line: 5,
+				source_name: Some("run".to_string()),
+				kind: TypeRelationKind::Extends,
+				target_name: "Base".to_string(),
+			}],
+			symbols: vec![
+				declaration("run", "function", 0, 10),
+				declaration("helper", "function", 20, 25),
+			],
+		};
+		let a_file = file_node("src/a.rs");
+		let b = file_node("src/b.rs");
+		let c = file_node("src/c.rs");
 
 		let all_nodes = vec![
-			a.clone(),
+			a_file,
 			b,
 			c,
 			symbol_node("src/a.rs", "run"),

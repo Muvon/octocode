@@ -19,6 +19,7 @@ use tracing::debug;
 use crate::config::Config;
 use crate::indexer::branch::BranchManifest;
 use crate::indexer::graphrag::find_node_id;
+use crate::indexer::graphrag::runtime::{self, RuntimeGraphCache};
 use crate::indexer::{self, graphrag::GraphRAG};
 use crate::mcp::types::McpError;
 
@@ -74,26 +75,33 @@ pub struct GraphRagProvider {
 	graphrag: GraphRAG,
 	working_directory: std::path::PathBuf,
 	branch_manifest: Option<BranchManifest>,
+	runtime_cache: RuntimeGraphCache,
 }
 
 impl GraphRagProvider {
-	pub fn new(config: Config, working_directory: std::path::PathBuf) -> Option<Self> {
-		if config.graphrag.enabled {
-			let branch_manifest = crate::indexer::branch::detect_branch_context(&working_directory)
-				.and_then(|branch_name| {
+	pub fn new(config: Config, working_directory: std::path::PathBuf) -> Self {
+		let branch_manifest = if config.graphrag.enabled {
+			crate::indexer::branch::detect_branch_context(&working_directory).and_then(
+				|branch_name| {
 					let branch_dir =
 						crate::storage::get_branch_dir(&working_directory, &branch_name).ok()?;
 					crate::indexer::branch::load_manifest(&branch_dir).ok()?
-				});
-
-			Some(Self {
-				graphrag: GraphRAG::new(config, working_directory.clone()),
-				working_directory,
-				branch_manifest,
-			})
+				},
+			)
 		} else {
 			None
+		};
+
+		Self {
+			graphrag: GraphRAG::new(config, working_directory.clone()),
+			working_directory,
+			branch_manifest,
+			runtime_cache: RuntimeGraphCache::default(),
 		}
+	}
+
+	pub fn runtime_cache(&self) -> RuntimeGraphCache {
+		self.runtime_cache.clone()
 	}
 
 	/// Execute the graphrag tool with any operation
@@ -124,8 +132,11 @@ impl GraphRagProvider {
 					.and_then(|v| v.as_str())
 					.ok_or_else(|| McpError::invalid_params("Missing required parameter 'query' for search operation: must be a detailed question about code relationships or architecture", "graphrag"))?;
 
-				if query.len() < 10 {
-					return Err(McpError::invalid_params("Invalid query: must be at least 10 characters long and describe relationships or architecture", "graphrag"));
+				if query.trim().is_empty() {
+					return Err(McpError::invalid_params(
+						"Invalid query: must not be empty",
+						"graphrag",
+					));
 				}
 				if query.len() > 1000 {
 					return Err(McpError::invalid_params(
@@ -172,7 +183,14 @@ impl GraphRagProvider {
 		let max_depth = arguments
 			.get("max_depth")
 			.and_then(|v| v.as_u64())
-			.unwrap_or(3) as usize;
+			.unwrap_or(3);
+		if !(1..=10).contains(&max_depth) {
+			return Err(McpError::invalid_params(
+				"Invalid max_depth: must be between 1 and 10",
+				"graphrag",
+			));
+		}
+		let max_depth = max_depth as usize;
 
 		let format_str = arguments
 			.get("format")
@@ -223,69 +241,123 @@ impl GraphRagProvider {
 
 	/// Execute GraphRAG operation using CLI logic with MCP-optimized output
 	async fn execute_graphrag_operation(&self, args: &GraphRAGArgs) -> Result<String> {
-		// Check if GraphRAG is enabled (this should always be true since we're created conditionally)
 		let config = self.graphrag.config();
-		if !config.graphrag.enabled {
-			return Err(anyhow::anyhow!("GraphRAG is not enabled in configuration"));
-		}
-
-		// Initialize the GraphBuilder
-		let graph_builder =
-			indexer::GraphBuilder::new_with_quiet(config.clone(), &self.working_directory, true)
-				.await
-				.map_err(|e| anyhow::anyhow!("Failed to initialize GraphRAG system: {}", e))?;
-
-		// Branch-aware GraphRAG: filter main graph and merge branch data.
-		// MCP is long-lived and the main DB can move under us via background
-		// reindexing; re-check coherence on every call rather than trusting
-		// the snapshot we took at provider construction.
-		if let Some(ref manifest) = self.branch_manifest {
-			let main_commit = match crate::store::Store::new_at(&self.working_directory).await {
-				Ok(s) => s.get_last_commit_hash().await.ok().flatten(),
-				Err(_) => None,
-			};
-			if crate::indexer::branch::manifest_is_coherent_with(manifest, main_commit.as_deref()) {
-				let overridden = manifest.overridden_paths();
-				graph_builder.apply_branch_filter(&overridden).await;
-				if let Ok(branch_store) = crate::store::Store::new_for_branch_at(
-					&self.working_directory,
-					&manifest.branch_name,
-				)
-				.await
-				{
-					if let Err(e) = graph_builder.merge_branch_graph(&branch_store).await {
-						tracing::warn!(error = %e, "Failed to merge branch GraphRAG data");
-					}
-				}
-			} else {
-				tracing::warn!(
-					branch = %manifest.branch_name,
-					recorded = %manifest.base_db_commit,
-					main_now = ?main_commit,
-					"Branch GraphRAG overlay skipped: branch DB doesn't match current main commit."
-				);
-			}
-		}
-
-		// Get the current graph
-		let graph = graph_builder
-			.get_graph()
+		let graph_builder = if config.graphrag.enabled {
+			match indexer::GraphBuilder::new_with_quiet(
+				config.clone(),
+				&self.working_directory,
+				true,
+			)
 			.await
-			.map_err(|e| anyhow::anyhow!("Failed to load GraphRAG knowledge graph: {}", e))?;
+			{
+				Ok(builder) => {
+					// Branch-aware persisted enrichment.
+					if let Some(ref manifest) = self.branch_manifest {
+						let main_commit =
+							match crate::store::Store::new_at(&self.working_directory).await {
+								Ok(store) => store.get_last_commit_hash().await.ok().flatten(),
+								Err(_) => None,
+							};
+						if crate::indexer::branch::manifest_is_coherent_with(
+							manifest,
+							main_commit.as_deref(),
+						) {
+							let overridden = manifest.overridden_paths();
+							builder.apply_branch_filter(&overridden).await;
+							if let Ok(branch_store) = crate::store::Store::new_for_branch_at(
+								&self.working_directory,
+								&manifest.branch_name,
+							)
+							.await
+							{
+								if let Err(error) = builder.merge_branch_graph(&branch_store).await
+								{
+									tracing::warn!(%error, "Failed to merge branch GraphRAG data");
+								}
+							}
+						} else {
+							tracing::warn!(
+								branch = %manifest.branch_name,
+								recorded = %manifest.base_db_commit,
+								main_now = ?main_commit,
+								"Branch GraphRAG overlay skipped: branch DB doesn't match current main commit."
+							);
+						}
+					}
+					Some(builder)
+				}
+				Err(error) => {
+					tracing::warn!(%error, "Persisted GraphRAG unavailable; using live structural graph");
+					None
+				}
+			}
+		} else {
+			None
+		};
+
+		let runtime_graph = self.runtime_cache.graph(&self.working_directory).await?;
+		let (graph, enrichment_active) = if let Some(builder) = &graph_builder {
+			match builder.get_graph().await {
+				Ok(enriched) => {
+					let active = !enriched.nodes.is_empty() || !enriched.relationships.is_empty();
+					(
+						std::sync::Arc::new(runtime::merge_enrichment(
+							&runtime_graph,
+							enriched,
+							&self.working_directory,
+						)),
+						active,
+					)
+				}
+				Err(error) => {
+					tracing::warn!(%error, "Failed to load persisted GraphRAG; using live structural graph");
+					(runtime_graph, false)
+				}
+			}
+		} else {
+			(runtime_graph, false)
+		};
 
 		// Check if graph is empty
 		if graph.nodes.is_empty() {
-			return Err(anyhow::anyhow!("GraphRAG knowledge graph is empty. Run 'octocode index' to build the knowledge graph."));
+			return Err(anyhow::anyhow!(
+				"No supported source symbols were found for graph search"
+			));
 		}
 
 		// Execute the requested operation and capture output
 		match args.operation {
 			GraphRAGOperation::Search => {
-				let query = args.query.as_ref().unwrap(); // Validated in caller
-				let nodes = graph_builder
-					.search_nodes(query)
-					.await
-					.map_err(|e| anyhow::anyhow!("Search failed: {}", e))?;
+				let query = args
+					.query
+					.as_deref()
+					.ok_or_else(|| anyhow::anyhow!("Search query is missing"))?;
+				let nodes = if let Some(builder) = &graph_builder {
+					let semantic_nodes = match builder.search_nodes(query).await {
+						Ok(nodes) => nodes,
+						Err(error) => {
+							tracing::warn!(%error, "Semantic graph seed search failed; using lexical seeds");
+							Vec::new()
+						}
+					};
+					// Symbols are live AST nodes, never embedding rows. Seed them by
+					// deterministic name/path lookup, then append semantic file hits.
+					let mut nodes = runtime::search_nodes(&graph, query, 20);
+					let mut seen: std::collections::HashSet<String> =
+						nodes.iter().map(|node| node.id.clone()).collect();
+					for node in semantic_nodes
+						.into_iter()
+						.filter(|node| !node.is_symbol_node())
+					{
+						if seen.insert(node.id.clone()) {
+							nodes.push(node);
+						}
+					}
+					nodes.truncate(50);
+					nodes
+				} else {
+					runtime::search_nodes(&graph, query, 50)
+				};
 
 				// Render based on format
 				match args.format {
@@ -302,7 +374,10 @@ impl GraphRagProvider {
 				}
 			}
 			GraphRAGOperation::GetNode => {
-				let node_id = args.node_id.as_ref().unwrap(); // Validated in caller
+				let node_id = args
+					.node_id
+					.as_deref()
+					.ok_or_else(|| anyhow::anyhow!("Node id is missing"))?;
 				match find_node_id(&graph, node_id) {
 					Some(resolved_id) => {
 						let node = &graph.nodes[resolved_id];
@@ -340,7 +415,10 @@ impl GraphRagProvider {
 				}
 			}
 			GraphRAGOperation::GetRelationships => {
-				let node_id = args.node_id.as_ref().unwrap(); // Validated in caller
+				let node_id = args
+					.node_id
+					.as_deref()
+					.ok_or_else(|| anyhow::anyhow!("Node id is missing"))?;
 
 				// Resolve node ID with fuzzy matching
 				let resolved_id = find_node_id(&graph, node_id)
@@ -458,8 +536,14 @@ impl GraphRagProvider {
 				}
 			}
 			GraphRAGOperation::FindPath => {
-				let source_id_input = args.source_id.as_ref().unwrap(); // Validated in caller
-				let target_id_input = args.target_id.as_ref().unwrap(); // Validated in caller
+				let source_id_input = args
+					.source_id
+					.as_deref()
+					.ok_or_else(|| anyhow::anyhow!("Source node id is missing"))?;
+				let target_id_input = args
+					.target_id
+					.as_deref()
+					.ok_or_else(|| anyhow::anyhow!("Target node id is missing"))?;
 
 				// Resolve source and target with fuzzy matching
 				let source_id = find_node_id(&graph, source_id_input)
@@ -470,10 +554,7 @@ impl GraphRagProvider {
 					.to_string();
 
 				// Find paths
-				let paths = graph_builder
-					.find_paths(&source_id, &target_id, args.max_depth)
-					.await
-					.map_err(|e| anyhow::anyhow!("Path finding failed: {}", e))?;
+				let paths = runtime::find_paths(&graph, &source_id, &target_id, args.max_depth);
 
 				if paths.is_empty() {
 					return Ok(format!(
@@ -582,6 +663,11 @@ impl GraphRagProvider {
 				}
 			}
 			GraphRAGOperation::Overview => {
+				let graph_mode = if enrichment_active {
+					"persisted_enriched"
+				} else {
+					"runtime_structural"
+				};
 				// Get statistics
 				let node_count = graph.nodes.len();
 				let relationship_count = graph.relationships.len();
@@ -601,6 +687,7 @@ impl GraphRagProvider {
 				match args.format {
 					OutputFormat::Json => {
 						let overview = json!({
+							"mode": graph_mode,
 							"node_count": node_count,
 							"relationship_count": relationship_count,
 							"node_types": node_types,
@@ -610,7 +697,7 @@ impl GraphRagProvider {
 							.map_err(|e| anyhow::anyhow!("JSON serialization failed: {}", e))?)
 					}
 					OutputFormat::Md => {
-						let mut output = format!("# GraphRAG Knowledge Graph Overview\n\nThe knowledge graph contains {} nodes and {} relationships.\n\n", node_count, relationship_count);
+						let mut output = format!("# Code Graph Overview\n\nMode: `{}`\n\nThe graph contains {} nodes and {} relationships.\n\n", graph_mode, node_count, relationship_count);
 
 						output.push_str("## Node Types\n\n");
 						for (kind, count) in node_types.iter() {
@@ -629,8 +716,8 @@ impl GraphRagProvider {
 					_ => {
 						// Text format for token efficiency
 						let mut output = format!(
-							"GraphRAG Overview: {} nodes, {} relationships\n\n",
-							node_count, relationship_count
+							"Code Graph Overview ({}): {} nodes, {} relationships\n\n",
+							graph_mode, node_count, relationship_count
 						);
 
 						output.push_str("Node Types:\n");

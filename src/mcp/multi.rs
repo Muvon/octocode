@@ -154,14 +154,20 @@ impl MultiServer {
 		// Read-only unless the in-process indexer is enabled; otherwise serve the
 		// existing per-repo index without spawning a watcher/indexer.
 		let bg = if self.config.index.mcp_index {
-			McpServer::start_repo_services(self.config.clone(), repo_path, self.no_git, self.debug)
-				.await
-				.map_err(|e| {
-					ErrorData::internal_error(
-						format!("Failed to start services for '{}': {}", project, e),
-						None,
-					)
-				})?
+			McpServer::start_repo_services(
+				self.config.clone(),
+				repo_path,
+				self.no_git,
+				self.debug,
+				server.runtime_graph_cache(),
+			)
+			.await
+			.map_err(|e| {
+				ErrorData::internal_error(
+					format!("Failed to start services for '{}': {}", project, e),
+					None,
+				)
+			})?
 		} else {
 			BackgroundServices::none()
 		};
@@ -266,8 +272,9 @@ impl ServerHandler for MultiServer {
 		let instructions = format!(
 			"Multi-repository Octocode MCP server. {} repositories are available ({}); \
 			 every tool requires a `project` argument naming the target repository. \
-			 Use 'semantic_search' for code/documentation searches and 'graphrag' \
-			 (if enabled) for relationship queries.",
+			 Use 'semantic_search' for conceptual lookups, 'structural_search' for \
+			 syntax and occurrences, and the always-available 'graphrag' for symbol \
+			 relationships and dependency paths.",
 			self.repos.len(),
 			self.project_list()
 		);
