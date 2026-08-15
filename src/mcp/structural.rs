@@ -1120,6 +1120,15 @@ mod tests {
 	}
 
 	#[test]
+	fn test_path_spec_matches_recursive_glob() {
+		let spec = PathSpec::compile("src/supervisor/**");
+
+		assert!(spec.matches("src/supervisor/mod.rs"));
+		assert!(spec.matches("src/supervisor/nested/worker.rs"));
+		assert!(!spec.matches("src/mcp/server.rs"));
+	}
+
+	#[test]
 	fn test_filter_by_containment() {
 		let m = |s: usize, e: usize| GrepMatch {
 			file: "a.rs".into(),

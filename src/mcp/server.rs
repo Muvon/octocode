@@ -127,6 +127,43 @@ where
 	deserializer.deserialize_any(StringOrVec)
 }
 
+/// Accept an optional single string or array of strings while preserving
+/// `None` for an omitted or explicit `null` field.
+fn optional_string_or_vec<'de, D>(deserializer: D) -> Result<Option<Vec<String>>, D::Error>
+where
+	D: serde::Deserializer<'de>,
+{
+	use serde::de::Visitor;
+	use std::fmt;
+
+	struct OptionalStringOrVec;
+
+	impl<'de> Visitor<'de> for OptionalStringOrVec {
+		type Value = Option<Vec<String>>;
+
+		fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+			formatter.write_str("a string, an array of strings, or null")
+		}
+
+		fn visit_none<E>(self) -> Result<Self::Value, E> {
+			Ok(None)
+		}
+
+		fn visit_unit<E>(self) -> Result<Self::Value, E> {
+			Ok(None)
+		}
+
+		fn visit_some<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
+		where
+			D: serde::Deserializer<'de>,
+		{
+			string_or_vec(deserializer).map(Some)
+		}
+	}
+
+	deserializer.deserialize_option(OptionalStringOrVec)
+}
+
 #[derive(Debug, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct GraphRagParams {
 	/// 'search' (semantic node search), 'get-node' (node details), 'get-relationships' (node connections), 'find-path' (path between two nodes), 'overview' (graph stats)
@@ -176,7 +213,11 @@ pub struct StructuralSearchParams {
 	/// Narrow the search to matching files. Each entry is either a path
 	/// substring (`src/mcp`, `server.rs`) or a glob (`src/**/*.rs`), relative
 	/// to the repo root. Default: all files of the language.
-	#[serde(default, skip_serializing_if = "Option::is_none")]
+	#[serde(
+		default,
+		deserialize_with = "optional_string_or_vec",
+		skip_serializing_if = "Option::is_none"
+	)]
 	pub paths: Option<Vec<String>>,
 	/// Only keep matches INSIDE a node matching this kind name or pattern
 	/// (e.g. `function_item`, `class _ { $$$ }`). Applies per file.
@@ -208,6 +249,45 @@ pub struct StructuralSearchParams {
 	/// Apply rewrites to files in-place. When false or absent, returns a diff preview. Requires rewrite parameter.
 	#[serde(default, skip_serializing_if = "Option::is_none")]
 	pub update_all: Option<bool>,
+}
+
+#[cfg(test)]
+mod parameter_tests {
+	use super::StructuralSearchParams;
+
+	#[test]
+	fn structural_search_paths_accepts_single_glob() {
+		let params: StructuralSearchParams = serde_json::from_value(serde_json::json!({
+			"language": "rust",
+			"symbol": "*json*",
+			"paths": "src/supervisor/**"
+		}))
+		.expect("a single path glob should deserialize");
+
+		assert_eq!(params.paths, Some(vec!["src/supervisor/**".to_string()]));
+	}
+
+	#[test]
+	fn structural_search_paths_preserves_array_and_null_inputs() {
+		let array_params: StructuralSearchParams = serde_json::from_value(serde_json::json!({
+			"language": "rust",
+			"symbol": "Config",
+			"paths": ["src/**/*.rs", "tests/**/*.rs"]
+		}))
+		.expect("an array of path globs should deserialize");
+		assert_eq!(
+			array_params.paths,
+			Some(vec!["src/**/*.rs".to_string(), "tests/**/*.rs".to_string()])
+		);
+
+		let null_params: StructuralSearchParams = serde_json::from_value(serde_json::json!({
+			"language": "rust",
+			"symbol": "Config",
+			"paths": null
+		}))
+		.expect("a null path filter should deserialize");
+		assert_eq!(null_params.paths, None);
+	}
 }
 
 #[derive(Debug, Serialize, Deserialize, schemars::JsonSchema)]
