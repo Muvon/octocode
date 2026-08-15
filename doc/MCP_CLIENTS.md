@@ -16,7 +16,7 @@ When connected, your AI assistant can:
 |------|-------------|
 | `semantic_search` | Search codebase by meaning — finds code by what it does, not exact symbol names |
 | `view_signatures` | Extract function signatures, class definitions, and declarations from files |
-| `graphrag` | Query code relationships, dependencies, and architecture |
+| `graphrag` | Query the always-on live file/symbol graph; no index, embeddings, or LLM required |
 | `structural_search` | Search or rewrite code by AST structure using ast-grep pattern syntax |
 
 ---

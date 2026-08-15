@@ -246,7 +246,8 @@ pub fn normalize_node_id(input: &str) -> String {
 }
 
 /// Find a node in the graph with fuzzy matching.
-/// Tries: exact match → normalized match → file suffix → unique symbol name.
+/// Tries: exact match → normalized match → file suffix → unique owner-qualified
+/// symbol suffix → unique bare symbol name.
 /// Returns the actual node ID stored in the graph.
 pub fn find_node_id<'a>(graph: &'a super::types::CodeGraph, input: &str) -> Option<&'a str> {
 	// 1. Exact match
@@ -286,7 +287,25 @@ pub fn find_node_id<'a>(graph: &'a super::types::CodeGraph, input: &str) -> Opti
 		return best_match;
 	}
 
-	// 4. Bare symbol name. Resolve only when unique so overloaded/common names
+	// 4. Owner-qualified symbol suffix (`Service::run`). Resolve only when
+	// unique across files, just like a bare symbol name.
+	if normalized.contains("::") {
+		let suffix = format!("::{}", normalized_lower);
+		let mut owned_match = None;
+		for key in graph.nodes.keys() {
+			if key.to_lowercase().ends_with(&suffix) {
+				if owned_match.is_some() {
+					return None;
+				}
+				owned_match = Some(key.as_str());
+			}
+		}
+		if owned_match.is_some() {
+			return owned_match;
+		}
+	}
+
+	// 5. Bare symbol name. Resolve only when unique so overloaded/common names
 	// never silently select an arbitrary graph node.
 	let mut symbol_match = None;
 	for (key, node) in &graph.nodes {
@@ -387,6 +406,19 @@ mod tests {
 			symbol_node("tests/config.rs::parse_config", "parse_config"),
 		);
 		assert_eq!(find_node_id(&graph, "parse_config"), None);
+	}
+
+	#[test]
+	fn resolves_unique_owner_qualified_symbol_suffix() {
+		let mut graph = super::super::types::CodeGraph::default();
+		graph.nodes.insert(
+			"src/service.rs::Service::run".to_string(),
+			symbol_node("src/service.rs::Service::run", "run"),
+		);
+		assert_eq!(
+			find_node_id(&graph, "Service::run"),
+			Some("src/service.rs::Service::run")
+		);
 	}
 
 	#[test]

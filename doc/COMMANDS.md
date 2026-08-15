@@ -26,7 +26,7 @@ octocode index /path/to/project
 - Scans all supported files in your project
 - Extracts code symbols and structure using Tree-sitter
 - Generates embeddings for semantic search
-- Builds knowledge graph relationships (if enabled)
+- Builds persisted knowledge-graph relationships (if GraphRAG is enabled)
 - Stores everything in local LanceDB database
 - **Safe file discovery** - Prevents infinite recursion from symlinks
 - **Respects ignore patterns** - Honors .gitignore and .noindex files
@@ -402,7 +402,7 @@ octocode mcp --path /path/to/project --debug
 **Available MCP tools:**
 - `semantic_search` - Semantic code search (supports multi-query, all modes including commits)
 - `view_signatures` - View file signatures and code structure by glob patterns
-- `graphrag` - Advanced GraphRAG operations (search, get-node, get-relationships, find-path, overview)
+- `graphrag` - Always-on live file/symbol graph operations (search, get-node, get-relationships, find-path, overview); no index or LLM required
 - `structural_search` - AST-based structural code search using ast-grep patterns
 - `lsp_*` - LSP integration tools (when --with-lsp is used)
 
@@ -433,9 +433,13 @@ octocode mcp --multi --bind "127.0.0.1:8080" --path /workspace --debug
 
 ### `octocode graphrag`
 
-Knowledge graph operations using GraphRAG.
+Commands for the persisted GraphRAG database. Unlike the MCP `graphrag` tool's always-on live structural graph, this CLI requires `[graphrag].enabled = true` and a completed `octocode index` run.
 
 ```bash
+# Enable and build the optional persisted graph first
+octocode config --graphrag-enabled true
+octocode index
+
 # Search the relationship graph
 octocode graphrag search --query "authentication modules"
 

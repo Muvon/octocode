@@ -51,14 +51,15 @@ The codebase is organized into the following core modules:
 - **Metadata indexing** for filtering
 - **Batch operations** for optimal performance
 
-### 4. GraphRAG Builder (`src/indexer/graphrag/`)
-- **AI-powered relationship extraction** between files
-- **Multi-language import resolver** - Maps import statements to actual file paths
-- **Import/export dependency tracking** with intelligent path resolution
-- **Module hierarchy analysis** with cross-language support
-- **Intelligent file descriptions** using LLMs
-- **Cached import resolution** for optimized repeated lookups
-- **Language-specific import handling** (Rust, JavaScript/TypeScript, Python, Go, PHP, C/C++, Ruby, Bash)
+### 4. Structural Graph and GraphRAG (`src/indexer/graphrag/`)
+
+- **Always-on MCP graph** built lazily from current source with Tree-sitter
+- **File and symbol nodes** with owner-aware method identities
+- **Deterministic relationships** for containment, imports, calls, inheritance, and implementations
+- **Conservative resolution** that prefers scoped/imported targets and drops ambiguous call targets
+- **In-memory caching** guarded by a repository metadata stamp; MCP watcher events also invalidate the cache when in-process indexing is enabled
+- **Optional persisted enrichment** for semantic file lookup, AI descriptions, and broader file-level architectural relationships
+- **No symbol embeddings or symbol LLM processing**; live AST symbols remain authoritative
 
 ### 5. Search Engine
 - **Semantic similarity search** using vector embeddings
@@ -102,40 +103,52 @@ The codebase is organized into the following core modules:
 ## Knowledge Graph Structure
 
 ### Nodes
-Each file/module in the codebase becomes a node with:
-- **File path and metadata** (size, modification time, etc.)
-- **AI-generated descriptions** explaining the file's purpose
-- **Extracted symbols** (functions, classes, variables, etc.)
-- **Import/export lists** for dependency tracking
-- **Vector embeddings** for semantic search
+
+The live graph contains:
+
+- **File nodes**, identified by their repository-relative path
+- **Symbol nodes**, normally identified as `path/to/file::symbol` or `path/to/file::Owner::method`
+- **Line-qualified IDs** only when true overloads would otherwise collide
+
+Symbols and owners come directly from the current Tree-sitter AST. They are not persisted or embedded. When indexed GraphRAG is enabled, persisted file descriptions and file-level nodes may be overlaid only when their source files still exist.
 
 ### Relationships
-Connections between nodes represent different types of relationships:
-- **`imports`**: Direct import dependencies between files
-- **`calls`**: Function/method call relationships between files
-- **`sibling_module`**: Files in the same directory
-- **`parent_module`** / **`child_module`**: Hierarchical relationships
+
+The deterministic live graph emits:
+
+- **`contains`**: File to declared symbol
+- **`imports`**: File to resolved imported file
+- **`calls`**: Calling symbol to conservatively resolved callable symbol
+- **`extends`**: Declared type to its resolved parent type
+- **`implements`**: Declared type to its resolved interface or trait
+
+Optional persisted enrichment can add broader file-level relationship types such as `uses`, `configures`, and architectural or design-pattern relationships.
 
 ### Graph Operations
-- **Search**: Find nodes by semantic query
-- **Get Node**: Retrieve detailed information about a specific file
+
+- **Search**: Lexically seed current file/symbol nodes; add semantic file seeds when persisted GraphRAG is available
+- **Get Node**: Retrieve a file or symbol node
 - **Get Relationships**: Find all connections for a node
 - **Find Path**: Discover connection paths between two nodes
 - **Overview**: Get high-level graph statistics
 
 ## Data Flow
 
-1. **Indexing Phase**:
+1. **Always-on MCP graph**:
    ```
-   Source Files → Tree-sitter Parser → Symbol Extraction → Embedding Generation → Vector Storage
-                                                        ↓
-   GraphRAG Analysis ← AI Description Generation ← Chunk Processing
+   Current Source → Repository Stamp → Tree-sitter Parse → File/Symbol Graph → MCP Operations
+                            │                                      ↑
+                            └── unchanged → reuse in-memory cache ─┘
    ```
 
-2. **Search Phase**:
+2. **Optional indexed enrichment**:
    ```
-   Query → Embedding Generation → Vector Similarity Search → Result Ranking → Response
+   Indexed Files → File Embeddings → Optional LLM Analysis → Persisted File Graph
+                                                              ↓
+   MCP Request → Live Graph + Current Persisted File Overlay → Response
    ```
+
+The live graph detects repository metadata changes on the next graph request. When `index.mcp_index = true`, watcher events invalidate it immediately as part of the normal debounce pipeline.
 
 ## Supported Languages
 
@@ -146,6 +159,7 @@ Connections between nodes represent different types of relationships:
 | **JavaScript** | `.js`, `.jsx` | ES6 imports/exports, function declarations |
 | **TypeScript** | `.ts`, `.tsx` | Type definitions, interface extraction, modules |
 | **Go** | `.go` | Package/import analysis, function extraction |
+| **Java** | `.java` | Class, interface, method, inheritance, and implementation extraction |
 | **PHP** | `.php` | Class/function extraction, namespace support |
 | **C++** | `.cpp`, `.hpp`, `.h`, `.cc`, `.cxx`, `.c++`, `.hxx`, `.cppm`, `.ixx`, `.mxx`, `.ccm`, `.cxxm` | Include analysis, class/function extraction |
 | **Ruby** | `.rb` | Class/module extraction, method definitions |
@@ -153,6 +167,7 @@ Connections between nodes represent different types of relationships:
 | **Bash** | `.sh`, `.bash` | Function and variable extraction |
 | **CSS** | `.css`, `.scss`, `.sass` | Selector and rule extraction |
 | **Lua** | `.lua` | Function and module extraction |
+| **Swift** | `.swift` | Type, protocol, function, and method extraction |
 | **Svelte** | `.svelte` | Component structure, script/style extraction |
 | **Markdown** | `.md` | Document section indexing, header extraction |
 

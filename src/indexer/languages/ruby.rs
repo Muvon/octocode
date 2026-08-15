@@ -1,4 +1,4 @@
-// Copyright 2025 Muvon Un Limited
+// Copyright 2026 Muvon Un Limited
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -195,7 +195,7 @@ impl Language for Ruby {
 		(imports, exports)
 	}
 
-	fn extract_function_calls(&self, node: Node, contents: &str) -> Vec<String> {
+	fn extract_function_calls(&self, node: Node, contents: &str) -> Vec<super::CallTarget> {
 		if node.kind() == "call" {
 			// The `method` field is the actual callee name; for `receiver.method(...)`
 			// calls, children appear in source order (receiver, operator, method), so
@@ -207,7 +207,12 @@ impl Language for Ruby {
 					if name == "require" || name == "require_relative" || name == "load" {
 						return Vec::new();
 					}
-					return super::extract_callee_identifiers(name);
+					let raw = node
+						.child_by_field_name("receiver")
+						.and_then(|receiver| receiver.utf8_text(contents.as_bytes()).ok())
+						.map(|receiver| format!("{}.{}", receiver, name))
+						.unwrap_or_else(|| name.to_string());
+					return super::extract_call_target(&raw).into_iter().collect();
 				}
 			}
 		}

@@ -32,7 +32,7 @@ octocode index --verbose
 - Scans all supported files in your project
 - Extracts code symbols and structure
 - Generates embeddings for semantic search
-- Builds knowledge graph relationships
+- Builds persisted knowledge-graph enrichment when GraphRAG is enabled
 - Stores everything in local database
 
 ### 3. Try Your First Search
@@ -97,9 +97,9 @@ octocode config \
 octocode config \
   --code-embedding-model "voyage:voyage-code-3" \
   --text-embedding-model "voyage:voyage-3.5-lite"
-```
 
-# Enable GraphRAG for relationship analysis
+# Enable optional persisted GraphRAG enrichment and CLI graph commands
+# (the MCP graphrag tool's live structural graph works without this)
 octocode config --graphrag-enabled true
 
 # Set search preferences
@@ -194,7 +194,8 @@ octocode graphrag overview --md > STRUCTURE.md
 # Use faster embedding models
 octocode config --code-embedding-model "fastembed:all-MiniLM-L6-v2"
 
-# Disable GraphRAG temporarily
+# Disable optional persisted GraphRAG enrichment
+# (the live MCP structural graph remains available)
 octocode config --graphrag-enabled false
 ```
 

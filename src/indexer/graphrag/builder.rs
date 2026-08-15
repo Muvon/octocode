@@ -283,7 +283,23 @@ impl GraphBuilder {
 				};
 				let imports = ast_data.imports.clone();
 				let exports = ast_data.exports.clone();
-				let file_calls = ast_data.calls.clone();
+				let file_calls: Vec<(u32, String)> = ast_data
+					.calls
+					.iter()
+					.map(|(line, call)| {
+						let name = if call.qualifier.is_none() {
+							ast_data
+								.import_bindings
+								.iter()
+								.find(|binding| binding.local_name == call.name)
+								.and_then(|binding| binding.imported_name.clone())
+								.unwrap_or_else(|| call.name.clone())
+						} else {
+							call.name.clone()
+						};
+						(*line, name)
+					})
+					.collect();
 				let file_type_rels = ast_data.type_relations.clone();
 
 				if !self.quiet && (!imports.is_empty() || !exports.is_empty()) {
@@ -342,7 +358,8 @@ impl GraphBuilder {
 						func.implements.dedup();
 					}
 				} else if !file_calls.is_empty() || !file_type_rels.is_empty() {
-					let mut callees: Vec<String> = file_calls.into_iter().map(|(_, c)| c).collect();
+					let mut callees: Vec<String> =
+						file_calls.into_iter().map(|(_, callee)| callee).collect();
 					callees.sort();
 					callees.dedup();
 
@@ -774,7 +791,7 @@ impl GraphBuilder {
 				// Process relationships in batches to avoid storing everything at the end
 				let relationship_batch_size = self.config.index.embeddings_batch_size * 4; // Larger batches for relationships
 
-				let mut all_relationships = if self.llm_enabled() {
+				let all_relationships = if self.llm_enabled() {
 					// Enhanced relationship discovery with optional AI for complex cases
 					self.discover_relationships_with_ai_enhancement(&all_processed_nodes)
 						.await?

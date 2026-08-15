@@ -293,7 +293,7 @@ octocode mcp --path /path/to/your/project --with-lsp "typescript-language-server
 |------|-------------|------------|
 | **semantic_search** | Semantic code search across the codebase (supports multi-query) | `query` (string or array), `mode` (string: all/code/docs/text/commits), `detail_level` (string), `max_results` (integer) |
 | **view_signatures** | View file signatures and code structure | `files` (array of file paths or glob patterns) |
-| **graphrag** | Advanced GraphRAG operations: search, get-node, get-relationships, find-path, overview | `operation` (string), `query` (string), `node_id` (string), `source_id` (string), `target_id` (string), `max_depth` (integer), `format` (string) |
+| **graphrag** | Always-on live file/symbol graph: search, get-node, get-relationships, find-path, overview | `operation` (string), `query` (string), `node_id` (string), `source_id` (string), `target_id` (string), `max_depth` (integer), `format` (string) |
 | **structural_search** | AST-based structural code search using ast-grep patterns | `pattern` (string), `language` (string), `paths` (array), `context` (integer), `max_results` (integer) |
 
 #### semantic_search Tool Details
@@ -508,6 +508,15 @@ octocode view "src/**/*.rs" --md
 ```
 
 ## Knowledge Graph Operations
+
+The MCP `graphrag` tool always builds a lightweight Tree-sitter graph from current source. It requires no index, embeddings, or LLM and supports file IDs plus symbol IDs such as `src/auth/service.rs::AuthService::authenticate`. Its baseline edges are `contains`, `imports`, `calls`, `extends`, and `implements`.
+
+The commands below use the persisted GraphRAG database instead. Enable and build it first:
+
+```bash
+octocode config --graphrag-enabled true
+octocode index
+```
 
 ### Basic GraphRAG Commands
 

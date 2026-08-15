@@ -47,6 +47,36 @@ impl Language for Swift {
 		]
 	}
 
+	fn get_symbol_kinds(&self) -> Vec<&'static str> {
+		vec![
+			"function_declaration",
+			"class_declaration",
+			"protocol_declaration",
+			"init_declaration",
+			"typealias_declaration",
+		]
+	}
+
+	fn extract_declaration_name(&self, node: Node, contents: &str) -> Option<String> {
+		if node.kind() == "init_declaration" {
+			return Some("init".to_string());
+		}
+		for field in ["name", "type"] {
+			if let Some(name) = node.child_by_field_name(field) {
+				if let Ok(text) = name.utf8_text(contents.as_bytes()) {
+					if let Some(simple) = super::simple_type_name(text) {
+						return Some(simple);
+					}
+				}
+			}
+		}
+		super::extract_symbol_by_kinds(
+			node,
+			contents,
+			&["simple_identifier", "type_identifier", "user_type"],
+		)
+	}
+
 	fn extract_symbols(&self, node: Node, contents: &str) -> Vec<String> {
 		let mut symbols = Vec::new();
 
@@ -258,12 +288,12 @@ impl Language for Swift {
 		(imports, exports)
 	}
 
-	fn extract_function_calls(&self, node: Node, contents: &str) -> Vec<String> {
+	fn extract_function_calls(&self, node: Node, contents: &str) -> Vec<super::CallTarget> {
 		if node.kind() == "call_expression" {
 			// The first child of call_expression is the callee expression
 			if let Some(callee) = node.child(0) {
 				if let Ok(text) = callee.utf8_text(contents.as_bytes()) {
-					return super::extract_callee_identifiers(text);
+					return super::extract_call_target(text).into_iter().collect();
 				}
 			}
 		}

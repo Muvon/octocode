@@ -1,4 +1,4 @@
-// Copyright 2025 Muvon Un Limited
+// Copyright 2026 Muvon Un Limited
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -152,7 +152,7 @@ impl Language for Bash {
 		(imports, exports)
 	}
 
-	fn extract_function_calls(&self, node: Node, contents: &str) -> Vec<String> {
+	fn extract_function_calls(&self, node: Node, contents: &str) -> Vec<super::CallTarget> {
 		if node.kind() == "command" {
 			// Use the `name` field rather than child(0) — a `command` node can have
 			// leading `variable_assignment`/redirect children (e.g. `DEBUG=1 cmd`),
@@ -163,7 +163,7 @@ impl Language for Bash {
 					if name == "source" || name == "." {
 						return Vec::new();
 					}
-					return vec![name.to_string()];
+					return super::extract_call_target(name).into_iter().collect();
 				}
 			}
 		}

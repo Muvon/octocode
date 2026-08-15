@@ -175,15 +175,30 @@ impl Language for Go {
 		(imports, exports)
 	}
 
-	fn extract_function_calls(&self, node: Node, contents: &str) -> Vec<String> {
+	fn extract_function_calls(&self, node: Node, contents: &str) -> Vec<super::CallTarget> {
 		if node.kind() == "call_expression" {
 			if let Some(func_node) = node.child(0) {
 				if let Ok(text) = func_node.utf8_text(contents.as_bytes()) {
-					return super::extract_callee_identifiers(text);
+					return super::extract_call_target(text).into_iter().collect();
 				}
 			}
 		}
 		Vec::new()
+	}
+
+	fn extract_symbol_owner(&self, node: Node, contents: &str) -> Option<String> {
+		if node.kind() != "method_declaration" {
+			return super::find_graph_symbol_owner(node, contents);
+		}
+		let receiver = node.child_by_field_name("receiver")?;
+		for parameter in receiver.children(&mut receiver.walk()) {
+			if let Some(receiver_type) = parameter.child_by_field_name("type") {
+				if let Ok(text) = receiver_type.utf8_text(contents.as_bytes()) {
+					return super::simple_type_name(text);
+				}
+			}
+		}
+		None
 	}
 
 	fn extract_type_relations(

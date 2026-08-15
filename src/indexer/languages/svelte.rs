@@ -1,4 +1,4 @@
-// Copyright 2025 Muvon Un Limited
+// Copyright 2026 Muvon Un Limited
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -81,6 +81,13 @@ impl Language for Svelte {
 			"element", // But we'll filter this in extract_symbols
 			           // Skip individual HTML tags as they create too much noise
 		]
+	}
+
+	fn get_symbol_kinds(&self) -> Vec<&'static str> {
+		// Script declarations are parsed with the JavaScript/TypeScript grammar by
+		// `extract_embedded_sources`; Svelte HTML/style container nodes are not
+		// callable code symbols.
+		Vec::new()
 	}
 
 	fn extract_symbols(&self, node: Node, contents: &str) -> Vec<String> {
@@ -208,6 +215,40 @@ impl Language for Svelte {
 		}
 
 		(imports, exports)
+	}
+
+	fn extract_embedded_sources(&self, root: Node, contents: &str) -> Vec<super::EmbeddedSource> {
+		let mut sources = Vec::new();
+		let mut stack = vec![root];
+		while let Some(node) = stack.pop() {
+			if node.kind() == "script_element" {
+				let script_text = node.utf8_text(contents.as_bytes()).unwrap_or_default();
+				let language = if script_text.contains("lang=\"ts\"")
+					|| script_text.contains("lang='ts'")
+					|| script_text.contains("lang=\"typescript\"")
+				{
+					"typescript"
+				} else {
+					"javascript"
+				};
+				for child in node.children(&mut node.walk()) {
+					if child.kind() == "raw_text" {
+						if let Ok(source) = child.utf8_text(contents.as_bytes()) {
+							sources.push(super::EmbeddedSource {
+								language,
+								contents: source.to_string(),
+								start_line: child.start_position().row as u32,
+							});
+						}
+					}
+				}
+				continue;
+			}
+			let mut children: Vec<_> = node.children(&mut node.walk()).collect();
+			children.reverse();
+			stack.extend(children);
+		}
+		sources
 	}
 
 	fn resolve_import(

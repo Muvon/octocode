@@ -69,8 +69,10 @@ AI: *uses LSP find-references* "process_payment() is called from 4 places:
 octocode search "authentication middleware"
 → src/middleware/auth.rs | Similarity 0.923
 
-# GraphRAG reveals the full dependency chain
-octocode graphrag get-relationships --node_id src/middleware/auth.rs
+# The GraphRAG CLI queries the optional persisted graph
+octocode config --graphrag-enabled true
+octocode index
+octocode graphrag get-relationships --node-id src/middleware/auth.rs
 Outgoing:
   imports → jwt (src/auth/jwt.rs): token validation logic
   calls   → user_store (src/db/user_store.rs): user lookup by token
@@ -78,20 +80,21 @@ Incoming:
   imports ← router (src/router.rs): wires auth into the request pipeline
 ```
 
-Octocode uses **tree-sitter AST parsing** to extract real symbols (functions, imports, dependencies), builds a **GraphRAG knowledge graph** of relationships between files, and exposes everything via **MCP** — so AI tools can *navigate* your project architecture, not just search it.
+Octocode uses **tree-sitter AST parsing** to build a live graph of files, symbols, imports, calls, inheritance, and implementations. The MCP `graphrag` tool builds this graph lazily from the current source tree, without an index, embeddings, or an LLM. Optional indexed GraphRAG adds semantic file discovery, descriptions, and broader architectural relationships.
 
 ## 🔬 How It Works
 
 ```
-Source Code → Tree-sitter AST → Symbols & Relationships → Knowledge Graph
-                                        ↓
-                    Embeddings + Hybrid Search + Reranking → MCP Server
+Current Source → Tree-sitter AST → Live Symbol Graph ──────────────→ MCP `graphrag`
+                                           ↑                              ↑
+Indexed Code → Embeddings + Optional LLM → Persisted File Enrichment ─────┘
 ```
 
-1. **AST Parsing** — tree-sitter extracts real code symbols (functions, classes, imports), not arbitrary text chunks
-2. **Knowledge Graph** — GraphRAG maps relationships between files: `imports`, `calls`, `implements`, `extends`, `configures`, and 9 more types — each with importance weighting
-3. **Hybrid Search** — semantic similarity + BM25 full-text search + reranking — not just vector embeddings
-4. **MCP Server** — exposes `semantic_search`, `view_signatures`, and `graphrag` tools to any MCP-compatible client
+1. **Live AST Graph** — tree-sitter extracts file and symbol nodes plus deterministic `contains`, `imports`, `calls`, `extends`, and `implements` relationships directly from current source
+2. **Always-on Graph Navigation** — MCP graph lookup, relationship traversal, path finding, and overview work with `[graphrag].enabled = false`
+3. **Optional Enrichment** — enabling indexed GraphRAG overlays semantic file matches, LLM descriptions, and broader file-level architectural relationships; symbols are never embedded or LLM-generated
+4. **Hybrid Search** — semantic similarity + BM25 full-text search + reranking handles meaning-based code retrieval separately
+5. **MCP Server** — exposes `semantic_search`, `view_signatures`, `graphrag`, and `structural_search` to any MCP-compatible client
 
 ## ✨ What Makes It Different
 
@@ -239,7 +242,7 @@ Octocode includes a **built-in MCP server** that exposes your codebase as tools 
 |------|--------------|
 | `semantic_search` | Find code by meaning — "authentication flow", "error handling", "database queries" |
 | `view_signatures` | View file structure — function signatures, class definitions, imports |
-| `graphrag` | Query relationships — "what calls this function?", "what does this module import?" |
+| `graphrag` | Always-on file/symbol graph — search nodes, inspect relationships, and find paths without indexing |
 | `structural_search` | AST pattern matching — find `.unwrap()` calls, `new` instantiations, specific patterns |
 | `lsp_goto_definition` | Jump to a symbol's definition (requires `--with-lsp`) |
 | `lsp_find_references` | Find all usages of a symbol across the workspace (requires `--with-lsp`) |
