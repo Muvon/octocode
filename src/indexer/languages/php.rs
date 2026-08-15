@@ -41,6 +41,19 @@ impl Language for Php {
 		]
 	}
 
+	fn get_symbol_kinds(&self) -> Vec<&'static str> {
+		// Symbol tier restores the type containers chunking excludes; drops
+		// namespace nodes (one per file, not a declared symbol).
+		vec![
+			"function_definition",
+			"method_declaration",
+			"class_declaration",
+			"interface_declaration",
+			"trait_declaration",
+			"enum_declaration",
+		]
+	}
+
 	fn extract_symbols(&self, node: Node, contents: &str) -> Vec<String> {
 		let mut symbols = Vec::new();
 

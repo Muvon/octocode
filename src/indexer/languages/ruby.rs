@@ -35,6 +35,36 @@ impl Language for Ruby {
 		vec!["method", "singleton_method", "call"]
 	}
 
+	fn get_symbol_kinds(&self) -> Vec<&'static str> {
+		// Symbol tier restores class/module containers and drops `call`: a
+		// call's method-name child matches the default name scan, which would
+		// turn every call site into a bogus symbol node.
+		vec!["method", "singleton_method", "class", "module"]
+	}
+
+	fn extract_declaration_name(&self, node: Node, contents: &str) -> Option<String> {
+		if matches!(node.kind(), "class" | "module") {
+			// Names are `constant` nodes; qualified names (`Foo::Bar`) are
+			// `scope_resolution` nodes whose LAST `constant` is the defined one.
+			let mut cursor = node.walk();
+			for child in node.children(&mut cursor) {
+				let name_node = match child.kind() {
+					"constant" => Some(child),
+					"scope_resolution" => {
+						let mut inner = child.walk();
+						child.children(&mut inner).filter(|c| c.kind() == "constant").last()
+					}
+					_ => None,
+				};
+				if let Some(name_node) = name_node {
+					return name_node.utf8_text(contents.as_bytes()).ok().map(String::from);
+				}
+			}
+			return None;
+		}
+		super::extract_symbol_by_kinds(node, contents, &["identifier", "name", "type_identifier"])
+	}
+
 	fn extract_symbols(&self, node: Node, contents: &str) -> Vec<String> {
 		let mut symbols = Vec::new();
 

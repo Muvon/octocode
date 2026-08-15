@@ -49,6 +49,21 @@ impl Language for Java {
 		]
 	}
 
+	fn get_symbol_kinds(&self) -> Vec<&'static str> {
+		// Symbol tier restores the type containers chunking excludes and drops
+		// non-symbol noise: field_declaration would name the symbol after its
+		// TYPE (first matching child), and lambdas/imports declare no symbol.
+		vec![
+			"class_declaration",
+			"interface_declaration",
+			"enum_declaration",
+			"record_declaration",
+			"annotation_type_declaration",
+			"method_declaration",
+			"constructor_declaration",
+		]
+	}
+
 	fn extract_symbols(&self, node: Node, contents: &str) -> Vec<String> {
 		let mut symbols = Vec::new();
 

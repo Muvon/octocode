@@ -81,6 +81,14 @@ pub trait Language: Send + Sync {
 	/// Returns node kinds considered meaningful for this language
 	fn get_meaningful_kinds(&self) -> Vec<&'static str>;
 
+	/// Node kinds that become symbol-level GraphRAG nodes. Defaults to the
+	/// chunking kinds; languages override when chunking deliberately drops
+	/// large containers (classes/interfaces/enums) or keeps non-declaration
+	/// nodes (imports, calls, statements) that must not become symbols.
+	fn get_symbol_kinds(&self) -> Vec<&'static str> {
+		self.get_meaningful_kinds()
+	}
+
 	/// Extract symbols from a node
 	fn extract_symbols(&self, node: Node, contents: &str) -> Vec<String>;
 

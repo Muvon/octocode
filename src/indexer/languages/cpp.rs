@@ -56,6 +56,20 @@ impl Language for Cpp {
 		]
 	}
 
+	fn get_symbol_kinds(&self) -> Vec<&'static str> {
+		// Symbol tier restores class/struct containers and drops noise:
+		// `declaration` matches every local variable declaration (its
+		// identifier child would become a bogus symbol), and #include
+		// directives declare no symbol.
+		vec![
+			"function_definition",
+			"class_specifier",
+			"struct_specifier",
+			"enum_specifier",
+			"namespace_definition",
+		]
+	}
+
 	fn extract_symbols(&self, node: Node, contents: &str) -> Vec<String> {
 		let mut symbols = Vec::new();
 
