@@ -217,13 +217,13 @@ impl Language for Rust {
 		(imports, exports)
 	}
 
-	fn extract_function_calls(&self, node: Node, contents: &str) -> Vec<String> {
+	fn extract_function_calls(&self, node: Node, contents: &str) -> Vec<super::CallTarget> {
 		match node.kind() {
 			"call_expression" => {
 				// First child is the function being called
 				if let Some(func_node) = node.child(0) {
 					if let Ok(text) = func_node.utf8_text(contents.as_bytes()) {
-						return super::extract_callee_identifiers(text);
+						return super::extract_call_target(text).into_iter().collect();
 					}
 				}
 				Vec::new()
@@ -235,7 +235,7 @@ impl Language for Rust {
 					if let Ok(text) = macro_node.utf8_text(contents.as_bytes()) {
 						let name = text.trim().trim_end_matches('!');
 						if !name.is_empty() {
-							return super::extract_callee_identifiers(name);
+							return super::extract_call_target(name).into_iter().collect();
 						}
 					}
 				}

@@ -1,4 +1,4 @@
-// Copyright 2025 Muvon Un Limited
+// Copyright 2026 Muvon Un Limited
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -50,11 +50,26 @@ impl Language for TypeScript {
 		vec![
 			"function_declaration",
 			"method_definition",
+			"arrow_function",
 			"class_declaration",
 			"interface_declaration",
 			"type_alias_declaration",
 			"enum_declaration",
 		]
+	}
+
+	fn extract_declaration_name(&self, node: Node, contents: &str) -> Option<String> {
+		if node.kind() == "arrow_function" {
+			let parent = node.parent()?;
+			if parent.kind() != "variable_declarator" {
+				return None;
+			}
+			return parent
+				.child_by_field_name("name")
+				.and_then(|name| name.utf8_text(contents.as_bytes()).ok())
+				.map(str::to_string);
+		}
+		super::extract_symbol_by_kinds(node, contents, &["identifier", "name"])
 	}
 
 	fn extract_symbols(&self, node: Node, contents: &str) -> Vec<String> {
@@ -242,12 +257,12 @@ impl Language for TypeScript {
 		(imports, exports)
 	}
 
-	fn extract_function_calls(&self, node: Node, contents: &str) -> Vec<String> {
+	fn extract_function_calls(&self, node: Node, contents: &str) -> Vec<super::CallTarget> {
 		match node.kind() {
 			"call_expression" => {
 				if let Some(func_node) = node.child(0) {
 					if let Ok(text) = func_node.utf8_text(contents.as_bytes()) {
-						return super::extract_callee_identifiers(text);
+						return super::extract_call_target(text).into_iter().collect();
 					}
 				}
 				Vec::new()
@@ -255,7 +270,7 @@ impl Language for TypeScript {
 			"new_expression" => {
 				if let Some(ctor) = node.child(1) {
 					if let Ok(text) = ctor.utf8_text(contents.as_bytes()) {
-						return super::extract_callee_identifiers(text);
+						return super::extract_call_target(text).into_iter().collect();
 					}
 				}
 				Vec::new()

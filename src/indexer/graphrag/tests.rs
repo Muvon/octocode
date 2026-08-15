@@ -958,7 +958,7 @@ def _private_function():
 		node: tree_sitter::Node,
 		contents: &str,
 		lang_impl: &dyn Language,
-		calls: &mut Vec<(u32, String)>,
+		calls: &mut Vec<(u32, crate::indexer::languages::CallTarget)>,
 	) {
 		let callees = lang_impl.extract_function_calls(node, contents);
 		if !callees.is_empty() {
@@ -998,17 +998,22 @@ fn helper_function(x: i32) -> i32 {
 		let mut calls = Vec::new();
 		extract_function_calls_recursive(tree.root_node(), rust_code, lang.as_ref(), &mut calls);
 
-		let callee_names: Vec<&str> = calls.iter().map(|(_, name)| name.as_str()).collect();
+		let callee_names: Vec<&str> = calls.iter().map(|(_, call)| call.name.as_str()).collect();
 		println!("Rust calls: {:?}", callee_names);
 
 		assert!(
 			callee_names.contains(&"new"),
 			"Should extract Config::new() call"
 		);
-		assert!(
-			callee_names.contains(&"Config"),
-			"Should extract Config from Config::new()"
-		);
+		assert!(calls.iter().any(|(_, call)| {
+			call.name == "new" && call.qualifier.as_deref() == Some("Config")
+		}));
+		assert!(calls.iter().any(|(_, call)| {
+			call.name == "run" && call.qualifier.as_deref() == Some("config")
+		}));
+		assert!(calls.iter().any(|(_, call)| {
+			call.name == "process" && call.qualifier.as_deref() == Some("other_module")
+		}));
 		assert!(
 			callee_names.contains(&"helper_function"),
 			"Should extract helper_function() call"
@@ -1049,7 +1054,7 @@ def helper(x):
 		let mut calls = Vec::new();
 		extract_function_calls_recursive(tree.root_node(), python_code, lang.as_ref(), &mut calls);
 
-		let callee_names: Vec<&str> = calls.iter().map(|(_, name)| name.as_str()).collect();
+		let callee_names: Vec<&str> = calls.iter().map(|(_, call)| call.name.as_str()).collect();
 		println!("Python calls: {:?}", callee_names);
 
 		assert!(
@@ -1064,6 +1069,9 @@ def helper(x):
 			callee_names.contains(&"process_data"),
 			"Should extract process_data() call"
 		);
+		assert!(calls.iter().any(|(_, call)| {
+			call.name == "join" && call.qualifier.as_deref() == Some("os::path")
+		}));
 	}
 
 	#[test]
@@ -1086,7 +1094,7 @@ function main() {
 		let mut calls = Vec::new();
 		extract_function_calls_recursive(tree.root_node(), js_code, lang.as_ref(), &mut calls);
 
-		let callee_names: Vec<&str> = calls.iter().map(|(_, name)| name.as_str()).collect();
+		let callee_names: Vec<&str> = calls.iter().map(|(_, call)| call.name.as_str()).collect();
 		println!("JavaScript calls: {:?}", callee_names);
 
 		assert!(
@@ -1101,6 +1109,9 @@ function main() {
 			callee_names.contains(&"MyClass"),
 			"Should extract new MyClass() constructor"
 		);
+		assert!(calls.iter().any(|(_, call)| {
+			call.name == "log" && call.qualifier.as_deref() == Some("console")
+		}));
 	}
 
 	#[test]
@@ -1128,7 +1139,7 @@ func helper(x int) int {
 		let mut calls = Vec::new();
 		extract_function_calls_recursive(tree.root_node(), go_code, lang.as_ref(), &mut calls);
 
-		let callee_names: Vec<&str> = calls.iter().map(|(_, name)| name.as_str()).collect();
+		let callee_names: Vec<&str> = calls.iter().map(|(_, call)| call.name.as_str()).collect();
 		println!("Go calls: {:?}", callee_names);
 
 		assert!(
@@ -1143,6 +1154,9 @@ func helper(x int) int {
 			callee_names.contains(&"process"),
 			"Should extract process() call"
 		);
+		assert!(calls.iter().any(|(_, call)| {
+			call.name == "Println" && call.qualifier.as_deref() == Some("fmt")
+		}));
 	}
 
 	#[test]
@@ -1316,7 +1330,7 @@ public class Main {
 
 		let mut calls = Vec::new();
 		extract_function_calls_recursive(tree.root_node(), java_code, lang.as_ref(), &mut calls);
-		let callee_names: Vec<&str> = calls.iter().map(|(_, name)| name.as_str()).collect();
+		let callee_names: Vec<&str> = calls.iter().map(|(_, call)| call.name.as_str()).collect();
 		println!("Java calls: {:?}", callee_names);
 
 		assert!(
@@ -1331,6 +1345,9 @@ public class Main {
 			callee_names.contains(&"MyClass"),
 			"Should extract new MyClass()"
 		);
+		assert!(calls.iter().any(|(_, call)| {
+			call.name == "println" && call.qualifier.as_deref() == Some("System::out")
+		}));
 	}
 
 	#[test]
@@ -1350,7 +1367,7 @@ void foo() {
 
 		let mut calls = Vec::new();
 		extract_function_calls_recursive(tree.root_node(), cpp_code, lang.as_ref(), &mut calls);
-		let callee_names: Vec<&str> = calls.iter().map(|(_, name)| name.as_str()).collect();
+		let callee_names: Vec<&str> = calls.iter().map(|(_, call)| call.name.as_str()).collect();
 		println!("C++ calls: {:?}", callee_names);
 
 		assert!(callee_names.contains(&"bar"), "Should extract bar() call");
@@ -1373,13 +1390,19 @@ function main() {
 
 		let mut calls = Vec::new();
 		extract_function_calls_recursive(tree.root_node(), php_code, lang.as_ref(), &mut calls);
-		let callee_names: Vec<&str> = calls.iter().map(|(_, name)| name.as_str()).collect();
+		let callee_names: Vec<&str> = calls.iter().map(|(_, call)| call.name.as_str()).collect();
 		println!("PHP calls: {:?}", callee_names);
 
 		assert!(
 			callee_names.contains(&"helper"),
 			"Should extract helper() call"
 		);
+		assert!(calls.iter().any(|(_, call)| {
+			call.name == "method" && call.qualifier.as_deref() == Some("$obj")
+		}));
+		assert!(calls.iter().any(|(_, call)| {
+			call.name == "staticMethod" && call.qualifier.as_deref() == Some("ClassName")
+		}));
 	}
 
 	#[test]
@@ -1398,7 +1421,7 @@ end
 
 		let mut calls = Vec::new();
 		extract_function_calls_recursive(tree.root_node(), ruby_code, lang.as_ref(), &mut calls);
-		let callee_names: Vec<&str> = calls.iter().map(|(_, name)| name.as_str()).collect();
+		let callee_names: Vec<&str> = calls.iter().map(|(_, call)| call.name.as_str()).collect();
 		println!("Ruby calls: {:?}", callee_names);
 
 		// Should have some calls, but not require/require_relative (filtered)
@@ -1410,6 +1433,9 @@ end
 			!callee_names.contains(&"require"),
 			"Should filter out require"
 		);
+		assert!(calls.iter().any(|(_, call)| {
+			call.name == "method" && call.qualifier.as_deref() == Some("obj")
+		}));
 	}
 
 	#[test]
@@ -1428,7 +1454,7 @@ end
 
 		let mut calls = Vec::new();
 		extract_function_calls_recursive(tree.root_node(), lua_code, lang.as_ref(), &mut calls);
-		let callee_names: Vec<&str> = calls.iter().map(|(_, name)| name.as_str()).collect();
+		let callee_names: Vec<&str> = calls.iter().map(|(_, call)| call.name.as_str()).collect();
 		println!("Lua calls: {:?}", callee_names);
 
 		assert!(
@@ -1444,6 +1470,9 @@ end
 			!callee_names.contains(&"require"),
 			"Should filter out require"
 		);
+		assert!(calls.iter().any(|(_, call)| {
+			call.name == "method" && call.qualifier.as_deref() == Some("other")
+		}));
 	}
 
 	#[test]
@@ -1461,7 +1490,7 @@ my_function() {
 
 		let mut calls = Vec::new();
 		extract_function_calls_recursive(tree.root_node(), bash_code, lang.as_ref(), &mut calls);
-		let callee_names: Vec<&str> = calls.iter().map(|(_, name)| name.as_str()).collect();
+		let callee_names: Vec<&str> = calls.iter().map(|(_, call)| call.name.as_str()).collect();
 		println!("Bash calls: {:?}", callee_names);
 
 		assert!(
@@ -1497,7 +1526,7 @@ function main(): void {
 
 		let mut calls = Vec::new();
 		extract_function_calls_recursive(tree.root_node(), ts_code, lang.as_ref(), &mut calls);
-		let callee_names: Vec<&str> = calls.iter().map(|(_, name)| name.as_str()).collect();
+		let callee_names: Vec<&str> = calls.iter().map(|(_, call)| call.name.as_str()).collect();
 		println!("TypeScript calls: {:?}", callee_names);
 
 		assert!(
@@ -1508,6 +1537,9 @@ function main(): void {
 			callee_names.contains(&"log"),
 			"Should extract console.log() call"
 		);
+		assert!(calls.iter().any(|(_, call)| {
+			call.name == "log" && call.qualifier.as_deref() == Some("console")
+		}));
 	}
 
 	/// Helper function to extract imports/exports recursively (same as in builder.rs)

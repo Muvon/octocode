@@ -1,4 +1,4 @@
-// Copyright 2025 Muvon Un Limited
+// Copyright 2026 Muvon Un Limited
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -37,6 +37,24 @@ impl Language for Lua {
 			// Individual fields and simple assignments will be filtered out
 			// Module system - only module-level returns are meaningful
 		]
+	}
+
+	fn get_symbol_kinds(&self) -> Vec<&'static str> {
+		// `function_definition` is anonymous in this grammar. Named local and
+		// table methods are represented by `function_declaration`.
+		vec!["function_declaration"]
+	}
+
+	fn extract_declaration_name(&self, node: Node, contents: &str) -> Option<String> {
+		let name = node.child_by_field_name("name")?;
+		let text = name.utf8_text(contents.as_bytes()).ok()?;
+		super::extract_call_target(text).map(|target| target.name)
+	}
+
+	fn extract_symbol_owner(&self, node: Node, contents: &str) -> Option<String> {
+		let name = node.child_by_field_name("name")?;
+		let text = name.utf8_text(contents.as_bytes()).ok()?;
+		super::extract_call_target(text).and_then(|target| target.qualifier)
 	}
 
 	fn extract_symbols(&self, node: Node, contents: &str) -> Vec<String> {
@@ -175,16 +193,16 @@ impl Language for Lua {
 		vec!["lua"]
 	}
 
-	fn extract_function_calls(&self, node: Node, contents: &str) -> Vec<String> {
+	fn extract_function_calls(&self, node: Node, contents: &str) -> Vec<super::CallTarget> {
 		if node.kind() == "function_call" {
 			// First child is the function name — skip "require" (that's an import)
-			if let Some(func_node) = node.child(0) {
+			if let Some(func_node) = node.child_by_field_name("name") {
 				if let Ok(text) = func_node.utf8_text(contents.as_bytes()) {
 					let name = text.trim();
 					if name == "require" {
 						return Vec::new();
 					}
-					return super::extract_callee_identifiers(name);
+					return super::extract_call_target(name).into_iter().collect();
 				}
 			}
 		}

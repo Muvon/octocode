@@ -394,17 +394,20 @@ func test() {
 			calls
 		);
 		assert!(
-			calls.iter().any(|c| c == "print"),
+			calls.iter().any(|call| call.name == "print"),
 			"Should contain 'print' call: got {:?}",
 			calls
 		);
+		assert!(calls.iter().any(|call| {
+			call.name == "process" && call.qualifier.as_deref() == Some("someObject")
+		}));
 	}
 
 	fn collect_calls(
 		node: tree_sitter::Node,
 		code: &str,
 		lang: &dyn Language,
-		calls: &mut Vec<String>,
+		calls: &mut Vec<crate::indexer::languages::CallTarget>,
 	) {
 		calls.extend(lang.extract_function_calls(node, code));
 		let mut cursor = node.walk();

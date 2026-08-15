@@ -107,8 +107,8 @@ text_model = "fastembed:nomic-ai/nomic-embed-text-v1.5"
 # JINA_API_KEY, VOYAGE_API_KEY, GOOGLE_API_KEY
 
 [graphrag]
-# The lightweight Tree-sitter symbol graph is always available through MCP.
-# This flag enables the persisted GraphRAG layer used for indexed enrichment.
+# The lightweight Tree-sitter file/symbol graph is always available through MCP.
+# This flag enables the persisted GraphRAG layer used for indexed enrichment and CLI graph commands.
 enabled = false
 # Optional LLM enrichment for the persisted graph; ignored when enabled = false.
 use_llm = false

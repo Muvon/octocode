@@ -164,12 +164,16 @@ Extract and view function signatures, class definitions, and other meaningful co
 
 ### graphrag
 
-Advanced relationship-aware GraphRAG operations for code analysis. Supports multiple operations for exploring the knowledge graph.
+Relationship-aware graph operations over current source. The base graph is built lazily with Tree-sitter and works when `[graphrag].enabled = false`; it needs no code index, embeddings, or LLM. Unchanged repositories reuse an in-memory graph, while repository metadata changes are detected on the next request. With in-process MCP indexing enabled, watcher events also invalidate the graph cache.
+
+The live graph contains file and symbol nodes connected by deterministic `contains`, `imports`, `calls`, `extends`, and `implements` edges. Enabling persisted GraphRAG overlays semantic file matches, descriptions, and additional file-level relationships. It does not embed or LLM-enrich symbol nodes.
+
+For agent use, `search` selects likely file or symbol nodes; it does not automatically traverse their edges. Follow it with `get-relationships`, then use `get-node` or `find-path` when deeper navigation is needed. Use `structural_search` separately for AST-pattern matching and `semantic_search` for meaning-based code retrieval.
 
 **Parameters:**
 - `operation` (string, required) - Operation to perform: "search", "get-node", "get-relationships", "find-path", "overview"
-- `query` (string, optional) - Search query for 'search' operation
-- `node_id` (string, optional) - Node identifier for 'get-node' and 'get-relationships' operations
+- `query` (string, optional) - Search query for 'search'; deterministic name/path lookup is always available, with semantic file lookup added when persisted GraphRAG is enabled
+- `node_id` (string, optional) - Node identifier for 'get-node' and 'get-relationships': `path/to/file`, `path/to/file::symbol`, or `path/to/file::Owner::method`
 - `source_id` (string, optional) - Source node identifier for 'find-path' operation
 - `target_id` (string, optional) - Target node identifier for 'find-path' operation
 - `max_depth` (integer, optional) - Maximum path depth for 'find-path' operation (default: 3)
@@ -177,11 +181,11 @@ Advanced relationship-aware GraphRAG operations for code analysis. Supports mult
 
 **Operation Examples:**
 
-**Search for nodes by semantic query:**
+**Search for file or symbol nodes:**
 ```json
 {
   "operation": "search",
-  "query": "How does user authentication flow through the system?"
+  "query": "AuthService authenticate"
 }
 ```
 
@@ -198,7 +202,7 @@ Advanced relationship-aware GraphRAG operations for code analysis. Supports mult
 ```json
 {
   "operation": "get-relationships",
-  "node_id": "src/auth/mod.rs",
+  "node_id": "src/auth/service.rs::AuthService::authenticate",
   "format": "text"
 }
 ```

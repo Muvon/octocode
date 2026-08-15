@@ -17,8 +17,8 @@
 // Also hosts the unified single-pass AST extractor that replaced the three
 // separate per-file parses (imports/exports, call sites, type relations).
 
-use crate::indexer::graphrag::types::{CodeNode, CodeRelationship, Provenance, RelationType};
-use crate::indexer::languages::{self, Language, TypeRelationKind};
+use crate::indexer::graphrag::types::{CodeRelationship, Provenance, RelationType};
+use crate::indexer::languages::{self, CallTarget, Language, TypeRelationKind};
 use anyhow::{Context, Result};
 use std::collections::HashMap;
 
@@ -26,6 +26,8 @@ use std::collections::HashMap;
 #[derive(Debug, Clone)]
 pub struct SymbolDecl {
 	pub name: String,
+	/// Nearest syntactic type/module that owns this declaration.
+	pub owner: Option<String>,
 	/// Coarse symbol kind: "function", "class", "struct", "trait", "interface",
 	/// "enum", "module", "macro", "const", "type", or "symbol".
 	pub kind: String,
@@ -43,13 +45,24 @@ pub struct TypeRelationDecl {
 	pub target_name: String,
 }
 
+#[derive(Debug, Clone)]
+pub struct ImportBinding {
+	/// Local identifier used at call sites.
+	pub local_name: String,
+	/// Original identifier in the imported file; None means a module namespace.
+	pub imported_name: Option<String>,
+	/// Import path consumed by the language's existing resolver.
+	pub import_path: String,
+}
+
 /// Everything the graph builder needs from ONE tree-sitter parse of a file.
 #[derive(Debug, Clone, Default)]
 pub struct FileAstData {
 	pub imports: Vec<String>,
+	pub import_bindings: Vec<ImportBinding>,
 	pub exports: Vec<String>,
-	/// (0-based line, callee name) pairs.
-	pub calls: Vec<(u32, String)>,
+	/// (0-based line, structured callee) pairs.
+	pub calls: Vec<(u32, CallTarget)>,
 	pub type_relations: Vec<TypeRelationDecl>,
 	/// Declared symbols with line ranges, in source order.
 	pub symbols: Vec<SymbolDecl>,
@@ -63,7 +76,8 @@ pub struct SymbolFileData {
 	pub path: String,
 	pub language: String,
 	pub imports: Vec<String>,
-	pub calls: Vec<(u32, String)>,
+	pub import_bindings: Vec<ImportBinding>,
+	pub calls: Vec<(u32, CallTarget)>,
 	pub type_relations: Vec<TypeRelationDecl>,
 	pub symbols: Vec<SymbolDecl>,
 }
@@ -74,6 +88,7 @@ impl SymbolFileData {
 			path,
 			language,
 			imports: data.imports.clone(),
+			import_bindings: data.import_bindings.clone(),
 			calls: data.calls.clone(),
 			type_relations: data.type_relations.clone(),
 			symbols: data.symbols.clone(),
@@ -81,22 +96,35 @@ impl SymbolFileData {
 	}
 }
 
-/// Generate symbol ids for one file. The common case keeps the concise
-/// `{path}::{name}` form; only same-file name collisions receive a source-line
-/// suffix so methods with the same name never overwrite each other.
+/// Generate stable, human-readable symbol ids for one file. Owned methods use
+/// `{path}::{owner}::{name}` so an LLM can distinguish `Service::run` from
+/// `Worker::run`; only true collisions (such as overloads on the same owner)
+/// receive a source-line suffix.
 pub fn symbol_node_ids(path: &str, symbols: &[SymbolDecl]) -> Vec<String> {
-	let mut counts: HashMap<&str, usize> = HashMap::new();
+	let mut counts: HashMap<(Option<&str>, &str), usize> = HashMap::new();
 	for symbol in symbols {
-		*counts.entry(symbol.name.as_str()).or_default() += 1;
+		*counts
+			.entry((symbol.owner.as_deref(), symbol.name.as_str()))
+			.or_default() += 1;
 	}
 
 	symbols
 		.iter()
 		.map(|symbol| {
-			if counts.get(symbol.name.as_str()).copied().unwrap_or(0) > 1 {
-				format!("{}::{}@{}", path, symbol.name, symbol.start_line + 1)
+			let base = if let Some(owner) = &symbol.owner {
+				format!("{}::{}::{}", path, owner, symbol.name)
 			} else {
 				format!("{}::{}", path, symbol.name)
+			};
+			if counts
+				.get(&(symbol.owner.as_deref(), symbol.name.as_str()))
+				.copied()
+				.unwrap_or(0)
+				> 1
+			{
+				format!("{}@{}", base, symbol.start_line + 1)
+			} else {
+				base
 			}
 		})
 		.collect()
@@ -108,6 +136,7 @@ pub fn symbol_kind_from_node_kind(kind: &str) -> &'static str {
 		|| kind.contains("method")
 		|| kind.contains("procedure")
 		|| kind.contains("constructor")
+		|| kind.contains("init")
 	{
 		"function"
 	} else if kind.contains("interface") {
@@ -156,13 +185,49 @@ pub fn extract_symbols_from_file(file_path: &str, language: &str) -> Result<File
 
 	let symbol_kinds = lang_impl.get_symbol_kinds();
 	let mut data = FileAstData::default();
+	let root = tree.root_node();
 	walk_ast(
-		tree.root_node(),
+		root,
 		&contents,
 		lang_impl.as_ref(),
 		&symbol_kinds,
 		&mut data,
 	);
+
+	for embedded in lang_impl.extract_embedded_sources(root, &contents) {
+		let Some(embedded_impl) = languages::get_language(embedded.language) else {
+			continue;
+		};
+		let mut embedded_parser = tree_sitter::Parser::new();
+		embedded_parser.set_language(&embedded_impl.get_ts_language())?;
+		let Some(embedded_tree) = embedded_parser.parse(&embedded.contents, None) else {
+			continue;
+		};
+		let mut embedded_data = FileAstData::default();
+		walk_ast(
+			embedded_tree.root_node(),
+			&embedded.contents,
+			embedded_impl.as_ref(),
+			&embedded_impl.get_symbol_kinds(),
+			&mut embedded_data,
+		);
+		for (line, _) in &mut embedded_data.calls {
+			*line += embedded.start_line;
+		}
+		for relation in &mut embedded_data.type_relations {
+			relation.line += embedded.start_line;
+		}
+		for symbol in &mut embedded_data.symbols {
+			symbol.start_line += embedded.start_line;
+			symbol.end_line += embedded.start_line;
+		}
+		data.imports.extend(embedded_data.imports);
+		data.import_bindings.extend(embedded_data.import_bindings);
+		data.exports.extend(embedded_data.exports);
+		data.calls.extend(embedded_data.calls);
+		data.type_relations.extend(embedded_data.type_relations);
+		data.symbols.extend(embedded_data.symbols);
+	}
 	Ok(data)
 }
 
@@ -177,6 +242,12 @@ fn walk_ast(
 	data: &mut FileAstData,
 ) {
 	let (imports, exports) = lang_impl.extract_imports_exports(node, contents);
+	data.import_bindings.extend(extract_import_bindings(
+		lang_impl.name(),
+		node,
+		contents,
+		&imports,
+	));
 	data.imports.extend(imports);
 	data.exports.extend(exports);
 
@@ -204,6 +275,7 @@ fn walk_ast(
 				data.symbols.push(SymbolDecl {
 					kind: symbol_kind_from_node_kind(node.kind()).to_string(),
 					name,
+					owner: lang_impl.extract_symbol_owner(node, contents),
 					start_line: node.start_position().row as u32,
 					end_line: node.end_position().row as u32,
 				});
@@ -217,36 +289,180 @@ fn walk_ast(
 	}
 }
 
-/// Symbol lookup structures shared by symbol-edge discovery.
-struct SymbolIndex<'a> {
-	/// Symbol name → symbol node ids declaring it (project-wide).
-	by_name: HashMap<&'a str, Vec<&'a str>>,
-	/// Owning file path → (symbol name → symbol node ids).
-	by_file: HashMap<&'a str, HashMap<&'a str, Vec<&'a str>>>,
+fn extract_import_bindings(
+	language: &str,
+	node: tree_sitter::Node,
+	contents: &str,
+	imports: &[String],
+) -> Vec<ImportBinding> {
+	if imports.is_empty() {
+		return Vec::new();
+	}
+	let Ok(text) = node.utf8_text(contents.as_bytes()) else {
+		return Vec::new();
+	};
+	let text = text.trim();
+	let mut bindings = Vec::new();
+
+	match language {
+		"python" if text.starts_with("import ") => {
+			for item in text.trim_start_matches("import ").split(',') {
+				let mut parts = item.trim().split_whitespace();
+				let Some(path) = parts.next() else { continue };
+				if parts.next() == Some("as") {
+					if let Some(alias) = parts.next() {
+						bindings.push(ImportBinding {
+							local_name: alias.to_string(),
+							imported_name: None,
+							import_path: path.to_string(),
+						});
+					}
+				}
+			}
+		}
+		"python" if text.starts_with("from ") => {
+			if let Some((module, names)) = text.trim_start_matches("from ").split_once(" import ") {
+				for item in names.trim_matches(['(', ')']).split(',') {
+					let mut parts = item.trim().split_whitespace();
+					let Some(imported) = parts.next() else {
+						continue;
+					};
+					let local = if parts.next() == Some("as") {
+						parts.next().unwrap_or(imported)
+					} else {
+						imported
+					};
+					bindings.push(ImportBinding {
+						local_name: local.to_string(),
+						imported_name: Some(imported.to_string()),
+						import_path: module.trim().to_string(),
+					});
+				}
+			}
+		}
+		"javascript" | "typescript" => {
+			let Some(path) = imports.first() else {
+				return bindings;
+			};
+			let clause = text
+				.trim_start_matches("import")
+				.split(" from ")
+				.next()
+				.unwrap_or_default()
+				.trim();
+			if let Some(alias) = clause.strip_prefix("* as ") {
+				bindings.push(ImportBinding {
+					local_name: alias.trim().to_string(),
+					imported_name: None,
+					import_path: path.clone(),
+				});
+			}
+			if let Some(start) = clause.find('{') {
+				if let Some(end) = clause.rfind('}') {
+					for item in clause[start + 1..end].split(',') {
+						let mut parts = item.trim().trim_start_matches("type ").split_whitespace();
+						let Some(imported) = parts.next() else {
+							continue;
+						};
+						let local = if parts.next() == Some("as") {
+							parts.next().unwrap_or(imported)
+						} else {
+							imported
+						};
+						bindings.push(ImportBinding {
+							local_name: local.to_string(),
+							imported_name: Some(imported.to_string()),
+							import_path: path.clone(),
+						});
+					}
+				}
+			}
+		}
+		"go" => {
+			for line in text.lines() {
+				let parts: Vec<_> = line
+					.trim()
+					.trim_start_matches("import")
+					.trim_matches(['(', ')'])
+					.split_whitespace()
+					.collect();
+				if parts.len() == 2 && !matches!(parts[0], "_" | ".") {
+					bindings.push(ImportBinding {
+						local_name: parts[0].to_string(),
+						imported_name: None,
+						import_path: parts[1].trim_matches('"').to_string(),
+					});
+				}
+			}
+		}
+		"rust" | "php" if text.contains(" as ") => {
+			let cleaned = text.trim_start_matches("use ").trim_end_matches(';').trim();
+			if let Some((path, alias)) = cleaned.rsplit_once(" as ") {
+				let imported = path
+					.rsplit([':', '\\'])
+					.find(|part| !part.is_empty())
+					.unwrap_or(path);
+				bindings.push(ImportBinding {
+					local_name: alias.trim().to_string(),
+					imported_name: Some(imported.to_string()),
+					import_path: imports.first().cloned().unwrap_or_else(|| path.to_string()),
+				});
+			}
+		}
+		_ => {}
+	}
+
+	bindings
 }
 
-impl<'a> SymbolIndex<'a> {
-	fn build(all_nodes: &'a [CodeNode]) -> Self {
+/// Symbol lookup structures shared by symbol-edge discovery.
+struct SymbolIndex {
+	/// Symbol name → symbol node ids declaring it (project-wide).
+	by_name: HashMap<String, Vec<String>>,
+	/// Owning file path → (symbol name → symbol node ids).
+	by_file: HashMap<String, HashMap<String, Vec<String>>>,
+	/// Owning type/module + symbol name → symbol node ids.
+	by_owner: HashMap<(String, String), Vec<String>>,
+	/// File + owning type/module + symbol name → symbol node ids.
+	by_file_owner: HashMap<(String, String, String), Vec<String>>,
+}
+
+impl SymbolIndex {
+	fn build(files: &[SymbolFileData]) -> Self {
 		let mut index = SymbolIndex {
 			by_name: HashMap::new(),
 			by_file: HashMap::new(),
+			by_owner: HashMap::new(),
+			by_file_owner: HashMap::new(),
 		};
-		for node in all_nodes {
-			if !node.is_symbol_node() || node.language == "markdown" {
-				continue;
+		for file in files {
+			let ids = symbol_node_ids(&file.path, &file.symbols);
+			for (symbol, id) in file.symbols.iter().zip(ids) {
+				index
+					.by_name
+					.entry(symbol.name.clone())
+					.or_default()
+					.push(id.clone());
+				index
+					.by_file
+					.entry(file.path.clone())
+					.or_default()
+					.entry(symbol.name.clone())
+					.or_default()
+					.push(id.clone());
+				if let Some(owner) = &symbol.owner {
+					index
+						.by_owner
+						.entry((owner.clone(), symbol.name.clone()))
+						.or_default()
+						.push(id.clone());
+					index
+						.by_file_owner
+						.entry((file.path.clone(), owner.clone(), symbol.name.clone()))
+						.or_default()
+						.push(id);
+				}
 			}
-			index
-				.by_name
-				.entry(node.name.as_str())
-				.or_default()
-				.push(node.id.as_str());
-			index
-				.by_file
-				.entry(node.path.as_str())
-				.or_default()
-				.entry(node.name.as_str())
-				.or_default()
-				.push(node.id.as_str());
 		}
 		index
 	}
@@ -260,7 +476,7 @@ impl<'a> SymbolIndex<'a> {
 		target_name: &str,
 		imported_files: &[String],
 		allow_ambiguous: bool,
-	) -> Vec<(&'a str, Provenance, f32)> {
+	) -> Vec<(&str, Provenance, f32)> {
 		// 1. Same file — direct AST fact.
 		if let Some(targets) = self
 			.by_file
@@ -268,58 +484,198 @@ impl<'a> SymbolIndex<'a> {
 			.and_then(|m| m.get(target_name))
 		{
 			if targets.len() == 1 {
-				return vec![(targets[0], Provenance::Extracted, 0.9)];
+				return vec![(targets[0].as_str(), Provenance::Extracted, 0.9)];
 			}
 			if allow_ambiguous {
 				return targets
 					.iter()
-					.map(|id| (*id, Provenance::Ambiguous, 0.4))
+					.map(|id| (id.as_str(), Provenance::Ambiguous, 0.4))
 					.collect();
 			}
 			return Vec::new();
 		}
 
-		// 2. A file the source imports declares the target.
+		// 2. Files the source imports declare the target. Collect across every
+		// import before deciding: returning the first match makes import order
+		// silently choose between two equally plausible declarations.
+		let mut imported_targets = Vec::new();
 		for imported in imported_files {
 			if let Some(targets) = self
 				.by_file
 				.get(imported.as_str())
 				.and_then(|m| m.get(target_name))
 			{
-				if targets.len() == 1 {
-					return vec![(targets[0], Provenance::Extracted, 0.85)];
-				}
+				imported_targets.extend(targets);
 			}
+		}
+		imported_targets.sort_unstable();
+		imported_targets.dedup();
+		if imported_targets.len() == 1 {
+			return vec![(imported_targets[0].as_str(), Provenance::Extracted, 0.85)];
+		}
+		if !imported_targets.is_empty() {
+			if allow_ambiguous {
+				return imported_targets
+					.into_iter()
+					.map(|id| (id.as_str(), Provenance::Ambiguous, 0.45))
+					.collect();
+			}
+			return Vec::new();
 		}
 
 		// 3. Unique global declaration.
 		match self.by_name.get(target_name) {
-			Some(ids) if ids.len() == 1 => vec![(ids[0], Provenance::Inferred, 0.6)],
+			Some(ids) if ids.len() == 1 => {
+				vec![(ids[0].as_str(), Provenance::Inferred, 0.6)]
+			}
 			// Multiple candidates: only type relations (extends/implements)
 			// record them — call sites hit ubiquitous method names (`new`,
 			// `get`) and would balloon the edge set with noise.
 			Some(ids) if allow_ambiguous => ids
 				.iter()
-				.map(|id| (&**id, Provenance::Ambiguous, 0.4))
+				.map(|id| (id.as_str(), Provenance::Ambiguous, 0.4))
 				.collect(),
 			_ => Vec::new(),
 		}
+	}
+
+	fn resolve_call(
+		&self,
+		source_path: &str,
+		source_owner: Option<&str>,
+		target: &CallTarget,
+		imports: &[(String, String)],
+		bindings: &[(ImportBinding, String)],
+	) -> Vec<(&str, Provenance, f32)> {
+		let imported_files: Vec<String> = imports.iter().map(|(_, path)| path.clone()).collect();
+		let mut bound_targets = Vec::new();
+		for (binding, path) in bindings {
+			if target.qualifier.is_none() && binding.local_name == target.name {
+				let imported_name = binding.imported_name.as_deref().unwrap_or(&target.name);
+				if let Some(ids) = self
+					.by_file
+					.get(path)
+					.and_then(|symbols| symbols.get(imported_name))
+				{
+					bound_targets.extend(ids);
+				}
+			}
+			if target.qualifier.as_deref() == Some(binding.local_name.as_str()) {
+				let ids = if let Some(owner) = &binding.imported_name {
+					self.by_file_owner
+						.get(&(path.clone(), owner.clone(), target.name.clone()))
+				} else {
+					self.by_file
+						.get(path)
+						.and_then(|symbols| symbols.get(&target.name))
+				};
+				if let Some(ids) = ids {
+					bound_targets.extend(ids);
+				}
+			}
+		}
+		bound_targets.sort_unstable();
+		bound_targets.dedup();
+		if bound_targets.len() == 1 {
+			return vec![(bound_targets[0].as_str(), Provenance::Extracted, 0.95)];
+		}
+		if bound_targets.len() > 1 {
+			return Vec::new();
+		}
+
+		let Some(qualifier) = target.qualifier.as_deref() else {
+			return self.resolve(source_path, &target.name, &imported_files, false);
+		};
+		let qualifier_leaf = qualifier
+			.rsplit("::")
+			.next()
+			.unwrap_or(qualifier)
+			.trim_start_matches('$');
+
+		if matches!(qualifier_leaf, "self" | "Self" | "this") {
+			if let Some(owner) = source_owner {
+				if let Some(ids) = self.by_file_owner.get(&(
+					source_path.to_string(),
+					owner.to_string(),
+					target.name.clone(),
+				)) {
+					if ids.len() == 1 {
+						return vec![(ids[0].as_str(), Provenance::Extracted, 0.95)];
+					}
+				}
+			}
+			return Vec::new();
+		}
+
+		// Static/type-qualified call (`Service::run`, `Service.run`).
+		if let Some(ids) = self.by_file_owner.get(&(
+			source_path.to_string(),
+			qualifier_leaf.to_string(),
+			target.name.clone(),
+		)) {
+			if ids.len() == 1 {
+				return vec![(ids[0].as_str(), Provenance::Extracted, 0.95)];
+			}
+		}
+		if let Some(ids) = self
+			.by_owner
+			.get(&(qualifier_leaf.to_string(), target.name.clone()))
+		{
+			if ids.len() == 1 {
+				return vec![(ids[0].as_str(), Provenance::Extracted, 0.9)];
+			}
+			let imported: Vec<_> = ids
+				.iter()
+				.filter(|id| {
+					imported_files
+						.iter()
+						.any(|path| id.starts_with(path.as_str()))
+				})
+				.collect();
+			if imported.len() == 1 {
+				return vec![(imported[0].as_str(), Provenance::Extracted, 0.85)];
+			}
+		}
+
+		// Module-qualified call: constrain lookup to the matching imported file.
+		for (raw_import, imported_file) in imports {
+			let import_leaf = raw_import
+				.rsplit([':', '.', '/'])
+				.next()
+				.unwrap_or(raw_import)
+				.trim_matches(|character: char| !character.is_alphanumeric() && character != '_');
+			let file_stem = std::path::Path::new(imported_file)
+				.file_stem()
+				.and_then(|stem| stem.to_str())
+				.unwrap_or_default();
+			if qualifier_leaf == import_leaf || qualifier_leaf == file_stem {
+				if let Some(ids) = self
+					.by_file
+					.get(imported_file)
+					.and_then(|symbols| symbols.get(&target.name))
+				{
+					if ids.len() == 1 {
+						return vec![(ids[0].as_str(), Provenance::Extracted, 0.9)];
+					}
+				}
+			}
+		}
+
+		// Unknown instance receiver: retain only a uniquely resolvable scoped
+		// target and mark it inferred; never fan out ubiquitous method names.
+		self.resolve(source_path, &target.name, &imported_files, false)
+			.into_iter()
+			.map(|(id, _, confidence)| (id, Provenance::Inferred, confidence.min(0.65)))
+			.collect()
 	}
 }
 
 /// Discover symbol→symbol edges (calls / extends / implements) for the given
 /// source files against the full graph. Pure tree-sitter + name resolution —
 /// no LLM. File-level edges are produced separately by `relationships.rs`.
-pub fn discover_symbol_relationships(
-	new_files: &[SymbolFileData],
-	all_nodes: &[CodeNode],
-) -> Vec<CodeRelationship> {
-	let index = SymbolIndex::build(all_nodes);
-	let all_files: Vec<String> = all_nodes
-		.iter()
-		.filter(|n| !n.is_symbol_node())
-		.map(|n| n.path.clone())
-		.collect();
+pub fn discover_symbol_relationships(new_files: &[SymbolFileData]) -> Vec<CodeRelationship> {
+	let index = SymbolIndex::build(new_files);
+	let all_files: Vec<String> = new_files.iter().map(|file| file.path.clone()).collect();
 
 	let mut relationships = Vec::new();
 
@@ -332,10 +688,27 @@ pub fn discover_symbol_relationships(
 		};
 
 		// Resolve each import to a concrete project file once per source file.
-		let imported_files: Vec<String> = source_file
+		let resolved_imports: Vec<(String, String)> = source_file
 			.imports
 			.iter()
-			.filter_map(|imp| lang_impl.resolve_import(imp, &source_file.path, &all_files))
+			.filter_map(|import| {
+				lang_impl
+					.resolve_import(import, &source_file.path, &all_files)
+					.map(|path| (import.clone(), path))
+			})
+			.collect();
+		let resolved_bindings: Vec<(ImportBinding, String)> = source_file
+			.import_bindings
+			.iter()
+			.filter_map(|binding| {
+				lang_impl
+					.resolve_import(&binding.import_path, &source_file.path, &all_files)
+					.map(|path| (binding.clone(), path))
+			})
+			.collect();
+		let imported_files: Vec<String> = resolved_imports
+			.iter()
+			.map(|(_, path)| path.clone())
 			.collect();
 
 		let symbol_ids = symbol_node_ids(&source_file.path, &source_file.symbols);
@@ -350,19 +723,40 @@ pub fn discover_symbol_relationships(
 						&& (!functions_only || symbol.kind == "function")
 				})
 				.min_by_key(|(_, symbol)| symbol.end_line.saturating_sub(symbol.start_line))
-				.map(|(index, symbol)| (symbol_ids[index].as_str(), symbol.name.as_str()))
+				.map(|(index, symbol)| (symbol_ids[index].as_str(), symbol))
 		};
 
 		for (line, callee) in &source_file.calls {
-			if let Some((source_id, source_name)) = owning_symbol(*line, true) {
-				for (target, provenance, confidence) in
-					index.resolve(&source_file.path, callee, &imported_files, false)
-				{
+			if let Some((source_id, source_symbol)) = owning_symbol(*line, true) {
+				let callee_display = callee
+					.qualifier
+					.as_ref()
+					.map(|qualifier| format!("{}::{}", qualifier, callee.name))
+					.unwrap_or_else(|| callee.name.clone());
+				if callee.qualifier.is_none() && callee.name == source_symbol.name {
+					relationships.push(CodeRelationship {
+						source: source_id.to_string(),
+						target: source_id.to_string(),
+						relation_type: RelationType::Calls,
+						description: format!("{} calls itself", source_symbol.name),
+						confidence: 1.0,
+						weight: 0.8,
+						provenance: Provenance::Extracted,
+					});
+					continue;
+				}
+				for (target, provenance, confidence) in index.resolve_call(
+					&source_file.path,
+					source_symbol.owner.as_deref(),
+					callee,
+					&resolved_imports,
+					&resolved_bindings,
+				) {
 					relationships.push(CodeRelationship {
 						source: source_id.to_string(),
 						target: target.to_string(),
 						relation_type: RelationType::Calls,
-						description: format!("{} calls {}", source_name, callee),
+						description: format!("{} calls {}", source_symbol.name, callee_display),
 						confidence,
 						weight: 0.8,
 						provenance,
@@ -380,10 +774,10 @@ pub fn discover_symbol_relationships(
 						.enumerate()
 						.filter(|(_, symbol)| symbol.name == name)
 						.min_by_key(|(_, symbol)| symbol.end_line.saturating_sub(symbol.start_line))
-						.map(|(index, symbol)| (symbol_ids[index].as_str(), symbol.name.as_str()))
+						.map(|(index, symbol)| (symbol_ids[index].as_str(), symbol))
 				})
 			});
-			if let Some((source_id, source_name)) = owner {
+			if let Some((source_id, source_symbol)) = owner {
 				let relation_type = match relation.kind {
 					TypeRelationKind::Extends => RelationType::Extends,
 					TypeRelationKind::Implements => RelationType::Implements,
@@ -400,7 +794,7 @@ pub fn discover_symbol_relationships(
 						relation_type: relation_type.clone(),
 						description: format!(
 							"{} {} {}",
-							source_name,
+							source_symbol.name,
 							relation_type.as_str(),
 							relation.target_name
 						),
@@ -431,44 +825,22 @@ mod tests {
 		SymbolDecl {
 			name: name.to_string(),
 			kind: kind.to_string(),
+			owner: None,
 			start_line,
 			end_line,
 		}
 	}
 
-	fn file_node(path: &str) -> CodeNode {
-		CodeNode {
-			id: path.to_string(),
-			name: path.to_string(),
-			kind: "source_file".to_string(),
-			path: path.to_string(),
-			description: String::new(),
-			symbols: Vec::new(),
-			hash: String::new(),
-			embedding: Vec::new(),
-			imports: Vec::new(),
-			exports: Vec::new(),
-			functions: Vec::new(),
-			size_lines: 0,
-			language: "rust".to_string(),
-		}
-	}
-
-	fn symbol_node(path: &str, name: &str) -> CodeNode {
-		CodeNode {
-			id: format!("{}::{}", path, name),
-			name: name.to_string(),
-			kind: "function".to_string(),
-			path: path.to_string(),
-			description: String::new(),
-			symbols: Vec::new(),
-			hash: String::new(),
-			embedding: Vec::new(),
-			imports: Vec::new(),
-			exports: Vec::new(),
-			functions: Vec::new(),
-			size_lines: 0,
-			language: "rust".to_string(),
+	fn owned_declaration(
+		owner: &str,
+		name: &str,
+		kind: &str,
+		start_line: u32,
+		end_line: u32,
+	) -> SymbolDecl {
+		SymbolDecl {
+			owner: Some(owner.to_string()),
+			..declaration(name, kind, start_line, end_line)
 		}
 	}
 
@@ -541,6 +913,7 @@ pub fn main_fn() {
 		assert_eq!(config.kind, "struct");
 		let new = find("new").expect("new symbol");
 		assert_eq!(new.kind, "function");
+		assert_eq!(new.owner.as_deref(), Some("Config"));
 		let helper = find("helper").expect("helper symbol");
 		assert_eq!(helper.kind, "function");
 		let main_fn = find("main_fn").expect("main_fn symbol");
@@ -550,7 +923,7 @@ pub fn main_fn() {
 
 		// Call sites extracted with lines
 		assert!(
-			data.calls.iter().any(|(_, c)| c == "helper"),
+			data.calls.iter().any(|(_, call)| call.name == "helper"),
 			"calls: {:?}",
 			data.calls
 		);
@@ -585,9 +958,18 @@ pub fn main_fn() {
 			path: "src/a.rs".to_string(),
 			language: "rust".to_string(),
 			imports: Vec::new(),
+			import_bindings: Vec::new(),
 			calls: ["helper", "unique_fn", "new"]
 				.into_iter()
-				.map(|callee| (5, callee.to_string()))
+				.map(|callee| {
+					(
+						5,
+						CallTarget {
+							name: callee.to_string(),
+							qualifier: None,
+						},
+					)
+				})
 				.collect(),
 			type_relations: vec![TypeRelationDecl {
 				line: 5,
@@ -600,24 +982,33 @@ pub fn main_fn() {
 				declaration("helper", "function", 20, 25),
 			],
 		};
-		let a_file = file_node("src/a.rs");
-		let b = file_node("src/b.rs");
-		let c = file_node("src/c.rs");
+		let b = SymbolFileData {
+			path: "src/b.rs".to_string(),
+			language: "rust".to_string(),
+			imports: Vec::new(),
+			import_bindings: Vec::new(),
+			calls: Vec::new(),
+			type_relations: Vec::new(),
+			symbols: vec![
+				declaration("unique_fn", "function", 0, 1),
+				declaration("new", "function", 2, 3),
+				declaration("Base", "struct", 4, 5),
+			],
+		};
+		let c = SymbolFileData {
+			path: "src/c.rs".to_string(),
+			language: "rust".to_string(),
+			imports: Vec::new(),
+			import_bindings: Vec::new(),
+			calls: Vec::new(),
+			type_relations: Vec::new(),
+			symbols: vec![
+				declaration("new", "function", 0, 1),
+				declaration("Base", "struct", 2, 3),
+			],
+		};
 
-		let all_nodes = vec![
-			a_file,
-			b,
-			c,
-			symbol_node("src/a.rs", "run"),
-			symbol_node("src/a.rs", "helper"),
-			symbol_node("src/b.rs", "unique_fn"),
-			symbol_node("src/b.rs", "new"),
-			symbol_node("src/c.rs", "new"),
-			symbol_node("src/b.rs", "Base"),
-			symbol_node("src/c.rs", "Base"),
-		];
-
-		let edges = discover_symbol_relationships(&[a], &all_nodes);
+		let edges = discover_symbol_relationships(&[a, b, c]);
 
 		let find = |source: &str, target: &str, rel: RelationType| {
 			edges
@@ -646,5 +1037,154 @@ pub fn main_fn() {
 		let amb_c = find("src/a.rs::run", "src/c.rs::Base", RelationType::Extends)
 			.expect("ambiguous extends edge to c");
 		assert_eq!(amb_c.provenance, Provenance::Ambiguous);
+	}
+
+	#[test]
+	fn qualified_and_self_calls_resolve_to_the_correct_owner() {
+		let file = SymbolFileData {
+			path: "src/services.rs".to_string(),
+			language: "rust".to_string(),
+			imports: Vec::new(),
+			import_bindings: Vec::new(),
+			calls: vec![
+				(
+					5,
+					CallTarget {
+						name: "run".to_string(),
+						qualifier: Some("self".to_string()),
+					},
+				),
+				(
+					25,
+					CallTarget {
+						name: "run".to_string(),
+						qualifier: Some("Worker".to_string()),
+					},
+				),
+			],
+			type_relations: Vec::new(),
+			symbols: vec![
+				owned_declaration("Service", "execute", "function", 0, 10),
+				owned_declaration("Service", "run", "function", 12, 16),
+				owned_declaration("Worker", "dispatch", "function", 20, 30),
+				owned_declaration("Worker", "run", "function", 32, 36),
+			],
+		};
+
+		let edges = discover_symbol_relationships(&[file]);
+		assert!(edges.iter().any(|edge| {
+			edge.source == "src/services.rs::Service::execute"
+				&& edge.target == "src/services.rs::Service::run"
+				&& edge.provenance == Provenance::Extracted
+		}));
+		assert!(edges.iter().any(|edge| {
+			edge.source == "src/services.rs::Worker::dispatch"
+				&& edge.target == "src/services.rs::Worker::run"
+				&& edge.provenance == Provenance::Extracted
+		}));
+	}
+
+	#[test]
+	fn imported_symbol_alias_resolves_to_original_declaration() {
+		let source = SymbolFileData {
+			path: "src/main.js".to_string(),
+			language: "javascript".to_string(),
+			imports: vec!["./utils".to_string()],
+			import_bindings: vec![ImportBinding {
+				local_name: "h".to_string(),
+				imported_name: Some("helper".to_string()),
+				import_path: "./utils".to_string(),
+			}],
+			calls: vec![(
+				2,
+				CallTarget {
+					name: "h".to_string(),
+					qualifier: None,
+				},
+			)],
+			type_relations: Vec::new(),
+			symbols: vec![declaration("main", "function", 0, 5)],
+		};
+		let target = SymbolFileData {
+			path: "src/utils.js".to_string(),
+			language: "javascript".to_string(),
+			imports: Vec::new(),
+			import_bindings: Vec::new(),
+			calls: Vec::new(),
+			type_relations: Vec::new(),
+			symbols: vec![declaration("helper", "function", 0, 1)],
+		};
+
+		let edges = discover_symbol_relationships(&[source, target]);
+		assert!(edges.iter().any(|edge| {
+			edge.source == "src/main.js::main"
+				&& edge.target == "src/utils.js::helper"
+				&& edge.relation_type == RelationType::Calls
+		}));
+	}
+
+	#[test]
+	fn svelte_embedded_script_builds_symbols_and_calls() {
+		let path = std::env::temp_dir().join(format!(
+			"octocode_symbols_svelte_test_{}.svelte",
+			std::process::id()
+		));
+		std::fs::write(
+			&path,
+			"<script>\nfunction helper() {}\nfunction run() { helper(); }\n</script>\n",
+		)
+		.unwrap();
+
+		let data = extract_symbols_from_file(path.to_str().unwrap(), "svelte").unwrap();
+		std::fs::remove_file(&path).unwrap();
+
+		assert!(data.symbols.iter().any(|symbol| symbol.name == "helper"));
+		assert!(data.symbols.iter().any(|symbol| symbol.name == "run"));
+		assert!(data.calls.iter().any(|(_, call)| call.name == "helper"));
+	}
+
+	#[test]
+	fn supported_object_languages_extract_method_owners() {
+		let cases = [
+			("javascript", "class Service { run() {} }", "run"),
+			("typescript", "class Service { run(): void {} }", "run"),
+			(
+				"python",
+				"class Service:\n    def run(self):\n        pass\n",
+				"run",
+			),
+			(
+				"go",
+				"package p\ntype Service struct{}\nfunc (s *Service) Run() {}\n",
+				"Run",
+			),
+			("java", "class Service { void run() {} }", "run"),
+			("cpp", "class Service { void run() {} };", "run"),
+			("php", "<?php class Service { function run() {} }", "run"),
+			("ruby", "class Service\n  def run\n  end\nend\n", "run"),
+			("lua", "function Service.run() end", "run"),
+			("swift", "class Service { func run() {} }", "run"),
+		];
+
+		for (index, (language, code, method)) in cases.into_iter().enumerate() {
+			let path = std::env::temp_dir().join(format!(
+				"octocode_owner_test_{}_{}",
+				std::process::id(),
+				index
+			));
+			std::fs::write(&path, code).unwrap();
+			let data = extract_symbols_from_file(path.to_str().unwrap(), language).unwrap();
+			std::fs::remove_file(&path).unwrap();
+			let declaration = data
+				.symbols
+				.iter()
+				.find(|symbol| symbol.name == method)
+				.unwrap_or_else(|| panic!("{language} should extract method {method}: {data:?}"));
+			assert_eq!(
+				declaration.owner.as_deref(),
+				Some("Service"),
+				"{language} should attribute {method} to Service"
+			);
+		}
 	}
 }

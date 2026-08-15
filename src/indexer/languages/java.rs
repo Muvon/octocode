@@ -273,26 +273,28 @@ impl Language for Java {
 		});
 	}
 
-	fn extract_function_calls(&self, node: Node, contents: &str) -> Vec<String> {
+	fn extract_function_calls(&self, node: Node, contents: &str) -> Vec<super::CallTarget> {
 		match node.kind() {
 			"method_invocation" => {
-				// Extract method name and object identifiers
-				let mut result = Vec::new();
-				for child in node.children(&mut node.walk()) {
-					if child.kind() == "identifier" {
-						if let Ok(text) = child.utf8_text(contents.as_bytes()) {
-							result.push(text.to_string());
-						}
-					}
-				}
-				result
+				let Some(name_node) = node.child_by_field_name("name") else {
+					return Vec::new();
+				};
+				let Ok(name) = name_node.utf8_text(contents.as_bytes()) else {
+					return Vec::new();
+				};
+				let raw = node
+					.child_by_field_name("object")
+					.and_then(|object| object.utf8_text(contents.as_bytes()).ok())
+					.map(|object| format!("{}.{}", object, name))
+					.unwrap_or_else(|| name.to_string());
+				super::extract_call_target(&raw).into_iter().collect()
 			}
 			"object_creation_expression" => {
 				// new Foo() → extract type name
 				for child in node.children(&mut node.walk()) {
 					if child.kind() == "type_identifier" || child.kind() == "generic_type" {
 						if let Ok(text) = child.utf8_text(contents.as_bytes()) {
-							return super::extract_callee_identifiers(text);
+							return super::extract_call_target(text).into_iter().collect();
 						}
 					}
 				}

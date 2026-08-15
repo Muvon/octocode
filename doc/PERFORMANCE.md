@@ -203,7 +203,7 @@ octocode clear && octocode index  # Index all at once vs incremental
 embeddings_batch_size = 16       # Smaller batches for cloud APIs
 
 [graphrag.llm]
-# Optimize AI call costs and rate limits
+# Optimize optional persisted GraphRAG enrichment costs and rate limits
 ai_batch_size = 8               # Process multiple files per AI call
 max_batch_tokens = 16384        # Stay within model context limits
 fallback_to_individual = true   # Reliability if batch processing fails

@@ -70,7 +70,7 @@ pub enum RelationType {
 	ParentModule,
 	/// Child directory relationship
 	ChildModule,
-	/// File contains a declared symbol (symbol-tier GraphRAG)
+	/// File contains a declared live AST symbol
 	Contains,
 }
 
@@ -227,7 +227,8 @@ impl CodeNode {
 		}
 	}
 
-	/// True for lightweight symbol-tier nodes (`{file_path}::{symbol_name}`).
+	/// True for live AST symbol nodes (`{file_path}::{symbol_name}` or
+	/// `{file_path}::{owner}::{method}`).
 	/// File node ids are relative paths and never contain `::` in practice.
 	pub fn is_symbol_node(&self) -> bool {
 		self.id.contains("::")

@@ -1,4 +1,4 @@
-// Copyright 2025 Muvon Un Limited
+// Copyright 2026 Muvon Un Limited
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -68,6 +68,41 @@ impl Language for Cpp {
 			"enum_specifier",
 			"namespace_definition",
 		]
+	}
+
+	fn extract_declaration_name(&self, node: Node, contents: &str) -> Option<String> {
+		if node.kind() == "function_definition" {
+			let declarator = node.child_by_field_name("declarator")?;
+			let text = declarator.utf8_text(contents.as_bytes()).ok()?;
+			let callable = text.split('(').next().unwrap_or(text);
+			return super::extract_call_target(callable).map(|target| target.name);
+		}
+		node.child_by_field_name("name")
+			.and_then(|name| name.utf8_text(contents.as_bytes()).ok())
+			.map(str::to_string)
+			.or_else(|| {
+				super::extract_symbol_by_kinds(
+					node,
+					contents,
+					&["identifier", "type_identifier", "namespace_identifier"],
+				)
+			})
+	}
+
+	fn extract_symbol_owner(&self, node: Node, contents: &str) -> Option<String> {
+		if node.kind() == "function_definition" {
+			if let Some(declarator) = node.child_by_field_name("declarator") {
+				if let Ok(text) = declarator.utf8_text(contents.as_bytes()) {
+					let callable = text.split('(').next().unwrap_or(text);
+					if let Some(owner) =
+						super::extract_call_target(callable).and_then(|target| target.qualifier)
+					{
+						return super::simple_type_name(&owner);
+					}
+				}
+			}
+		}
+		super::find_graph_symbol_owner(node, contents)
 	}
 
 	fn extract_symbols(&self, node: Node, contents: &str) -> Vec<String> {
@@ -348,11 +383,11 @@ impl Language for Cpp {
 		(imports, exports)
 	}
 
-	fn extract_function_calls(&self, node: Node, contents: &str) -> Vec<String> {
+	fn extract_function_calls(&self, node: Node, contents: &str) -> Vec<super::CallTarget> {
 		if node.kind() == "call_expression" {
 			if let Some(func_node) = node.child(0) {
 				if let Ok(text) = func_node.utf8_text(contents.as_bytes()) {
-					return super::extract_callee_identifiers(text);
+					return super::extract_call_target(text).into_iter().collect();
 				}
 			}
 		}

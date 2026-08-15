@@ -110,12 +110,9 @@ fn scan_sources(root: &Path) -> (Vec<SourceFile>, RepositoryStamp) {
 			continue;
 		}
 		let path = entry.path();
-		let Some(language) = crate::grep::language_from_extension(path) else {
+		let Some(language) = supported_source_language(path) else {
 			continue;
 		};
-		if languages::get_language(language).is_none() {
-			continue;
-		}
 
 		let metadata = match entry.metadata() {
 			Ok(metadata) => metadata,
@@ -153,6 +150,13 @@ fn scan_sources(root: &Path) -> (Vec<SourceFile>, RepositoryStamp) {
 		fingerprint: hasher.finish(),
 	};
 	(files, stamp)
+}
+
+fn supported_source_language(path: &Path) -> Option<&'static str> {
+	let language = crate::indexer::detect_language(path)?;
+	languages::get_language(language)
+		.is_some()
+		.then_some(language)
 }
 
 fn build_graph(files: Vec<SourceFile>) -> CodeGraph {
@@ -230,14 +234,27 @@ fn build_graph(files: Vec<SourceFile>) -> CodeGraph {
 					name: symbol.name.clone(),
 					kind: symbol.kind.clone(),
 					path: file.relative_path.clone(),
-					description: format!(
-						"{} {} in {}:{}",
-						symbol.kind,
-						symbol.name,
-						file.relative_path,
-						symbol.start_line + 1
-					),
-					symbols: vec![symbol.name.clone()],
+					description: if let Some(owner) = &symbol.owner {
+						format!(
+							"{} {}::{} in {}:{}",
+							symbol.kind,
+							owner,
+							symbol.name,
+							file.relative_path,
+							symbol.start_line + 1
+						)
+					} else {
+						format!(
+							"{} {} in {}:{}",
+							symbol.kind,
+							symbol.name,
+							file.relative_path,
+							symbol.start_line + 1
+						)
+					},
+					symbols: std::iter::once(symbol.name.clone())
+						.chain(symbol.owner.clone())
+						.collect(),
 					hash: String::new(),
 					embedding: Vec::new(),
 					imports: Vec::new(),
@@ -288,10 +305,9 @@ fn build_graph(files: Vec<SourceFile>) -> CodeGraph {
 		}
 	}
 
-	let all_nodes: Vec<CodeNode> = graph.nodes.values().cloned().collect();
 	graph
 		.relationships
-		.extend(discover_symbol_relationships(&symbol_files, &all_nodes));
+		.extend(discover_symbol_relationships(&symbol_files));
 	graph.relationships.sort_unstable_by(|a, b| {
 		(&a.source, &a.target, &a.relation_type).cmp(&(&b.source, &b.target, &b.relation_type))
 	});
@@ -360,6 +376,11 @@ pub fn search_nodes(graph: &CodeGraph, query: &str, limit: usize) -> Vec<CodeNod
 		let name = node.name.to_lowercase();
 		let id = node.id.to_lowercase();
 		let path = node.path.to_lowercase();
+		let aliases: Vec<String> = node
+			.symbols
+			.iter()
+			.map(|symbol| symbol.to_lowercase())
+			.collect();
 		let mut score = 0u32;
 		for term in &terms {
 			if name == *term {
@@ -368,6 +389,10 @@ pub fn search_nodes(graph: &CodeGraph, query: &str, limit: usize) -> Vec<CodeNod
 				score += 40;
 			} else if name.contains(term) {
 				score += 20;
+			} else if aliases.iter().any(|alias| alias == term) {
+				score += 30;
+			} else if aliases.iter().any(|alias| alias.contains(term)) {
+				score += 10;
 			} else if id.contains(term) || path.contains(term) {
 				score += 5;
 			}
@@ -444,6 +469,18 @@ pub fn find_paths(
 mod tests {
 	use super::*;
 
+	#[test]
+	fn runtime_source_detection_covers_embedded_and_document_languages() {
+		assert_eq!(
+			supported_source_language(Path::new("src/App.svelte")),
+			Some("svelte")
+		);
+		assert_eq!(
+			supported_source_language(Path::new("docs/design.md")),
+			Some("markdown")
+		);
+	}
+
 	fn graph_node(id: &str, name: &str, kind: &str, path: &str) -> CodeNode {
 		CodeNode {
 			id: id.to_string(),
@@ -477,6 +514,22 @@ mod tests {
 
 		let results = search_nodes(&graph, "what calls parse_config", 5);
 		assert_eq!(results[0].id, "src/config.rs::parse_config");
+	}
+
+	#[test]
+	fn lexical_search_uses_symbol_owner_to_disambiguate_methods() {
+		let mut graph = CodeGraph::default();
+		for (id, owner) in [
+			("src/service.rs::Service::run", "Service"),
+			("src/worker.rs::Worker::run", "Worker"),
+		] {
+			let mut node = graph_node(id, "run", "function", id.split("::").next().unwrap());
+			node.symbols = vec!["run".to_string(), owner.to_string()];
+			graph.nodes.insert(id.to_string(), node);
+		}
+
+		let results = search_nodes(&graph, "Service run", 5);
+		assert_eq!(results[0].id, "src/service.rs::Service::run");
 	}
 
 	#[test]

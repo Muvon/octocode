@@ -61,6 +61,19 @@ impl RelationshipDiscovery {
 		let all_files: Vec<String> = all_nodes.iter().map(|node| node.path.clone()).collect();
 
 		for source_file in new_files {
+			let imported_node_ids: std::collections::HashSet<&str> =
+				crate::indexer::languages::get_language(&source_file.language)
+					.map(|language| {
+						source_file
+							.imports
+							.iter()
+							.filter_map(|import| {
+								language.resolve_import(import, &source_file.path, &all_files)
+							})
+							.filter_map(|path| file_map.get(&path).map(|node| node.id.as_str()))
+							.collect()
+					})
+					.unwrap_or_default();
 			// 1. Import/Export relationships via pre-built index (O(1) per import)
 			// Markdown imports are paths, not symbols. They are resolved below by
 			// `resolve_import_relationships` and emitted only as References edges.
@@ -123,7 +136,12 @@ impl RelationshipDiscovery {
 			for function in &source_file.functions {
 				for callee in &function.calls {
 					if let Some(target_ids) = symbol_index.get(callee.as_str()) {
-						for &target_id in target_ids {
+						let target_ids = Self::select_scoped_targets(
+							target_ids,
+							&imported_node_ids,
+							source_file.id.as_str(),
+						);
+						for target_id in target_ids {
 							if target_id != source_file.id {
 								relationships.push(CodeRelationship {
 									source: source_file.id.clone(),
@@ -145,7 +163,11 @@ impl RelationshipDiscovery {
 				//    `trait A: B`, `class C(D)`).
 				for extended in &function.extends {
 					if let Some(target_ids) = symbol_index.get(extended.as_str()) {
-						for &target_id in target_ids {
+						for target_id in Self::select_scoped_targets(
+							target_ids,
+							&imported_node_ids,
+							source_file.id.as_str(),
+						) {
 							if target_id != source_file.id {
 								relationships.push(CodeRelationship {
 									source: source_file.id.clone(),
@@ -167,7 +189,11 @@ impl RelationshipDiscovery {
 				//    (e.g. `class Foo implements Bar`, `impl Trait for Type`).
 				for implemented in &function.implements {
 					if let Some(target_ids) = symbol_index.get(implemented.as_str()) {
-						for &target_id in target_ids {
+						for target_id in Self::select_scoped_targets(
+							target_ids,
+							&imported_node_ids,
+							source_file.id.as_str(),
+						) {
 							if target_id != source_file.id {
 								relationships.push(CodeRelationship {
 									source: source_file.id.clone(),
@@ -200,6 +226,42 @@ impl RelationshipDiscovery {
 		});
 
 		Ok(relationships)
+	}
+
+	/// Prefer a single imported declaration, then a single global declaration.
+	/// Ambiguous file-level matches are dropped rather than fanning one call out
+	/// to every file that happens to export a ubiquitous name such as `run`.
+	fn select_scoped_targets<'a>(
+		target_ids: &[&'a str],
+		imported_node_ids: &std::collections::HashSet<&str>,
+		source_id: &str,
+	) -> Vec<&'a str> {
+		let mut imported: Vec<_> = target_ids
+			.iter()
+			.copied()
+			.filter(|target| *target != source_id && imported_node_ids.contains(*target))
+			.collect();
+		imported.sort_unstable();
+		imported.dedup();
+		if imported.len() == 1 {
+			return imported;
+		}
+		if imported.len() > 1 {
+			return Vec::new();
+		}
+
+		let mut global: Vec<_> = target_ids
+			.iter()
+			.copied()
+			.filter(|target| *target != source_id)
+			.collect();
+		global.sort_unstable();
+		global.dedup();
+		if global.len() == 1 {
+			global
+		} else {
+			Vec::new()
+		}
 	}
 
 	/// Resolve import string against the pre-built symbol index.
@@ -674,5 +736,32 @@ impl RelationshipDiscovery {
 		} else {
 			format!("{} {} file ({} lines)", file_name, language, lines)
 		}
+	}
+}
+
+#[cfg(test)]
+mod scoped_target_tests {
+	use super::RelationshipDiscovery;
+	use std::collections::HashSet;
+
+	#[test]
+	fn imported_target_wins_over_unrelated_global_match() {
+		let targets = ["src/a.rs", "src/b.rs"];
+		let imported = HashSet::from(["src/b.rs"]);
+		assert_eq!(
+			RelationshipDiscovery::select_scoped_targets(&targets, &imported, "src/main.rs"),
+			vec!["src/b.rs"]
+		);
+	}
+
+	#[test]
+	fn ambiguous_targets_are_not_fanned_out() {
+		let targets = ["src/a.rs", "src/b.rs"];
+		assert!(RelationshipDiscovery::select_scoped_targets(
+			&targets,
+			&HashSet::new(),
+			"src/main.rs"
+		)
+		.is_empty());
 	}
 }

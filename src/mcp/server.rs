@@ -169,10 +169,10 @@ pub struct GraphRagParams {
 	/// 'search' (symbol/file lookup), 'get-node' (node details), 'get-relationships' (node connections), 'find-path' (path between two nodes), 'overview' (graph stats)
 	#[schemars(extend("enum" = ["search", "get-node", "get-relationships", "find-path", "overview"]))]
 	pub operation: String,
-	/// Symbol, file, or architectural query for 'search'. Uses deterministic lexical lookup when GraphRAG is disabled and semantic lookup when enabled.
+	/// Symbol, file, or architectural query for 'search'. Always uses deterministic name/path lookup and adds semantic file lookup when persisted GraphRAG is enabled.
 	#[serde(default, skip_serializing_if = "Option::is_none")]
 	pub query: Option<String>,
-	/// Node ID for 'get-node'/'get-relationships' (format: 'path/to/file' or 'path/to/file::symbol')
+	/// Node ID for 'get-node'/'get-relationships' (format: 'path/to/file', 'path/to/file::symbol', or 'path/to/file::Owner::method')
 	#[serde(default, skip_serializing_if = "Option::is_none")]
 	pub node_id: Option<String>,
 	/// Source node ID for 'find-path'

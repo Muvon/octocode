@@ -217,11 +217,13 @@ Core embedding configuration.
 ### [graphrag]
 
 Persisted knowledge-graph enrichment settings. The MCP `graphrag` tool and its
-lightweight Tree-sitter symbol graph are always available without indexing,
+lightweight Tree-sitter file/symbol graph are always available without indexing,
 embeddings, or an LLM.
 
-- `enabled`: Persist and overlay indexed file-level GraphRAG enrichment
-- `use_llm`: Add AI-discovered relationships and file descriptions to that persisted layer
+- `enabled`: Persist and overlay indexed file-level GraphRAG enrichment; also enables the `octocode graphrag` CLI, which reads that persisted graph
+- `use_llm`: Add AI-discovered relationships and file descriptions to that persisted layer; ignored when `enabled = false`
+
+The live MCP graph creates file and symbol nodes directly from current source and emits deterministic `contains`, `imports`, `calls`, `extends`, and `implements` relationships. It is cached in memory and rebuilt after repository metadata changes. Symbol nodes are never embedded, persisted, or sent to an LLM.
 
 ### [graphrag.llm]
 
@@ -274,7 +276,7 @@ octocode config --text-embedding-model "fastembed:multilingual-e5-small"
 # Set LLM model (provider:model format)
 octocode config --model "anthropic:claude-3-5-sonnet-20241022"
 
-# Enable/disable GraphRAG
+# Enable/disable optional persisted GraphRAG enrichment
 octocode config --graphrag-enabled true
 octocode config --graphrag-enabled false
 

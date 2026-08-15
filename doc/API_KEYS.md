@@ -111,7 +111,7 @@ octocode config \
 
 ## Optional: LLM Provider
 
-For AI-powered features like commit messages, code review, and GraphRAG descriptions.
+For AI-powered features like commit messages, code review, and optional persisted GraphRAG descriptions. The live MCP symbol graph does not use an LLM.
 
 Octocode supports multiple LLM providers through a unified interface. Configure using `provider:model` format.
 
@@ -248,7 +248,7 @@ description_model = "local:<model-id>"
 relationship_model = "local:<model-id>"
 ```
 
-Contextual indexing and GraphRAG require structured-output support, so an
+Contextual indexing and optional LLM GraphRAG enrichment require structured-output support, so an
 otherwise compatible endpoint can still be rejected when the selected model's
 capabilities are not recognized.
 

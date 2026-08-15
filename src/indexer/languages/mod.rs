@@ -70,6 +70,26 @@ pub enum TypeRelationKind {
 	Implements,
 }
 
+/// A callable reference extracted from a language AST.
+///
+/// `name` is always the terminal callable (`run` in `service.run()`), while
+/// `qualifier` preserves the receiver/module/type (`service`). Keeping both
+/// avoids turning every segment of a qualified expression into a bogus call.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CallTarget {
+	pub name: String,
+	pub qualifier: Option<String>,
+}
+
+/// A code region embedded in another supported language (for example a
+/// JavaScript/TypeScript `<script>` inside Svelte).
+#[derive(Debug, Clone)]
+pub struct EmbeddedSource {
+	pub language: &'static str,
+	pub contents: String,
+	pub start_line: u32,
+}
+
 /// Common trait for all language parsers
 pub trait Language: Send + Sync {
 	/// Name of the language
@@ -105,8 +125,22 @@ pub trait Language: Send + Sync {
 	/// Extract function/method call names from a node.
 	/// Returns callee names if this node represents a function call.
 	/// The recursive walk and line tracking is handled by the caller.
-	fn extract_function_calls(&self, node: Node, contents: &str) -> Vec<String> {
+	fn extract_function_calls(&self, node: Node, contents: &str) -> Vec<CallTarget> {
 		let _ = (node, contents);
+		Vec::new()
+	}
+
+	/// Owning type/module for a declared symbol, when it is syntactically known.
+	/// The default handles the common class/module/impl ancestor shapes used by
+	/// the supported tree-sitter grammars. Languages with receiver syntax on the
+	/// declaration itself (notably Go) override this method.
+	fn extract_symbol_owner(&self, node: Node, contents: &str) -> Option<String> {
+		find_graph_symbol_owner(node, contents)
+	}
+
+	/// Extract embedded code regions that should participate in the live graph.
+	fn extract_embedded_sources(&self, root: Node, contents: &str) -> Vec<EmbeddedSource> {
+		let _ = (root, contents);
 		Vec::new()
 	}
 
@@ -328,7 +362,9 @@ pub fn simple_type_name(text: &str) -> Option<String> {
 	let stripped = text.split('<').next().unwrap_or(text);
 	let after_colons = stripped.rsplit("::").next().unwrap_or(stripped);
 	let after_dots = after_colons.rsplit('.').next().unwrap_or(after_colons);
-	let trimmed = after_dots.trim();
+	let trimmed = after_dots
+		.trim()
+		.trim_matches(|character: char| !character.is_alphanumeric() && character != '_');
 	if trimmed.is_empty() {
 		None
 	} else {
@@ -336,26 +372,96 @@ pub fn simple_type_name(text: &str) -> Option<String> {
 	}
 }
 
-/// Extract callee name(s) from a call expression's function child.
-/// Splits compound names (e.g. `Foo::bar`, `obj.method`) into individual identifiers
-/// for matching against exported symbols.
-pub fn extract_callee_identifiers(text: &str) -> Vec<String> {
-	let trimmed = text.trim();
+/// Parse a textual callee expression without losing its qualifier.
+///
+/// Handles the shared forms used by the supported languages: `foo`,
+/// `module.foo`, `Type::method`, `ptr->method`, and optional chaining. Generic
+/// arguments on the callable are removed before splitting.
+pub fn extract_call_target(text: &str) -> Option<CallTarget> {
+	let mut trimmed = text.trim().trim_start_matches('&').trim_start_matches('*');
 	if trimmed.is_empty() {
-		return Vec::new();
+		return None;
 	}
 
-	let mut results = Vec::new();
-
-	// Split on :: and . to get individual segments
-	for segment in trimmed.split(['.', ':']) {
-		let seg = segment.trim();
-		if !seg.is_empty() && seg != "self" && seg != "Self" && seg != "this" && seg != "super" {
-			results.push(seg.to_string());
+	let mut without_generics = String::with_capacity(trimmed.len());
+	let mut generic_depth = 0u32;
+	for character in trimmed.chars() {
+		match character {
+			'<' => generic_depth += 1,
+			'>' if generic_depth > 0 => generic_depth -= 1,
+			_ if generic_depth == 0 => without_generics.push(character),
+			_ => {}
 		}
 	}
+	trimmed = without_generics.trim();
+	let normalized = trimmed.replace("?.", ".").replace("->", ".");
+	let segments: Vec<&str> = normalized
+		.split(['.', ':'])
+		.map(str::trim)
+		.filter(|segment| !segment.is_empty())
+		.collect();
+	let (name, qualifier_segments) = segments.split_last()?;
+	let name =
+		name.trim_matches(|character: char| !character.is_alphanumeric() && character != '_');
+	if name.is_empty()
+		|| !name
+			.chars()
+			.all(|character| character.is_alphanumeric() || character == '_')
+	{
+		return None;
+	}
+	let qualifier = if qualifier_segments.is_empty() {
+		None
+	} else {
+		if qualifier_segments.iter().any(|segment| {
+			!segment.chars().all(|character| {
+				character.is_alphanumeric() || matches!(character, '_' | '$' | '@' | '#')
+			})
+		}) {
+			return None;
+		}
+		Some(qualifier_segments.join("::"))
+	};
+	Some(CallTarget {
+		name: name.to_string(),
+		qualifier,
+	})
+}
 
-	results
+/// Find the nearest enclosing declaration that provides a stable method owner.
+pub fn find_graph_symbol_owner(node: Node, contents: &str) -> Option<String> {
+	let mut current = node.parent();
+	while let Some(parent) = current {
+		let kind = parent.kind();
+		let is_owner = !kind.contains("body")
+			&& (kind.contains("class")
+				|| kind.contains("struct")
+				|| kind.contains("interface")
+				|| kind.contains("trait")
+				|| kind.contains("module")
+				|| kind.contains("namespace")
+				|| kind.contains("extension")
+				|| kind == "impl_item");
+		if is_owner {
+			for field in ["type", "name"] {
+				if let Some(name_node) = parent.child_by_field_name(field) {
+					if let Ok(text) = name_node.utf8_text(contents.as_bytes()) {
+						if let Some(name) = simple_type_name(text) {
+							return Some(name);
+						}
+					}
+				}
+			}
+			return extract_symbol_by_kinds(
+				parent,
+				contents,
+				&["identifier", "name", "type_identifier", "constant"],
+			)
+			.and_then(|name| simple_type_name(&name));
+		}
+		current = parent.parent();
+	}
+	None
 }
 
 /// Extract a symbol from a node by finding a child matching any of multiple kinds
@@ -431,4 +537,31 @@ pub fn find_enclosing_container_name(
 		cur = parent.parent();
 	}
 	None
+}
+
+#[cfg(test)]
+mod graph_extraction_tests {
+	use super::*;
+
+	#[test]
+	fn structured_callee_preserves_terminal_name_and_qualifier() {
+		for (input, expected_name, expected_qualifier) in [
+			("helper", "helper", None),
+			("service.run", "run", Some("service")),
+			("Service::new", "new", Some("Service")),
+			("std::vector<Item>::make", "make", Some("std::vector")),
+			("ptr->flush", "flush", Some("ptr")),
+			("client?.send", "send", Some("client")),
+		] {
+			let target = extract_call_target(input).expect("callee should parse");
+			assert_eq!(target.name, expected_name);
+			assert_eq!(target.qualifier.as_deref(), expected_qualifier);
+		}
+	}
+
+	#[test]
+	fn dynamic_callee_is_dropped_instead_of_inventing_a_symbol() {
+		assert!(extract_call_target("obj[method]").is_none());
+		assert!(extract_call_target("condition ? first : second").is_none());
+	}
 }
