@@ -499,6 +499,20 @@ mod tests {
 		}
 	}
 
+	/// Files octolib left next to `config_path`, by extension. The names are
+	/// octolib's to choose, so tests here only ask whether a backup or a lock
+	/// was made, never what it's called.
+	fn siblings(config_path: &Path, extension: &str) -> Vec<PathBuf> {
+		let parent = config_path
+			.parent()
+			.expect("config path must have a parent");
+		fs::read_dir(parent)
+			.expect("config directory must be readable")
+			.map(|entry| entry.expect("directory entry must be readable").path())
+			.filter(|path| path.extension().is_some_and(|found| found == extension))
+			.collect()
+	}
+
 	fn released_v1_config() -> String {
 		let mut document = DEFAULT_CONFIG_TEMPLATE
 			.parse::<toml_edit::DocumentMut>()
@@ -647,7 +661,7 @@ mod tests {
 			fs::read_to_string(&config_path).unwrap(),
 			DEFAULT_CONFIG_TEMPLATE
 		);
-		assert!(!config_path.with_file_name("config.toml.v1.bak").exists());
+		assert!(siblings(&config_path, "bak").is_empty());
 	}
 
 	#[test]
@@ -659,7 +673,7 @@ mod tests {
 		let config = Config::load_from_path(&config_path).expect("current config should load");
 
 		assert_eq!(config.version, 2);
-		assert!(!config_path.with_file_name(".config.toml.lock").exists());
+		assert!(siblings(&config_path, "lock").is_empty());
 	}
 
 	#[test]
@@ -676,10 +690,10 @@ mod tests {
 		assert_eq!(config.search.hybrid.default_vector_weight, 0.73);
 		assert_eq!(config.search.hybrid.rrf_k, 60.0);
 		assert!(!config.search.reasoning.enabled);
-		assert_eq!(
-			fs::read_to_string(config_path.with_file_name("config.toml.v1.bak")).unwrap(),
-			original
-		);
+		let [backup] = siblings(&config_path, "bak").as_slice() else {
+			panic!("migration should leave exactly one backup");
+		};
+		assert_eq!(fs::read_to_string(backup).unwrap(), original);
 
 		Config::load_from_path(&config_path).expect("v2 config should load unchanged");
 		assert_eq!(fs::read_to_string(&config_path).unwrap(), migrated);
@@ -698,7 +712,7 @@ mod tests {
 			.to_string()
 			.contains("newer than this octocode binary"));
 		assert_eq!(fs::read_to_string(&config_path).unwrap(), future);
-		assert!(!config_path.with_file_name("config.toml.v2.bak").exists());
+		assert!(siblings(&config_path, "bak").is_empty());
 	}
 
 	#[test]
@@ -710,27 +724,30 @@ mod tests {
 
 		assert!(Config::load_from_path(&config_path).is_err());
 		assert_eq!(fs::read_to_string(&config_path).unwrap(), invalid);
-		assert!(!config_path.with_file_name("config.toml.v1.bak").exists());
+		assert!(siblings(&config_path, "bak").is_empty());
 	}
 
 	#[test]
-	fn conflicting_backup_prevents_migration_without_modifying_config() {
+	fn migration_keeps_an_older_backup_intact() {
 		let temp = TempConfigDir::new();
 		let config_path = temp.config_path();
-		let backup_path = config_path.with_file_name("config.toml.v1.bak");
+		let stale_backup = config_path.with_file_name("config.toml.v1.bak");
 		let original = released_v1_config();
 		fs::write(&config_path, &original).unwrap();
-		fs::write(&backup_path, "different previous backup").unwrap();
+		fs::write(&stale_backup, "backup of an earlier config").unwrap();
 
-		let error = Config::load_from_path(&config_path)
-			.expect_err("conflicting backup should stop migration");
+		let config = Config::load_from_path(&config_path).expect("v1 config should migrate");
 
-		assert!(error.to_string().contains("different contents"));
-		assert_eq!(fs::read_to_string(&config_path).unwrap(), original);
+		assert_eq!(config.version, 2);
 		assert_eq!(
-			fs::read_to_string(&backup_path).unwrap(),
-			"different previous backup"
+			fs::read_to_string(&stale_backup).unwrap(),
+			"backup of an earlier config"
 		);
+		let fresh = siblings(&config_path, "bak")
+			.into_iter()
+			.find(|path| *path != stale_backup)
+			.expect("migration should add its own backup");
+		assert_eq!(fs::read_to_string(fresh).unwrap(), original);
 	}
 
 	#[test]
