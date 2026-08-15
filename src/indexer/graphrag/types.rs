@@ -70,6 +70,8 @@ pub enum RelationType {
 	ParentModule,
 	/// Child directory relationship
 	ChildModule,
+	/// File contains a declared symbol (symbol-tier GraphRAG)
+	Contains,
 }
 
 impl RelationType {
@@ -90,7 +92,7 @@ impl RelationType {
 			Self::References => 0.6,
 
 			// Low importance - organizational structure
-			Self::SiblingModule | Self::ParentModule | Self::ChildModule => 0.3,
+			Self::SiblingModule | Self::ParentModule | Self::ChildModule | Self::Contains => 0.3,
 		}
 	}
 
@@ -112,6 +114,7 @@ impl RelationType {
 			Self::SiblingModule => "sibling_module",
 			Self::ParentModule => "parent_module",
 			Self::ChildModule => "child_module",
+			Self::Contains => "contains",
 		}
 	}
 }
@@ -137,6 +140,7 @@ impl FromStr for RelationType {
 			"sibling_module" => Self::SiblingModule,
 			"parent_module" => Self::ParentModule,
 			"child_module" => Self::ChildModule,
+			"contains" => Self::Contains,
 			// Default fallback for unknown types
 			_ => Self::Imports,
 		})
@@ -146,6 +150,40 @@ impl FromStr for RelationType {
 impl fmt::Display for RelationType {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		write!(f, "{}", self.as_str())
+	}
+}
+
+/// How a relationship was derived. `Extracted` = read directly from the AST
+/// (import statements, declared inheritance, same-file calls, module layout);
+/// `Inferred` = resolved by heuristics (cross-file name matching, unique-global
+/// resolution, LLM suggestions); `Ambiguous` = the reference matches multiple
+/// targets and no import disambiguated it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum Provenance {
+	#[default]
+	Extracted,
+	Inferred,
+	Ambiguous,
+}
+
+impl Provenance {
+	/// Parse from the database column value; unknown/absent values (older
+	/// rows written before the column existed) default to `Extracted`.
+	pub fn parse_or_default(s: &str) -> Self {
+		match s {
+			"inferred" => Self::Inferred,
+			"ambiguous" => Self::Ambiguous,
+			_ => Self::Extracted,
+		}
+	}
+
+	pub fn as_str(&self) -> &'static str {
+		match self {
+			Self::Extracted => "extracted",
+			Self::Inferred => "inferred",
+			Self::Ambiguous => "ambiguous",
+		}
 	}
 }
 
@@ -188,6 +226,13 @@ impl CodeNode {
 			language: self.language.clone(),
 		}
 	}
+
+	/// True for symbol-tier nodes (`{file_path}::{symbol_name}`), created by
+	/// `graphrag.symbols`. File node ids are relative paths and never contain
+	/// `::` in practice.
+	pub fn is_symbol_node(&self) -> bool {
+		self.id.contains("::")
+	}
 }
 
 // Function-level information for better granularity. Also doubles as the
@@ -220,6 +265,8 @@ pub struct CodeRelationship {
 	pub description: String,         // Brief description
 	pub confidence: f32,             // Confidence score (0.0-1.0)
 	pub weight: f32,                 // Relationship strength/frequency
+	#[serde(default)]
+	pub provenance: Provenance, // How the relationship was derived
 }
 
 impl CodeRelationship {
@@ -237,6 +284,7 @@ impl CodeRelationship {
 			description,
 			confidence: 0.9, // Default high confidence for AST-based relationships
 			weight: 1.0,     // Default weight, will be calculated later
+			provenance: Provenance::default(),
 		}
 	}
 
@@ -256,6 +304,7 @@ impl CodeRelationship {
 			description,
 			confidence,
 			weight,
+			provenance: Provenance::default(),
 		}
 	}
 }
@@ -507,5 +556,76 @@ mod tests {
 		assert_eq!(deserialized.target, rel.target);
 		assert_eq!(deserialized.relation_type, rel.relation_type);
 		assert_eq!(deserialized.description, rel.description);
+	}
+
+	#[test]
+	fn test_relation_type_contains_roundtrip() {
+		assert_eq!(RelationType::Contains.as_str(), "contains");
+		assert_eq!(
+			"contains".parse::<RelationType>().unwrap(),
+			RelationType::Contains
+		);
+		assert_eq!(RelationType::Contains.importance_weight(), 0.3);
+	}
+
+	#[test]
+	fn test_provenance_serde_roundtrip() {
+		let mut rel = CodeRelationship::new(
+			"src/a.rs".to_string(),
+			"src/a.rs::foo".to_string(),
+			RelationType::Contains,
+			"File contains function foo".to_string(),
+		);
+		assert_eq!(rel.provenance, Provenance::default());
+
+		rel.provenance = Provenance::Inferred;
+		let json = serde_json::to_string(&rel).unwrap();
+		assert!(json.contains("\"inferred\""));
+		let deserialized: CodeRelationship = serde_json::from_str(&json).unwrap();
+		assert_eq!(deserialized.provenance, Provenance::Inferred);
+	}
+
+	#[test]
+	fn test_provenance_parse_or_default() {
+		assert_eq!(
+			Provenance::parse_or_default("extracted"),
+			Provenance::Extracted
+		);
+		assert_eq!(
+			Provenance::parse_or_default("inferred"),
+			Provenance::Inferred
+		);
+		assert_eq!(
+			Provenance::parse_or_default("ambiguous"),
+			Provenance::Ambiguous
+		);
+		// Unknown values (rows written before the column existed) default to Extracted
+		assert_eq!(Provenance::parse_or_default(""), Provenance::Extracted);
+		assert_eq!(
+			Provenance::parse_or_default("legacy"),
+			Provenance::Extracted
+		);
+	}
+
+	#[test]
+	fn test_code_node_is_symbol_node() {
+		let mut node = CodeNode {
+			id: "src/lib.rs".to_string(),
+			name: "lib".to_string(),
+			kind: "source_file".to_string(),
+			path: "src/lib.rs".to_string(),
+			description: String::new(),
+			symbols: Vec::new(),
+			hash: String::new(),
+			embedding: Vec::new(),
+			imports: Vec::new(),
+			exports: Vec::new(),
+			functions: Vec::new(),
+			size_lines: 0,
+			language: "rust".to_string(),
+		};
+		assert!(!node.is_symbol_node());
+		node.id = "src/lib.rs::my_func".to_string();
+		assert!(node.is_symbol_node());
 	}
 }

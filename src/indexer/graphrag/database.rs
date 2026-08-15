@@ -14,7 +14,7 @@
 
 // GraphRAG database operations
 
-use crate::indexer::graphrag::types::{CodeGraph, CodeNode, CodeRelationship};
+use crate::indexer::graphrag::types::{CodeGraph, CodeNode, CodeRelationship, Provenance};
 use crate::indexer::graphrag::utils::cosine_similarity;
 use crate::store::Store;
 use anyhow::{Context, Result};
@@ -225,6 +225,8 @@ impl<'a> DatabaseOperations<'a> {
 			let type_array = extract_string_column(&rel_batch, "relation_type")?;
 			let desc_array = extract_string_column(&rel_batch, "description")?;
 			let conf_array = extract_f32_column(&rel_batch, "confidence")?;
+			// Absent in tables written before the provenance column existed.
+			let provenance_array = try_string_column(&rel_batch, "provenance");
 
 			// Deduplicate relationships by (source, target, type) triple —
 			// batch writes can produce duplicates across incremental flushes
@@ -248,6 +250,8 @@ impl<'a> DatabaseOperations<'a> {
 					description: desc_array.value(i).to_string(),
 					confidence: conf_array.value(i),
 					weight: 1.0,
+					provenance: provenance_array
+						.map_or(Provenance::default(), |arr| Provenance::parse_or_default(arr.value(i))),
 				};
 				graph.relationships.push(relationship);
 			}
@@ -595,6 +599,8 @@ impl<'a> DatabaseOperations<'a> {
 			Field::new("description", DataType::Utf8, false),
 			Field::new("confidence", DataType::Float32, false),
 			Field::new("weight", DataType::Float32, false),
+			// Nullable so appending to pre-provenance tables auto-evolves the schema.
+			Field::new("provenance", DataType::Utf8, true),
 		]));
 
 		// Generate unique IDs
@@ -614,6 +620,10 @@ impl<'a> DatabaseOperations<'a> {
 			.collect();
 		let confidences: Vec<f32> = relationships.iter().map(|r| r.confidence).collect();
 		let weights: Vec<f32> = relationships.iter().map(|r| r.weight).collect();
+		let provenances: Vec<&str> = relationships
+			.iter()
+			.map(|r| r.provenance.as_str())
+			.collect();
 
 		// Create record batch
 		let batch = arrow::record_batch::RecordBatch::try_new(
@@ -626,6 +636,7 @@ impl<'a> DatabaseOperations<'a> {
 				Arc::new(arrow::array::StringArray::from(descriptions)),
 				Arc::new(arrow::array::Float32Array::from(confidences)),
 				Arc::new(arrow::array::Float32Array::from(weights)),
+				Arc::new(arrow::array::StringArray::from(provenances)),
 			],
 		)?;
 

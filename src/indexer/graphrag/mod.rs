@@ -18,6 +18,7 @@ pub mod ai;
 pub mod builder;
 pub mod database;
 pub mod relationships;
+pub mod symbols;
 pub mod types;
 pub mod utils;
 

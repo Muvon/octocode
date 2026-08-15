@@ -115,6 +115,16 @@ pub trait Language: Send + Sync {
 		Vec::new()
 	}
 
+	/// Declared name of the symbol at this node, for symbol-level GraphRAG
+	/// nodes. Unlike `extract_symbols` (which enriches and sorts), this must
+	/// return exactly the name the declaration introduces, or None when the
+	/// node has no single declarable name. The default covers the dominant
+	/// tree-sitter convention: a direct child whose kind is or contains
+	/// "identifier", "name", or "type_identifier".
+	fn extract_declaration_name(&self, node: Node, contents: &str) -> Option<String> {
+		extract_symbol_by_kinds(node, contents, &["identifier", "name", "type_identifier"])
+	}
+
 	/// Check if two node types are semantically equivalent for grouping
 	/// This allows each language to define its own semantic relationships
 	fn are_node_types_equivalent(&self, type1: &str, type2: &str) -> bool {
