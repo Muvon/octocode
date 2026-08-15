@@ -39,6 +39,15 @@ impl Language for Go {
 		]
 	}
 
+	fn get_symbol_kinds(&self) -> Vec<&'static str> {
+		// `type_spec` instead of `type_declaration`: the name lives two levels
+		// deep (type_declaration > type_spec > identifier), so per-spec nodes
+		// are the only way the default name scan resolves them — and grouped
+		// declarations (`type ( A ...; B ... )`) yield one symbol per spec.
+		// const/var/import declarations declare no single named symbol.
+		vec!["function_declaration", "method_declaration", "type_spec"]
+	}
+
 	fn extract_symbols(&self, node: Node, contents: &str) -> Vec<String> {
 		let mut symbols = Vec::new();
 

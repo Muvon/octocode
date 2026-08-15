@@ -39,6 +39,12 @@ impl Language for Python {
 		]
 	}
 
+	fn get_symbol_kinds(&self) -> Vec<&'static str> {
+		// Symbol tier adds the class container chunking excludes; imports
+		// declare no symbol.
+		vec!["function_definition", "class_definition"]
+	}
+
 	fn extract_symbols(&self, node: Node, contents: &str) -> Vec<String> {
 		let mut symbols = Vec::new();
 

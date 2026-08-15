@@ -44,6 +44,19 @@ impl Language for TypeScript {
 		]
 	}
 
+	fn get_symbol_kinds(&self) -> Vec<&'static str> {
+		// Symbol tier adds the class/enum containers chunking excludes; drops
+		// anonymous arrow functions and import/export statements.
+		vec![
+			"function_declaration",
+			"method_definition",
+			"class_declaration",
+			"interface_declaration",
+			"type_alias_declaration",
+			"enum_declaration",
+		]
+	}
+
 	fn extract_symbols(&self, node: Node, contents: &str) -> Vec<String> {
 		let mut symbols = Vec::new();
 

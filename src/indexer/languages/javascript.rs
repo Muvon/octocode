@@ -40,6 +40,17 @@ impl Language for JavaScript {
 		]
 	}
 
+	fn get_symbol_kinds(&self) -> Vec<&'static str> {
+		// Symbol tier adds the class container chunking excludes; drops
+		// anonymous arrow functions and import/export statements, which
+		// declare no symbol.
+		vec![
+			"function_declaration",
+			"method_definition",
+			"class_declaration",
+		]
+	}
+
 	fn extract_symbols(&self, node: Node, contents: &str) -> Vec<String> {
 		let mut symbols = Vec::new();
 

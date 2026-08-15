@@ -32,6 +32,26 @@ impl Language for Bash {
 		vec!["function_definition", "command"] // command for source/. statements
 	}
 
+	fn get_symbol_kinds(&self) -> Vec<&'static str> {
+		// Only named functions are symbols; `command` nodes (source/. calls)
+		// declare nothing.
+		vec!["function_definition"]
+	}
+
+	fn extract_declaration_name(&self, node: Node, contents: &str) -> Option<String> {
+		// Bash function names are `word` nodes exposed via the `name` field;
+		// the default identifier/name scan never matches them — and on
+		// `command` nodes it would match `command_name`, turning every
+		// command into a bogus symbol.
+		if node.kind() == "function_definition" {
+			return node
+				.child_by_field_name("name")
+				.and_then(|n| n.utf8_text(contents.as_bytes()).ok())
+				.map(str::to_string);
+		}
+		None
+	}
+
 	fn extract_symbols(&self, node: Node, contents: &str) -> Vec<String> {
 		let mut symbols = Vec::new();
 

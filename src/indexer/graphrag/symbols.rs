@@ -105,14 +105,14 @@ pub fn extract_symbols_from_file(file_path: &str, language: &str) -> Result<File
 		.parse(&contents, None)
 		.ok_or_else(|| anyhow::anyhow!("Failed to parse file: {}", file_path))?;
 
-	let meaningful_kinds = lang_impl.get_meaningful_kinds();
+	let symbol_kinds = lang_impl.get_symbol_kinds();
 	let mut data = FileAstData::default();
 	let mut seen_names = HashSet::new();
 	walk_ast(
 		tree.root_node(),
 		&contents,
 		lang_impl.as_ref(),
-		&meaningful_kinds,
+		&symbol_kinds,
 		&mut seen_names,
 		&mut data,
 	);
@@ -126,7 +126,7 @@ fn walk_ast(
 	node: tree_sitter::Node,
 	contents: &str,
 	lang_impl: &dyn Language,
-	meaningful_kinds: &[&str],
+	symbol_kinds: &[&str],
 	seen_names: &mut HashSet<String>,
 	data: &mut FileAstData,
 ) {
@@ -142,7 +142,7 @@ fn walk_ast(
 		data.type_relations.push((line, kind, target));
 	}
 
-	if meaningful_kinds.contains(&node.kind()) {
+	if symbol_kinds.contains(&node.kind()) {
 		if let Some(name) = lang_impl.extract_declaration_name(node, contents) {
 			let name = name.trim().to_string();
 			// First declaration of a name wins: duplicate names in one file
@@ -173,7 +173,7 @@ fn walk_ast(
 			child,
 			contents,
 			lang_impl,
-			meaningful_kinds,
+			symbol_kinds,
 			seen_names,
 			data,
 		);
