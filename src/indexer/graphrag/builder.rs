@@ -22,7 +22,10 @@ use crate::embedding::{
 use crate::indexer::graphrag::ai::AIEnhancements;
 use crate::indexer::graphrag::database::DatabaseOperations;
 use crate::indexer::graphrag::relationships::RelationshipDiscovery;
-use crate::indexer::graphrag::types::{CodeGraph, CodeNode, CodeRelationship};
+use crate::indexer::graphrag::symbols::{discover_symbol_relationships, extract_symbols_from_file};
+use crate::indexer::graphrag::types::{
+	CodeGraph, CodeNode, CodeRelationship, Provenance, RelationType,
+};
 use crate::indexer::graphrag::utils::{
 	cosine_similarity, detect_project_root, detect_project_root_from, to_relative_path,
 };
@@ -137,6 +140,12 @@ impl GraphBuilder {
 		// for the whole graph on every incremental run.
 		let mut processed_node_ids: HashSet<String> = HashSet::new();
 
+		// Symbol-tier accumulators (graphrag.symbols): one node per declared
+		// symbol, plus file→symbol "contains" edges.
+		let mut symbol_nodes: Vec<CodeNode> = Vec::new();
+		let mut symbol_embed_texts: Vec<String> = Vec::new();
+		let mut symbol_contains_edges: Vec<CodeRelationship> = Vec::new();
+
 		// Group code blocks by file for efficient processing
 		let mut files_to_blocks: HashMap<String, Vec<&CodeBlock>> = HashMap::new();
 		for block in code_blocks {
@@ -196,16 +205,30 @@ impl GraphBuilder {
 					}
 				}
 
-				// CRITICAL FIX: Also remove from in-memory graph to prevent duplicates
+				// CRITICAL FIX: Also remove from in-memory graph to prevent duplicates.
+				// Path-based: covers the file node AND its symbol-tier nodes
+				// ("{path}::{symbol}") plus every edge touching them.
 				{
 					let mut graph = self.graph.write().await;
-					if graph.nodes.remove(&relative_path).is_some() && !self.quiet {
-						eprintln!("🗑️  Removed stale in-memory node: {}", relative_path);
+					let stale_ids: HashSet<String> = graph
+						.nodes
+						.iter()
+						.filter(|(_, n)| n.path == relative_path)
+						.map(|(id, _)| id.clone())
+						.collect();
+					if !stale_ids.is_empty() {
+						if !self.quiet {
+							eprintln!(
+								"🗑️  Removed {} stale in-memory node(s) for: {}",
+								stale_ids.len(),
+								relative_path
+							);
+						}
+						graph.nodes.retain(|id, _| !stale_ids.contains(id));
+						graph.relationships.retain(|rel| {
+							!stale_ids.contains(&rel.source) && !stale_ids.contains(&rel.target)
+						});
 					}
-					// Remove stale relationships referencing this node
-					graph
-						.relationships
-						.retain(|rel| rel.source != relative_path && rel.target != relative_path);
 				}
 
 				// Extract file information efficiently
@@ -243,24 +266,32 @@ impl GraphBuilder {
 
 				let symbols: Vec<String> = all_symbols.into_iter().collect();
 
-				// Extract imports and exports using language-specific AST parsing
-				let (imports, exports) = self
-					.extract_imports_exports_from_file(&file_path, &language)
-					.await
-					.unwrap_or_else(|e| {
-						if !self.quiet {
-							eprintln!(
-								"⚠️  Import/export extraction failed for {}: {}",
-								relative_path, e
-							);
+				// Unified single-pass AST extraction: imports, exports, call
+				// sites, type relations, and symbol declarations from ONE
+				// tree-sitter parse (replaces three per-file parses).
+				let (imports, exports, file_calls, file_type_rels, symbol_decls) =
+					match extract_symbols_from_file(&file_path, &language) {
+						Ok(data) => (
+							data.imports,
+							data.exports,
+							data.calls,
+							data.type_relations,
+							data.symbols,
+						),
+						Err(e) => {
+							if !self.quiet {
+								eprintln!("⚠️  AST extraction failed for {}: {}", relative_path, e);
+							}
+							// Fallback to the old heuristic if AST parsing fails
+							let (imports, exports) =
+								RelationshipDiscovery::extract_imports_exports_efficient(
+									&symbols,
+									&language,
+									&relative_path,
+								);
+							(imports, exports, Vec::new(), Vec::new(), Vec::new())
 						}
-						// Fallback to old method if AST parsing fails
-						RelationshipDiscovery::extract_imports_exports_efficient(
-							&symbols,
-							&language,
-							&relative_path,
-						)
-					});
+					};
 
 				if !self.quiet && (!imports.is_empty() || !exports.is_empty()) {
 					eprintln!(
@@ -277,20 +308,12 @@ impl GraphBuilder {
 					}
 				}
 
-				// Extract callees + type relations (extends/implements).
+				// Attribute callees + type relations (extends/implements).
 				// When per-function FunctionInfo entries are available, attribute
 				// callees by line range. When they are not — currently always, see
 				// extract_functions_from_block — synthesize a single file-scope
 				// FunctionInfo so the edges still reach relationships.rs, which
 				// emits at (source_file.id → target_file.id) granularity.
-				let file_calls = self
-					.extract_function_calls_from_file(&file_path, &language)
-					.await
-					.unwrap_or_default();
-				let file_type_rels = self
-					.extract_type_relations_from_file(&file_path, &language)
-					.await
-					.unwrap_or_default();
 
 				if !all_functions.is_empty() {
 					for func in &mut all_functions {
@@ -515,11 +538,50 @@ impl GraphBuilder {
 					hash: content_hash,
 					embedding: Vec::new(), // Will be filled after batch embedding
 					size_lines: total_lines as u32,
-					language,
+					language: language.clone(),
 				};
 
 				new_nodes.push(node);
 				processed_count += 1;
+
+				// Symbol-tier nodes: one per declared symbol (graphrag.symbols).
+				if self.config.graphrag.symbols.enabled {
+					for decl in &symbol_decls {
+						let symbol_id = format!("{}::{}", relative_path, decl.name);
+						let description =
+							format!("{} {} in {}", decl.kind, decl.name, relative_path);
+						symbol_embed_texts
+							.push(format!("{}\n{}", description, decl.source_snippet));
+						symbol_nodes.push(CodeNode {
+							id: symbol_id.clone(),
+							name: decl.name.clone(),
+							kind: decl.kind.clone(),
+							path: relative_path.clone(),
+							description,
+							symbols: vec![decl.name.clone()],
+							hash: calculate_unique_content_hash(&decl.source_snippet, &symbol_id),
+							embedding: Vec::new(),
+							imports: Vec::new(),
+							exports: Vec::new(),
+							functions: Vec::new(),
+							size_lines: decl.end_line.saturating_sub(decl.start_line) + 1,
+							language: language.clone(),
+						});
+						processed_node_ids.insert(symbol_id.clone());
+						symbol_contains_edges.push(CodeRelationship {
+							source: relative_path.clone(),
+							target: symbol_id,
+							relation_type: RelationType::Contains,
+							description: format!(
+								"{} contains {} {}",
+								relative_path, decl.kind, decl.name
+							),
+							confidence: 1.0,
+							weight: RelationType::Contains.importance_weight(),
+							provenance: Provenance::Extracted,
+						});
+					}
+				}
 
 				// Update state if provided
 				if let Some(ref state) = state {
@@ -676,6 +738,46 @@ impl GraphBuilder {
 			.await?;
 		}
 
+		// Persist symbol-tier nodes before relationship discovery so symbol
+		// edges can resolve against them.
+		if !symbol_nodes.is_empty() {
+			if self.config.graphrag.symbols.embed {
+				let embeddings = crate::embedding::generate_embeddings_batch(
+					&symbol_embed_texts,
+					false, // Text embeddings for GraphRAG symbol descriptions
+					&self.config,
+					crate::embedding::types::InputType::Document,
+				)
+				.await?;
+				for (node, embedding) in symbol_nodes.iter_mut().zip(embeddings.iter()) {
+					node.embedding = embedding.clone();
+				}
+			} else {
+				// Zero vectors satisfy the storage dimension check; cosine
+				// similarity with a zero vector is 0.0, so search matches
+				// these nodes by name/kind only.
+				let dim = self.store.get_code_vector_dim();
+				for node in &mut symbol_nodes {
+					node.embedding = vec![0.0; dim];
+				}
+			}
+
+			{
+				let mut graph = self.graph.write().await;
+				for node in &symbol_nodes {
+					graph.nodes.insert(node.id.clone(), node.clone());
+				}
+				graph
+					.relationships
+					.extend(symbol_contains_edges.iter().cloned());
+			}
+
+			let db_ops = DatabaseOperations::new(&self.store);
+			db_ops
+				.save_graph_incremental(&symbol_nodes, &symbol_contains_edges)
+				.await?;
+		}
+
 		// Discover relationships incrementally for processed nodes
 		// This ensures relationships are stored during processing, not just at the end
 		if processed_count > 0 {
@@ -754,7 +856,7 @@ impl GraphBuilder {
 				// Process relationships in batches to avoid storing everything at the end
 				let relationship_batch_size = self.config.index.embeddings_batch_size * 4; // Larger batches for relationships
 
-				let all_relationships = if self.llm_enabled() {
+				let mut all_relationships = if self.llm_enabled() {
 					// Enhanced relationship discovery with optional AI for complex cases
 					self.discover_relationships_with_ai_enhancement(&all_processed_nodes)
 						.await?
@@ -763,6 +865,23 @@ impl GraphBuilder {
 					self.discover_relationships_efficiently(&all_processed_nodes)
 						.await?
 				};
+
+				// Symbol→symbol edges (calls / extends / implements) resolved to
+				// symbol-tier nodes — pure tree-sitter + name resolution, no LLM.
+				if self.config.graphrag.symbols.enabled {
+					let all_nodes = {
+						let graph = self.graph.read().await;
+						graph
+							.nodes
+							.values()
+							.map(|n| n.without_embedding())
+							.collect::<Vec<CodeNode>>()
+					};
+					all_relationships.extend(discover_symbol_relationships(
+						&all_processed_nodes,
+						&all_nodes,
+					));
+				}
 
 				// Storage is append-only: keep only edges that touch a node from
 				// this run, or the importer sources added above would re-append
@@ -1317,176 +1436,5 @@ impl GraphBuilder {
 			*batches_processed = 0;
 		}
 		Ok(())
-	}
-
-	// Extract imports/exports using language-specific AST parsing
-	pub async fn extract_imports_exports_from_file(
-		&self,
-		file_path: &str,
-		language: &str,
-	) -> Result<(Vec<String>, Vec<String>)> {
-		use crate::indexer::languages;
-		use std::fs;
-		use tree_sitter::Parser;
-
-		// Get language implementation
-		let lang_impl = languages::get_language(language).ok_or_else(|| {
-			anyhow::anyhow!("Failed to get language implementation for: {}", language)
-		})?;
-
-		// Read file content
-		let contents = fs::read_to_string(file_path)?;
-
-		// Parse with tree-sitter
-		let mut parser = Parser::new();
-		parser.set_language(&lang_impl.get_ts_language())?;
-		let tree = parser
-			.parse(&contents, None)
-			.ok_or_else(|| anyhow::anyhow!("Failed to parse file"))?;
-
-		let mut all_imports = Vec::new();
-		let mut all_exports = Vec::new();
-
-		// Walk through all nodes and extract imports/exports
-		let cursor = tree.walk();
-		extract_imports_exports_recursive(
-			cursor.node(),
-			&contents,
-			lang_impl.as_ref(),
-			&mut all_imports,
-			&mut all_exports,
-		);
-
-		Ok((all_imports, all_exports))
-	}
-
-	/// Extract function calls from a file using language-specific AST parsing.
-	/// Returns (line_number, callee_name) pairs.
-	pub async fn extract_function_calls_from_file(
-		&self,
-		file_path: &str,
-		language: &str,
-	) -> Result<Vec<(u32, String)>> {
-		use crate::indexer::languages;
-		use std::fs;
-		use tree_sitter::Parser;
-
-		let lang_impl = languages::get_language(language).ok_or_else(|| {
-			anyhow::anyhow!("Failed to get language implementation for: {}", language)
-		})?;
-
-		let contents = fs::read_to_string(file_path)?;
-
-		let mut parser = Parser::new();
-		parser.set_language(&lang_impl.get_ts_language())?;
-		let tree = parser
-			.parse(&contents, None)
-			.ok_or_else(|| anyhow::anyhow!("Failed to parse file"))?;
-
-		let mut calls = Vec::new();
-		extract_function_calls_recursive(
-			tree.walk().node(),
-			&contents,
-			lang_impl.as_ref(),
-			&mut calls,
-		);
-
-		Ok(calls)
-	}
-
-	/// Extract type-level relationships (Extends / Implements) from a file using
-	/// language-specific AST parsing. Returns (line, kind, target_name) tuples.
-	pub async fn extract_type_relations_from_file(
-		&self,
-		file_path: &str,
-		language: &str,
-	) -> Result<Vec<(u32, TypeRelationKind, String)>> {
-		use crate::indexer::languages;
-		use std::fs;
-		use tree_sitter::Parser;
-
-		let lang_impl = languages::get_language(language).ok_or_else(|| {
-			anyhow::anyhow!("Failed to get language implementation for: {}", language)
-		})?;
-
-		let contents = fs::read_to_string(file_path)?;
-
-		let mut parser = Parser::new();
-		parser.set_language(&lang_impl.get_ts_language())?;
-		let tree = parser
-			.parse(&contents, None)
-			.ok_or_else(|| anyhow::anyhow!("Failed to parse file"))?;
-
-		let mut rels = Vec::new();
-		extract_type_relations_recursive(
-			tree.walk().node(),
-			&contents,
-			lang_impl.as_ref(),
-			&mut rels,
-		);
-
-		Ok(rels)
-	}
-}
-
-// Recursively extract function calls from AST nodes
-fn extract_function_calls_recursive(
-	node: tree_sitter::Node,
-	contents: &str,
-	lang_impl: &dyn crate::indexer::languages::Language,
-	calls: &mut Vec<(u32, String)>,
-) {
-	let callees = lang_impl.extract_function_calls(node, contents);
-	if !callees.is_empty() {
-		let line = node.start_position().row as u32; // 0-based to match FunctionInfo
-		for callee in callees {
-			calls.push((line, callee));
-		}
-	}
-
-	let mut cursor = node.walk();
-	for child in node.children(&mut cursor) {
-		extract_function_calls_recursive(child, contents, lang_impl, calls);
-	}
-}
-
-// Recursively extract type-level relationships (Extends / Implements) from AST nodes.
-fn extract_type_relations_recursive(
-	node: tree_sitter::Node,
-	contents: &str,
-	lang_impl: &dyn crate::indexer::languages::Language,
-	rels: &mut Vec<(u32, TypeRelationKind, String)>,
-) {
-	let pairs = lang_impl.extract_type_relations(node, contents);
-	if !pairs.is_empty() {
-		let line = node.start_position().row as u32;
-		for (kind, target) in pairs {
-			rels.push((line, kind, target));
-		}
-	}
-
-	let mut cursor = node.walk();
-	for child in node.children(&mut cursor) {
-		extract_type_relations_recursive(child, contents, lang_impl, rels);
-	}
-}
-
-// Recursively extract imports/exports from AST nodes
-fn extract_imports_exports_recursive(
-	node: tree_sitter::Node,
-	contents: &str,
-	lang_impl: &dyn crate::indexer::languages::Language,
-	all_imports: &mut Vec<String>,
-	all_exports: &mut Vec<String>,
-) {
-	// Extract imports/exports from current node
-	let (imports, exports) = lang_impl.extract_imports_exports(node, contents);
-	all_imports.extend(imports);
-	all_exports.extend(exports);
-
-	// Recursively process children
-	let mut cursor = node.walk();
-	for child in node.children(&mut cursor) {
-		extract_imports_exports_recursive(child, contents, lang_impl, all_imports, all_exports);
 	}
 }

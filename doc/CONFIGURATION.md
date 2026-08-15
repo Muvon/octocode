@@ -70,6 +70,10 @@ text_model = "voyage:voyage-3.5-lite"
 enabled = false
 use_llm = false
 
+[graphrag.symbols]
+enabled = true
+embed = false
+
 [graphrag.llm]
 description_model = "openrouter:openai/gpt-4o-mini"
 relationship_model = "openrouter:openai/gpt-4o-mini"
@@ -221,6 +225,13 @@ Knowledge graph generation settings.
 - `enabled`: Enable/disable GraphRAG features
 - `use_llm`: Enable AI-powered relationship discovery and file descriptions
 
+### [graphrag.symbols]
+
+Symbol-tier graph nodes: one node per declared symbol (function, class, struct, trait, ...) extracted via tree-sitter — no LLM required. Symbol nodes use `{file_path}::{symbol_name}` ids, link to their file via `contains` edges, and calls / extends / implements between symbols become graph edges.
+
+- `enabled`: Extract per-symbol nodes and symbol→symbol edges during GraphRAG builds (default: true)
+- `embed`: Generate vector embeddings for symbol nodes; when false, symbol nodes are stored with zero vectors and match by name/kind only (default: false)
+
 ### [graphrag.llm]
 
 LLM-specific configuration for GraphRAG AI features.
@@ -344,6 +355,10 @@ text_model = "voyage:voyage-3.5-lite"
 [graphrag]
 enabled = false
 use_llm = false
+
+[graphrag.symbols]
+enabled = true
+embed = false
 ```
 
 **Note**: MCP server settings like port, debug mode, and LSP integration are controlled via command-line flags, not configuration file options.

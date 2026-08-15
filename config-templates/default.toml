@@ -110,6 +110,16 @@ text_model = "fastembed:nomic-ai/nomic-embed-text-v1.5"
 enabled = false
 use_llm = false
 
+[graphrag.symbols]
+# Symbol-tier GraphRAG: one graph node per declared symbol (function, class,
+# struct, trait, ...) extracted via tree-sitter — no LLM required.
+# Symbol nodes get "{file_path}::{symbol_name}" ids, link to their file via
+# "contains" edges, and calls/extends/implements between symbols become edges.
+enabled = true
+# Generate vector embeddings for symbol nodes (one embedding call per symbol).
+# When false, symbol nodes are stored with zero vectors and match by name/kind only.
+embed = false
+
 [graphrag.llm]
 # Models for GraphRAG AI enhancements in provider:model format
 description_model = "openrouter:openai/gpt-4o-mini"

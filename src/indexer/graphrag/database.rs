@@ -250,8 +250,9 @@ impl<'a> DatabaseOperations<'a> {
 					description: desc_array.value(i).to_string(),
 					confidence: conf_array.value(i),
 					weight: 1.0,
-					provenance: provenance_array
-						.map_or(Provenance::default(), |arr| Provenance::parse_or_default(arr.value(i))),
+					provenance: provenance_array.map_or(Provenance::default(), |arr| {
+						Provenance::parse_or_default(arr.value(i))
+					}),
 				};
 				graph.relationships.push(relationship);
 			}

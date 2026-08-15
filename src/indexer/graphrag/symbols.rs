@@ -255,7 +255,7 @@ impl<'a> SymbolIndex<'a> {
 			// `get`) and would balloon the edge set with noise.
 			Some(ids) if allow_ambiguous => ids
 				.iter()
-				.map(|id| (**id, Provenance::Ambiguous, 0.4))
+				.map(|id| (&**id, Provenance::Ambiguous, 0.4))
 				.collect(),
 			_ => Vec::new(),
 		}
