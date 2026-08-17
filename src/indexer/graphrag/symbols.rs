@@ -308,7 +308,7 @@ fn extract_import_bindings(
 	match language {
 		"python" if text.starts_with("import ") => {
 			for item in text.trim_start_matches("import ").split(',') {
-				let mut parts = item.trim().split_whitespace();
+				let mut parts = item.split_whitespace();
 				let Some(path) = parts.next() else { continue };
 				if parts.next() == Some("as") {
 					if let Some(alias) = parts.next() {
@@ -324,7 +324,7 @@ fn extract_import_bindings(
 		"python" if text.starts_with("from ") => {
 			if let Some((module, names)) = text.trim_start_matches("from ").split_once(" import ") {
 				for item in names.trim_matches(['(', ')']).split(',') {
-					let mut parts = item.trim().split_whitespace();
+					let mut parts = item.split_whitespace();
 					let Some(imported) = parts.next() else {
 						continue;
 					};
