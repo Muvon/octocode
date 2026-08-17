@@ -1,5 +1,37 @@
 # Changelog
 
+## [0.21.0] - 2026-08-17
+
+### 📋 Release Summary
+
+This release significantly enhances code intelligence through improved symbol resolution, indexing, and the introduction of a runtime structural graph builder (9974cfd1, d06eb11d, f6304eb6, 9de1cc8d, aedb2bde). The MCP server now features streamlined search path configuration and improved structural search validation (0a14b173, e23d04a2). Additionally, several fixes optimize symbol detection and prevent indexing inflation for better system stability (60776a09, 3b289751).
+
+
+### ✨ New Features & Enhancements
+
+- **graphrag**: enhance symbol resolution and indexing `9974cfd1`
+- **graphrag**: implement runtime structural graph builder `d06eb11d`
+- **indexer**: implement language-specific symbol kinds `aedb2bde`
+- **graphrag**: implement symbol-tier node extraction `f6304eb6`
+- **graphrag**: implement symbol-tier extraction and provenance `9de1cc8d`
+- **mcp**: allow single string for search paths `0a14b173`
+- **mcp**: improve structural search validation `e23d04a2`
+
+### 🔧 Improvements & Optimizations
+
+- **indexer**: remove redundant trim before split `45d8aab9`
+- **config**: relax backup filename assertions `b4af3a86`
+- **release**: add npm publishing step to workflow `d07fd242`
+
+### 🐛 Bug Fixes & Stability
+
+- **indexer**: restrict function detection to init prefix `60776a09`
+- **indexer**: prevent symbol inflation and path explosion `3b289751`
+
+### 🔄 Other Changes
+
+2 maintenance, dependency, and tooling updates not listed individually.
+
 ## [0.20.2] - 2026-08-04
 
 ### 📋 Release Summary

@@ -2909,9 +2909,9 @@ dependencies = [
 
 [[package]]
 name = "h2"
-version = "0.4.15"
+version = "0.4.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6cb093c84e8bd9b188d4c4a8cb6579fc016968d14c99882163cd3ff402a4f155"
+checksum = "a9f37a958b41b3b19ee2707c06439c0e9e547e847223eb791ecb0cb821c65e27"
 dependencies = [
  "atomic-waker",
  "bytes",
@@ -4933,7 +4933,7 @@ dependencies = [
 
 [[package]]
 name = "octocode"
-version = "0.20.2"
+version = "0.21.0"
 dependencies = [
  "anyhow",
  "arrow",
@@ -5000,9 +5000,9 @@ dependencies = [
 
 [[package]]
 name = "octolib"
-version = "0.32.0"
+version = "0.32.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0e3e258d5644ad0301bbf3918b9330cb522561a12dcdbe88ffe8c33fb70c66be"
+checksum = "bfa5f431bccce89325d759ceb78e88eac7834c7c9b7ec41ff9cc450f3c257520"
 dependencies = [
  "anyhow",
  "arc-swap",
