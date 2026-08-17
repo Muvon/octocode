@@ -77,6 +77,16 @@ impl Language for Cpp {
 			let callable = text.split('(').next().unwrap_or(text);
 			return super::extract_call_target(callable).map(|target| target.name);
 		}
+		// Bodyless specifiers are type REFERENCES (`struct stat st;`) or forward
+		// declarations, not definitions — naming them would mint a bogus symbol
+		// at every usage site.
+		if matches!(
+			node.kind(),
+			"class_specifier" | "struct_specifier" | "enum_specifier"
+		) && node.child_by_field_name("body").is_none()
+		{
+			return None;
+		}
 		node.child_by_field_name("name")
 			.and_then(|name| name.utf8_text(contents.as_bytes()).ok())
 			.map(str::to_string)

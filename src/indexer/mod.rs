@@ -263,7 +263,7 @@ pub fn get_file_mtime(file_path: &std::path::Path) -> Result<u64> {
 }
 
 // Detect language based on file extension
-pub fn detect_language(path: &std::path::Path) -> Option<&str> {
+pub fn detect_language(path: &std::path::Path) -> Option<&'static str> {
 	FileUtils::detect_language(path)
 }
 
