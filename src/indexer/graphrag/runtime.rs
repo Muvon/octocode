@@ -427,6 +427,10 @@ pub fn find_paths(
 	use std::collections::{HashMap, VecDeque};
 
 	const MAX_PATHS: usize = 20;
+	// Total-work bound: the path cap alone only triggers on reaching the
+	// target, so an unreachable target on a dense symbol graph would still
+	// enumerate every simple path up to max_depth.
+	const MAX_EXPANSIONS: usize = 100_000;
 	let mut adjacency: HashMap<&str, Vec<&str>> = HashMap::new();
 	for relationship in &graph.relationships {
 		adjacency
@@ -441,7 +445,12 @@ pub fn find_paths(
 
 	let mut queue = VecDeque::from([vec![source_id.to_string()]]);
 	let mut paths = Vec::new();
+	let mut expansions = 0usize;
 	while let Some(path) = queue.pop_front() {
+		expansions += 1;
+		if expansions > MAX_EXPANSIONS {
+			break;
+		}
 		let current = path.last().map(String::as_str).unwrap_or_default();
 		if current == target_id {
 			paths.push(path);

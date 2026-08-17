@@ -64,6 +64,15 @@ impl Language for Java {
 		]
 	}
 
+	fn extract_declaration_name(&self, node: Node, contents: &str) -> Option<String> {
+		// The default child scan would match a method's RETURN TYPE
+		// (type_identifier precedes the name), so use the grammar's `name`
+		// field — every symbol kind above declares one.
+		node.child_by_field_name("name")
+			.and_then(|name| name.utf8_text(contents.as_bytes()).ok())
+			.map(str::to_string)
+	}
+
 	fn extract_symbols(&self, node: Node, contents: &str) -> Vec<String> {
 		let mut symbols = Vec::new();
 
