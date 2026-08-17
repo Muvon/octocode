@@ -136,7 +136,8 @@ pub fn symbol_kind_from_node_kind(kind: &str) -> &'static str {
 		|| kind.contains("method")
 		|| kind.contains("procedure")
 		|| kind.contains("constructor")
-		|| kind.contains("init")
+		// starts_with, not contains: "definition" contains "init".
+		|| kind.starts_with("init")
 	{
 		"function"
 	} else if kind.contains("interface") {
