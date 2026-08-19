@@ -20,6 +20,7 @@
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
@@ -119,10 +120,16 @@ pub fn get_current_branch(repo_path: &Path) -> Option<String> {
 	Some(branch)
 }
 
-/// Determine whether the current checkout is on a non-default branch.
-/// Returns `Some(branch_name)` if on a feature branch, `None` if on default or detached.
+/// Determine whether the current checkout needs a branch-delta index.
+/// Named feature branches use their branch name. Detached worktrees get a stable,
+/// worktree-specific name so they cannot overwrite the shared main index.
 pub fn detect_branch_context(repo_path: &Path) -> Option<String> {
-	let current = get_current_branch(repo_path)?;
+	let Some(current) = get_current_branch(repo_path) else {
+		let path = repo_path.canonicalize().ok()?;
+		let path_hash = format!("{:x}", Sha256::digest(path.to_string_lossy().as_bytes()));
+		get_branch_commit(repo_path, "HEAD").ok()?;
+		return Some(format!("detached/{}", &path_hash[..12]));
+	};
 	let default = GitUtils::get_default_branch(repo_path).ok()?;
 	if current == default {
 		None
@@ -567,6 +574,7 @@ pub fn resolve_branch_state(
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use std::process::Command;
 
 	#[test]
 	fn test_sanitize_branch_name() {
@@ -592,6 +600,70 @@ mod tests {
 		for name in names {
 			assert_eq!(desanitize_branch_name(&sanitize_branch_name(name)), name);
 		}
+	}
+
+	#[test]
+	fn detached_worktrees_get_distinct_branch_contexts() {
+		let root = std::env::temp_dir().join(format!(
+			"octocode-detached-context-{}",
+			uuid::Uuid::new_v4()
+		));
+		let repo = root.join("repo");
+		let first = root.join("first");
+		let second = root.join("second");
+		std::fs::create_dir_all(&repo).unwrap();
+
+		for args in [
+			vec!["init"],
+			vec!["config", "user.email", "test@example.com"],
+			vec!["config", "user.name", "Test"],
+		] {
+			assert!(Command::new("git")
+				.args(args)
+				.current_dir(&repo)
+				.status()
+				.unwrap()
+				.success());
+		}
+		std::fs::write(repo.join("tracked.txt"), "tracked\n").unwrap();
+		for args in [vec!["add", "tracked.txt"], vec!["commit", "-m", "initial"]] {
+			assert!(Command::new("git")
+				.args(args)
+				.current_dir(&repo)
+				.status()
+				.unwrap()
+				.success());
+		}
+		for path in [&first, &second] {
+			assert!(Command::new("git")
+				.args(["worktree", "add", "--detach"])
+				.arg(path)
+				.arg("HEAD")
+				.current_dir(&repo)
+				.status()
+				.unwrap()
+				.success());
+		}
+
+		let first_context = detect_branch_context(&first).expect("detached worktree context");
+		let second_context = detect_branch_context(&second).expect("detached worktree context");
+
+		assert_ne!(first_context, second_context);
+		assert!(first_context.starts_with("detached/"));
+		assert!(second_context.starts_with("detached/"));
+
+		std::fs::write(first.join("tracked.txt"), "changed\n").unwrap();
+		for args in [vec!["add", "tracked.txt"], vec!["commit", "-m", "next"]] {
+			assert!(Command::new("git")
+				.args(args)
+				.current_dir(&first)
+				.status()
+				.unwrap()
+				.success());
+		}
+		assert_eq!(detect_branch_context(&first).unwrap(), first_context);
+
+		std::fs::remove_dir_all(root).unwrap();
 	}
 
 	fn make_manifest(changed: Vec<&str>, deleted: Vec<&str>) -> BranchManifest {
