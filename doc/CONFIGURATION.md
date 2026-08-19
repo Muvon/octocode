@@ -100,6 +100,9 @@ quantization = true                          # RaBitQ quantization for ~32x vect
 contextual_descriptions = false              # Contextual Retrieval: enrich chunks with AI context
 contextual_model = "openrouter:openai/gpt-4o-mini"  # Model for contextual descriptions
 contextual_batch_size = 10                   # Chunks per batch for contextual enrichment
+
+[index.file_associations]
+# inc = "php"                                # Treat this project's .inc files as PHP
 ```
 
 ## Embedding Providers
@@ -213,6 +216,25 @@ Core embedding configuration.
 
 - `code_model`: Model for code embedding
 - `text_model`: Model for text/documentation embedding
+
+### [index.file_associations]
+
+Map a project's ambiguous or nonstandard final file extensions to an existing
+Octocode language. Keys are case-insensitive and may include a leading dot;
+explicit associations override built-in detection.
+
+```toml
+[index.file_associations]
+inc = "php"
+```
+
+Associations affect semantic indexing, signatures, GraphRAG, structural search,
+and MCP language detection. Unknown language names and invalid extensions fail
+configuration loading instead of silently skipping source files.
+
+The default configuration path is global. To keep associations project-specific,
+set `OCTOCODE_CONFIG_PATH` to that project's complete configuration file when
+launching Octocode.
 
 ### [graphrag]
 

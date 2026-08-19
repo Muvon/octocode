@@ -1,4 +1,4 @@
-// Copyright 2025 Muvon Un Limited
+// Copyright 2026 Muvon Un Limited
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -115,6 +115,10 @@ impl FileUtils {
 
 	/// Detect language based on file extension
 	pub fn detect_language(path: &Path) -> Option<&'static str> {
+		if let Some(language) = crate::language::associated_language(path) {
+			return Some(language);
+		}
+
 		match path.extension()?.to_str()? {
 			// Rust
 			"rs" => Some("rust"),

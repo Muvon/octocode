@@ -263,6 +263,10 @@ fn pattern_info_with_lang<L: LanguageExt + AstGrepLanguage + Clone>(
 
 /// Determine language from file extension.
 pub fn language_from_extension(path: &Path) -> Option<&'static str> {
+	if let Some(language) = crate::language::associated_language(path) {
+		return Some(language);
+	}
+
 	let ext = path.extension()?.to_str()?;
 	match ext {
 		"rs" => Some("rust"),
