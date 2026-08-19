@@ -1036,25 +1036,6 @@ impl McpServer {
 		let store = Arc::new(Store::new_with_path(db_path).await?);
 		store.initialize_collections().await?;
 
-		// One-shot initial index so a freshly-accessed repo is searchable without
-		// waiting for a file change. Incremental and lock-guarded, so it's cheap
-		// when already indexed and safe against the watcher-triggered reindex.
-		{
-			let store = store.clone();
-			let config = config.clone();
-			let working_directory = working_directory.clone();
-			tokio::spawn(async move {
-				if let Err(e) = perform_indexing(&store, &config, &working_directory, no_git).await
-				{
-					warn!(
-						"Initial index failed for {}: {}",
-						working_directory.display(),
-						e
-					);
-				}
-			});
-		}
-
 		start_background_services(
 			config,
 			store,
@@ -1122,9 +1103,8 @@ impl McpServer {
 			(None, None, None)
 		};
 
-		// The in-process MCP indexer is opt-in via `index.mcp_index`. When disabled,
-		// MCP serves the existing index read-only; when enabled, the usual git gate
-		// still applies.
+		// The in-process MCP indexer is enabled by default. Explicit read-only mode
+		// still serves the existing index, and the usual git gate applies otherwise.
 		let should_start_indexer = config.index.mcp_index
 			&& (no_git
 				|| !config.index.require_git
@@ -1327,6 +1307,9 @@ pub(crate) async fn start_background_services(
 ) -> Result<BackgroundServices> {
 	let (file_tx, file_rx) = mpsc::channel(MCP_MAX_PENDING_EVENTS);
 	let (index_tx, index_rx) = mpsc::channel(10);
+	index_tx
+		.try_send(())
+		.map_err(|e| anyhow::anyhow!("Failed to queue initial index: {}", e))?;
 
 	// 1. File watcher
 	let working_dir = working_directory.clone();
@@ -1337,7 +1320,7 @@ pub(crate) async fn start_background_services(
 	});
 
 	// 2. Debouncer: accumulates file events, triggers indexing after quiet period
-	let indexing_in_progress = Arc::new(AtomicBool::new(false));
+	let indexing_in_progress = Arc::new(AtomicBool::new(true));
 	let indexing_flag = indexing_in_progress.clone();
 	let debug_mode = debug;
 	let graph_cache = runtime_graph_cache;

@@ -157,11 +157,9 @@ pub struct IndexConfig {
 	#[serde(default = "default_contextual_batch_size")]
 	pub contextual_batch_size: usize,
 
-	/// When `true`, the MCP server runs background indexing + a file watcher to keep
-	/// the index fresh while serving. When `false` (default), MCP serves search,
-	/// `view_signatures`, and `structural_search` over the EXISTING index in read-only
-	/// mode and never (re)indexes in-process. The `index` CLI command is unaffected —
-	/// this gates only the in-process MCP indexer.
+	/// When `true` (default), the MCP server runs background indexing + a file watcher
+	/// to keep the index fresh while serving. When `false`, MCP serves the existing
+	/// index read-only. The `index` CLI command is unaffected.
 	pub mcp_index: bool,
 }
 
@@ -178,7 +176,7 @@ impl Default for IndexConfig {
 			contextual_descriptions: false,
 			contextual_model: "openrouter:openai/gpt-4o-mini".to_string(),
 			contextual_batch_size: 10,
-			mcp_index: false,
+			mcp_index: true,
 		}
 	}
 }
@@ -535,6 +533,10 @@ mod tests {
 	fn test_default_config() {
 		let config = Config::load_from_template().expect("Failed to load template config");
 		assert_eq!(config.version, 2);
+		assert!(
+			config.index.mcp_index,
+			"MCP must keep its semantic index fresh by default"
+		);
 		assert_eq!(config.llm.model, "openrouter:openai/gpt-4o-mini");
 		assert_eq!(config.index.chunk_size, 2000);
 		assert_eq!(config.search.max_results, 20);
