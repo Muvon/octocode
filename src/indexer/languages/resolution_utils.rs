@@ -1,4 +1,4 @@
-// Copyright 2025 Muvon Un Limited
+// Copyright 2026 Muvon Un Limited
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -254,6 +254,10 @@ pub fn normalize_path(path: &str) -> String {
 /// Detect language from file path extension
 pub fn detect_language_from_path(file_path: &str) -> Option<String> {
 	let path = Path::new(file_path);
+	if let Some(language) = crate::language::associated_language(path) {
+		return Some(language.to_string());
+	}
+
 	let extension = path.extension()?.to_str()?;
 
 	match extension {

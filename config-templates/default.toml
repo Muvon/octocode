@@ -37,6 +37,12 @@ contextual_model = "openrouter:openai/gpt-4o-mini"
 # Number of code chunks to send per LLM description batch
 contextual_batch_size = 10
 
+# Project-specific final-extension associations. Keys may include a leading dot;
+# values must name an existing Octocode language. Explicit associations override
+# built-in detection. Use OCTOCODE_CONFIG_PATH to select a project-specific config.
+[index.file_associations]
+# inc = "php"
+
 [search]
 max_results = 20
 similarity_threshold = 0.65

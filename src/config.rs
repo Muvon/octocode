@@ -15,6 +15,7 @@
 use anyhow::{Context, Result};
 use octolib::utils::config_file;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -137,6 +138,10 @@ pub struct IndexConfig {
 	/// Require git repository for indexing (default: true)
 	pub require_git: bool,
 
+	/// Project-specific final-extension to language associations.
+	#[serde(default)]
+	pub file_associations: HashMap<String, String>,
+
 	/// Enable RaBitQ quantization for vector indexes (default: true)
 	/// When enabled, uses IVF_RQ (32x compression) instead of IVF_HNSW_SQ (4x compression)
 	/// RaBitQ provides better storage efficiency while maintaining good recall
@@ -174,6 +179,7 @@ impl Default for IndexConfig {
 			embeddings_max_tokens_per_batch: 100000,
 			flush_frequency: 2,
 			require_git: true,
+			file_associations: HashMap::new(),
 			quantization: true,
 			contextual_descriptions: false,
 			contextual_model: "openrouter:openai/gpt-4o-mini".to_string(),
@@ -366,7 +372,9 @@ impl Default for Config {
 impl Config {
 	pub fn load() -> Result<Self> {
 		let config_path = Self::get_config_path()?;
-		Self::load_from_path(&config_path)
+		let config = Self::load_from_path(&config_path)?;
+		crate::language::configure_file_associations(&config.index.file_associations)?;
+		Ok(config)
 	}
 
 	fn load_from_path(config_path: &Path) -> Result<Self> {
@@ -637,6 +645,22 @@ mod tests {
 			"fastembed:jina-reranker-v2-base-multilingual"
 		);
 		assert_eq!(config.search.hybrid.default_vector_weight, 0.6);
+		assert!(config.index.file_associations.is_empty());
+	}
+
+	#[test]
+	fn parses_project_file_associations() {
+		let configured = DEFAULT_CONFIG_TEMPLATE.replace("# inc = \"php\"", "inc = \"php\"");
+		let config: Config = toml::from_str(&configured).expect("association should parse");
+
+		assert_eq!(
+			config
+				.index
+				.file_associations
+				.get("inc")
+				.map(String::as_str),
+			Some("php")
+		);
 	}
 
 	#[test]

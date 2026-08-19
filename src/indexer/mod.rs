@@ -419,67 +419,8 @@ fn fast_count_indexable_files(
 			continue;
 		}
 
-		// Quick check: just see if file has an extension that might be indexable
-		// This is much faster than full language detection
-		if let Some(ext) = entry.path().extension() {
-			let ext_str = ext.to_str().unwrap_or("");
-			// Quick list of common extensions we index
-			if matches!(
-				ext_str,
-				"rs" | "js"
-					| "ts" | "jsx" | "tsx"
-					| "py" | "go" | "java"
-					| "c" | "cpp" | "cc"
-					| "cxx" | "c++" | "h"
-					| "hpp" | "hxx" | "cppm"
-					| "ixx" | "mxx" | "ccm"
-					| "cxxm" | "cs" | "php"
-					| "rb" | "swift"
-					| "kt" | "scala"
-					| "r" | "m" | "mm"
-					| "md" | "markdown"
-					| "txt" | "json"
-					| "yaml" | "yml"
-					| "toml" | "xml"
-					| "html" | "css"
-					| "scss" | "sass"
-					| "less" | "sql"
-					| "sh" | "bash" | "zsh"
-					| "fish" | "vim"
-					| "lua" | "pl" | "pm"
-					| "t" | "pod" | "raku"
-					| "rakumod" | "rakudoc"
-					| "nix" | "dhall"
-					| "tf" | "tfvars"
-					| "hcl" | "vue" | "svelte"
-					| "elm" | "purs"
-					| "hs" | "lhs" | "ml"
-					| "mli" | "fs" | "fsi"
-					| "fsx" | "clj" | "cljs"
-					| "cljc" | "edn"
-					| "ex" | "exs" | "erl"
-					| "hrl" | "zig" | "v"
-					| "vsh" | "nim" | "nims"
-					| "cr" | "jl" | "d"
-					| "dart" | "pas"
-					| "pp" | "inc" | "asm"
-					| "s" | "S" | "rst"
-					| "adoc" | "tex"
-					| "bib" | "org" | "wiki"
-					| "pod6" | "rakutest"
-					| "cfg" | "conf"
-					| "config" | "ini"
-					| "env" | "properties"
-					| "gradle" | "cmake"
-					| "make" | "makefile"
-					| "dockerfile" | "containerfile"
-					| "vagrantfile" | "gemfile"
-					| "rakefile" | "guardfile"
-					| "podfile" | "fastfile"
-					| "brewfile"
-			) {
-				count += 1;
-			}
+		if detect_language(entry.path()).is_some() || is_allowed_text_extension(entry.path()) {
+			count += 1;
 		}
 	}
 

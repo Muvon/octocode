@@ -153,6 +153,16 @@ pub fn execute(args: &ConfigArgs, mut config: Config) -> Result<()> {
 			"   Batch size: {} texts",
 			config.index.embeddings_batch_size
 		);
+		if config.index.file_associations.is_empty() {
+			println!("   File associations: none");
+		} else {
+			let mut associations: Vec<_> = config.index.file_associations.iter().collect();
+			associations.sort_unstable_by_key(|(extension, _)| *extension);
+			println!("   File associations:");
+			for (extension, language) in associations {
+				println!("     .{extension} → {language}");
+			}
+		}
 		println!(
 			"   GraphRAG: {}",
 			if config.graphrag.enabled {
