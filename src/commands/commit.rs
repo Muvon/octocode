@@ -519,6 +519,8 @@ async fn generate_commit_message_chunked(
 		""
 	};
 
+	let files_section = file_status_section(&diff);
+
 	// Check if we need to chunk the diff
 	let chunks = diff_chunker::chunk_diff(&diff);
 
@@ -531,6 +533,7 @@ async fn generate_commit_message_chunked(
 			deletions,
 			&guidance_section,
 			docs_restriction,
+			&files_section,
 		);
 		return call_llm_with_retry(
 			|| call_llm_for_commit_message(&prompt, config),
@@ -552,6 +555,7 @@ async fn generate_commit_message_chunked(
 		deletions,
 		&guidance_section,
 		docs_restriction,
+		&files_section,
 		config,
 	)
 	.await;
@@ -634,6 +638,8 @@ async fn generate_commit_message_from_diff(
 		""
 	};
 
+	let files_section = file_status_section(diff);
+
 	let chunks = diff_chunker::chunk_diff(diff);
 
 	if chunks.len() == 1 {
@@ -644,6 +650,7 @@ async fn generate_commit_message_from_diff(
 			deletions,
 			&guidance_section,
 			docs_restriction,
+			&files_section,
 		);
 		return call_llm_with_retry(
 			|| call_llm_for_commit_message(&prompt, config),
@@ -664,6 +671,7 @@ async fn generate_commit_message_from_diff(
 		deletions,
 		&guidance_section,
 		docs_restriction,
+		&files_section,
 		config,
 	)
 	.await;
@@ -687,6 +695,45 @@ async fn generate_commit_message_from_diff(
 	}
 }
 
+/// Derive per-file change status (A/M/D/R) from raw diff headers.
+///
+/// Grounds the LLM in what actually happened to each file so it cannot
+/// claim "add X" for code that was merely modified.
+fn file_status_section(diff: &str) -> String {
+	let mut lines = Vec::new();
+	let mut current: Option<(String, char)> = None;
+
+	for line in diff.lines() {
+		if let Some(rest) = line.strip_prefix("diff --git ") {
+			if let Some((path, status)) = current.take() {
+				lines.push(format!("{} {}", status, path));
+			}
+			let path = rest.split(" b/").nth(1).unwrap_or(rest).to_string();
+			current = Some((path, 'M'));
+		} else if let Some((_, status)) = current.as_mut() {
+			if line.starts_with("new file mode") {
+				*status = 'A';
+			} else if line.starts_with("deleted file mode") {
+				*status = 'D';
+			} else if line.starts_with("rename from") {
+				*status = 'R';
+			}
+		}
+	}
+	if let Some((path, status)) = current {
+		lines.push(format!("{} {}", status, path));
+	}
+
+	if lines.is_empty() {
+		String::new()
+	} else {
+		format!(
+			"File status (A=added, M=modified, D=deleted, R=renamed):\n{}\n\n",
+			lines.join("\n")
+		)
+	}
+}
+
 /// Create a standardized commit prompt for LLM processing
 fn create_commit_prompt(
 	diff_content: &str,
@@ -695,19 +742,26 @@ fn create_commit_prompt(
 	deletions: usize,
 	guidance_section: &str,
 	docs_restriction: &str,
+	files_section: &str,
 ) -> String {
 	format!(
 		"STRICT FORMAT: Plain text commit message, NO markdown, NO backticks, NO code blocks.
 type(scope): description under 50 chars
 Types: feat, fix, docs, style, refactor, test, chore, perf, ci, build
 Use imperative mood (add not added, fix not fixed)
-Avoid generic words: update, change, modify, various, several
+Avoid vague subjects ('update files', 'various changes'); name the specific behavior that changed
 Focus on WHAT functionality changed, not implementation details
 ---
+ACCURACY RULES (CRITICAL):
+Describe ONLY what is visible in the diff; never infer intent or claim behavior beyond the changed lines
+Use 'add', 'implement', 'introduce' ONLY for new files (status A) or entirely new functions/types
+Changes inside existing code are modifications: use extend, rework, improve, update, or fix
+Never present a change to existing functionality as adding that functionality
+---
 COMMIT TYPE GUIDE:
-feat: NEW functionality being added
+feat: NEW user-visible capability (new files, new functions, new behavior)
 fix: CORRECTING bugs/errors/broken functionality
-refactor: IMPROVING code without changing functionality
+refactor: IMPROVING or reworking code without changing user-visible behavior
 perf: OPTIMIZING performance
 docs: .md/.markdown/.rst files ONLY
 test: ADDING or fixing tests
@@ -716,9 +770,10 @@ chore: maintenance (dependencies, build, tooling)
 ci: workflows/pipelines
 build: Cargo.toml, package.json, Makefile{}
 ---
-FEATURE vs FIX: Working code with bugs = fix, completely new = feat
-Examples: fix(auth): resolve token validation error, feat(auth): add OAuth2 support
-When in doubt: choose fix if addressing problems, feat if adding new
+FEAT vs FIX vs MODIFICATION: completely new capability = feat, correcting broken behavior = fix,
+reworking existing behavior = refactor (feat only if it adds a NEW user-visible capability)
+Examples: fix(auth): resolve token validation error, feat(auth): add OAuth2 support, refactor(auth): rework token refresh flow
+When in doubt: prefer fix or refactor over feat
 ---
 BREAKING CHANGES: Function/API signature changes, removed public methods, interface/trait changes
 Library code: mark any public interface changes as breaking
@@ -739,7 +794,7 @@ If body: blank line then dash bullets
 If breaking: BREAKING CHANGE: line
 NO code blocks, NO backticks, NO markdown
 ---{}
-Changes: {} files (+{} -{} lines)
+{}Changes: {} files (+{} -{} lines)
 
 Git diff:
 {}
@@ -747,6 +802,7 @@ Git diff:
 Generate commit message:",
 		docs_restriction,
 		guidance_section,
+		files_section,
 		file_count,
 		additions,
 		deletions,
@@ -800,26 +856,46 @@ async fn process_commit_chunks_parallel(
 	deletions: usize,
 	guidance_section: &str,
 	docs_restriction: &str,
+	files_section: &str,
 	config: &Config,
 ) -> Vec<String> {
-	// Limit parallel processing to prevent resource exhaustion
-	let chunk_limit = std::cmp::min(chunks.len(), diff_chunker::MAX_PARALLEL_CHUNKS);
+	// Process ALL chunks; the semaphore only bounds concurrency so no part
+	// of the diff is silently dropped from the commit message.
+	let total_chunks = chunks.len();
+	let semaphore = std::sync::Arc::new(tokio::sync::Semaphore::new(
+		diff_chunker::MAX_PARALLEL_CHUNKS,
+	));
 	let mut join_set = JoinSet::new();
 
-	// Process chunks in parallel batches
-	for (i, chunk) in chunks.iter().take(chunk_limit).enumerate() {
+	for (i, chunk) in chunks.iter().enumerate() {
 		let chunk_content = chunk.content.clone();
 		let chunk_summary = chunk.file_summary.clone();
 		let config = config.clone();
 		let guidance_section = guidance_section.to_string();
 		let docs_restriction = docs_restriction.to_string();
+		let files_section = files_section.to_string();
+		let semaphore = semaphore.clone();
 
 		join_set.spawn(async move {
+			let _permit = semaphore
+				.acquire_owned()
+				.await
+				.expect("semaphore never closed");
+
 			println!(
 				"  Processing chunk {}/{}: {}",
 				i + 1,
-				chunk_limit,
+				total_chunks,
 				chunk_summary
+			);
+
+			let chunk_note = format!(
+				"NOTE: This is chunk {}/{} of a larger diff and shows only PART of the changes.\n\
+The file status list and totals below cover the WHOLE commit, not just this chunk.\n\
+Added lines inside this chunk may belong to files marked M (modified) - do not assume they are new functionality.\n\n{}",
+				i + 1,
+				total_chunks,
+				files_section
 			);
 
 			let chunk_prompt = create_commit_prompt(
@@ -829,6 +905,7 @@ async fn process_commit_chunks_parallel(
 				deletions,
 				&guidance_section,
 				&docs_restriction,
+				&chunk_note,
 			);
 
 			match call_llm_for_commit_message(&chunk_prompt, &config).await {
@@ -842,7 +919,7 @@ async fn process_commit_chunks_parallel(
 	}
 
 	// Collect results maintaining order
-	collect_ordered_responses(join_set, chunk_limit).await
+	collect_ordered_responses(join_set, total_chunks).await
 }
 
 async fn call_llm_for_commit_message(prompt: &str, config: &Config) -> Result<String> {
@@ -894,7 +971,9 @@ SYNTHESIS REQUIREMENTS:
 5. Body: list every meaningful change as a dash-space bullet, one per line, max 72 chars each
 6. Group related changes together; remove duplication
 7. Do NOT omit changes just because they appear in a later chunk
-8. Types: feat, fix, docs, style, refactor, test, chore, perf, ci, build
+8. Do NOT upgrade claims: if a summary says code was modified/reworked/improved, never restate it as added or implemented
+9. Describe something as new/added ONLY if a chunk summary explicitly says it is new
+10. Types: feat, fix, docs, style, refactor, test, chore, perf, ci, build
 
 OUTPUT FORMAT (PLAIN TEXT ONLY):
 feat(agents): add multi-jurisdiction lawyer specialists
@@ -1042,4 +1121,31 @@ async fn run_precommit_hooks(
 	}
 
 	Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn test_file_status_section() {
+		let diff = "diff --git a/src/existing.rs b/src/existing.rs\n\
+index 123..456 100644\n\
+--- a/src/existing.rs\n\
++++ b/src/existing.rs\n\
+@@ -1,2 +1,3 @@\n\
++new line\n\
+diff --git a/src/brand_new.rs b/src/brand_new.rs\n\
+new file mode 100644\n\
+--- /dev/null\n\
++++ b/src/brand_new.rs\n\
+diff --git a/src/gone.rs b/src/gone.rs\n\
+deleted file mode 100644\n";
+
+		let section = file_status_section(diff);
+		assert!(section.contains("M src/existing.rs"));
+		assert!(section.contains("A src/brand_new.rs"));
+		assert!(section.contains("D src/gone.rs"));
+		assert!(file_status_section("").is_empty());
+	}
 }

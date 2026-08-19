@@ -1155,10 +1155,12 @@ async fn generate_ai_changelog_summary(
         - Group by impact/feature, not by individual commit\\n\\
         - If commits are nearly identical, mention the improvement once with all commit references\\n\\
 
-        MESSAGE REFINEMENT:\\n\\
-        - You may IMPROVE and REFINE commit messages for clarity\\n\\
-        - Don't preserve exact wording - make it user-friendly\\n\\
-        - Focus on the RESULT/BENEFIT, not the technical implementation\\n\\
+        MESSAGE REFINEMENT (ACCURACY FIRST):\\n\\
+        - Reword commit messages for clarity, but NEVER upgrade the claim: a fix stays a fix, a refactor stays an improvement\\n\\
+        - Only commits listed under NEW FEATURES may be described as new/introduced/added\\n\\
+        - Describe fixes and refactors as improvements to EXISTING behavior, never as new capabilities\\n\\
+        - Do not state benefits or capabilities that are not implied by a commit message\\n\\
+        - Focus on the RESULT for users, not the technical implementation\\n\\
         - Combine multiple small changes into broader improvements\\n\\
 
         FORMATTING:\\n\\
@@ -1167,7 +1169,7 @@ async fn generate_ai_changelog_summary(
         - End with a period\\n\\
         - Create only a high-level summary for users, not developers\\n\\n\\
 
-        Example: \\\"This release introduces multi-query search capabilities and enhanced memory management features (a1b2c3d, e4f5g6h). Performance improvements include optimized indexing with better batch processing and reduced memory usage (i7j8k9l, m0n1o2p). Several bug fixes improve search relevance, error handling, and system stability (q3r4s5t, u6v7w8x, y9z0a1b).\\\"\\n\\n\\
+        Example: \\\"This release adds multi-query search support (a1b2c3d, e4f5g6h). Indexing was improved with better batch processing and reduced memory usage (i7j8k9l, m0n1o2p). Several bug fixes improve search relevance, error handling, and system stability (q3r4s5t, u6v7w8x, y9z0a1b).\\\"\\n\\n\\
 
         Generate summary:",
 		project_name = project_name,
