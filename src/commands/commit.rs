@@ -519,7 +519,14 @@ async fn generate_commit_message_chunked(
 		""
 	};
 
-	let files_section = file_status_section(&diff);
+	let prompt_context = CommitPromptContext {
+		file_count,
+		additions,
+		deletions,
+		guidance_section,
+		docs_restriction: docs_restriction.to_string(),
+		files_section: file_status_section(&diff),
+	};
 
 	// Check if we need to chunk the diff
 	let chunks = diff_chunker::chunk_diff(&diff);
@@ -528,12 +535,8 @@ async fn generate_commit_message_chunked(
 		// Single chunk - use existing logic
 		let prompt = create_commit_prompt(
 			&chunks[0].content,
-			file_count,
-			additions,
-			deletions,
-			&guidance_section,
-			docs_restriction,
-			&files_section,
+			&prompt_context,
+			&prompt_context.files_section,
 		);
 		return call_llm_with_retry(
 			|| call_llm_for_commit_message(&prompt, config),
@@ -548,17 +551,7 @@ async fn generate_commit_message_chunked(
 		chunks.len()
 	);
 
-	let responses = process_commit_chunks_parallel(
-		&chunks,
-		file_count,
-		additions,
-		deletions,
-		&guidance_section,
-		docs_restriction,
-		&files_section,
-		config,
-	)
-	.await;
+	let responses = process_commit_chunks_parallel(&chunks, &prompt_context, config).await;
 
 	if responses.is_empty() {
 		return Ok("chore: update files".to_string());
@@ -638,19 +631,22 @@ async fn generate_commit_message_from_diff(
 		""
 	};
 
-	let files_section = file_status_section(diff);
+	let prompt_context = CommitPromptContext {
+		file_count,
+		additions,
+		deletions,
+		guidance_section,
+		docs_restriction: docs_restriction.to_string(),
+		files_section: file_status_section(diff),
+	};
 
 	let chunks = diff_chunker::chunk_diff(diff);
 
 	if chunks.len() == 1 {
 		let prompt = create_commit_prompt(
 			&chunks[0].content,
-			file_count,
-			additions,
-			deletions,
-			&guidance_section,
-			docs_restriction,
-			&files_section,
+			&prompt_context,
+			&prompt_context.files_section,
 		);
 		return call_llm_with_retry(
 			|| call_llm_for_commit_message(&prompt, config),
@@ -664,17 +660,7 @@ async fn generate_commit_message_from_diff(
 		chunks.len()
 	);
 
-	let responses = process_commit_chunks_parallel(
-		&chunks,
-		file_count,
-		additions,
-		deletions,
-		&guidance_section,
-		docs_restriction,
-		&files_section,
-		config,
-	)
-	.await;
+	let responses = process_commit_chunks_parallel(&chunks, &prompt_context, config).await;
 
 	if responses.is_empty() {
 		return Ok("chore: update files".to_string());
@@ -734,14 +720,25 @@ fn file_status_section(diff: &str) -> String {
 	}
 }
 
-/// Create a standardized commit prompt for LLM processing
-fn create_commit_prompt(
-	diff_content: &str,
+/// Diff-wide context shared by every chunk prompt: change totals plus the
+/// pre-built guidance, docs-restriction and file-status sections.
+#[derive(Clone)]
+struct CommitPromptContext {
 	file_count: usize,
 	additions: usize,
 	deletions: usize,
-	guidance_section: &str,
-	docs_restriction: &str,
+	guidance_section: String,
+	docs_restriction: String,
+	files_section: String,
+}
+
+/// Create a standardized commit prompt for LLM processing
+///
+/// `files_section` stays a separate parameter because chunked processing
+/// substitutes it with a chunk-note-wrapped variant of `ctx.files_section`.
+fn create_commit_prompt(
+	diff_content: &str,
+	ctx: &CommitPromptContext,
 	files_section: &str,
 ) -> String {
 	format!(
@@ -800,12 +797,12 @@ Git diff:
 {}
 
 Generate commit message:",
-		docs_restriction,
-		guidance_section,
+		ctx.docs_restriction,
+		ctx.guidance_section,
 		files_section,
-		file_count,
-		additions,
-		deletions,
+		ctx.file_count,
+		ctx.additions,
+		ctx.deletions,
 		diff_content
 	)
 }
@@ -840,23 +837,14 @@ async fn collect_ordered_responses(
 ///
 /// # Arguments
 /// * `chunks` - Array of diff chunks to process
-/// * `file_count` - Total number of files changed (for context)
-/// * `additions` - Total lines added (for context)
-/// * `deletions` - Total lines deleted (for context)
-/// * `guidance_section` - User-provided guidance for commit message
-/// * `docs_restriction` - Documentation type restrictions
+/// * `ctx` - Diff-wide prompt context (totals, guidance, docs restriction, file statuses)
 /// * `config` - Application configuration
 ///
 /// # Returns
 /// Vector of successful LLM responses in original chunk order
 async fn process_commit_chunks_parallel(
 	chunks: &[diff_chunker::DiffChunk],
-	file_count: usize,
-	additions: usize,
-	deletions: usize,
-	guidance_section: &str,
-	docs_restriction: &str,
-	files_section: &str,
+	ctx: &CommitPromptContext,
 	config: &Config,
 ) -> Vec<String> {
 	// Process ALL chunks; the semaphore only bounds concurrency so no part
@@ -871,9 +859,7 @@ async fn process_commit_chunks_parallel(
 		let chunk_content = chunk.content.clone();
 		let chunk_summary = chunk.file_summary.clone();
 		let config = config.clone();
-		let guidance_section = guidance_section.to_string();
-		let docs_restriction = docs_restriction.to_string();
-		let files_section = files_section.to_string();
+		let ctx = ctx.clone();
 		let semaphore = semaphore.clone();
 
 		join_set.spawn(async move {
@@ -895,18 +881,10 @@ The file status list and totals below cover the WHOLE commit, not just this chun
 Added lines inside this chunk may belong to files marked M (modified) - do not assume they are new functionality.\n\n{}",
 				i + 1,
 				total_chunks,
-				files_section
+				ctx.files_section
 			);
 
-			let chunk_prompt = create_commit_prompt(
-				&chunk_content,
-				file_count,
-				additions,
-				deletions,
-				&guidance_section,
-				&docs_restriction,
-				&chunk_note,
-			);
+			let chunk_prompt = create_commit_prompt(&chunk_content, &ctx, &chunk_note);
 
 			match call_llm_for_commit_message(&chunk_prompt, &config).await {
 				Ok(response) => Ok((i, response)),
