@@ -37,8 +37,8 @@ use anyhow::Result;
 use rmcp::{
 	handler::server::{router::tool::ToolRouter, tool::ToolCallContext, wrapper::Parameters},
 	model::{
-		CallToolRequestParams, CallToolResponse, Implementation, ProtocolVersion,
-		ServerCapabilities, ServerInfo, Tool,
+		CallToolRequestParams, CallToolResponse, Implementation, ListToolsResult,
+		PaginatedRequestParams, ProtocolVersion, ServerCapabilities, ServerInfo, Tool,
 	},
 	schemars,
 	service::RequestContext,
@@ -876,6 +876,62 @@ fn format_structural_response(
 	out
 }
 
+/// Collapse `"type": [T, "null"]` to `T` and `anyOf: [X, {"type": "null"}]` to
+/// `X` throughout a tool schema.
+///
+/// schemars emits those nullable forms for every `Option<T>` parameter. Alibaba
+/// Model Studio's compatible-mode endpoint resolves an argument's type from a
+/// scalar `"type"` only; on the array form it falls back to string and
+/// constrains the model to emit `"3"` instead of `3`, which then fails this
+/// server's own parameter deserialization. Verified live across qwen3.8-max,
+/// qwen3.7-max/plus and qwen3.6-flash.
+///
+/// Dropping the null branch is lossless: optionality is carried by `required`.
+fn strip_null_variants(value: &mut serde_json::Value) {
+	match value {
+		serde_json::Value::Object(obj) => {
+			for nested in obj.values_mut() {
+				strip_null_variants(nested);
+			}
+
+			let collapsed_type = obj
+				.get_mut("type")
+				.and_then(|t| t.as_array_mut())
+				.and_then(|types| {
+					types.retain(|t| t.as_str() != Some("null"));
+					(types.len() == 1).then(|| types[0].clone())
+				});
+			if let Some(single) = collapsed_type {
+				obj.insert("type".to_string(), single);
+			}
+
+			for key in ["anyOf", "oneOf"] {
+				let only = obj
+					.get_mut(key)
+					.and_then(|v| v.as_array_mut())
+					.and_then(|variants| {
+						variants.retain(|v| v.get("type").and_then(|t| t.as_str()) != Some("null"));
+						(variants.len() == 1).then(|| variants[0].clone())
+					});
+				// Merge the surviving variant into the parent; sibling keys
+				// (the field-level description) take precedence.
+				if let Some(serde_json::Value::Object(only)) = only {
+					obj.remove(key);
+					for (k, v) in only {
+						obj.entry(k).or_insert(v);
+					}
+				}
+			}
+		}
+		serde_json::Value::Array(items) => {
+			for item in items.iter_mut() {
+				strip_null_variants(item);
+			}
+		}
+		_ => {}
+	}
+}
+
 #[tool_handler(router = self.tool_router)]
 impl ServerHandler for McpServer {
 	fn get_info(&self) -> ServerInfo {
@@ -895,6 +951,14 @@ impl ServerHandler for McpServer {
 				),
 			)
 			.with_instructions(instructions)
+	}
+
+	async fn list_tools(
+		&self,
+		_request: Option<PaginatedRequestParams>,
+		_context: RequestContext<RoleServer>,
+	) -> Result<ListToolsResult, ErrorData> {
+		Ok(ListToolsResult::with_all_items(self.list_tool_defs()))
 	}
 }
 
@@ -1001,7 +1065,18 @@ impl McpServer {
 	/// Tool definitions exposed by this per-repo server. The multi-server clones
 	/// these and injects a `project` argument before serving them to clients.
 	pub(crate) fn list_tool_defs(&self) -> Vec<Tool> {
-		self.tool_router.list_all()
+		self.tool_router
+			.list_all()
+			.into_iter()
+			.map(|mut tool| {
+				let mut schema = tool.input_schema.as_ref().clone();
+				for value in schema.values_mut() {
+					strip_null_variants(value);
+				}
+				tool.input_schema = Arc::new(schema);
+				tool
+			})
+			.collect()
 	}
 
 	pub(crate) fn runtime_graph_cache(
@@ -1588,4 +1663,50 @@ async fn update_lsp_after_indexing(
 
 	debug!("LSP update completed: {} files updated", files_updated);
 	Ok(())
+}
+
+#[cfg(test)]
+mod schema_tests {
+	use super::strip_null_variants;
+
+	/// schemars renders `Option<T>` as a `type` array; serving stacks that read
+	/// `"type"` as a plain string (Alibaba's Qwen path, CoreWeave) then
+	/// constrain the model to emit the argument as text — `"3"` instead of `3`.
+	#[test]
+	fn nullable_types_collapse_to_scalars() {
+		let mut schema = serde_json::json!({
+			"type": "object",
+			"required": ["query"],
+			"properties": {
+				"query": {"type": "string"},
+				"max_results": {"type": ["integer", "null"], "format": "uint"},
+				"threshold": {"type": ["number", "null"]},
+				"mode": {
+					"anyOf": [{"type": "string", "enum": ["code", "docs"]}, {"type": "null"}],
+					"description": "Content type filter"
+				}
+			}
+		});
+
+		strip_null_variants(&mut schema);
+
+		let props = &schema["properties"];
+		assert_eq!(props["max_results"]["type"], "integer");
+		assert_eq!(props["threshold"]["type"], "number");
+		assert!(props["mode"].get("anyOf").is_none());
+		assert_eq!(props["mode"]["type"], "string");
+		assert_eq!(props["mode"]["description"], "Content type filter");
+		assert_eq!(props["query"]["type"], "string");
+	}
+
+	/// A genuine multi-branch union has nothing to collapse to — left as authored.
+	#[test]
+	fn real_unions_are_preserved() {
+		let mut schema = serde_json::json!({
+			"properties": {"files": {"anyOf": [{"type": "string"}, {"type": "array"}]}}
+		});
+		let before = schema.clone();
+		strip_null_variants(&mut schema);
+		assert_eq!(schema, before);
+	}
 }
