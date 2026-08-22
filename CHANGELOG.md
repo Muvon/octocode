@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.22.0] - 2026-08-22
+
+### 📋 Release Summary
+
+This release introduces project file associations for the indexer (110a0c46) and refined tool schemas for the MCP server (c423ac8a). LLM grounding and prompt accuracy were enhanced (bea6c7dd, 7a7d4122), alongside general dependency updates (04d1b842, 7c3523ae).
+
+
+### ✨ New Features & Enhancements
+
+- **mcp**: implement null variant stripping in tool schemas `c423ac8a`
+- **indexer**: support project file associations `110a0c46`
+- **commit**: enhance LLM grounding and prompt accuracy `bea6c7dd`
+
+### 🔧 Improvements & Optimizations
+
+- **commit**: introduce CommitPromptContext for prompt data `7a7d4122`
+
+### 🔄 Other Changes
+
+2 maintenance, dependency, and tooling updates not listed individually.
+
 ## [0.21.0] - 2026-08-17
 
 ### 📋 Release Summary
