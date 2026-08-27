@@ -312,6 +312,7 @@ mod parameter_tests {
 
 	#[test]
 	fn semantic_search_query_schema_declares_string_or_array() {
+		use super::SemanticSearchParams;
 		use schemars::JsonSchema;
 
 		let mut gen = schemars::SchemaGenerator::default();
