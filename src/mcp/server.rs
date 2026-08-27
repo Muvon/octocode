@@ -894,13 +894,13 @@ fn strip_null_variants(value: &mut serde_json::Value) {
 				strip_null_variants(nested);
 			}
 
-			let collapsed_type = obj
-				.get_mut("type")
-				.and_then(|t| t.as_array_mut())
-				.and_then(|types| {
-					types.retain(|t| t.as_str() != Some("null"));
-					(types.len() == 1).then(|| types[0].clone())
-				});
+			let collapsed_type =
+				obj.get_mut("type")
+					.and_then(|t| t.as_array_mut())
+					.and_then(|types| {
+						types.retain(|t| t.as_str() != Some("null"));
+						(types.len() == 1).then(|| types[0].clone())
+					});
 			if let Some(single) = collapsed_type {
 				obj.insert("type".to_string(), single);
 			}
