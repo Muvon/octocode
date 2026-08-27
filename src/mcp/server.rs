@@ -63,6 +63,7 @@ const MCP_INDEX_TIMEOUT_MS: u64 = 300_000; // 5 minutes
 #[derive(Debug, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct SemanticSearchParams {
 	/// Describe the code by what it does or the concept behind it, not its symbol name (e.g. 'retry failed network requests', not 'fn retry'). String or array of strings; an array of related phrasings widens recall.
+	#[schemars(schema_with = "query_input_schema")]
 	pub query: serde_json::Value,
 	/// Max results to return (default: 3)
 	#[serde(default, skip_serializing_if = "Option::is_none")]
@@ -83,6 +84,26 @@ pub struct SemanticSearchParams {
 	#[serde(default, skip_serializing_if = "Option::is_none")]
 	#[schemars(range(min = 0, max = 1))]
 	pub threshold: Option<f32>,
+}
+/// Inline `anyOf` schema for `SemanticSearchParams::query`. Hand-written
+/// because `serde_json::Value` maps to the boolean schema `true` (any value,
+/// no type constraint) — models then guess the shape and some (e.g. GLM via
+/// Z.ai) emit the array stringified into a single query.
+fn query_input_schema(_gen: &mut schemars::SchemaGenerator) -> schemars::Schema {
+	serde_json::from_value(serde_json::json!({
+		"anyOf": [
+			{
+				"type": "string",
+				"description": "Single search query"
+			},
+			{
+				"type": "array",
+				"items": { "type": "string" },
+				"description": "2-5 related phrasings widens recall — preferred over a single query"
+			}
+		]
+	}))
+	.expect("static schema is valid JSON")
 }
 
 #[derive(Debug, Serialize, Deserialize, schemars::JsonSchema)]
@@ -287,6 +308,27 @@ mod parameter_tests {
 		}))
 		.expect("a null path filter should deserialize");
 		assert_eq!(null_params.paths, None);
+	}
+
+	#[test]
+	fn semantic_search_query_schema_declares_string_or_array() {
+		use schemars::JsonSchema;
+
+		let mut gen = schemars::SchemaGenerator::default();
+		let schema =
+			serde_json::to_value(SemanticSearchParams::json_schema(&mut gen)).expect("schema");
+		let query = schema["properties"]["query"]
+			.as_object()
+			.expect("query schema");
+		let branches = query["anyOf"].as_array().expect("anyOf branches");
+		assert!(
+			branches.iter().any(|b| b["type"] == "string"),
+			"query must declare the string branch"
+		);
+		assert!(
+			branches.iter().any(|b| b["type"] == "array"),
+			"query must declare the array branch"
+		);
 	}
 }
 
