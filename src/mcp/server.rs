@@ -422,7 +422,13 @@ pub struct McpServer {
 #[tool_router]
 impl McpServer {
 	#[tool(
-		description = "Recall-oriented search by concept or behavior — finds relevant code even when its names don't match your words. Use this when you DON'T know the symbol name and are searching by intent: e.g. \"where is authentication handled\", \"code that retries failed requests\", \"rate-limiting logic\". It favors recall over precision, so expect some loosely related hits. For a KNOWN symbol, exact string, or call sites, use structural_search instead — it is precise and cheaper. Prefer an array of related terms over a single query for broader coverage."
+		description = "Recall-oriented search by concept or behavior — finds relevant code even when its names don't match your words. Use this when you DON'T know the symbol name and are searching by intent: e.g. \"where is authentication handled\", \"code that retries failed requests\", \"rate-limiting logic\". It favors recall over precision, so expect some loosely related hits. For a KNOWN symbol, exact string, or call sites, use structural_search instead — it is precise and cheaper. Prefer an array of related terms over a single query for broader coverage.",
+		annotations(
+			read_only_hint = true,
+			destructive_hint = false,
+			idempotent_hint = true,
+			open_world_hint = true
+		)
 	)]
 	async fn semantic_search(
 		&self,
@@ -447,7 +453,13 @@ impl McpServer {
 	}
 
 	#[tool(
-		description = "Map a file or area structurally: extract function signatures, class/type definitions, and declarations without implementation bodies — the cheapest way to see what code exposes. Reach for this FIRST to orient in unfamiliar code before reading full bodies. Accepts file paths or glob patterns. Supports Rust, JS/TS, Python, Go, C++, PHP, Ruby, Bash, JSON, CSS, Svelte, Swift, Markdown."
+		description = "Map a file or area structurally: extract function signatures, class/type definitions, and declarations without implementation bodies — the cheapest way to see what code exposes. Reach for this FIRST to orient in unfamiliar code before reading full bodies. Accepts file paths or glob patterns. Supports Rust, JS/TS, Python, Go, C++, PHP, Ruby, Bash, JSON, CSS, Svelte, Swift, Markdown.",
+		annotations(
+			read_only_hint = true,
+			destructive_hint = false,
+			idempotent_hint = true,
+			open_world_hint = false
+		)
 	)]
 	async fn view_signatures(
 		&self,
@@ -467,7 +479,13 @@ impl McpServer {
 	}
 
 	#[tool(
-		description = "Always-available code graph operations for symbols, calls, imports, inheritance, neighbors, and dependency paths. Builds a fast in-memory Tree-sitter graph directly from current source; when GraphRAG is enabled, persisted enrichment is overlaid on that live graph. Use structural_search for syntax/occurrence matching and semantic_search for conceptual lookup."
+		description = "Always-available code graph operations for symbols, calls, imports, inheritance, neighbors, and dependency paths. Builds a fast in-memory Tree-sitter graph directly from current source; when GraphRAG is enabled, persisted enrichment is overlaid on that live graph. Use structural_search for syntax/occurrence matching and semantic_search for conceptual lookup.",
+		annotations(
+			read_only_hint = true,
+			destructive_hint = false,
+			idempotent_hint = true,
+			open_world_hint = true
+		)
 	)]
 	async fn graphrag(
 		&self,
@@ -488,7 +506,15 @@ impl McpServer {
 
 	// --- LSP tools ---
 
-	#[tool(description = "Jump to the definition of a symbol via LSP.")]
+	#[tool(
+		description = "Jump to the definition of a symbol via LSP.",
+		annotations(
+			read_only_hint = true,
+			destructive_hint = false,
+			idempotent_hint = true,
+			open_world_hint = false
+		)
+	)]
 	async fn lsp_goto_definition(
 		&self,
 		Parameters(params): Parameters<LspPositionParams>,
@@ -505,7 +531,15 @@ impl McpServer {
 			.map_err(|e| e.to_string())
 	}
 
-	#[tool(description = "Get type info and documentation for a symbol via LSP.")]
+	#[tool(
+		description = "Get type info and documentation for a symbol via LSP.",
+		annotations(
+			read_only_hint = true,
+			destructive_hint = false,
+			idempotent_hint = true,
+			open_world_hint = false
+		)
+	)]
 	async fn lsp_hover(
 		&self,
 		Parameters(params): Parameters<LspPositionParams>,
@@ -522,7 +556,15 @@ impl McpServer {
 			.map_err(|e| e.to_string())
 	}
 
-	#[tool(description = "Find all usages of a symbol across the workspace via LSP.")]
+	#[tool(
+		description = "Find all usages of a symbol across the workspace via LSP.",
+		annotations(
+			read_only_hint = true,
+			destructive_hint = false,
+			idempotent_hint = true,
+			open_world_hint = false
+		)
+	)]
 	async fn lsp_find_references(
 		&self,
 		Parameters(params): Parameters<LspFindReferencesParams>,
@@ -540,7 +582,13 @@ impl McpServer {
 	}
 
 	#[tool(
-		description = "List all symbols (functions, types, variables) defined in a file via LSP."
+		description = "List all symbols (functions, types, variables) defined in a file via LSP.",
+		annotations(
+			read_only_hint = true,
+			destructive_hint = false,
+			idempotent_hint = true,
+			open_world_hint = false
+		)
 	)]
 	async fn lsp_document_symbols(
 		&self,
@@ -558,7 +606,15 @@ impl McpServer {
 			.map_err(|e| e.to_string())
 	}
 
-	#[tool(description = "Search for symbols by name across the entire workspace via LSP.")]
+	#[tool(
+		description = "Search for symbols by name across the entire workspace via LSP.",
+		annotations(
+			read_only_hint = true,
+			destructive_hint = false,
+			idempotent_hint = true,
+			open_world_hint = false
+		)
+	)]
 	async fn lsp_workspace_symbols(
 		&self,
 		Parameters(params): Parameters<LspWorkspaceSymbolsParams>,
@@ -575,7 +631,15 @@ impl McpServer {
 			.map_err(|e| e.to_string())
 	}
 
-	#[tool(description = "Get code completion suggestions at a symbol position via LSP.")]
+	#[tool(
+		description = "Get code completion suggestions at a symbol position via LSP.",
+		annotations(
+			read_only_hint = true,
+			destructive_hint = false,
+			idempotent_hint = true,
+			open_world_hint = false
+		)
+	)]
 	async fn lsp_completion(
 		&self,
 		Parameters(params): Parameters<LspPositionParams>,
@@ -613,7 +677,13 @@ impl McpServer {
 		Python kinds: function_definition, class_definition, import_statement, import_from_statement, decorated_definition. \
 		Go kinds: function_declaration, method_declaration, type_declaration, call_expression, if_statement. \
 		\n\nWhen a pattern returns zero matches the tool auto-retries with relaxed strictness, kind broadening, and language-aware context wrapping, then falls back to labeled plain-text hits plus a diagnostic — it never silently returns nothing relevant. Use `rewrite` to apply a template with metavariable substitution. \
-		\n\nThis is the PRECISE, low-noise way to find code you can name or describe by shape — prefer it whenever you know the symbol, pattern, or usage you're after. Only when you DON'T know the name and must search by concept or behavior, reach for `semantic_search` instead."
+		\n\nThis is the PRECISE, low-noise way to find code you can name or describe by shape — prefer it whenever you know the symbol, pattern, or usage you're after. Only when you DON'T know the name and must search by concept or behavior, reach for `semantic_search` instead.",
+		annotations(
+			read_only_hint = false,
+			destructive_hint = true,
+			idempotent_hint = false,
+			open_world_hint = false
+		)
 	)]
 	async fn structural_search(
 		&self,
