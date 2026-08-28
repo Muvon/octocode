@@ -78,6 +78,7 @@ define_ast_grep_lang!(AstSwift, tree_sitter_swift::LANGUAGE, '$');
 define_ast_grep_lang!(AstLua, tree_sitter_lua::LANGUAGE, 'µ');
 define_ast_grep_lang!(AstBash, tree_sitter_bash::LANGUAGE, '$');
 define_ast_grep_lang!(AstCss, tree_sitter_css::LANGUAGE, 'µ');
+define_ast_grep_lang!(AstElixir, tree_sitter_elixir::LANGUAGE, 'µ');
 define_ast_grep_lang!(AstJson, tree_sitter_json::LANGUAGE, '$');
 
 /// A single match result from structural search.
@@ -283,6 +284,7 @@ pub fn language_from_extension(path: &Path) -> Option<&'static str> {
 		"lua" => Some("lua"),
 		"sh" | "bash" | "zsh" => Some("bash"),
 		"css" | "scss" => Some("css"),
+		"ex" | "exs" => Some("elixir"),
 		"json" => Some("json"),
 		_ => None,
 	}
@@ -350,6 +352,9 @@ pub fn container_kinds(language: &str) -> &'static [(&'static str, &'static str)
 			("class_declaration", "class"),
 			("protocol_declaration", "protocol"),
 		],
+		// Elixir declarations all use the generic `call` node. Adding `call`
+		// here would make every nested invocation look like a container.
+		"elixir" => &[],
 		_ => &[],
 	}
 }
@@ -428,6 +433,7 @@ pub fn definition_kinds(language: &str) -> &'static [&'static str] {
 			"class_declaration",
 			"protocol_declaration",
 		],
+		"elixir" => &["call"],
 		_ => &[],
 	}
 }
@@ -476,6 +482,7 @@ fn find_defs_with_lang<L: LanguageExt + AstGrepLanguage + Clone>(
 	lang: L,
 	source: &str,
 	name: &NameMatcher,
+	language: &str,
 	def_kinds: &[&str],
 	containers: &[(&str, &str)],
 ) -> Vec<RawMatch> {
@@ -487,7 +494,7 @@ fn find_defs_with_lang<L: LanguageExt + AstGrepLanguage + Clone>(
 		if !def_kinds.contains(&kind.as_ref()) {
 			continue;
 		}
-		let Some(def_name) = node_def_name(&node) else {
+		let Some(def_name) = definition_name(language, &node) else {
 			continue;
 		};
 		if !name.matches(&def_name) {
@@ -507,12 +514,67 @@ fn find_defs_with_lang<L: LanguageExt + AstGrepLanguage + Clone>(
 	out
 }
 
+fn definition_name<D: Doc>(language: &str, node: &Node<'_, D>) -> Option<String> {
+	if language == "elixir" {
+		return elixir_declaration_name(node);
+	}
+	node_def_name(node)
+}
+
+fn elixir_declaration_name<D: Doc>(node: &Node<'_, D>) -> Option<String> {
+	if node.kind().as_ref() != "call" {
+		return None;
+	}
+	let macro_name = node.field("target")?.text().to_string();
+	let declarations = [
+		"def",
+		"defp",
+		"defdelegate",
+		"defguard",
+		"defguardp",
+		"defmacro",
+		"defmacrop",
+		"defn",
+		"defnp",
+		"defcallback",
+		"defmacrocallback",
+		"defmodule",
+		"defprotocol",
+		"defimpl",
+	];
+	if !declarations.contains(&macro_name.as_str()) {
+		return None;
+	}
+
+	let text = node.text().to_string();
+	let remainder = text.strip_prefix(&macro_name)?.trim_start();
+	if macro_name == "defimpl" {
+		let protocol = remainder
+			.split([',', ' ', '\n'])
+			.find(|part| !part.is_empty())?;
+		let implementation = remainder
+			.split_once("for:")
+			.map(|(_, tail)| tail.trim_start())
+			.and_then(|tail| tail.split([',', ' ', '\n']).find(|part| !part.is_empty()));
+		return implementation
+			.map(|implementation| format!("{protocol} for {implementation}"))
+			.or_else(|| Some(protocol.to_string()));
+	}
+	let name = remainder
+		.split(|character: char| {
+			character.is_whitespace() || matches!(character, '(' | ',' | '[' | '{')
+		})
+		.find(|part| !part.is_empty())?;
+	Some(name.trim_start_matches(':').to_string())
+}
+
 /// Find references (identifier usages) by name in a single file. Each hit
 /// reports the full trimmed source line; definition sites are tagged `[def]`.
 fn find_refs_with_lang<L: LanguageExt + AstGrepLanguage + Clone>(
 	lang: L,
 	source: &str,
 	name: &NameMatcher,
+	language: &str,
 	def_kinds: &[&str],
 	containers: &[(&str, &str)],
 ) -> Vec<RawMatch> {
@@ -538,13 +600,18 @@ fn find_refs_with_lang<L: LanguageExt + AstGrepLanguage + Clone>(
 			.get(pos.line())
 			.map(|l| l.trim().to_string())
 			.unwrap_or_default();
-		let is_def = node
-			.parent()
-			.map(|p| {
-				def_kinds.contains(&p.kind().as_ref())
-					&& p.field("name").map(|n| n.range() == range).unwrap_or(false)
+		let is_def = if language == "elixir" {
+			node.ancestors().any(|ancestor| {
+				elixir_declaration_name(&ancestor).as_deref() == Some(text.as_ref())
 			})
-			.unwrap_or(false);
+		} else {
+			node.parent()
+				.map(|p| {
+					def_kinds.contains(&p.kind().as_ref())
+						&& p.field("name").map(|n| n.range() == range).unwrap_or(false)
+				})
+				.unwrap_or(false)
+		};
 		out.push(RawMatch {
 			line: pos.line() + 1,
 			column: pos.byte_point().1,
@@ -700,6 +767,11 @@ macro_rules! dispatch_lang {
 				let $lang = AstCss;
 				$body
 			}
+			"elixir" => {
+				#[allow(unused_variables)]
+				let $lang = AstElixir;
+				$body
+			}
 			"json" => {
 				#[allow(unused_variables)]
 				let $lang = AstJson;
@@ -832,7 +904,7 @@ pub fn find_symbol_defs(
 	let def_kinds = definition_kinds(language);
 	let containers = container_kinds(language);
 	let raw: Vec<RawMatch> = dispatch_lang!(language, |lang| Ok::<_, anyhow::Error>(
-		find_defs_with_lang(lang, source, name, def_kinds, containers)
+		find_defs_with_lang(lang, source, name, language, def_kinds, containers)
 	))?;
 	Ok(wrap_matches(file_path, raw))
 }
@@ -933,7 +1005,7 @@ pub fn find_symbol_refs(
 	let def_kinds = definition_kinds(language);
 	let containers = container_kinds(language);
 	let raw: Vec<RawMatch> = dispatch_lang!(language, |lang| Ok::<_, anyhow::Error>(
-		find_refs_with_lang(lang, source, name, def_kinds, containers)
+		find_refs_with_lang(lang, source, name, language, def_kinds, containers)
 	))?;
 	Ok(wrap_matches(file_path, raw))
 }
@@ -1290,6 +1362,10 @@ function main() {
 		);
 		assert_eq!(language_from_extension(Path::new("baz.py")), Some("python"));
 		assert_eq!(language_from_extension(Path::new("qux.go")), Some("go"));
+		assert_eq!(
+			language_from_extension(Path::new("mix.exs")),
+			Some("elixir")
+		);
 		assert_eq!(language_from_extension(Path::new("nope.txt")), None);
 	}
 
@@ -1373,6 +1449,20 @@ end
 "#;
 		let matches = search_file("test.rb", source, "puts $ARG", "ruby").unwrap();
 		assert_eq!(matches.len(), 2, "Ruby: Should find two puts calls");
+	}
+
+	#[test]
+	fn test_elixir_structural_search() {
+		let source = r#"
+defmodule Accounts do
+  def fetch(id), do: Repo.get(User, id)
+  def fetch_by_email(email), do: Repo.get_by(User, email: email)
+end
+"#;
+		let matches = search_file("accounts.ex", source, "Repo.get($MODEL, $ID)", "elixir")
+			.expect("Elixir structural search should parse");
+		assert_eq!(matches.len(), 1);
+		assert!(matches[0].text.contains("Repo.get(User, id)"));
 	}
 
 	#[test]
@@ -2388,6 +2478,26 @@ const x = 1;
 		let matches = find_symbol_defs("a.ts", source, &name, "typescript").unwrap();
 		assert_eq!(matches.len(), 1);
 		assert!(matches[0].text.contains("interface"));
+	}
+
+	#[test]
+	fn test_find_elixir_symbol_defs_excludes_calls() {
+		let source = r#"
+defmodule Accounts do
+  def fetch(id), do: Repo.get(User, id)
+  def run(), do: fetch(1)
+end
+"#;
+		let name = NameMatcher::new("fetch").unwrap();
+		let definitions = find_symbol_defs("accounts.ex", source, &name, "elixir").unwrap();
+		assert_eq!(definitions.len(), 1);
+		assert!(definitions[0].text.starts_with("def fetch"));
+
+		let references = find_symbol_refs("accounts.ex", source, &name, "elixir").unwrap();
+		assert_eq!(references.len(), 2);
+		assert!(references
+			.iter()
+			.any(|reference| reference.text.starts_with("[def]")));
 	}
 
 	#[test]

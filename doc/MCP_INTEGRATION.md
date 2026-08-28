@@ -234,7 +234,7 @@ Search or rewrite code by AST structure using ast-grep pattern syntax. Complemen
 - `pattern` (string) - AST pattern to search for (e.g. `$FUNC.unwrap()`, `if let Some($X) = $Y { $$$ }`)
 - `symbol` (string) - Find symbol DEFINITIONS by name, `*` wildcards supported (e.g. `handle_*`)
 - `references` (string) - Find symbol USAGES by name, `*` wildcards supported
-- `language` (string, required) - Language to search: rust, javascript, typescript, python, go, java, cpp, php, ruby, lua, bash, css, json
+- `language` (string, required) - Language to search: rust, javascript, typescript, python, go, java, cpp, php, ruby, lua, bash, css, json, elixir
 - `paths` (array, optional) - File path substrings to filter results
 - `context` (integer, optional) - Number of context lines around matches (default: 0)
 - `max_results` (integer, optional) - Maximum number of matches to return (default: 50)

@@ -470,7 +470,7 @@ octocode grep 'console.log($ARG)' --lang javascript --rewrite 'logger.info($ARG)
 
 #### Supported Languages
 
-Rust, JavaScript, TypeScript, Python, Go, Java, C/C++, PHP, Ruby, Lua, Bash, CSS, JSON
+Rust, JavaScript, TypeScript, Python, Go, Java, C/C++, PHP, Ruby, Lua, Bash, CSS, JSON, Elixir
 
 ### Similarity Thresholds
 
@@ -562,6 +562,7 @@ The GraphRAG system includes an intelligent import resolver that maps import sta
 - **PHP**: `require`, `include`, `use` statements
 - **C/C++**: `#include` directives
 - **Ruby**: `require`, `load` statements
+- **Elixir**: `alias`, `import`, `require`, and `use` module dependencies
 - **Bash**: `source`, `.` commands
 
 **Features:**

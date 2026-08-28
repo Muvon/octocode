@@ -143,7 +143,7 @@ pub async fn execute(
 		use octocode::indexer::languages;
 		if languages::get_language(language).is_none() {
 			return Err(anyhow::anyhow!(
-				"Invalid language '{}'. Supported languages: rust, javascript, typescript, python, go, cpp, php, bash, ruby, json, svelte, css",
+				"Invalid language '{}'. Supported languages: rust, javascript, typescript, python, go, java, cpp, php, bash, ruby, lua, swift, json, svelte, css, markdown, elixir",
 				language
 			));
 		}

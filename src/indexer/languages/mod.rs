@@ -23,6 +23,9 @@ mod cpp;
 #[cfg(test)]
 mod cpp_test;
 mod css;
+mod elixir;
+#[cfg(test)]
+mod elixir_test;
 mod go;
 mod java;
 mod javascript;
@@ -46,6 +49,7 @@ mod typescript;
 pub use bash::Bash;
 pub use cpp::Cpp;
 pub use css::Css;
+pub use elixir::Elixir;
 pub use go::Go;
 pub use java::Java;
 pub use javascript::JavaScript;
@@ -100,6 +104,21 @@ pub trait Language: Send + Sync {
 
 	/// Returns node kinds considered meaningful for this language
 	fn get_meaningful_kinds(&self) -> Vec<&'static str>;
+
+	/// Whether a node whose kind is listed in `get_meaningful_kinds` should
+	/// become an indexed code region. Most grammars have dedicated declaration
+	/// kinds; macro-oriented grammars such as Elixir need to inspect the node.
+	fn is_meaningful_node(&self, node: Node, contents: &str) -> bool {
+		let _ = (node, contents);
+		true
+	}
+
+	/// Whether a candidate node should appear in signature views. Defaults to
+	/// the indexing decision, but languages may expose container declarations in
+	/// signatures while chunking only their nested members.
+	fn is_signature_node(&self, node: Node, contents: &str) -> bool {
+		self.is_meaningful_node(node, contents)
+	}
 
 	/// Node kinds that become symbol-level GraphRAG nodes. Defaults to the
 	/// chunking kinds; languages override when chunking deliberately drops
@@ -174,6 +193,13 @@ pub trait Language: Send + Sync {
 		extract_symbol_by_kinds(node, contents, &["identifier", "name", "type_identifier"])
 	}
 
+	/// Coarse declaration kind when it cannot be inferred from the grammar's
+	/// node kind. Callers fall back to their normal node-kind mapping.
+	fn extract_declaration_kind(&self, node: Node, contents: &str) -> Option<&'static str> {
+		let _ = (node, contents);
+		None
+	}
+
 	/// Check if two node types are semantically equivalent for grouping
 	/// This allows each language to define its own semantic relationships
 	fn are_node_types_equivalent(&self, type1: &str, type2: &str) -> bool {
@@ -235,6 +261,7 @@ pub fn get_language(name: &str) -> Option<Box<dyn Language>> {
 		"svelte" => Some(Box::new(Svelte {})),
 		"swift" => Some(Box::new(Swift {})),
 		"css" => Some(Box::new(Css {})),
+		"elixir" => Some(Box::new(Elixir {})),
 		"markdown" => Some(Box::new(Markdown {})),
 		_ => None,
 	}

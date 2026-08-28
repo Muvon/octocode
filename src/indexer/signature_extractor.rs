@@ -1,4 +1,4 @@
-// Copyright 2025 Muvon Un Limited
+// Copyright 2026 Muvon Un Limited
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -127,7 +127,7 @@ pub fn extract_signatures(
 		let node_kind = node.kind();
 
 		// Check if this node is a meaningful declaration
-		if meaningful_kinds.contains(&node_kind) {
+		if meaningful_kinds.contains(&node_kind) && lang_impl.is_signature_node(node, contents) {
 			// Get the line numbers
 			let start_line = node.start_position().row;
 			let end_line = node.end_position().row;
@@ -143,7 +143,10 @@ pub fn extract_signatures(
 				let sig_text = node_text(node, contents);
 
 				// Map tree-sitter node kinds to our simplified kinds
-				let kind = map_node_kind_to_simple_with_context(node, contents);
+				let kind = lang_impl
+					.extract_declaration_kind(node, contents)
+					.map(str::to_string)
+					.unwrap_or_else(|| map_node_kind_to_simple_with_context(node, contents));
 
 				signatures.push(SignatureItem {
 					kind,
@@ -191,6 +194,10 @@ pub fn extract_signatures(
 
 /// Extract the name of a declaration node (function, class, etc.)
 fn extract_name(node: Node, contents: &str, lang_impl: &dyn languages::Language) -> Option<String> {
+	if let Some(name) = lang_impl.extract_declaration_name(node, contents) {
+		return Some(name);
+	}
+
 	// Look for identifier nodes
 	for child in node.children(&mut node.walk()) {
 		if child.kind() == "identifier"

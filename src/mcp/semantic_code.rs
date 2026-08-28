@@ -165,7 +165,7 @@ impl SemanticCodeProvider {
 			use crate::indexer::languages;
 			if languages::get_language(language).is_none() {
 				return Err(McpError::invalid_params(
-					format!("Invalid language '{}': supported languages are rust, javascript, typescript, python, go, cpp, php, bash, ruby, json, svelte, css", language),
+					format!("Invalid language '{}': supported languages are rust, javascript, typescript, python, go, java, cpp, php, bash, ruby, lua, swift, json, svelte, css, markdown, elixir", language),
 					"semantic_search"
 				));
 			}

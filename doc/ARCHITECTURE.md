@@ -163,6 +163,7 @@ The live graph detects repository metadata changes on the next graph request. Wh
 | **PHP** | `.php` | Class/function extraction, namespace support |
 | **C++** | `.cpp`, `.hpp`, `.h`, `.cc`, `.cxx`, `.c++`, `.hxx`, `.cppm`, `.ixx`, `.mxx`, `.ccm`, `.cxxm` | Include analysis, class/function extraction |
 | **Ruby** | `.rb` | Class/module extraction, method definitions |
+| **Elixir** | `.ex`, `.exs` | Module, protocol, function, macro, and dependency extraction |
 | **JSON** | `.json` | Structure analysis, key extraction |
 | **Bash** | `.sh`, `.bash` | Function and variable extraction |
 | **CSS** | `.css`, `.scss`, `.sass` | Selector and rule extraction |

@@ -273,6 +273,7 @@ pub fn detect_language_from_path(file_path: &str) -> Option<String> {
 		"sh" | "bash" => Some("bash".to_string()),
 		"json" => Some("json".to_string()),
 		"css" | "scss" | "sass" => Some("css".to_string()),
+		"ex" | "exs" => Some("elixir".to_string()),
 		"md" | "markdown" => Some("markdown".to_string()),
 		"svelte" => Some("svelte".to_string()),
 		_ => None,
