@@ -366,6 +366,14 @@ fn discover_repos(root: &Path, no_git: bool) -> Result<HashMap<String, PathBuf>>
 	Ok(repos)
 }
 
+/// Whether at least one qualifying project exists among the immediate children
+/// of `root`, using the exact same discovery rules as multi mode. Lets
+/// `mcp --auto` pick a mode without constructing a full `MultiServer` (which
+/// initializes logging and builds tool schemas).
+pub fn has_child_repos(root: &Path, no_git: bool) -> bool {
+	discover_repos(root, no_git).is_ok_and(|repos| !repos.is_empty())
+}
+
 /// Clone the base tools and inject a required `project` argument into each one's
 /// schema, plus a hint in the description. Done only in multi mode, leaving the
 /// single-repo tool definitions untouched.

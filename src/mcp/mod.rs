@@ -29,5 +29,5 @@ pub mod structural;
 pub mod types;
 pub mod watcher;
 
-pub use multi::MultiServer;
+pub use multi::{has_child_repos, MultiServer};
 pub use server::McpServer;

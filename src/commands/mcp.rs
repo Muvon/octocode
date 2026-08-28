@@ -17,7 +17,7 @@ use clap::Args;
 
 use octocode::config::Config;
 use octocode::indexer;
-use octocode::mcp::{McpServer, MultiServer};
+use octocode::mcp::{has_child_repos, McpServer, MultiServer};
 
 #[derive(Args, Clone)]
 pub struct McpArgs {
@@ -45,6 +45,11 @@ pub struct McpArgs {
 	/// endpoint. Each tool gains a `project` argument to select the target repo.
 	#[arg(long)]
 	pub multi: bool,
+
+	/// Automatically select mode: single-repo when the target directory is a git
+	/// repo root, multi-repo when it is not but git repos exist one level under it.
+	#[arg(long, conflicts_with = "multi")]
+	pub auto: bool,
 }
 
 pub async fn run(args: McpArgs) -> Result<()> {
@@ -68,8 +73,15 @@ pub async fn run(args: McpArgs) -> Result<()> {
 	// Git validation is handled in the server: indexer only starts if in git repo or --no-git is set.
 
 	// Multi mode: serve every git repo one level under --path behind one endpoint,
-	// routing tool calls by an injected `project` argument.
-	if args.multi {
+	// routing tool calls by an injected `project` argument. --auto resolves to
+	// multi only when the target itself is not a git repo root yet qualifying
+	// projects exist one level under it; otherwise it stays on the single-repo
+	// path below.
+	let use_multi = args.multi
+		|| (args.auto
+			&& !indexer::git::is_git_repo_root(&working_directory)
+			&& has_child_repos(&working_directory, args.no_git));
+	if use_multi {
 		let server = MultiServer::new(config, working_directory, args.no_git, args.debug).await?;
 		return match args.bind {
 			Some(bind_addr) => server.run_http(&bind_addr).await,
@@ -88,8 +100,8 @@ pub async fn run(args: McpArgs) -> Result<()> {
 	{
 		return Err(anyhow::anyhow!(
 			"'{}' is not a git repository. Run `octocode mcp` from a git repo root, \
-			 pass --no-git to serve a non-git directory, or use --multi to serve \
-			 repositories found under this path.",
+			 pass --no-git to serve a non-git directory, or use --multi or --auto \
+			 to serve repositories found under this path.",
 			working_directory.display()
 		));
 	}
