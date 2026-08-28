@@ -511,6 +511,11 @@ mod tests {
 			language: "rust".to_string(),
 		}
 	}
+	// Expected IDs must use the native separator: scan_sources builds
+	// relative paths from OS walker output (`\` on Windows).
+	fn native_path(relative: &str) -> String {
+		relative.replace('/', &std::path::MAIN_SEPARATOR.to_string())
+	}
 
 	#[test]
 	fn lexical_search_prefers_exact_symbol_over_path_match() {
@@ -686,32 +691,37 @@ mod tests {
 		let graph = build_graph(files);
 		std::fs::remove_dir_all(&root).expect("temporary source directory should be removed");
 
-		assert!(graph.nodes.contains_key("lib/fixture/accounts.ex"));
-		assert!(graph
-			.nodes
-			.contains_key("lib/fixture/accounts.ex::Fixture.Accounts::fetch"));
-		assert!(graph.nodes.contains_key(
-			"lib/fixture/accounts_test.exs::Fixture.AccountsTest::fetches an account"
-		));
+		let accounts = native_path("lib/fixture/accounts.ex");
+		let repo = native_path("lib/fixture/repo.ex");
+		let renderable = native_path("lib/fixture/renderable.ex");
+		let accounts_fetch = native_path("lib/fixture/accounts.ex::Fixture.Accounts::fetch");
+		let repo_get = native_path("lib/fixture/repo.ex::Fixture.Repo::get");
+		let impl_renderable =
+			native_path("lib/fixture/renderable.ex::Fixture.Renderable for Fixture.User");
+		let test_fetch =
+			native_path("lib/fixture/accounts_test.exs::Fixture.AccountsTest::fetches an account");
+
+		assert!(graph.nodes.contains_key(&accounts));
+		assert!(graph.nodes.contains_key(&accounts_fetch));
+		assert!(graph.nodes.contains_key(&test_fetch));
 		assert!(graph.relationships.iter().any(|relationship| {
-			relationship.source == "lib/fixture/accounts.ex"
-				&& relationship.target == "lib/fixture/repo.ex"
+			relationship.source == accounts
+				&& relationship.target == repo
 				&& relationship.relation_type == RelationType::Imports
 		}));
 		assert!(graph.relationships.iter().any(|relationship| {
-			relationship.source == "lib/fixture/accounts.ex::Fixture.Accounts::fetch"
-				&& relationship.target == "lib/fixture/repo.ex::Fixture.Repo::get"
+			relationship.source == accounts_fetch
+				&& relationship.target == repo_get
 				&& relationship.relation_type == RelationType::Calls
 		}));
 		assert!(graph.relationships.iter().any(|relationship| {
-			relationship.source == "lib/fixture/renderable.ex::Fixture.Renderable for Fixture.User"
-				&& relationship.target == "lib/fixture/renderable.ex::Fixture.Renderable"
+			relationship.source == impl_renderable
+				&& relationship.target == renderable
 				&& relationship.relation_type == RelationType::Implements
 		}));
 		assert!(graph.relationships.iter().any(|relationship| {
-			relationship.source
-				== "lib/fixture/accounts_test.exs::Fixture.AccountsTest::fetches an account"
-				&& relationship.target == "lib/fixture/accounts.ex::Fixture.Accounts::fetch"
+			relationship.source == test_fetch
+				&& relationship.target == accounts_fetch
 				&& relationship.relation_type == RelationType::Calls
 		}));
 	}
