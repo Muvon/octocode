@@ -156,6 +156,8 @@ pub(super) fn is_likely_text_file(file_path: &Path) -> bool {
 		"cs",
 		"php",
 		"rb",
+		"ex",
+		"exs",
 		"pl",
 		"pm",
 		"sh",

@@ -193,6 +193,13 @@ pub trait Language: Send + Sync {
 		extract_symbol_by_kinds(node, contents, &["identifier", "name", "type_identifier"])
 	}
 
+	/// Name shown by signature views. Usually identical to the graph symbol
+	/// name, but declaration forms that do not create a standalone graph symbol
+	/// may still expose a useful signature name.
+	fn extract_signature_name(&self, node: Node, contents: &str) -> Option<String> {
+		self.extract_declaration_name(node, contents)
+	}
+
 	/// Coarse declaration kind when it cannot be inferred from the grammar's
 	/// node kind. Callers fall back to their normal node-kind mapping.
 	fn extract_declaration_kind(&self, node: Node, contents: &str) -> Option<&'static str> {

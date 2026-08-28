@@ -1148,6 +1148,93 @@ pub fn main_fn() {
 	}
 
 	#[test]
+	fn elixir_builds_live_symbols_imported_calls_and_protocol_edges() {
+		let root = std::env::temp_dir().join(format!(
+			"octocode_symbols_elixir_test_{}",
+			std::process::id()
+		));
+		let fixture = root.join("lib/fixture");
+		std::fs::create_dir_all(&fixture).unwrap();
+		let files = [
+			(
+				"accounts.ex",
+				r#"defmodule Fixture.Accounts do
+  alias Fixture.Repo
+  import Fixture.Validation
+  def fetch_user(id), do: Repo.get(User, id) |> validate_result()
+end
+"#,
+			),
+			(
+				"repo.ex",
+				"defmodule Fixture.Repo do\n  def get(schema, id), do: {schema, id}\nend\n",
+			),
+			(
+				"validation.ex",
+				"defmodule Fixture.Validation do\n  def validate_result(value), do: value\nend\n",
+			),
+			(
+				"renderable.ex",
+				r#"defprotocol Fixture.Renderable do
+  def render(value)
+end
+defimpl Fixture.Renderable, for: Fixture.User do
+  def render(user), do: user.email
+end
+"#,
+			),
+		];
+
+		let mut graph_files = Vec::new();
+		for (name, code) in files {
+			let path = fixture.join(name);
+			std::fs::write(&path, code).unwrap();
+			let data = extract_symbols_from_file(path.to_str().unwrap(), "elixir").unwrap();
+			graph_files.push(SymbolFileData::from_ast(
+				path.to_string_lossy().into_owned(),
+				"elixir".to_string(),
+				&data,
+			));
+		}
+		std::fs::remove_dir_all(&root).unwrap();
+
+		let accounts = graph_files
+			.iter()
+			.find(|file| file.path.ends_with("accounts.ex"))
+			.unwrap();
+		assert!(accounts.symbols.iter().any(|symbol| {
+			symbol.name == "fetch_user" && symbol.owner.as_deref() == Some("Fixture.Accounts")
+		}));
+		assert!(accounts.imports.contains(&"Fixture.Repo".to_string()));
+		assert!(accounts.imports.contains(&"Fixture.Validation".to_string()));
+
+		let relationships = discover_symbol_relationships(&graph_files);
+		assert!(relationships.iter().any(|relationship| {
+			relationship.relation_type == RelationType::Calls
+				&& relationship
+					.source
+					.ends_with("::Fixture.Accounts::fetch_user")
+				&& relationship.target.ends_with("::Fixture.Repo::get")
+		}));
+		assert!(relationships.iter().any(|relationship| {
+			relationship.relation_type == RelationType::Calls
+				&& relationship
+					.source
+					.ends_with("::Fixture.Accounts::fetch_user")
+				&& relationship
+					.target
+					.ends_with("::Fixture.Validation::validate_result")
+		}));
+		assert!(relationships.iter().any(|relationship| {
+			relationship.relation_type == RelationType::Implements
+				&& relationship
+					.source
+					.ends_with("::Fixture.Renderable for Fixture.User")
+				&& relationship.target.ends_with("::Fixture.Renderable")
+		}));
+	}
+
+	#[test]
 	fn supported_object_languages_extract_method_owners() {
 		let cases = [
 			("javascript", "class Service { run() {} }", "run"),
@@ -1168,6 +1255,11 @@ pub fn main_fn() {
 			("ruby", "class Service\n  def run\n  end\nend\n", "run"),
 			("lua", "function Service.run() end", "run"),
 			("swift", "class Service { func run() {} }", "run"),
+			(
+				"elixir",
+				"defmodule Service do\n  def run(), do: :ok\nend\n",
+				"run",
+			),
 		];
 
 		for (index, (language, code, method)) in cases.into_iter().enumerate() {
