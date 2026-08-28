@@ -1,4 +1,4 @@
-// Copyright 2025 Muvon Un Limited
+// Copyright 2026 Muvon Un Limited
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -70,7 +70,7 @@ fn collect_meaningful_regions_recursive(
 ) {
 	let node_kind = node.kind();
 
-	if meaningful_kinds.contains(&node_kind) {
+	if meaningful_kinds.contains(&node_kind) && lang_impl.is_meaningful_node(node, contents) {
 		let (combined_content, start_line) = combine_with_preceding_comments(node, contents);
 		let end_line = node.end_position().row;
 		let symbols = lang_impl.extract_symbols(node, contents);

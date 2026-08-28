@@ -274,7 +274,10 @@ fn walk_ast(
 			let name = name.trim().to_string();
 			if !name.is_empty() {
 				data.symbols.push(SymbolDecl {
-					kind: symbol_kind_from_node_kind(node.kind()).to_string(),
+					kind: lang_impl
+						.extract_declaration_kind(node, contents)
+						.unwrap_or_else(|| symbol_kind_from_node_kind(node.kind()))
+						.to_string(),
 					name,
 					owner: lang_impl.extract_symbol_owner(node, contents),
 					start_line: node.start_position().row as u32,

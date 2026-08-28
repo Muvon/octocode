@@ -229,7 +229,7 @@ pub struct StructuralSearchParams {
 	/// Each hit shows the source line and enclosing symbol; definition sites are tagged `[def]`.
 	#[serde(default, skip_serializing_if = "Option::is_none")]
 	pub references: Option<String>,
-	/// Language to search (required: rust, javascript, typescript, python, go, java, cpp, php, ruby, swift, lua, bash, css, json)
+	/// Language to search (required: rust, javascript, typescript, python, go, java, cpp, php, ruby, swift, lua, bash, css, json, elixir)
 	pub language: String,
 	/// Narrow the search to matching files. Each entry is either a path
 	/// substring (`src/mcp`, `server.rs`) or a glob (`src/**/*.rs`), relative
@@ -496,7 +496,7 @@ impl McpServer {
 	}
 
 	#[tool(
-		description = "Map a file or area structurally: extract function signatures, class/type definitions, and declarations without implementation bodies — the cheapest way to see what code exposes. Reach for this FIRST to orient in unfamiliar code before reading full bodies. Accepts file paths or glob patterns. Supports Rust, JS/TS, Python, Go, C++, PHP, Ruby, Bash, JSON, CSS, Svelte, Swift, Markdown.",
+		description = "Map a file or area structurally: extract function signatures, class/type definitions, and declarations without implementation bodies — the cheapest way to see what code exposes. Reach for this FIRST to orient in unfamiliar code before reading full bodies. Accepts file paths or glob patterns. Supports Rust, JS/TS, Python, Go, Java, C++, PHP, Ruby, Lua, Bash, JSON, CSS, Svelte, Swift, Markdown, and Elixir.",
 		annotations(
 			read_only_hint = true,
 			destructive_hint = false,

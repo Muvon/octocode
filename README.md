@@ -349,7 +349,7 @@ AI: *analyzes changes* "The PR adds password hashing in src/auth/hash.rs. Howeve
 
 ## 🌐 Supported Languages
 
-16 languages with full tree-sitter AST parsing:
+17 languages with full tree-sitter AST parsing:
 
 | Language | Extensions | Features |
 |----------|------------|----------|
@@ -360,6 +360,7 @@ AI: *analyzes changes* "The PR adds password hashing in src/auth/hash.rs. Howeve
 | **PHP** | `.php` | Class/function extraction, namespace support |
 | **C++** | `.cpp`, `.cc`, `.cxx`, `.c++`, `.c`, `.h`, `.hpp`, `.hxx`, `.cppm`, `.ixx`, `.mxx`, `.ccm`, `.cxxm` | Include analysis, class/function extraction, C++20 module support |
 | **Ruby** | `.rb` | Class/module extraction, method definitions |
+| **Elixir** | `.ex`, `.exs` | Module/protocol extraction, function and macro definitions |
 | **Java** | `.java` | Import analysis, class/method extraction |
 | **Swift** | `.swift` | Class/struct/protocol extraction, import analysis |
 | **Svelte** | `.svelte` | Component structure, script/style block extraction |

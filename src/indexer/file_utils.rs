@@ -151,6 +151,8 @@ impl FileUtils {
 			"svelte" => Some("svelte"),
 			// CSS
 			"css" | "scss" | "sass" => Some("css"),
+			// Elixir
+			"ex" | "exs" => Some("elixir"),
 			// Markdown
 			"md" | "markdown" => Some("markdown"),
 			_ => None,

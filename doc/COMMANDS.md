@@ -140,7 +140,7 @@ octocode grep 'console.log($ARG)' --lang javascript --rewrite 'logger.info($ARG)
 - `--json` — Output as JSON
 
 **Supported languages:**
-Rust, JavaScript, TypeScript, Python, Go, Java, C/C++, PHP, Ruby, Lua, Bash, CSS, JSON
+Rust, JavaScript, TypeScript, Python, Go, Java, C/C++, PHP, Ruby, Lua, Bash, CSS, JSON, Elixir
 
 ### `octocode config`
 
