@@ -194,7 +194,7 @@ pub fn extract_signatures(
 
 /// Extract the name of a declaration node (function, class, etc.)
 fn extract_name(node: Node, contents: &str, lang_impl: &dyn languages::Language) -> Option<String> {
-	if let Some(name) = lang_impl.extract_declaration_name(node, contents) {
+	if let Some(name) = lang_impl.extract_signature_name(node, contents) {
 		return Some(name);
 	}
 

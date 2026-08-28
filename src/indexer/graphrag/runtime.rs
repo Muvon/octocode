@@ -488,6 +488,10 @@ mod tests {
 			supported_source_language(Path::new("docs/design.md")),
 			Some("markdown")
 		);
+		assert_eq!(
+			supported_source_language(Path::new("lib/accounts.ex")),
+			Some("elixir")
+		);
 	}
 
 	fn graph_node(id: &str, name: &str, kind: &str, path: &str) -> CodeNode {
@@ -640,6 +644,74 @@ mod tests {
 		assert!(graph.relationships.iter().any(|relationship| {
 			relationship.source == "lib.rs::run"
 				&& relationship.target == "lib.rs::helper"
+				&& relationship.relation_type == RelationType::Calls
+		}));
+	}
+
+	#[test]
+	fn builds_elixir_live_graph_with_import_call_and_protocol_edges() {
+		let root = std::env::temp_dir().join(format!(
+			"octocode-runtime-elixir-graph-{}-{}",
+			std::process::id(),
+			std::time::SystemTime::now()
+				.duration_since(UNIX_EPOCH)
+				.expect("system clock should be after Unix epoch")
+				.as_nanos()
+		));
+		let fixture = root.join("lib/fixture");
+		std::fs::create_dir_all(&fixture).expect("temporary Elixir directory should be created");
+		for (name, source) in [
+			(
+				"accounts.ex",
+				"defmodule Fixture.Accounts do\n  alias Fixture.Repo\n  def fetch(id), do: Repo.get(User, id)\nend\n",
+			),
+			(
+				"repo.ex",
+				"defmodule Fixture.Repo do\n  def get(schema, id), do: {schema, id}\nend\n",
+			),
+			(
+				"renderable.ex",
+				"defprotocol Fixture.Renderable do\n  def render(value)\nend\ndefimpl Fixture.Renderable, for: Fixture.User do\n  def render(user), do: user.email\nend\n",
+			),
+			(
+				"accounts_test.exs",
+				"defmodule Fixture.AccountsTest do\n  alias Fixture.Accounts\n  test \"fetches an account\" do\n    Accounts.fetch(42)\n  end\nend\n",
+			),
+		] {
+			std::fs::write(fixture.join(name), source)
+				.expect("temporary Elixir source should be written");
+		}
+
+		let (files, _) = scan_sources(&root);
+		let graph = build_graph(files);
+		std::fs::remove_dir_all(&root).expect("temporary source directory should be removed");
+
+		assert!(graph.nodes.contains_key("lib/fixture/accounts.ex"));
+		assert!(graph
+			.nodes
+			.contains_key("lib/fixture/accounts.ex::Fixture.Accounts::fetch"));
+		assert!(graph.nodes.contains_key(
+			"lib/fixture/accounts_test.exs::Fixture.AccountsTest::fetches an account"
+		));
+		assert!(graph.relationships.iter().any(|relationship| {
+			relationship.source == "lib/fixture/accounts.ex"
+				&& relationship.target == "lib/fixture/repo.ex"
+				&& relationship.relation_type == RelationType::Imports
+		}));
+		assert!(graph.relationships.iter().any(|relationship| {
+			relationship.source == "lib/fixture/accounts.ex::Fixture.Accounts::fetch"
+				&& relationship.target == "lib/fixture/repo.ex::Fixture.Repo::get"
+				&& relationship.relation_type == RelationType::Calls
+		}));
+		assert!(graph.relationships.iter().any(|relationship| {
+			relationship.source == "lib/fixture/renderable.ex::Fixture.Renderable for Fixture.User"
+				&& relationship.target == "lib/fixture/renderable.ex::Fixture.Renderable"
+				&& relationship.relation_type == RelationType::Implements
+		}));
+		assert!(graph.relationships.iter().any(|relationship| {
+			relationship.source
+				== "lib/fixture/accounts_test.exs::Fixture.AccountsTest::fetches an account"
+				&& relationship.target == "lib/fixture/accounts.ex::Fixture.Accounts::fetch"
 				&& relationship.relation_type == RelationType::Calls
 		}));
 	}

@@ -37,6 +37,7 @@ const FUNCTION_DEFINITION_MACROS: &[&str] = &[
 
 const CONTAINER_DEFINITION_MACROS: &[&str] = &["defmodule", "defprotocol", "defimpl"];
 const DATA_DEFINITION_MACROS: &[&str] = &["defstruct", "defexception"];
+const TEST_DEFINITION_MACROS: &[&str] = &["test", "property"];
 
 const NON_CALL_MACROS: &[&str] = &[
 	"after",
@@ -83,6 +84,9 @@ impl Language for Elixir {
 		call_macro_name(node, contents).is_some_and(|name| {
 			FUNCTION_DEFINITION_MACROS.contains(&name.as_str())
 				|| DATA_DEFINITION_MACROS.contains(&name.as_str())
+				|| (!CONTAINER_DEFINITION_MACROS.contains(&name.as_str())
+					&& !NON_CALL_MACROS.contains(&name.as_str())
+					&& has_do_block(node))
 		})
 	}
 
@@ -113,6 +117,12 @@ impl Language for Elixir {
 			return first_argument(node)
 				.and_then(|argument| definition_head_name(argument, contents));
 		}
+		if TEST_DEFINITION_MACROS.contains(&macro_name.as_str()) {
+			return first_argument(node)
+				.and_then(|argument| node_text(argument, contents))
+				.map(|name| name.trim().trim_matches(['"', '\'']).to_string())
+				.filter(|name| !name.is_empty());
+		}
 		None
 	}
 
@@ -121,10 +131,21 @@ impl Language for Elixir {
 			"defmodule" => Some("module"),
 			"defprotocol" => Some("interface"),
 			"defimpl" => Some("implementation"),
+			"defstruct" => Some("struct"),
+			"defexception" => Some("class"),
+			name if TEST_DEFINITION_MACROS.contains(&name) => Some("function"),
 			"defmacro" | "defmacrop" | "defmacrocallback" => Some("macro"),
 			name if FUNCTION_DEFINITION_MACROS.contains(&name) => Some("function"),
 			_ => None,
 		}
+	}
+
+	fn extract_signature_name(&self, node: Node, contents: &str) -> Option<String> {
+		let macro_name = call_macro_name(node, contents)?;
+		if DATA_DEFINITION_MACROS.contains(&macro_name.as_str()) {
+			return self.extract_symbol_owner(node, contents);
+		}
+		self.extract_declaration_name(node, contents)
 	}
 
 	fn extract_symbol_owner(&self, node: Node, contents: &str) -> Option<String> {
@@ -321,6 +342,7 @@ fn is_definition_macro(name: &str) -> bool {
 	FUNCTION_DEFINITION_MACROS.contains(&name)
 		|| CONTAINER_DEFINITION_MACROS.contains(&name)
 		|| DATA_DEFINITION_MACROS.contains(&name)
+		|| TEST_DEFINITION_MACROS.contains(&name)
 }
 
 fn is_public_definition_macro(name: &str) -> bool {
@@ -355,6 +377,14 @@ fn first_argument(node: Node) -> Option<Node> {
 		.children(&mut cursor)
 		.find(|child| child.kind() == "arguments")?;
 	arguments.named_child(0)
+}
+
+fn has_do_block(node: Node) -> bool {
+	let mut cursor = node.walk();
+	let found = node
+		.children(&mut cursor)
+		.any(|child| child.kind() == "do_block");
+	found
 }
 
 fn definition_head_name(node: Node, contents: &str) -> Option<String> {

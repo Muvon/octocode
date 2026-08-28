@@ -135,6 +135,7 @@ fn extracts_semantic_signatures_and_declaration_kinds() {
 		.collect();
 
 	assert!(summary.contains(&("module", "MyApp.Accounts")));
+	assert!(summary.contains(&("struct", "MyApp.Accounts")));
 	assert!(summary.contains(&("function", "fetch_user")));
 	assert!(summary.contains(&("function", "validate")));
 	assert!(summary.contains(&("macro", "active")));
@@ -231,5 +232,47 @@ fn resolves_mix_module_paths() {
 	assert_eq!(
 		language.resolve_import("External.Package", "lib/my_app/accounts.ex", &files),
 		None
+	);
+}
+
+#[test]
+fn indexes_exunit_tests_as_owned_function_like_declarations() {
+	let source = r#"
+defmodule MyApp.AccountsTest do
+  use ExUnit.Case
+  alias MyApp.Accounts
+
+  test "fetches an account" do
+    assert Accounts.fetch_user(42)
+  end
+end
+"#;
+	let language = get_language("elixir").unwrap();
+	let tree = parse(source);
+	let mut regions = Vec::new();
+	extract_meaningful_regions(tree.root_node(), source, language.as_ref(), &mut regions);
+	assert_eq!(regions.len(), 1);
+	assert!(regions[0]
+		.content
+		.starts_with("test \"fetches an account\""));
+
+	let signatures = extract_signatures(tree.root_node(), source, language.as_ref());
+	assert!(signatures.iter().any(|signature| {
+		signature.kind == "function" && signature.name == "fetches an account"
+	}));
+
+	let mut declaration = None;
+	walk_calls(tree.root_node(), &mut |node| {
+		if language.extract_declaration_name(node, source).as_deref() == Some("fetches an account")
+		{
+			declaration = Some((
+				language.extract_declaration_kind(node, source),
+				language.extract_symbol_owner(node, source),
+			));
+		}
+	});
+	assert_eq!(
+		declaration,
+		Some((Some("function"), Some("MyApp.AccountsTest".to_string())))
 	);
 }
