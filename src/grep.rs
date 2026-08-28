@@ -21,6 +21,7 @@ use ast_grep_core::matcher::{KindMatcher, PatternBuilder, PatternNode};
 use ast_grep_core::source::Edit as AstEdit;
 use ast_grep_core::tree_sitter::{LanguageExt, StrDoc};
 use ast_grep_core::{Doc, Node, Pattern, PatternError};
+use std::borrow::Cow;
 use std::path::Path;
 
 pub use ast_grep_core::MatchStrictness;
@@ -78,8 +79,41 @@ define_ast_grep_lang!(AstSwift, tree_sitter_swift::LANGUAGE, '$');
 define_ast_grep_lang!(AstLua, tree_sitter_lua::LANGUAGE, 'µ');
 define_ast_grep_lang!(AstBash, tree_sitter_bash::LANGUAGE, '$');
 define_ast_grep_lang!(AstCss, tree_sitter_css::LANGUAGE, 'µ');
-define_ast_grep_lang!(AstElixir, tree_sitter_elixir::LANGUAGE, 'µ');
 define_ast_grep_lang!(AstJson, tree_sitter_json::LANGUAGE, '$');
+
+#[derive(Clone, Copy)]
+pub struct AstElixir;
+
+impl AstGrepLanguage for AstElixir {
+	fn pre_process_pattern<'q>(&self, query: &'q str) -> Cow<'q, str> {
+		Cow::Owned(query.replace('$', "µ"))
+	}
+
+	fn expando_char(&self) -> char {
+		'µ'
+	}
+
+	fn kind_to_id(&self, kind: &str) -> u16 {
+		let language: tree_sitter::Language = tree_sitter_elixir::LANGUAGE.into();
+		language.id_for_node_kind(kind, true)
+	}
+
+	fn field_to_id(&self, field: &str) -> Option<u16> {
+		self.get_ts_language()
+			.field_id_for_name(field)
+			.map(|field| field.get())
+	}
+
+	fn build_pattern(&self, builder: &PatternBuilder) -> Result<Pattern, PatternError> {
+		builder.build(|source| StrDoc::try_new(source, *self))
+	}
+}
+
+impl LanguageExt for AstElixir {
+	fn get_ts_language(&self) -> tree_sitter::Language {
+		tree_sitter_elixir::LANGUAGE.into()
+	}
+}
 
 /// A single match result from structural search.
 pub struct GrepMatch {
@@ -1459,9 +1493,15 @@ defmodule Accounts do
   def fetch_by_email(email), do: Repo.get_by(User, email: email)
 end
 "#;
-		let matches = search_file("accounts.ex", source, "Repo.get($MODEL, $ID)", "elixir")
+		let literal = search_file("accounts.ex", source, "Repo.get(User, id)", "elixir")
 			.expect("Elixir structural search should parse");
-		assert_eq!(matches.len(), 1);
+		assert_eq!(literal.len(), 1);
+
+		let info = pattern_info("Repo.get($MODEL, $ID)", "elixir").unwrap();
+		assert!(!info.has_error, "pattern info: {info:?}");
+		let matches = search_file("accounts.ex", source, "Repo.get($MODEL, $ID)", "elixir")
+			.expect("Elixir metavariable search should parse");
+		assert_eq!(matches.len(), 1, "pattern info: {info:?}");
 		assert!(matches[0].text.contains("Repo.get(User, id)"));
 	}
 

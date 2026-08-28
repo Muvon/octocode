@@ -19,7 +19,6 @@
 //! their target instead of treating every invocation as a declaration.
 
 use crate::indexer::languages::{CallTarget, Language, TypeRelationKind};
-use std::path::Path;
 use tree_sitter::Node;
 
 const FUNCTION_DEFINITION_MACROS: &[&str] = &[
@@ -370,8 +369,10 @@ fn definition_head_name(node: Node, contents: &str) -> Option<String> {
 			.and_then(|left| definition_head_name(left, contents)),
 		_ => {
 			let mut cursor = node.walk();
-			node.children(&mut cursor)
-				.find_map(|child| definition_head_name(child, contents))
+			let name = node
+				.children(&mut cursor)
+				.find_map(|child| definition_head_name(child, contents));
+			name
 		}
 	}
 }
@@ -405,6 +406,19 @@ fn implementation_type(node: Node, contents: &str) -> Option<String> {
 	if call_macro_name(node, contents).as_deref() != Some("defimpl") {
 		return None;
 	}
+	if let Some(text) = node_text(node, contents) {
+		if let Some((_, tail)) = text.split_once("for:") {
+			let target = tail
+				.trim_start()
+				.split(|character: char| {
+					character.is_whitespace() || matches!(character, ',' | ')' | ']')
+				})
+				.find(|part| !part.is_empty())?;
+			if !target.starts_with('[') {
+				return Some(normalize_module_name(target.to_string()));
+			}
+		}
+	}
 	let mut cursor = node.walk();
 	for descendant in node.children(&mut cursor) {
 		if let Some(found) = find_for_option(descendant, contents) {
@@ -417,21 +431,23 @@ fn implementation_type(node: Node, contents: &str) -> Option<String> {
 fn find_for_option(node: Node, contents: &str) -> Option<String> {
 	if node.kind() == "pair" {
 		let key = node
-			.named_child(0)
+			.child_by_field_name("key")
 			.and_then(|child| node_text(child, contents));
 		if key
 			.as_deref()
 			.is_some_and(|key| key.trim_end_matches(':') == "for")
 		{
 			return node
-				.named_child(1)
+				.child_by_field_name("value")
 				.and_then(|child| node_text(child, contents))
 				.map(normalize_module_name);
 		}
 	}
 	let mut cursor = node.walk();
-	node.children(&mut cursor)
-		.find_map(|child| find_for_option(child, contents))
+	let option = node
+		.children(&mut cursor)
+		.find_map(|child| find_for_option(child, contents));
+	option
 }
 
 fn is_definition_head_call(node: Node, contents: &str) -> bool {
