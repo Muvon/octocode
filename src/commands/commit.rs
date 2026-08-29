@@ -921,7 +921,7 @@ async fn call_llm_for_commit_message(prompt: &str, config: &Config) -> Result<St
 ///
 /// Takes a combined commit message from multiple chunks and uses AI to:
 /// - Remove duplication and redundancy
-/// - Create concise bullet points
+/// - Narrow many per-chunk bullets into a few themed ones (max 7)
 /// - Maintain proper conventional commit format
 /// - Preserve important technical details
 ///
@@ -943,12 +943,12 @@ PER-CHUNK SUMMARIES:
 
 SYNTHESIS REQUIREMENTS:
 1. Read ALL chunk summaries before writing anything
-2. Identify every distinct change across all chunks
-3. Choose a single conventional commit type that best represents the overall change set
-4. Subject line: type(scope): description — max 50 chars, imperative mood
-5. Body: list every meaningful change as a dash-space bullet, one per line, max 72 chars each
-6. Group related changes together; remove duplication
-7. Do NOT omit changes just because they appear in a later chunk
+2. Choose a single conventional commit type that best represents the overall change set
+3. Subject line: type(scope): description — max 50 chars, imperative mood
+4. Body: AT MOST 7 dash-space bullets, one per line, max 72 chars each
+5. Synthesise, do not concatenate: group related changes into themed bullets covering multiple items
+6. When many minor changes share a theme, name the theme instead of listing every item
+7. Every chunk must be reflected in some bullet, but one bullet may cover several chunks; never drop a whole area of change
 8. Do NOT upgrade claims: if a summary says code was modified/reworked/improved, never restate it as added or implemented
 9. Describe something as new/added ONLY if a chunk summary explicitly says it is new
 10. Types: feat, fix, docs, style, refactor, test, chore, perf, ci, build
