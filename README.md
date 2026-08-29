@@ -4,6 +4,8 @@
 
 ### **Structural Code Intelligence for AI Agents — MCP Server + Knowledge Graph + Semantic Search**
 
+[![CI](https://github.com/Muvon/octocode/actions/workflows/ci.yml/badge.svg)](https://github.com/Muvon/octocode/actions/workflows/ci.yml)
+[![Crates.io](https://img.shields.io/crates/v/octocode)](https://crates.io/crates/octocode)
 [![GitHub stars](https://img.shields.io/github/stars/Muvon/octocode?style=social)](https://github.com/Muvon/octocode/stargazers)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Rust](https://img.shields.io/badge/Rust-1.95%2B-orange.svg)](https://www.rust-lang.org)
@@ -33,17 +35,6 @@
 
 **Works with:** Claude Desktop • Cursor • Windsurf • Any MCP-compatible AI
 
-```json
-// Add to your AI assistant config
-{
-  "mcpServers": {
-    "octocode": {
-      "command": "octocode",
-      "args": ["mcp", "--path", "/your/project"]
-    }
-  }
-}
-```
 
 Now your AI assistant can:
 ```
@@ -67,7 +58,7 @@ AI: *uses LSP find-references* "process_payment() is called from 4 places:
 ```
 # Semantic search finds the right code
 octocode search "authentication middleware"
-→ src/middleware/auth.rs | Similarity 0.923
+→ src/middleware/auth.rs — Similarity: 0.9234
 
 # The GraphRAG CLI queries the optional persisted graph
 octocode config --graphrag-enabled true
@@ -125,8 +116,9 @@ Tilting RRF fusion toward the BM25/keyword signal — which carries disproportio
 The benchmark also flags what _doesn't_ help here (full 6-variant matrix in [`benchmark/RESULTS.md`](benchmark/RESULTS.md)): a **generic** local cross-encoder reranker (`bge-reranker-base`) actually **regressed** results (Hit@5 0.732 → 0.598) — code retrieval needs a _code-aware_ reranker (e.g. `voyage:rerank-2.5`), not an off-the-shelf one.
 
 ```bash
-git worktree add /tmp/corpus b1771ba        # pin the corpus to the ground-truth commit
-CORPUS=/tmp/corpus python3 benchmark/run_matrix.py
+git clone https://github.com/Muvon/octocode && cd octocode
+git worktree add /tmp/corpus b1771ba   # pin the corpus to the ground-truth commit
+CORPUS=/tmp/corpus python3 benchmark/run_matrix.py   # set OCTO_BIN to use a custom binary
 ```
 
 See [benchmark/README.md](benchmark/README.md) for methodology and metric definitions.
@@ -147,7 +139,10 @@ brew install muvon/tap/octocode
 <summary><strong>Other installation methods</strong></summary>
 
 ```bash
-# Cargo (build from source)
+# From crates.io
+cargo install octocode
+
+# Or from source (latest)
 cargo install --git https://github.com/Muvon/octocode
 
 # Download binary from releases
@@ -160,7 +155,7 @@ See [Installation Guide](INSTALL.md) for platform-specific instructions.
 ### 2. Set Up API Keys
 
 ```bash
-# Required: Embedding provider (Voyage AI has 200M free tokens/month)
+# Required: Embedding provider (Voyage AI has a free tier)
 export VOYAGE_API_KEY="your-voyage-api-key"
 
 # Optional: LLM for commit messages, code review
@@ -196,7 +191,7 @@ See [API Keys guide](doc/API_KEYS.md) for all supported providers.
 ```bash
 cd /your/project
 octocode index
-# → Indexed 12,847 blocks across 342 files
+# → ✓ Indexing complete! 342 of 342 files processed (342 new, 0 unchanged)
 ```
 
 ### 4. Search Your Code
@@ -309,47 +304,9 @@ claude mcp add octocode -- octocode mcp --path /path/to/your/project
 
 📖 **[Complete MCP Client Setup Guide](doc/MCP_CLIENTS.md)** — Detailed instructions for 15+ clients including VS Code (Cline/Continue), Zed, Replit, and more.
 
-## 🎯 What Can You Do With It?
-
-**New developer onboarding:**
-```
-You: "How does the authentication system work?"
-AI: *searches and navigates* "Authentication starts in src/middleware/auth.rs which
-    validates JWT tokens. It calls src/auth/jwt.rs for token verification, which uses
-    the public key from config. Failed auth returns 401 via src/errors/auth_error.rs.
-    Sessions are stored in Redis via src/cache/session.rs."
-```
-
-**Code archaeology:**
-```
-You: "Find all places we handle database errors"
-AI: *structural search* "Found 47 error handling patterns:
-    - 32 use Result<T, DbError> with proper error types
-    - 15 use .unwrap() (potential issues in src/db/user.rs:23, src/db/order.rs:156)
-    - Recommend adding proper error handling to those locations"
-```
-
-**Refactoring with confidence:**
-```
-You: "What depends on the PaymentProcessor trait?"
-AI: *queries graph* "src/api/handlers/checkout.rs, src/workers/refund_worker.rs,
-    and src/cron/billing.rs all depend on PaymentProcessor. The trait is defined
-    in src/domain/payment.rs and implemented by src/infrastructure/stripe.rs
-    and src/infrastructure/paypal.rs."
-```
-
-**Code review assistance:**
-```
-You: "Review this PR for security issues"
-AI: *analyzes changes* "The PR adds password hashing in src/auth/hash.rs. However,
-    it uses SHA256 which is fast and vulnerable to brute force. Recommend using
-    bcrypt or argon2 instead. Also found 3 instances of .unwrap() that could panic
-    in production."
-```
-
 ## 🌐 Supported Languages
 
-17 languages with full tree-sitter AST parsing:
+16 languages with full tree-sitter AST parsing:
 
 | Language | Extensions | Features |
 |----------|------------|----------|
@@ -384,18 +341,18 @@ AI: *analyzes changes* "The PR adds password hashing in src/auth/hash.rs. Howeve
 
 ## 🔒 Privacy & Security
 
-- **🏠 Local-first** — local embedding models available on supported platforms (macOS ARM default builds); cloud providers on all platforms
+- **🏠 Local-first** — fully local embedding via fastembed (no API key required); cloud providers optional
 - **🔐 Secure** — API keys stored locally, env vars supported
 - **🚫 Respects .gitignore** — Never indexes sensitive files
 - **🛡️ MCP security** — Local-only server, no external network for search
-- **📤 Cloud-safe** — Embeddings process only metadata, never source code
+- **📤 Cloud-safe** — cloud providers receive only the code chunks being embedded; use local models for fully offline indexing
 
 <details>
 <summary><strong>📊 Retrieval Quality Benchmark</strong></summary>
 
 We measure semantic search quality using a hand-annotated ground truth dataset of 254 queries (127 code + 127 docs) with precise line-range annotations. Each query has 1–3 expected results scored by relevance.
 
-Tested on commit [`b1771ba`](https://github.com/Muvon/octocode/commit/b1771ba) with [benchmark config](benchmark/config.toml) (contextual retrieval, Voyage reranker, RaBitQ quantization).
+These numbers use the **full cloud stack** — contextual retrieval, Voyage reranker, RaBitQ quantization — on commit [`b1771ba`](https://github.com/Muvon/octocode/commit/b1771ba) with [benchmark config](benchmark/config.toml). For the fully local baseline and the complete variant matrix, see [Retrieval Quality](#-retrieval-quality) above and [`benchmark/RESULTS.md`](benchmark/RESULTS.md).
 
 <details>
 <summary><strong>Documentation search</strong> (<code>--mode docs</code>) — Hit@10: 0.953, MRR: 0.776</summary>
@@ -468,4 +425,4 @@ Apache License 2.0 — See [LICENSE](LICENSE) for details.
 
 </div>
 
-mcp-name: io.github.Muvon/octocode
+<!-- mcp-name: io.github.Muvon/octocode -->
