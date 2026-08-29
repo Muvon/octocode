@@ -1,5 +1,40 @@
 # Changelog
 
+## [0.23.0] - 2026-08-29
+
+### 📋 Release Summary
+
+This release extends Elixir indexing support and adds automatic single- or multi-mode operation for the built-in MCP server (52c3b973, e6ba3777, fc83832b). It improves graph and indexer correctness, handles stringified JSON arrays in semantic search, updates dependencies, and refreshes project setup guidance and documentation (34061a85, d423d02d, b0e95969, 0726c3f8, 36863c13, d98decf7, 80a35f2f, 0e91665f, 4b2d5eaa).
+
+
+### ✨ New Features & Enhancements
+
+- **elixir**: extend Elixir indexing support `52c3b973`
+- **elixir**: add language indexing support `e6ba3777`
+- **mcp**: add automatic single or multi mode `fc83832b`
+
+### 🔧 Improvements & Optimizations
+
+- **commit**: condense synthesized change bullets `283e9ba2`
+- **mcp**: move parse_query_arg to module level `87792abb`
+- **mcp**: add annotations to server tools `dd409e7e`
+- **mcp**: reformat type collapse logic `dcff1003`
+
+### 🐛 Bug Fixes & Stability
+
+- **graphrag**: correct protocol relationship test target `34061a85`
+- **indexer**: normalize graph path test IDs `d423d02d`
+- **elixir**: match metavariables and impl targets `b0e95969`
+- **mcp**: handle stringified JSON arrays in semantic search `0726c3f8`
+
+### 📚 Documentation & Examples
+
+- **readme**: update project links and setup guidance `4b2d5eaa`
+
+### 🔄 Other Changes
+
+4 maintenance, dependency, and tooling updates not listed individually.
+
 ## [0.22.0] - 2026-08-22
 
 ### 📋 Release Summary
