@@ -514,7 +514,7 @@ mod tests {
 	// Expected IDs must use the native separator: scan_sources builds
 	// relative paths from OS walker output (`\` on Windows).
 	fn native_path(relative: &str) -> String {
-		relative.replace('/', &std::path::MAIN_SEPARATOR.to_string())
+		relative.replace('/', std::path::MAIN_SEPARATOR_STR)
 	}
 
 	#[test]
@@ -693,7 +693,7 @@ mod tests {
 
 		let accounts = native_path("lib/fixture/accounts.ex");
 		let repo = native_path("lib/fixture/repo.ex");
-		let renderable = native_path("lib/fixture/renderable.ex");
+		let renderable_protocol = native_path("lib/fixture/renderable.ex::Fixture.Renderable");
 		let accounts_fetch = native_path("lib/fixture/accounts.ex::Fixture.Accounts::fetch");
 		let repo_get = native_path("lib/fixture/repo.ex::Fixture.Repo::get");
 		let impl_renderable =
@@ -716,7 +716,7 @@ mod tests {
 		}));
 		assert!(graph.relationships.iter().any(|relationship| {
 			relationship.source == impl_renderable
-				&& relationship.target == renderable
+				&& relationship.target == renderable_protocol
 				&& relationship.relation_type == RelationType::Implements
 		}));
 		assert!(graph.relationships.iter().any(|relationship| {
