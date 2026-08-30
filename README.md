@@ -5,6 +5,7 @@
 ### **Structural Code Intelligence for AI Agents — MCP Server + Knowledge Graph + Semantic Search**
 
 [![CI](https://github.com/Muvon/octocode/actions/workflows/ci.yml/badge.svg)](https://github.com/Muvon/octocode/actions/workflows/ci.yml)
+[![Coverage](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fmuvon%2Foctocode%2Fbadges%2Fcoverage.json&style=flat-square)](https://github.com/Muvon/octocode/actions/workflows/ci.yml)
 [![Crates.io](https://img.shields.io/crates/v/octocode)](https://crates.io/crates/octocode)
 [![GitHub stars](https://img.shields.io/github/stars/Muvon/octocode?style=social)](https://github.com/Muvon/octocode/stargazers)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)

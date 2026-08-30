@@ -119,6 +119,12 @@ test-nextest: ## Run tests with nextest (faster test runner)
 	@echo "$(YELLOW)Running tests with nextest...$(NC)"
 	cargo nextest run
 
+
+.PHONY: coverage
+coverage: ## Generate test coverage report (cargo-llvm-cov)
+	@echo "$(YELLOW)Generating coverage report...$(NC)"
+	cargo llvm-cov --summary-only --all-features --ignore-filename-regex '(_tests?\.rs|/tests\.rs)$$'
+	@echo "$(GREEN)Coverage report generated$(NC)"
 .PHONY: lint
 lint: ## Run clippy lints
 	@echo "$(YELLOW)Running clippy lints...$(NC)"

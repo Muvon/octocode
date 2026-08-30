@@ -108,6 +108,22 @@ jobs:
         RUSTFLAGS: ${{ runner.os == 'Windows' && '-C target-feature=-crt-static' || '' }}
       run: cargo test --verbose --all-features
 
+
+  coverage:
+    name: Coverage Report
+    permissions:
+      contents: write # push the badge JSON to the `badges` branch
+    uses: muvon/ci-workflow/.github/workflows/rust-coverage.yml@master
+    with:
+      feature-flags: '--all-features'
+      ignore-filename-regex: '(_tests?\.rs|/tests\.rs)$'
+      setup-protoc: true
+      setup-script: |
+        ORT_VERSION="1.24.2"
+        ORT_ASSET="onnxruntime-linux-x64-static_lib-${ORT_VERSION}-glibc2_17"
+        curl -sL "https://github.com/csukuangfj/onnxruntime-libs/releases/download/v${ORT_VERSION}/${ORT_ASSET}.zip" -o /tmp/ort.zip
+        unzip -q /tmp/ort.zip -d /tmp/ort
+        echo "ORT_LIB_LOCATION=/tmp/ort/${ORT_ASSET}/lib" >> "$GITHUB_ENV"
   musl-build:
     name: Musl Build (${{ matrix.target }})
     runs-on: ${{ matrix.os }}
