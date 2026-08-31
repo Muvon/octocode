@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.23.1] - 2026-08-31
+
+### 📋 Release Summary
+
+Indexing behavior was improved by assigning processing status consistently across branches (bd6ca299). Underlying dependencies, Rust tooling, and coverage workflows were updated to support ongoing reliability and maintenance (b30fb645, a5d19f1e, 80d2f75f, f89a24d0, 88a676c7).
+
+
+### 🔧 Improvements & Optimizations
+
+- **indexer**: assign processing status from branches `bd6ca299`
+- **coverage**: generate and publish coverage reports `f89a24d0`
+
+### 🔄 Other Changes
+
+4 maintenance, dependency, and tooling updates not listed individually.
+
 ## [0.23.0] - 2026-08-29
 
 ### 📋 Release Summary
