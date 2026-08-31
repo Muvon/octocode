@@ -4999,9 +4999,9 @@ dependencies = [
 
 [[package]]
 name = "octolib"
-version = "0.34.7"
+version = "0.34.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dbcdeb4afaa768fb5c36c7941b1814182e951ac3c6962136734aa67d9de06ed2"
+checksum = "9b34dd69e57b5bfc0d40e63ec7f01053b554f0c1feea7f983d1da90a87cf271a"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -7454,9 +7454,9 @@ dependencies = [
 
 [[package]]
 name = "tree-sitter-language"
-version = "0.1.7"
+version = "0.1.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "009994f150cc0cd50ff54917d5bc8bffe8cad10ca10d81c34da2ec421ae61782"
+checksum = "ca0d1bf6fdd806e43ae5198f82f527056d359def39e54e67a0f478ac09dac081"
 
 [[package]]
 name = "tree-sitter-lua"
