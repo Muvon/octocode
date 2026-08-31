@@ -1406,7 +1406,6 @@ pub async fn index_files_with_quiet(
 				match fs::read_to_string(&full_path) {
 					Ok(contents) => {
 						// Store the file modification time after successful processing
-						let file_processed;
 
 						let ctx = ProcessFileContext {
 							store,
@@ -1414,7 +1413,7 @@ pub async fn index_files_with_quiet(
 							state: state.clone(),
 						};
 
-						if language == "markdown" {
+						let file_processed = if language == "markdown" {
 							// Handle markdown files specially - index as document blocks
 							process_markdown_file_differential(
 								store,
@@ -1434,7 +1433,7 @@ pub async fn index_files_with_quiet(
 								all_code_blocks.push(markdown_graphrag_block(file_path, &contents));
 							}
 
-							file_processed = true;
+							true
 						} else {
 							// Handle code files - index as semantic code blocks only
 							process_file_differential(
@@ -1448,8 +1447,8 @@ pub async fn index_files_with_quiet(
 								&mut file_context_map,
 							)
 							.await?;
-							file_processed = true;
-						}
+							true
+						};
 
 						// Track file metadata for atomic storage after batch processing
 						if file_processed {
@@ -1658,9 +1657,8 @@ pub async fn index_files_with_quiet(
 				match fs::read_to_string(entry.path()) {
 					Ok(contents) => {
 						// Store the file modification time after successful processing
-						let file_processed;
 
-						if language == "markdown" {
+						let file_processed = if language == "markdown" {
 							// Handle markdown files specially - index as document blocks
 							process_markdown_file_differential(
 								store,
@@ -1678,7 +1676,7 @@ pub async fn index_files_with_quiet(
 									.push(markdown_graphrag_block(&file_path, &contents));
 							}
 
-							file_processed = true;
+							true
 						} else {
 							// Handle code files - index as semantic code blocks only
 							let ctx = ProcessFileContext {
@@ -1697,8 +1695,8 @@ pub async fn index_files_with_quiet(
 								&mut file_context_map,
 							)
 							.await?;
-							file_processed = true;
-						}
+							true
+						};
 
 						// Track file metadata for atomic storage after batch processing
 						if file_processed {
