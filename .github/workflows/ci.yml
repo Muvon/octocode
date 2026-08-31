@@ -18,7 +18,7 @@ jobs:
     with:
       feature-flags: '--all-features'
       setup-protoc: true
-      # Test and coverage stay local below: need ONNX static libs + sccache
+      # Test and coverage run in dedicated jobs below: need ONNX static libs + sccache
       test: false
       doc: false
       coverage: false
@@ -233,55 +233,6 @@ jobs:
             export RUSTFLAGS="-C link-arg=-lgcc"
             cargo build --target ${{ matrix.target }}
           '
-
-  coverage:
-    name: Code Coverage
-    runs-on: ubuntu-latest
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-
-    - name: Install Rust
-      uses: dtolnay/rust-toolchain@1.98.0
-
-    - name: Install protobuf compiler
-      uses: arduino/setup-protoc@v3
-      with:
-        repo-token: ${{ secrets.GITHUB_TOKEN }}
-
-    - name: Install cargo-tarpaulin
-      run: cargo install cargo-tarpaulin --locked
-
-    - name: Cache Rust artifacts
-      uses: Swatinem/rust-cache@v2
-
-    - name: Run sccache-cache
-      uses: mozilla-actions/sccache-action@v0.0.9
-
-    - name: Download ONNX Runtime static library
-      shell: bash
-      run: |
-        ORT_VERSION="1.24.2"
-        ORT_ASSET="onnxruntime-linux-x64-static_lib-${ORT_VERSION}-glibc2_17"
-        curl -sL "https://github.com/csukuangfj/onnxruntime-libs/releases/download/v${ORT_VERSION}/${ORT_ASSET}.zip" -o /tmp/ort.zip
-        unzip -q /tmp/ort.zip -d /tmp/ort
-        echo "ORT_LIB_LOCATION=/tmp/ort/${ORT_ASSET}/lib" >> "$GITHUB_ENV"
-
-    # `--engine llvm` uses LLVM source-based coverage instead of the default
-    # ptrace engine. Ptrace requires `-Clink-dead-code`, which forces
-    # monomorphizations of dead-code paths and trips pulp v0.22.2's
-    # `CheckSameSize::<i8, u16>` const-eval assertion. llvm coverage doesn't
-    # need link-dead-code, so the offending instantiations never happen.
-    - name: Generate code coverage
-      env:
-        RUSTC_WRAPPER: sccache
-      run: cargo tarpaulin --engine llvm --verbose --all-features --workspace --timeout 120 --out xml
-
-    - name: Upload coverage to Codecov
-      uses: codecov/codecov-action@v4
-      with:
-        file: ./cobertura.xml
-        fail_ci_if_error: false
 
   brief:
     uses: muvon/ci-workflow/.github/workflows/brief.yml@master
