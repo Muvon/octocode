@@ -53,6 +53,7 @@ pub fn extract_meaningful_regions(
 		contents,
 		lang_impl,
 		&meaningful_kinds,
+		None,
 		&mut candidate_regions,
 	);
 
@@ -61,6 +62,8 @@ pub fn extract_meaningful_regions(
 }
 
 /// Recurses into a node's children, collecting meaningful regions from each.
+/// Tracks the previous sibling in true O(1) steps as it walks, so callers
+/// never need to re-derive it by rescanning from the parent's first child.
 fn descend_children(
 	node: Node,
 	contents: &str,
@@ -70,14 +73,18 @@ fn descend_children(
 ) {
 	let mut cursor = node.walk();
 	if cursor.goto_first_child() {
+		let mut prev: Option<Node> = None;
 		loop {
+			let current = cursor.node();
 			collect_meaningful_regions_recursive(
-				cursor.node(),
+				current,
 				contents,
 				lang_impl,
 				meaningful_kinds,
+				prev,
 				regions,
 			);
+			prev = Some(current);
 			if !cursor.goto_next_sibling() {
 				break;
 			}
@@ -85,12 +92,16 @@ fn descend_children(
 	}
 }
 
-/// Recursively collects meaningful regions without merging
+/// Recursively collects meaningful regions without merging.
+/// `prev_sibling` is the sibling immediately preceding `node` in its own
+/// parent's children (as discovered by `descend_children`'s walk), or `None`
+/// at the root — used to attach a preceding comment/attribute in O(1).
 fn collect_meaningful_regions_recursive(
 	node: Node,
 	contents: &str,
 	lang_impl: &dyn languages::Language,
 	meaningful_kinds: &[&str],
+	prev_sibling: Option<Node>,
 	regions: &mut Vec<CodeRegion>,
 ) {
 	let node_kind = node.kind();
@@ -125,7 +136,8 @@ fn collect_meaningful_regions_recursive(
 			return;
 		}
 
-		let (combined_content, start_line) = combine_with_preceding_comments(node, contents);
+		let (combined_content, start_line) =
+			combine_with_preceding_comments(node, contents, prev_sibling);
 		let end_line = node.end_position().row;
 		let symbols = lang_impl.extract_symbols(node, contents);
 
@@ -343,27 +355,22 @@ fn determine_block_type(
 	lang_impl.get_node_type_description(&sample_region.node_kind)
 }
 
-/// Combines preceding comment or attribute nodes with a declaration node.
-pub fn combine_with_preceding_comments(node: Node, contents: &str) -> (String, usize) {
+/// Combines a preceding comment or attribute node with a declaration node.
+/// `prev_sibling` must be the node's immediately-preceding sibling (or `None`
+/// if it has none), as already known by the caller's tree walk.
+pub fn combine_with_preceding_comments(
+	node: Node,
+	contents: &str,
+	prev_sibling: Option<Node>,
+) -> (String, usize) {
 	let mut combined_start = node.start_position().row;
 	let mut snippet = String::new();
-	if let Some(parent) = node.parent() {
-		let mut cursor = parent.walk();
-		// Track only the immediately-preceding sibling instead of buffering all.
-		let mut prev: Option<Node> = None;
-		for child in parent.children(&mut cursor) {
-			if child.id() == node.id() {
-				break;
-			}
-			prev = Some(child);
-		}
-		if let Some(last) = prev {
-			let kind = last.kind();
-			if kind.contains("comment") || kind.contains("attribute") {
-				combined_start = last.start_position().row;
-				snippet.push_str(&contents[last.start_byte()..last.end_byte()]);
-				snippet.push('\n');
-			}
+	if let Some(last) = prev_sibling {
+		let kind = last.kind();
+		if kind.contains("comment") || kind.contains("attribute") {
+			combined_start = last.start_position().row;
+			snippet.push_str(&contents[last.start_byte()..last.end_byte()]);
+			snippet.push('\n');
 		}
 	}
 	snippet.push_str(&contents[node.start_byte()..node.end_byte()]);

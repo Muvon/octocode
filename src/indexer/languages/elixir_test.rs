@@ -220,6 +220,7 @@ fn resolves_mix_module_paths() {
 		"lib/my_app/user.ex".to_string(),
 		"test/support/my_app/user.exs".to_string(),
 	];
+	let files = resolution_utils::FileRegistry::new(&files);
 
 	assert_eq!(
 		language.resolve_import("MyApp.Repo", "lib/my_app/accounts.ex", &files),
@@ -232,6 +233,61 @@ fn resolves_mix_module_paths() {
 	assert_eq!(
 		language.resolve_import("External.Package", "lib/my_app/accounts.ex", &files),
 		None
+	);
+}
+
+#[test]
+fn describe_block_splits_into_individual_test_regions() {
+	// Bodies are multi-statement/non-trivial so the smart single-line merge
+	// pass (unrelated to this fix) doesn't recombine the two `test` blocks
+	// into one "// Merged ..." block, which would defeat this test's purpose.
+	let source = r#"
+defmodule MyApp.AccountsTest do
+  use ExUnit.Case
+  alias MyApp.Accounts
+
+  describe "fetch_user/1" do
+    test "returns the user when the id exists in the database" do
+      user = Accounts.fetch_user(42)
+      assert user.id == 42
+      assert user.name == "Ada Lovelace"
+    end
+
+    test "returns nil when the id is not present in the database" do
+      user = Accounts.fetch_user(999)
+      assert is_nil(user)
+    end
+  end
+end
+"#;
+	let language = get_language("elixir").unwrap();
+	let tree = parse(source);
+	let mut regions = Vec::new();
+	extract_meaningful_regions(tree.root_node(), source, language.as_ref(), &mut regions);
+
+	let test_regions: Vec<_> = regions
+		.iter()
+		.filter(|region| region.content.trim_start().starts_with("test \""))
+		.collect();
+	assert_eq!(
+		test_regions.len(),
+		2,
+		"expected 2 separate regions for the nested test blocks, got {} (regions: {:?})",
+		test_regions.len(),
+		regions.iter().map(|r| &r.content).collect::<Vec<_>>()
+	);
+
+	let describe_regions: Vec<_> = regions
+		.iter()
+		.filter(|region| region.content.trim_start().starts_with("describe "))
+		.collect();
+	assert!(
+		describe_regions.is_empty(),
+		"describe block should not collapse into a single blob region, got: {:?}",
+		describe_regions
+			.iter()
+			.map(|r| &r.content)
+			.collect::<Vec<_>>()
 	);
 }
 

@@ -286,12 +286,13 @@ fn build_graph(files: Vec<SourceFile>) -> CodeGraph {
 		.iter()
 		.map(|(file, _)| file.relative_path.clone())
 		.collect();
+	let registry = languages::resolution_utils::FileRegistry::new(&all_paths);
 	for file in &symbol_files {
 		let Some(language) = languages::get_language(&file.language) else {
 			continue;
 		};
 		for import in &file.imports {
-			if let Some(target) = language.resolve_import(import, &file.path, &all_paths) {
+			if let Some(target) = language.resolve_import(import, &file.path, &registry) {
 				graph.relationships.push(CodeRelationship {
 					source: file.path.clone(),
 					target,

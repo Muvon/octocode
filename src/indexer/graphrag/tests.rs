@@ -255,6 +255,7 @@ def _private_function():
 			"src/features/mod.rs".to_string(), // Module directory pattern
 			"src/main.rs".to_string(),
 		];
+		let all_files = crate::indexer::languages::resolution_utils::FileRegistry::new(&all_files);
 
 		// Test simple crate:: import resolution
 		let resolved =
@@ -308,6 +309,8 @@ def _private_function():
 			"src/config/features.rs".to_string(),
 			"src/main.rs".to_string(),
 		];
+		let files_with_mod_only =
+			crate::indexer::languages::resolution_utils::FileRegistry::new(&files_with_mod_only);
 		let resolved = rust_lang.resolve_import(
 			"crate::utils::helper_function",
 			"src/main.rs",
@@ -351,6 +354,7 @@ def _private_function():
 			"src/utils/math/statistics.rs".to_string(),
 			"src/features/technical.rs".to_string(),
 		];
+		let files = crate::indexer::languages::resolution_utils::FileRegistry::new(&files);
 
 		// Test 3-level deep import
 		let resolved = rust_lang.resolve_import(
@@ -399,6 +403,7 @@ def _private_function():
 			"src/utils.js".to_string(),
 			"src/processor.js".to_string(),
 		];
+		let all_files = crate::indexer::languages::resolution_utils::FileRegistry::new(&all_files);
 
 		// Test relative import resolution
 		let resolved = js_lang.resolve_import("./utils.js", "src/main.js", &all_files);
@@ -435,6 +440,7 @@ def _private_function():
 			"src/processor.ts".to_string(),
 			"src/types.d.ts".to_string(),
 		];
+		let all_files = crate::indexer::languages::resolution_utils::FileRegistry::new(&all_files);
 
 		// Test relative import resolution
 		let resolved = ts_lang.resolve_import("./utils.ts", "src/main.ts", &all_files);
@@ -470,6 +476,7 @@ def _private_function():
 			"utils/helper.go".to_string(),
 			"config/settings.go".to_string(),
 		];
+		let all_files = crate::indexer::languages::resolution_utils::FileRegistry::new(&all_files);
 
 		// Test package import resolution
 		let resolved = go_lang.resolve_import("./utils", "main.go", &all_files);
@@ -498,6 +505,7 @@ def _private_function():
 			"src/utils.cpp".to_string(),
 			"include/config.h".to_string(),
 		];
+		let all_files = crate::indexer::languages::resolution_utils::FileRegistry::new(&all_files);
 
 		// Test header include resolution
 		let resolved = cpp_lang.resolve_import("utils.h", "src/main.cpp", &all_files);
@@ -525,6 +533,7 @@ def _private_function():
 			"src/Utils.php".to_string(),
 			"src/Config.php".to_string(),
 		];
+		let all_files = crate::indexer::languages::resolution_utils::FileRegistry::new(&all_files);
 
 		// Test require/include resolution
 		let resolved = php_lang.resolve_import("./Utils.php", "src/Main.php", &all_files);
@@ -553,6 +562,7 @@ def _private_function():
 			"src/utils.py".to_string(),
 			"src/processor.py".to_string(),
 		];
+		let all_files = crate::indexer::languages::resolution_utils::FileRegistry::new(&all_files);
 
 		// Test relative import resolution
 		let resolved = python_lang.resolve_import(".utils", "src/main.py", &all_files);
@@ -580,6 +590,7 @@ def _private_function():
 			"lib/utils.rb".to_string(),
 			"config/settings.rb".to_string(),
 		];
+		let all_files = crate::indexer::languages::resolution_utils::FileRegistry::new(&all_files);
 
 		// Test relative require resolution
 		let resolved = ruby_lang.resolve_import("./lib/utils", "main.rb", &all_files);
@@ -608,6 +619,7 @@ def _private_function():
 			"lib/utils.sh".to_string(),
 			"config/settings.sh".to_string(),
 		];
+		let all_files = crate::indexer::languages::resolution_utils::FileRegistry::new(&all_files);
 
 		// Test relative source resolution
 		let resolved = bash_lang.resolve_import("./lib/utils.sh", "main.sh", &all_files);
@@ -636,6 +648,7 @@ def _private_function():
 			"src/components/Button.svelte".to_string(),
 			"src/utils.js".to_string(),
 		];
+		let all_files = crate::indexer::languages::resolution_utils::FileRegistry::new(&all_files);
 
 		// Test relative component import
 		let resolved =
@@ -665,6 +678,7 @@ def _private_function():
 			"styles/components.css".to_string(),
 			"styles/base.css".to_string(),
 		];
+		let all_files = crate::indexer::languages::resolution_utils::FileRegistry::new(&all_files);
 
 		// Test CSS @import resolution
 		let resolved = css_lang.resolve_import("./components.css", "styles/main.css", &all_files);
@@ -795,6 +809,7 @@ def _private_function():
 			"lib/external/library.h".to_string(),
 			"src/modules/core.cpp".to_string(),
 		];
+		let files = crate::indexer::languages::resolution_utils::FileRegistry::new(&files);
 
 		// Test local include in same directory
 		let resolved = lang_impl.resolve_import("\"helper.h\"", "src/main.cpp", &files);
@@ -827,6 +842,7 @@ def _private_function():
 			"app/models/user.rb".to_string(),
 			"vendor/gems/external_gem/lib/external.rb".to_string(),
 		];
+		let files = crate::indexer::languages::resolution_utils::FileRegistry::new(&files);
 
 		// Test require_relative
 		let resolved =
@@ -854,6 +870,7 @@ def _private_function():
 			"node_modules/bootstrap/dist/css/bootstrap.css".to_string(),
 			"assets/fonts/custom.css".to_string(),
 		];
+		let files = crate::indexer::languages::resolution_utils::FileRegistry::new(&files);
 
 		// Test relative import with extension
 		let resolved =
@@ -886,6 +903,7 @@ def _private_function():
 			"src/utils/helper.rs".to_string(),
 			"src/config/mod.rs".to_string(),
 		];
+		let files = crate::indexer::languages::resolution_utils::FileRegistry::new(&files);
 
 		let resolved = lang_impl.resolve_import("crate::utils::helper", "src/main.rs", &files);
 		assert!(
@@ -910,6 +928,7 @@ def _private_function():
 			files.push(format!("src/module_{}.js", i));
 		}
 		files.push("src/utils/helper.js".to_string());
+		let files = crate::indexer::languages::resolution_utils::FileRegistry::new(&files);
 
 		let start = std::time::Instant::now();
 		let resolved = lang_impl.resolve_import("./utils/helper", "src/main.js", &files);
@@ -931,6 +950,7 @@ def _private_function():
 		let lang_impl = get_language("python").expect("Python language should be available");
 
 		let files = vec!["src/main.py".to_string(), "src/utils.py".to_string()];
+		let files = crate::indexer::languages::resolution_utils::FileRegistry::new(&files);
 
 		// Test empty import
 		let resolved = lang_impl.resolve_import("", "src/main.py", &files);

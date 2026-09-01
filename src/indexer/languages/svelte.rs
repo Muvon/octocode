@@ -335,7 +335,7 @@ impl Language for Svelte {
 		&self,
 		import_path: &str,
 		source_file: &str,
-		all_files: &[String],
+		all_files: &super::resolution_utils::FileRegistry,
 	) -> Option<String> {
 		// Svelte uses JavaScript import resolution
 		let js = super::javascript::JavaScript {};

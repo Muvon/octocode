@@ -58,6 +58,23 @@ impl Language for TypeScript {
 		]
 	}
 
+	fn is_meaningful_node(&self, node: Node, _contents: &str) -> bool {
+		if node.kind() == "export_statement" {
+			// Mirror class_declaration's own exclusion (see the comment in
+			// get_meaningful_kinds): an exported class must not collapse into
+			// one oversized block either. Falling through to "not meaningful"
+			// here makes the walker descend into the wrapped
+			// class_declaration (itself already excluded from
+			// meaningful_kinds), reaching its method_definition children —
+			// exactly like a non-exported class already works.
+			let wraps_class = node
+				.child_by_field_name("declaration")
+				.is_some_and(|d| d.kind() == "class_declaration");
+			return !wraps_class;
+		}
+		true
+	}
+
 	fn extract_declaration_name(&self, node: Node, contents: &str) -> Option<String> {
 		if node.kind() == "arrow_function" {
 			let parent = node.parent()?;
@@ -314,11 +331,11 @@ impl Language for TypeScript {
 		&self,
 		import_path: &str,
 		source_file: &str,
-		all_files: &[String],
+		all_files: &super::resolution_utils::FileRegistry,
 	) -> Option<String> {
-		use super::resolution_utils::{resolve_relative_path, FileRegistry};
+		use super::resolution_utils::resolve_relative_path;
 
-		let registry = FileRegistry::new(all_files);
+		let registry = all_files;
 
 		if import_path.starts_with("./") || import_path.starts_with("../") {
 			// Relative import - handle TypeScript-specific extensions with enhanced matching

@@ -59,6 +59,7 @@ impl RelationshipDiscovery {
 			.map(|node| (node.path.clone(), node))
 			.collect();
 		let all_files: Vec<String> = all_nodes.iter().map(|node| node.path.clone()).collect();
+		let registry = crate::indexer::languages::resolution_utils::FileRegistry::new(&all_files);
 
 		for source_file in new_files {
 			let imported_node_ids: std::collections::HashSet<&str> =
@@ -68,7 +69,7 @@ impl RelationshipDiscovery {
 							.imports
 							.iter()
 							.filter_map(|import| {
-								language.resolve_import(import, &source_file.path, &all_files)
+								language.resolve_import(import, &source_file.path, &registry)
 							})
 							.filter_map(|path| file_map.get(&path).map(|node| node.id.as_str()))
 							.collect()
@@ -128,7 +129,7 @@ impl RelationshipDiscovery {
 				source_file,
 				all_nodes,
 				&file_map,
-				&all_files,
+				&registry,
 				&mut relationships,
 			);
 
@@ -315,11 +316,11 @@ impl RelationshipDiscovery {
 		source_file: &CodeNode,
 		all_nodes: &[CodeNode],
 		file_map: &std::collections::HashMap<String, &CodeNode>,
-		all_files: &[String],
+		registry: &crate::indexer::languages::resolution_utils::FileRegistry,
 		relationships: &mut Vec<CodeRelationship>,
 	) {
 		// First, resolve imports to create semantic relationships (shared maps).
-		Self::resolve_import_relationships(source_file, file_map, all_files, relationships);
+		Self::resolve_import_relationships(source_file, file_map, registry, relationships);
 
 		// Then add language-specific patterns as fallback
 		match source_file.language.as_str() {
@@ -356,7 +357,8 @@ impl RelationshipDiscovery {
 			.map(|node| (node.path.clone(), node))
 			.collect();
 		let all_files: Vec<String> = all_nodes.iter().map(|node| node.path.clone()).collect();
-		Self::resolve_import_relationships(source_file, &file_map, &all_files, relationships);
+		let registry = crate::indexer::languages::resolution_utils::FileRegistry::new(&all_files);
+		Self::resolve_import_relationships(source_file, &file_map, &registry, relationships);
 	}
 
 	// Import resolution against pre-built lookup maps, shared across source files
@@ -364,7 +366,7 @@ impl RelationshipDiscovery {
 	fn resolve_import_relationships(
 		source_file: &CodeNode,
 		file_map: &std::collections::HashMap<String, &CodeNode>,
-		all_files: &[String],
+		registry: &crate::indexer::languages::resolution_utils::FileRegistry,
 		relationships: &mut Vec<CodeRelationship>,
 	) {
 		// Get language implementation for import resolution
@@ -372,7 +374,7 @@ impl RelationshipDiscovery {
 			// Resolve each import to create direct relationships
 			for import_path in &source_file.imports {
 				if let Some(resolved_path) =
-					lang_impl.resolve_import(import_path, &source_file.path, all_files)
+					lang_impl.resolve_import(import_path, &source_file.path, registry)
 				{
 					// Find the target node
 					if let Some(target_node) = file_map.get(&resolved_path) {

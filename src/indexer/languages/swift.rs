@@ -349,11 +349,9 @@ impl Language for Swift {
 		&self,
 		import_path: &str,
 		source_file: &str,
-		all_files: &[String],
+		all_files: &super::resolution_utils::FileRegistry,
 	) -> Option<String> {
-		use super::resolution_utils::FileRegistry;
-
-		let registry = FileRegistry::new(all_files);
+		let registry = all_files;
 		let swift_files = registry.get_files_with_extensions(&self.get_file_extensions());
 
 		if import_path.starts_with("./") || import_path.starts_with("../") {

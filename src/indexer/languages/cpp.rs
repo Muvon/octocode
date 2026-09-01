@@ -441,11 +441,9 @@ impl Language for Cpp {
 		&self,
 		import_path: &str,
 		source_file: &str,
-		all_files: &[String],
+		all_files: &super::resolution_utils::FileRegistry,
 	) -> Option<String> {
-		use super::resolution_utils::FileRegistry;
-
-		let registry = FileRegistry::new(all_files);
+		let registry = all_files;
 
 		if import_path.len() >= 2 && import_path.starts_with('"') && import_path.ends_with('"') {
 			// Local include: #include "header.h"

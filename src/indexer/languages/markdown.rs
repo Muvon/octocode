@@ -109,14 +109,17 @@ impl Language for Markdown {
 		&self,
 		import_path: &str,
 		source_file: &str,
-		all_files: &[String],
+		all_files: &super::resolution_utils::FileRegistry,
 	) -> Option<String> {
 		use super::resolution_utils::resolve_relative_path;
 		use crate::utils::path::PathNormalizer;
 
 		let resolved = resolve_relative_path(source_file, import_path)?;
-		PathNormalizer::find_path_in_collection(&resolved.to_string_lossy(), all_files)
-			.map(str::to_string)
+		PathNormalizer::find_path_in_collection(
+			&resolved.to_string_lossy(),
+			all_files.get_all_files(),
+		)
+		.map(str::to_string)
 	}
 
 	fn get_file_extensions(&self) -> Vec<&'static str> {
@@ -163,6 +166,7 @@ Long extension is kept: [Long](./manual.markdown)
 			"core-architecture/pool.md".to_string(),
 			"introduction/adapters.md".to_string(),
 		];
+		let all_files = super::super::resolution_utils::FileRegistry::new(&all_files);
 
 		// Relative link: introduction/credit-accounts.md → ../core-architecture/credit-suite.md
 		let resolved = md.resolve_import(
@@ -201,6 +205,7 @@ Long extension is kept: [Long](./manual.markdown)
 			"projects/gearbox/autodocs-about/docs/core-architecture/pool.md".to_string(),
 			"projects/gearbox/autodocs-about/docs/introduction/credit-accounts.md".to_string(),
 		];
+		let all_files = super::super::resolution_utils::FileRegistry::new(&all_files);
 
 		// adapters-integrations.md links to credit-suite.md (same dir)
 		let resolved = md.resolve_import(

@@ -382,7 +382,7 @@ impl Language for Java {
 		&self,
 		import_path: &str,
 		_current_file: &str,
-		java_files: &[String],
+		java_files: &super::resolution_utils::FileRegistry,
 	) -> Option<String> {
 		// Wildcard imports (e.g. java.util.*) cannot resolve to a single file
 		if import_path.ends_with('*') {
@@ -392,7 +392,11 @@ impl Language for Java {
 		if import_path.contains('.') {
 			let candidate = format!("{}.java", import_path.replace('.', "/"));
 			// Only return if the file actually exists in the project
-			return java_files.iter().find(|f| f.ends_with(&candidate)).cloned();
+			return java_files
+				.get_all_files()
+				.iter()
+				.find(|f| f.ends_with(&candidate))
+				.cloned();
 		}
 		None
 	}

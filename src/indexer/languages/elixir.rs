@@ -18,6 +18,7 @@
 //! as ordinary `call` nodes. This implementation classifies those calls by
 //! their target instead of treating every invocation as a declaration.
 
+use crate::indexer::code_region_extractor::{extract_meaningful_regions, CodeRegion};
 use crate::indexer::languages::{CallTarget, Language, TypeRelationKind};
 use tree_sitter::Node;
 
@@ -92,6 +93,27 @@ impl Language for Elixir {
 
 	fn is_signature_node(&self, node: Node, contents: &str) -> bool {
 		call_macro_name(node, contents).is_some_and(|name| is_definition_macro(&name))
+	}
+
+	fn expand_meaningful_node(&self, node: Node, contents: &str) -> Option<Vec<CodeRegion>> {
+		// A meaningful call-with-do-block (e.g. ExUnit `describe "x" do ...
+		// end` or a Phoenix `scope "/api", W do ... end`) can wrap other
+		// meaningful calls (`test`, `get`, `post`, ...). Recurse into its
+		// children looking for those first; is_meaningful_node already
+		// excludes ordinary calls (`Repo.get`, `assert`, ...), so this never
+		// turns plain expressions into their own regions. Returning None
+		// when nothing nested qualifies falls back to the normal path, which
+		// keeps the whole call as one region exactly as before (e.g. a `def`
+		// with an ordinary body, or a `test` with no nested block).
+		if node.kind() != "call" || !self.is_meaningful_node(node, contents) {
+			return None;
+		}
+		let mut sub_regions = Vec::new();
+		let mut cursor = node.walk();
+		for child in node.children(&mut cursor) {
+			extract_meaningful_regions(child, contents, self, &mut sub_regions);
+		}
+		(!sub_regions.is_empty()).then_some(sub_regions)
 	}
 
 	fn get_symbol_kinds(&self) -> Vec<&'static str> {
@@ -301,11 +323,11 @@ impl Language for Elixir {
 		&self,
 		import_path: &str,
 		source_file: &str,
-		all_files: &[String],
+		all_files: &super::resolution_utils::FileRegistry,
 	) -> Option<String> {
-		use super::resolution_utils::{resolve_relative_path, FileRegistry};
+		use super::resolution_utils::resolve_relative_path;
 
-		let registry = FileRegistry::new(all_files);
+		let registry = all_files;
 		if import_path.starts_with("./") || import_path.starts_with("../") {
 			let path = resolve_relative_path(source_file, import_path)?;
 			return registry.find_file_with_extensions(&path, &self.get_file_extensions());

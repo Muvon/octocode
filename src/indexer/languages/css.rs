@@ -181,12 +181,12 @@ impl Language for Css {
 		&self,
 		import_path: &str,
 		source_file: &str,
-		all_files: &[String],
+		all_files: &super::resolution_utils::FileRegistry,
 	) -> Option<String> {
-		use super::resolution_utils::{resolve_relative_path, FileRegistry};
+		use super::resolution_utils::resolve_relative_path;
 		use crate::utils::path::PathNormalizer;
 
-		let registry = FileRegistry::new(all_files);
+		let registry = all_files;
 
 		if import_path.starts_with("./") || import_path.starts_with("../") {
 			// Relative CSS import
@@ -194,9 +194,10 @@ impl Language for Css {
 				let relative_path_str =
 					PathNormalizer::normalize_separators(&relative_path.to_string_lossy());
 				// Check exact match first using cross-platform comparison
-				if let Some(found) =
-					PathNormalizer::find_path_in_collection(&relative_path_str, all_files)
-				{
+				if let Some(found) = PathNormalizer::find_path_in_collection(
+					&relative_path_str,
+					registry.get_all_files(),
+				) {
 					return Some(found.to_string());
 				}
 				// Try without extension and add CSS extensions
@@ -212,9 +213,10 @@ impl Language for Css {
 				let target_path_str =
 					PathNormalizer::normalize_separators(&target_path.to_string_lossy());
 				// Use cross-platform path comparison
-				if let Some(found) =
-					PathNormalizer::find_path_in_collection(&target_path_str, all_files)
-				{
+				if let Some(found) = PathNormalizer::find_path_in_collection(
+					&target_path_str,
+					registry.get_all_files(),
+				) {
 					return Some(found.to_string());
 				}
 			}

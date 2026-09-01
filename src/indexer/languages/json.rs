@@ -32,6 +32,16 @@ impl Language for Json {
 		vec!["object", "array"]
 	}
 
+	fn descend_first_kinds(&self) -> Vec<&'static str> {
+		// tree-sitter-json's document is a single top-level value, so without
+		// this an entire file's object/array becomes one oversized region.
+		// Descending finds nested object/array values first, falling back to
+		// the whole node only when it has none (e.g. a flat object with only
+		// scalar values — that case is a known, accepted gap: a flat file
+		// with thousands of scalar keys still becomes one region).
+		vec!["object", "array"]
+	}
+
 	fn extract_symbols(&self, node: Node, contents: &str) -> Vec<String> {
 		let mut symbols = Vec::new();
 
@@ -122,7 +132,7 @@ impl Language for Json {
 		&self,
 		_import_path: &str,
 		_source_file: &str,
-		_all_files: &[String],
+		_all_files: &super::resolution_utils::FileRegistry,
 	) -> Option<String> {
 		// JSON doesn't have imports
 		None

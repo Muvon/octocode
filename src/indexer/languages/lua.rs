@@ -213,11 +213,11 @@ impl Language for Lua {
 		&self,
 		import_path: &str,
 		source_file: &str,
-		all_files: &[String],
+		all_files: &crate::indexer::languages::resolution_utils::FileRegistry,
 	) -> Option<String> {
-		use crate::indexer::languages::resolution_utils::{resolve_relative_path, FileRegistry};
+		use crate::indexer::languages::resolution_utils::resolve_relative_path;
 
-		let registry = FileRegistry::new(all_files);
+		let registry = all_files;
 		let base_dir = std::path::Path::new(source_file).parent()?;
 
 		// Handle relative imports (e.g., require("./module") or require("../utils")).

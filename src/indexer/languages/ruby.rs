@@ -14,6 +14,7 @@
 
 //! Ruby language implementation for the indexer
 
+use crate::indexer::code_region_extractor::{extract_meaningful_regions, CodeRegion};
 use crate::indexer::languages::Language;
 use tree_sitter::Node;
 
@@ -33,6 +34,35 @@ impl Language for Ruby {
 		// collapse into a single chunk. Methods inside them are captured individually
 		// as `method`/`singleton_method` via recursion. `call` stays for require/load statements.
 		vec!["method", "singleton_method", "call"]
+	}
+
+	fn expand_meaningful_node(&self, node: Node, contents: &str) -> Option<Vec<CodeRegion>> {
+		// A DSL `call` with a do/end or {} block (e.g. RSpec `describe "x" do
+		// ... end`) can wrap other block-taking calls (`it`, `context`, ...).
+		// `is_meaningful_node` is never false for `call` in Ruby (unlike
+		// Elixir), so gate on the block itself instead: only a call that has
+		// one is a candidate, and only OTHER block-taking calls found inside
+		// it count as nested content — a plain call reached along the way
+		// (e.g. `expect(x).to eq(1)`) is left alone rather than promoted to
+		// its own region, so it stays folded into whichever block/region
+		// already contains it. Returning None when no nested block-call is
+		// found falls back to capturing the whole call as one region, e.g. a
+		// plain `it("a") { ... }` with no further nested blocks, or a call
+		// with no block at all (`puts x`, `require 'foo'`).
+		if node.kind() != "call" {
+			return None;
+		}
+		let block = node.child_by_field_name("block")?;
+		let mut nested_calls = Vec::new();
+		collect_block_calls(block, &mut nested_calls);
+		if nested_calls.is_empty() {
+			return None;
+		}
+		let mut sub_regions = Vec::new();
+		for call in nested_calls {
+			extract_meaningful_regions(call, contents, self, &mut sub_regions);
+		}
+		(!sub_regions.is_empty()).then_some(sub_regions)
 	}
 
 	fn get_symbol_kinds(&self) -> Vec<&'static str> {
@@ -249,11 +279,9 @@ impl Language for Ruby {
 		&self,
 		import_path: &str,
 		source_file: &str,
-		all_files: &[String],
+		all_files: &super::resolution_utils::FileRegistry,
 	) -> Option<String> {
-		use super::resolution_utils::FileRegistry;
-
-		let registry = FileRegistry::new(all_files);
+		let registry = all_files;
 
 		if import_path.starts_with("relative:") {
 			// require_relative import
@@ -270,6 +298,22 @@ impl Language for Ruby {
 
 	fn get_file_extensions(&self) -> Vec<&'static str> {
 		vec!["rb"]
+	}
+}
+
+/// Recursively collect `call` nodes that themselves have a block, without
+/// treating a plain (blockless) call's own arguments as a place more such
+/// calls could legitimately live. This is what lets `expand_meaningful_node`
+/// recurse into a DSL wrapper's (`describe`/`context`) nested block-taking
+/// calls while leaving ordinary calls found along the way untouched.
+fn collect_block_calls<'a>(node: Node<'a>, out: &mut Vec<Node<'a>>) {
+	let mut cursor = node.walk();
+	for child in node.children(&mut cursor) {
+		if child.kind() == "call" && child.child_by_field_name("block").is_some() {
+			out.push(child);
+		} else {
+			collect_block_calls(child, out);
+		}
 	}
 }
 

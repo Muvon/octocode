@@ -680,6 +680,7 @@ impl SymbolIndex {
 pub fn discover_symbol_relationships(new_files: &[SymbolFileData]) -> Vec<CodeRelationship> {
 	let index = SymbolIndex::build(new_files);
 	let all_files: Vec<String> = new_files.iter().map(|file| file.path.clone()).collect();
+	let registry = languages::resolution_utils::FileRegistry::new(&all_files);
 
 	let mut relationships = Vec::new();
 
@@ -697,7 +698,7 @@ pub fn discover_symbol_relationships(new_files: &[SymbolFileData]) -> Vec<CodeRe
 			.iter()
 			.filter_map(|import| {
 				lang_impl
-					.resolve_import(import, &source_file.path, &all_files)
+					.resolve_import(import, &source_file.path, &registry)
 					.map(|path| (import.clone(), path))
 			})
 			.collect();
@@ -706,7 +707,7 @@ pub fn discover_symbol_relationships(new_files: &[SymbolFileData]) -> Vec<CodeRe
 			.iter()
 			.filter_map(|binding| {
 				lang_impl
-					.resolve_import(&binding.import_path, &source_file.path, &all_files)
+					.resolve_import(&binding.import_path, &source_file.path, &registry)
 					.map(|path| (binding.clone(), path))
 			})
 			.collect();

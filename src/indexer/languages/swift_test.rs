@@ -523,6 +523,7 @@ func test() {
 			// Path that ./Models/User resolves to from Services/
 			"Sources/App/Services/Models/User.swift".to_string(),
 		];
+		let all_files = languages::resolution_utils::FileRegistry::new(&all_files);
 
 		// Relative import from UserService.swift
 		let result = lang.resolve_import(
@@ -545,6 +546,7 @@ func test() {
 			"Sources/Models/Post.swift".to_string(),
 			"Sources/Services/AuthService.swift".to_string(),
 		];
+		let all_files = languages::resolution_utils::FileRegistry::new(&all_files);
 
 		// Module-level import "Models" — should find a file in Models directory
 		let result = lang.resolve_import("Models", "Sources/main.swift", &all_files);

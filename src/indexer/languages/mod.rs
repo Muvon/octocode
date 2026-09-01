@@ -29,7 +29,11 @@ mod elixir_test;
 mod go;
 mod java;
 mod javascript;
+#[cfg(test)]
+mod javascript_test;
 mod json;
+#[cfg(test)]
+mod json_test;
 mod lua;
 mod markdown;
 mod php;
@@ -38,7 +42,11 @@ mod php_test;
 mod python;
 pub mod resolution_utils;
 mod ruby;
+#[cfg(test)]
+mod ruby_test;
 mod rust;
+#[cfg(test)]
+mod rust_test;
 mod svelte;
 #[cfg(test)]
 mod svelte_test;
@@ -46,6 +54,8 @@ mod swift;
 #[cfg(test)]
 mod swift_test;
 mod typescript;
+#[cfg(test)]
+mod typescript_test;
 
 // Re-export language modules
 pub use bash::Bash;
@@ -266,7 +276,7 @@ pub trait Language: Send + Sync {
 		&self,
 		import_path: &str,
 		source_file: &str,
-		all_files: &[String],
+		all_files: &resolution_utils::FileRegistry,
 	) -> Option<String>;
 
 	/// Get file extensions supported by this language

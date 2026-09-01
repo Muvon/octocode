@@ -42,6 +42,17 @@ impl Language for Rust {
 		]
 	}
 
+	fn descend_first_kinds(&self) -> Vec<&'static str> {
+		// `mod foo { ... }` and `trait Foo { ... default methods ... }` are
+		// containers whose bodies hold their own meaningful items
+		// (function_item/struct_item/etc, or default method function_items).
+		// Descend into them first so those nested items are chunked
+		// individually; fall back to the whole node only when nothing
+		// meaningful is found inside (a bodyless `mod foo;` or a
+		// signature-only trait).
+		vec!["mod_item", "trait_item"]
+	}
+
 	fn extract_symbols(&self, node: Node, contents: &str) -> Vec<String> {
 		let mut symbols = Vec::new();
 
@@ -299,11 +310,9 @@ impl Language for Rust {
 		&self,
 		import_path: &str,
 		source_file: &str,
-		all_files: &[String],
+		all_files: &super::resolution_utils::FileRegistry,
 	) -> Option<String> {
-		use super::resolution_utils::FileRegistry;
-
-		let registry = FileRegistry::new(all_files);
+		let registry = all_files;
 		let rust_files = registry.get_files_with_extensions(&self.get_file_extensions());
 
 		// Handle different Rust import patterns
