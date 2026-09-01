@@ -60,6 +60,31 @@ pub fn extract_meaningful_regions(
 	apply_smart_merging(candidate_regions, regions, lang_impl);
 }
 
+/// Recurses into a node's children, collecting meaningful regions from each.
+fn descend_children(
+	node: Node,
+	contents: &str,
+	lang_impl: &dyn languages::Language,
+	meaningful_kinds: &[&str],
+	regions: &mut Vec<CodeRegion>,
+) {
+	let mut cursor = node.walk();
+	if cursor.goto_first_child() {
+		loop {
+			collect_meaningful_regions_recursive(
+				cursor.node(),
+				contents,
+				lang_impl,
+				meaningful_kinds,
+				regions,
+			);
+			if !cursor.goto_next_sibling() {
+				break;
+			}
+		}
+	}
+}
+
 /// Recursively collects meaningful regions without merging
 fn collect_meaningful_regions_recursive(
 	node: Node,
@@ -70,7 +95,36 @@ fn collect_meaningful_regions_recursive(
 ) {
 	let node_kind = node.kind();
 
-	if meaningful_kinds.contains(&node_kind) && lang_impl.is_meaningful_node(node, contents) {
+	if meaningful_kinds.contains(&node_kind) {
+		// A language may replace this node outright with independently
+		// produced sub-regions (e.g. an embedded language's own extractor)
+		// instead of a single verbatim-text region.
+		if let Some(sub_regions) = lang_impl.expand_meaningful_node(node, contents) {
+			regions.extend(sub_regions);
+			return;
+		}
+
+		let is_meaningful = lang_impl.is_meaningful_node(node, contents);
+		let descend_first = lang_impl.descend_first_kinds().contains(&node_kind);
+
+		if descend_first {
+			// Look for smaller, independently-meaningful regions among the
+			// children before settling for this node as one big region.
+			let regions_before = regions.len();
+			descend_children(node, contents, lang_impl, meaningful_kinds, regions);
+			if regions.len() > regions_before {
+				return;
+			}
+			// Nothing meaningful found below — fall through to the single-
+			// region fallback so this node's content is never silently
+			// dropped, even if `is_meaningful_node` itself said no (e.g. a
+			// plain wrapper element with no directives and no meaningful
+			// descendants).
+		} else if !is_meaningful {
+			descend_children(node, contents, lang_impl, meaningful_kinds, regions);
+			return;
+		}
+
 		let (combined_content, start_line) = combine_with_preceding_comments(node, contents);
 		let end_line = node.end_position().row;
 		let symbols = lang_impl.extract_symbols(node, contents);
@@ -96,21 +150,7 @@ fn collect_meaningful_regions_recursive(
 		return;
 	}
 
-	let mut cursor = node.walk();
-	if cursor.goto_first_child() {
-		loop {
-			collect_meaningful_regions_recursive(
-				cursor.node(),
-				contents,
-				lang_impl,
-				meaningful_kinds,
-				regions,
-			);
-			if !cursor.goto_next_sibling() {
-				break;
-			}
-		}
-	}
+	descend_children(node, contents, lang_impl, meaningful_kinds, regions);
 }
 
 /// Applies smart merging logic to consolidate single-line declarations

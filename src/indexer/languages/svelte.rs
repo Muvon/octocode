@@ -14,6 +14,7 @@
 
 //! Svelte language implementation for the indexer
 
+use crate::indexer::code_region_extractor::{extract_meaningful_regions, CodeRegion};
 use crate::indexer::languages::Language;
 use tree_sitter::Node;
 
@@ -88,6 +89,85 @@ impl Language for Svelte {
 		// `extract_embedded_sources`; Svelte HTML/style container nodes are not
 		// callable code symbols.
 		Vec::new()
+	}
+
+	fn is_meaningful_node(&self, node: Node, contents: &str) -> bool {
+		match node.kind() {
+			// Plain wrapper elements (no event/binding directive, not a
+			// component) carry no code of their own; `descend_first_kinds`
+			// still gives them a fallback region if nothing meaningful is
+			// found beneath them, so returning false here just skips
+			// treating an uninteresting wrapper as the region on its own.
+			"element" => self.element_is_meaningful(node, contents),
+			_ => true,
+		}
+	}
+
+	fn descend_first_kinds(&self) -> Vec<&'static str> {
+		// Look inside an element's children for smaller, independently
+		// meaningful regions (nested components/directives) before falling
+		// back to treating the whole element as one region.
+		vec!["element"]
+	}
+
+	fn expand_meaningful_node(&self, node: Node, contents: &str) -> Option<Vec<CodeRegion>> {
+		let lang_name = match node.kind() {
+			"script_element" => {
+				let script_text = node.utf8_text(contents.as_bytes()).unwrap_or_default();
+				if script_text.contains("lang=\"ts\"")
+					|| script_text.contains("lang='ts'")
+					|| script_text.contains("lang=\"typescript\"")
+				{
+					"typescript"
+				} else {
+					"javascript"
+				}
+			}
+			"style_element" => "css",
+			_ => return None,
+		};
+
+		let Some(raw_text) = node
+			.children(&mut node.walk())
+			.find(|child| child.kind() == "raw_text")
+		else {
+			return Some(Vec::new());
+		};
+		let embedded_text = raw_text.utf8_text(contents.as_bytes()).unwrap_or_default();
+		if embedded_text.trim().is_empty() {
+			return Some(Vec::new());
+		}
+
+		let Some(embedded_lang) = super::get_language(lang_name) else {
+			return Some(Vec::new());
+		};
+
+		let mut parser = tree_sitter::Parser::new();
+		if parser
+			.set_language(&embedded_lang.get_ts_language())
+			.is_err()
+		{
+			return Some(Vec::new());
+		}
+		let Some(tree) = parser.parse(embedded_text, None) else {
+			return Some(Vec::new());
+		};
+
+		let mut sub_regions = Vec::new();
+		extract_meaningful_regions(
+			tree.root_node(),
+			embedded_text,
+			embedded_lang.as_ref(),
+			&mut sub_regions,
+		);
+
+		let line_offset = raw_text.start_position().row;
+		for region in &mut sub_regions {
+			region.start_line += line_offset;
+			region.end_line += line_offset;
+		}
+
+		Some(sub_regions)
 	}
 
 	fn extract_symbols(&self, node: Node, contents: &str) -> Vec<String> {
@@ -301,6 +381,15 @@ impl Svelte {
 		}
 	}
 
+	/// Whether an element's own start tag has a directive attribute
+	/// (`on:`/`bind:`/`use:`/`transition:`) or is a component (capitalized
+	/// tag name). Does not look at nested elements.
+	fn element_is_meaningful(&self, node: Node, contents: &str) -> bool {
+		let mut symbols = Vec::new();
+		self.extract_meaningful_element_symbols(node, contents, &mut symbols);
+		!symbols.is_empty()
+	}
+
 	/// Extract symbols from meaningful Svelte elements (components, event handlers)
 	fn extract_meaningful_element_symbols(
 		&self,
@@ -341,16 +430,6 @@ impl Svelte {
 						}
 					}
 				}
-			}
-		}
-
-		// Recurse into child elements so nested components/directives (e.g. a
-		// <Button on:click> inside a plain wrapper <div>) are still captured —
-		// the top-level region walker doesn't revisit an "element" node's
-		// children once it has already matched a meaningful region here.
-		for child in node.children(&mut node.walk()) {
-			if child.kind() == "element" {
-				self.extract_meaningful_element_symbols(child, contents, symbols);
 			}
 		}
 	}

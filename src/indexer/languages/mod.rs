@@ -40,6 +40,8 @@ pub mod resolution_utils;
 mod ruby;
 mod rust;
 mod svelte;
+#[cfg(test)]
+mod svelte_test;
 mod swift;
 #[cfg(test)]
 mod swift_test;
@@ -111,6 +113,27 @@ pub trait Language: Send + Sync {
 	fn is_meaningful_node(&self, node: Node, contents: &str) -> bool {
 		let _ = (node, contents);
 		true
+	}
+
+	/// Node kinds (subset of `get_meaningful_kinds()`) for which a match should
+	/// not immediately end the region walk — children are explored first for
+	/// smaller, independently-meaningful regions; the matched node is kept as
+	/// one region only as a fallback when that search finds nothing.
+	fn descend_first_kinds(&self) -> Vec<&'static str> {
+		Vec::new()
+	}
+
+	/// Lets a language replace a single matched node with a set of
+	/// independently-produced sub-regions (e.g. delegating an embedded
+	/// language's raw text to that language's own extractor) instead of one
+	/// verbatim-text region.
+	fn expand_meaningful_node(
+		&self,
+		node: Node,
+		contents: &str,
+	) -> Option<Vec<crate::indexer::code_region_extractor::CodeRegion>> {
+		let _ = (node, contents);
+		None
 	}
 
 	/// Whether a candidate node should appear in signature views. Defaults to
