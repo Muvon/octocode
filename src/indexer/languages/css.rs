@@ -42,6 +42,15 @@ impl Language for Css {
 		]
 	}
 
+	fn descend_first_kinds(&self) -> Vec<&'static str> {
+		// `@layer`/`@container`/`@media` blocks can hold arbitrary nested
+		// rule_set/at_rule/media_statement (already meaningful) inside their
+		// `block` child. Descend first so those nested rules are chunked
+		// individually; fall back to the whole node for a leaf at-rule with
+		// only declarations (e.g. `@font-face { font-family: ...; }`).
+		vec!["at_rule", "media_statement"]
+	}
+
 	fn extract_symbols(&self, node: Node, contents: &str) -> Vec<String> {
 		let mut symbols = Vec::new();
 

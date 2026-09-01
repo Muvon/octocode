@@ -391,3 +391,85 @@ fn test_php_meaningful_kinds_excludes_class() {
 		"✅ PHP meaningful_kinds configuration verified - class_declaration properly excluded"
 	);
 }
+
+#[test]
+fn test_braced_namespace_splits_into_individual_functions() {
+	// Non-trivial content so the smart single-line merge pass doesn't recombine them.
+	let php_code = r#"<?php
+
+namespace Foo {
+    function f() {
+        $x = 1;
+        $y = 2;
+        $z = $x + $y;
+        return $z;
+    }
+    function g() {
+        $a = 10;
+        $b = 20;
+        $c = $a * $b;
+        return $c;
+    }
+}
+"#;
+
+	let php_lang = Php {};
+	let mut parser = Parser::new();
+	parser.set_language(&php_lang.get_ts_language()).unwrap();
+
+	let tree = parser.parse(php_code, None).unwrap();
+	let mut regions = Vec::new();
+	extract_meaningful_regions(tree.root_node(), php_code, &php_lang, &mut regions);
+
+	let namespace_regions: Vec<_> = regions
+		.iter()
+		.filter(|r| r.node_kind == "namespace_definition")
+		.collect();
+	assert_eq!(
+		namespace_regions.len(),
+		0,
+		"braced namespace with functions inside should not collapse into one region, got {:?}",
+		regions.iter().map(|r| &r.node_kind).collect::<Vec<_>>()
+	);
+
+	let function_regions: Vec<_> = regions
+		.iter()
+		.filter(|r| r.node_kind == "function_definition")
+		.collect();
+	assert_eq!(
+		function_regions.len(),
+		2,
+		"expected a region per function inside braced namespace"
+	);
+}
+
+#[test]
+fn test_unbraced_namespace_stays_single_region() {
+	let php_code = r#"<?php
+
+namespace Foo\Bar;
+
+function standalone() {
+    return 1;
+}
+"#;
+
+	let php_lang = Php {};
+	let mut parser = Parser::new();
+	parser.set_language(&php_lang.get_ts_language()).unwrap();
+
+	let tree = parser.parse(php_code, None).unwrap();
+	let mut regions = Vec::new();
+	extract_meaningful_regions(tree.root_node(), php_code, &php_lang, &mut regions);
+
+	let namespace_regions: Vec<_> = regions
+		.iter()
+		.filter(|r| r.node_kind == "namespace_definition")
+		.collect();
+	assert_eq!(
+		namespace_regions.len(),
+		1,
+		"unbraced namespace declaration should remain its own single region unchanged, got {:?}",
+		regions.iter().map(|r| &r.node_kind).collect::<Vec<_>>()
+	);
+}

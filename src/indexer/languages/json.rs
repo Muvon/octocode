@@ -69,7 +69,9 @@ impl Language for Json {
 				if let Ok(text) = node.utf8_text(contents.as_bytes()) {
 					// Strip the quotes from the string
 					let t = text.trim_matches('"').trim();
-					if !t.is_empty() && !symbols.iter().any(|s| s.as_str() == t) {
+					// Dedup happens once in extract_symbols via sort+dedup on
+					// the full result, so no need to scan on every push here.
+					if !t.is_empty() {
 						symbols.push(t.to_string());
 					}
 				}
@@ -157,7 +159,9 @@ impl Json {
 						if let Ok(text) = key_node.utf8_text(contents.as_bytes()) {
 							// Strip the quotes from the string
 							let t = text.trim_matches('"').trim();
-							if !t.is_empty() && !symbols.iter().any(|s| s.as_str() == t) {
+							// Dedup happens once in extract_symbols via sort+dedup on
+							// the full result, so no need to scan on every push here.
+							if !t.is_empty() {
 								symbols.push(t.to_string());
 							}
 						}

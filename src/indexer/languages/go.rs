@@ -14,6 +14,7 @@
 
 //! Go language implementation for the indexer
 
+use crate::indexer::code_region_extractor::{combine_with_preceding_comments, CodeRegion};
 use crate::indexer::languages::Language;
 use tree_sitter::Node;
 
@@ -37,6 +38,57 @@ impl Language for Go {
 			"var_declaration",
 			"import_declaration",
 		]
+	}
+
+	fn expand_meaningful_node(&self, node: Node, contents: &str) -> Option<Vec<CodeRegion>> {
+		// The grouped form (`const ( A = 1\nB = 2\n)`) wraps an unbounded
+		// repeat() of spec children in ONE node — a real generated file can
+		// have thousands in one node. The ungrouped single-declaration form
+		// (`const X = 1`) produces exactly one spec child in the SAME node
+		// kind, so splitting unconditionally would strip the `const`/`var`/
+		// `type` keyword prefix from the overwhelmingly common case. Only
+		// split when there is more than one spec child.
+		let spec_kind = match node.kind() {
+			"const_declaration" => "const_spec",
+			"var_declaration" => "var_spec",
+			"type_declaration" => "type_spec",
+			_ => return None,
+		};
+		// Grouped `var (...)` wraps its specs one level deeper in a
+		// var_spec_list node; const_spec/type_spec are direct children either way.
+		let spec_container = node
+			.children(&mut node.walk())
+			.find(|c| c.kind() == "var_spec_list")
+			.unwrap_or(node);
+		let specs: Vec<Node> = spec_container
+			.children(&mut spec_container.walk())
+			.filter(|c| c.kind() == spec_kind)
+			.collect();
+		if specs.len() <= 1 {
+			// Ungrouped single-declaration form: keep today's behavior of one
+			// region including the const/var/type keyword.
+			return None;
+		}
+		let mut sub_regions = Vec::new();
+		for spec in specs {
+			let (content, start_line) = combine_with_preceding_comments(spec, contents, None);
+			if content.trim().is_empty() {
+				continue;
+			}
+			let mut symbols = self.extract_symbols(spec, contents);
+			if symbols.is_empty() {
+				symbols.push(format!("{}_{}", spec.kind(), start_line));
+			}
+			sub_regions.push(CodeRegion {
+				content,
+				symbols,
+				start_line,
+				end_line: spec.end_position().row,
+				node_kind: spec.kind().to_string(),
+				node_id: spec.id(),
+			});
+		}
+		(!sub_regions.is_empty()).then_some(sub_regions)
 	}
 
 	fn get_symbol_kinds(&self) -> Vec<&'static str> {
@@ -86,6 +138,23 @@ impl Language for Go {
 			"struct_type" | "interface_type" => {
 				// Extract field names within structs or interfaces
 				self.extract_struct_interface_fields(node, contents, &mut symbols);
+			}
+			"const_spec" | "var_spec" => {
+				// A spec can declare several comma-separated names
+				// (`a, b = 1, 2`); each appears as its own direct "identifier"
+				// child rather than wrapped in a list node.
+				for child in node.children(&mut node.walk()) {
+					if child.kind() == "identifier" {
+						if let Ok(name) = child.utf8_text(contents.as_bytes()) {
+							symbols.push(name.to_string());
+						}
+					}
+				}
+			}
+			"type_spec" => {
+				if let Some(name) = super::extract_symbol_by_kind(node, contents, "identifier") {
+					symbols.push(name);
+				}
 			}
 			_ => self.extract_identifiers(node, contents, &mut symbols),
 		}

@@ -187,22 +187,33 @@ impl DocumentHierarchy {
 	}
 
 	pub fn build_parent_child_relationships(&mut self) {
+		// Stack of currently-open ancestor indices, strictly increasing by level.
+		// For each section, pop anything that can no longer be an ancestor
+		// (level >= current); the remaining top (if any) is the parent. This
+		// yields the same nearest-preceding-lower-level parent as the naive
+		// backward scan, but each section is pushed/popped at most once,
+		// making the whole pass O(n) instead of O(n^2).
+		let mut open_ancestors: Vec<usize> = Vec::new();
+
 		for i in 0..self.sections.len() {
 			let current_level = self.sections[i].level;
 
-			// Find parent (previous section with lower level)
-			for j in (0..i).rev() {
-				if self.sections[j].level < current_level {
-					self.sections[i].parent = Some(j);
-					self.sections[j].children.push(i);
+			while let Some(&top) = open_ancestors.last() {
+				if self.sections[top].level >= current_level {
+					open_ancestors.pop();
+				} else {
 					break;
 				}
 			}
 
-			// If no parent found, it's a root section
-			if self.sections[i].parent.is_none() {
+			if let Some(&parent_idx) = open_ancestors.last() {
+				self.sections[i].parent = Some(parent_idx);
+				self.sections[parent_idx].children.push(i);
+			} else {
 				self.root_sections.push(i);
 			}
+
+			open_ancestors.push(i);
 		}
 	}
 
@@ -263,13 +274,13 @@ impl DocumentHierarchy {
 		}
 	}
 
-	pub fn bottom_up_chunking(&self, base_chunk_size: usize) -> Vec<ChunkResult> {
+	pub fn bottom_up_chunking(&self, base_chunk_size: usize, overlap: usize) -> Vec<ChunkResult> {
 		let mut chunks = Vec::new();
 		let mut processed = vec![false; self.sections.len()];
 
 		// Process from deepest level to shallowest
 		for level in (1..=6).rev() {
-			self.process_level(level, &mut chunks, &mut processed, base_chunk_size);
+			self.process_level(level, &mut chunks, &mut processed, base_chunk_size, overlap);
 		}
 
 		self.post_process_tiny_chunks(chunks, base_chunk_size)
@@ -352,6 +363,7 @@ impl DocumentHierarchy {
 		chunks: &mut Vec<ChunkResult>,
 		processed: &mut Vec<bool>,
 		base_chunk_size: usize,
+		overlap: usize,
 	) {
 		let sections_at_level: Vec<usize> = self
 			.sections
@@ -395,9 +407,21 @@ impl DocumentHierarchy {
 				// Section is too large, process children separately
 				self.process_children_smartly(section_idx, chunks, processed, base_chunk_size);
 
-				// Create chunk for this section alone
-				let chunk = self.create_chunk_for_section(section_idx);
-				chunks.push(chunk);
+				if self.sections[section_idx].children.is_empty() {
+					// True leaf section (no sub-headings): process_children_smartly
+					// was a no-op, so this section's own oversized content would
+					// otherwise become a single unsplit chunk. Split it instead.
+					chunks.extend(self.split_oversized_leaf_section(
+						section_idx,
+						target_size,
+						overlap,
+					));
+				} else {
+					// Non-leaf: children already produced their own chunks above;
+					// this chunk covers only the section's own (pre-child) content.
+					let chunk = self.create_chunk_for_section(section_idx);
+					chunks.push(chunk);
+				}
 				processed[section_idx] = true;
 			}
 		}
@@ -575,6 +599,36 @@ impl DocumentHierarchy {
 		}
 	}
 
+	/// Split a leaf section's own oversized content into multiple chunks
+	/// using the shared text chunker, since it has no sub-headings to divide
+	/// the work for it. Line numbers from the chunker are 1-based within
+	/// `section.content`, so they're shifted by the section's own start line.
+	fn split_oversized_leaf_section(
+		&self,
+		section_idx: usize,
+		target_size: usize,
+		overlap: usize,
+	) -> Vec<ChunkResult> {
+		let section = &self.sections[section_idx];
+		let title = self.get_section_title(section_idx);
+
+		crate::indexer::text_processing::TextProcessor::chunk_text(
+			&section.content,
+			target_size,
+			overlap,
+		)
+		.into_iter()
+		.map(|piece| ChunkResult {
+			title: title.clone(),
+			storage_content: piece.content,
+			context: section.context.clone(),
+			level: section.level,
+			start_line: section.start_line + piece.start_line,
+			end_line: section.start_line + piece.end_line,
+		})
+		.collect()
+	}
+
 	// Note: collect_section_tree functions were part of old implementation, removed as unused
 
 	fn mark_section_tree_processed(&self, section_idx: usize, processed: &mut Vec<bool>) {
@@ -595,7 +649,8 @@ pub fn parse_markdown_content(
 	let hierarchy = parse_document_hierarchy(contents);
 
 	// Perform bottom-up chunking
-	let chunk_results = hierarchy.bottom_up_chunking(config.index.chunk_size);
+	let chunk_results =
+		hierarchy.bottom_up_chunking(config.index.chunk_size, config.index.chunk_overlap);
 
 	// Validate and repair chunks to ensure meaningful content
 	let mut valid_chunks = Vec::new();
@@ -1050,5 +1105,134 @@ Content here."#;
 
 		// Next sibling of H1 (index 0) should be None
 		assert_eq!(hierarchy.find_next_sibling(0), None);
+	}
+
+	#[test]
+	fn test_oversized_leaf_section_is_split_into_multiple_chunks() {
+		// A single `# Title` section with no sub-headings and a body well
+		// past the level-1 target chunk size (base_chunk_size * 2 = 4000
+		// chars by default) must be split, not pushed as one oversized chunk.
+		let mut body = String::new();
+		for i in 0..300 {
+			body.push_str(&format!(
+				"MARKER_{i:04} filler filler filler filler filler filler filler.\n"
+			));
+		}
+		let markdown = format!("# Title\n\n{body}");
+
+		let config = Config::load_from_template().expect("Failed to load config");
+		let blocks = parse_markdown_content(&markdown, "test.md", &config);
+
+		assert!(
+			blocks.len() > 1,
+			"oversized leaf section should be split into multiple chunks, got {}",
+			blocks.len()
+		);
+
+		// Every marker from the original content must survive in at least one
+		// chunk, and the first chunk containing it must be non-decreasing as
+		// markers advance — proving content isn't lost, reordered, or
+		// duplicated beyond the chunker's designed overlap.
+		let mut last_seen_block = 0usize;
+		for i in 0..300 {
+			let marker = format!("MARKER_{i:04}");
+			let found_block = blocks
+				.iter()
+				.position(|b| b.content.contains(&marker))
+				.unwrap_or_else(|| panic!("marker {marker} missing from all chunks"));
+			assert!(
+				found_block >= last_seen_block,
+				"marker {marker} appeared out of order (block {found_block} < {last_seen_block})"
+			);
+			last_seen_block = found_block;
+		}
+	}
+
+	#[test]
+	fn test_build_parent_child_relationships_mixed_nesting() {
+		// Hand-verified structure:
+		// 0:H1 -> 1:H2 -> 2:H3
+		//      \-> 3:H2 -> 4:H3 -> 5:H4
+		//               \-> 6:H3
+		// 7:H1 -> 8:H2
+		let markdown = r#"# H1-A
+content0
+
+## H2-A
+content1
+
+### H3-A
+content2
+
+## H2-B
+content3
+
+### H3-B
+content4
+
+#### H4-A
+content5
+
+### H3-C
+content6
+
+# H1-B
+content7
+
+## H2-C
+content8
+"#;
+
+		let hierarchy = parse_document_hierarchy(markdown);
+		assert_eq!(hierarchy.sections.len(), 9);
+
+		let expected_parents: [Option<usize>; 9] = [
+			None,
+			Some(0),
+			Some(1),
+			Some(0),
+			Some(3),
+			Some(4),
+			Some(3),
+			None,
+			Some(7),
+		];
+		for (i, expected) in expected_parents.iter().enumerate() {
+			assert_eq!(
+				hierarchy.sections[i].parent, *expected,
+				"unexpected parent for section {i}"
+			);
+		}
+
+		assert_eq!(hierarchy.sections[0].children, vec![1, 3]);
+		assert_eq!(hierarchy.sections[1].children, vec![2]);
+		assert_eq!(hierarchy.sections[3].children, vec![4, 6]);
+		assert_eq!(hierarchy.sections[4].children, vec![5]);
+		assert_eq!(hierarchy.sections[7].children, vec![8]);
+		assert_eq!(hierarchy.root_sections, vec![0, 7]);
+	}
+
+	#[test]
+	fn test_build_parent_child_relationships_flat_headers_large_n() {
+		// 600 top-level headers in a row: none should have a parent among
+		// each other, matching what the old O(n^2) backward-scan produced.
+		// Completing quickly here (rather than hanging) is evidence that
+		// build_parent_child_relationships is no longer quadratic.
+		let mut markdown = String::new();
+		for i in 0..600 {
+			markdown.push_str(&format!("# Header {i}\ncontent line {i}\n\n"));
+		}
+
+		let hierarchy = parse_document_hierarchy(&markdown);
+		assert_eq!(hierarchy.sections.len(), 600);
+
+		for section in &hierarchy.sections {
+			assert!(section.parent.is_none(), "flat headers must have no parent");
+			assert!(
+				section.children.is_empty(),
+				"flat headers must have no children"
+			);
+		}
+		assert_eq!(hierarchy.root_sections.len(), 600);
 	}
 }

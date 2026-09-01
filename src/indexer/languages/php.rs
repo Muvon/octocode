@@ -41,6 +41,16 @@ impl Language for Php {
 		]
 	}
 
+	fn descend_first_kinds(&self) -> Vec<&'static str> {
+		// The braced form (`namespace Foo { ... }`) holds function_definition/
+		// method_declaration (already meaningful) directly, and nested
+		// class_declaration (excluded) whose methods are reached via normal
+		// fallthrough recursion. Descend first so nested items are chunked
+		// individually; fall back to the whole node for the common unbraced
+		// `namespace X;` form, which has no meaningful children to find.
+		vec!["namespace_definition"]
+	}
+
 	fn get_symbol_kinds(&self) -> Vec<&'static str> {
 		// Symbol tier restores the type containers chunking excludes; drops
 		// namespace nodes (one per file, not a declared symbol).

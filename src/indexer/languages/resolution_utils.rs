@@ -28,6 +28,15 @@ pub struct FileRegistry {
 	files_by_extension: HashMap<String, Vec<String>>,
 	/// All files for general searches
 	all_files: Vec<String>,
+	/// Lazily-populated cache of each file's canonicalized path (or `None` if
+	/// canonicalize failed), keyed by the original path. Populated on first
+	/// use of `find_exact_file`'s canonicalize fallback rather than eagerly
+	/// at construction, since most lookups hit the fast path in
+	/// `PathNormalizer::find_path_in_collection` and never need it — but
+	/// `FileRegistry` is built once per indexing pass and reused across many
+	/// `resolve_import` calls, so a fallback that does hit this path would
+	/// otherwise re-run a `Path::canonicalize()` syscall per file on every call.
+	canonical_cache: std::sync::OnceLock<HashMap<String, Option<String>>>,
 }
 
 impl FileRegistry {
@@ -49,6 +58,7 @@ impl FileRegistry {
 		Self {
 			files_by_extension,
 			all_files: all_files.to_vec(),
+			canonical_cache: std::sync::OnceLock::new(),
 		}
 	}
 
@@ -92,47 +102,53 @@ impl FileRegistry {
 
 		// Try direct canonicalize only as fallback (for real files)
 		if let Ok(canonical_target) = std::path::Path::new(target_path).canonicalize() {
-			// Handle Windows UNC paths
-			let canonical_str = canonical_target.to_string_lossy();
-			let normalized_canonical = if canonical_str.starts_with("//?/") {
-				if let Some(drive_pos) = canonical_str.find(":/") {
-					if let Some(relative_part) = canonical_str.get(drive_pos + 2..) {
-						PathNormalizer::normalize_separators(relative_part)
-					} else {
-						PathNormalizer::normalize_separators(&canonical_str)
-					}
-				} else {
-					PathNormalizer::normalize_separators(&canonical_str)
-				}
-			} else {
-				PathNormalizer::normalize_separators(&canonical_str)
-			};
+			let normalized_canonical = Self::normalize_canonical_path(&canonical_target);
 
-			for file_path in &self.all_files {
-				if let Ok(canonical_file) = std::path::Path::new(file_path).canonicalize() {
-					let canonical_file_str = canonical_file.to_string_lossy();
-					let normalized_file = if canonical_file_str.starts_with("//?/") {
-						if let Some(drive_pos) = canonical_file_str.find(":/") {
-							if let Some(relative_part) = canonical_file_str.get(drive_pos + 2..) {
-								PathNormalizer::normalize_separators(relative_part)
-							} else {
-								PathNormalizer::normalize_separators(&canonical_file_str)
-							}
-						} else {
-							PathNormalizer::normalize_separators(&canonical_file_str)
-						}
-					} else {
-						PathNormalizer::normalize_separators(&canonical_file_str)
-					};
-
-					if normalized_canonical == normalized_file {
-						return Some(file_path.clone());
-					}
+			for (file_path, normalized_file) in self.canonical_files() {
+				if normalized_file.as_deref() == Some(normalized_canonical.as_str()) {
+					return Some(file_path.clone());
 				}
 			}
 		}
 
 		None
+	}
+
+	/// Each registry file's canonicalized-and-normalized path (or `None` if
+	/// canonicalize failed), computed once on first call and cached for the
+	/// lifetime of this `FileRegistry`. `find_exact_file`'s fallback runs this
+	/// per `resolve_import` call in the worst case, so without caching every
+	/// fallback lookup would re-run one `Path::canonicalize()` syscall per
+	/// registry file.
+	fn canonical_files(&self) -> &HashMap<String, Option<String>> {
+		self.canonical_cache.get_or_init(|| {
+			self.all_files
+				.iter()
+				.map(|file_path| {
+					let normalized = std::path::Path::new(file_path)
+						.canonicalize()
+						.ok()
+						.map(|canonical| Self::normalize_canonical_path(&canonical));
+					(file_path.clone(), normalized)
+				})
+				.collect()
+		})
+	}
+
+	/// Normalize a canonicalized path for cross-platform comparison, handling
+	/// Windows UNC paths (`//?/C:/...`) the same way as a plain path.
+	fn normalize_canonical_path(canonical: &Path) -> String {
+		let canonical_str = canonical.to_string_lossy();
+		if let Some(drive_pos) = canonical_str
+			.starts_with("//?/")
+			.then(|| canonical_str.find(":/"))
+			.flatten()
+		{
+			if let Some(relative_part) = canonical_str.get(drive_pos + 2..) {
+				return PathNormalizer::normalize_separators(relative_part);
+			}
+		}
+		PathNormalizer::normalize_separators(&canonical_str)
 	}
 
 	/// Find files matching a pattern
@@ -416,5 +432,43 @@ mod tests {
 		assert_eq!(PathNormalizer::normalize_separators(""), "");
 		assert_eq!(PathNormalizer::normalize_separators("\\"), "/");
 		assert_eq!(PathNormalizer::normalize_separators("/"), "/");
+	}
+
+	#[test]
+	fn test_find_exact_file_canonicalize_fallback_cache_is_reused() {
+		let unique = format!(
+			"octocode_test_{}_{}",
+			std::process::id(),
+			std::time::SystemTime::now()
+				.duration_since(std::time::UNIX_EPOCH)
+				.unwrap()
+				.as_nanos()
+		);
+		let dir = std::env::temp_dir().join(unique).join("sub");
+		std::fs::create_dir_all(&dir).expect("failed to create temp dir");
+		let file_path = dir.join("file.txt");
+		std::fs::write(&file_path, b"content").expect("failed to write temp file");
+
+		let canonical = file_path.canonicalize().expect("failed to canonicalize");
+		let registered_path = canonical.to_string_lossy().to_string();
+
+		let registry = FileRegistry::new(&[registered_path.clone()]);
+
+		// Query with a textually different but equivalent path (redundant
+		// `..` component) so the fast string-match path misses and the
+		// canonicalize fallback is actually exercised.
+		let query_path = dir.join("..").join("sub").join("file.txt");
+		let query = query_path.to_string_lossy().to_string();
+
+		let first = registry.find_exact_file(&query);
+		assert_eq!(first, Some(registered_path.clone()));
+
+		// Second fallback lookup against the same registry instance must
+		// still succeed and agree, proving the lazily-built cache is
+		// populated once and reused correctly rather than going stale.
+		let second = registry.find_exact_file(&query);
+		assert_eq!(second, Some(registered_path));
+
+		let _ = std::fs::remove_dir_all(dir.parent().unwrap());
 	}
 }

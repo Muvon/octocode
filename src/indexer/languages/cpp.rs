@@ -56,6 +56,18 @@ impl Language for Cpp {
 		]
 	}
 
+	fn descend_first_kinds(&self) -> Vec<&'static str> {
+		// A namespace body holds function_definition/enum_specifier/nested
+		// namespace_definition (already meaningful) directly, and
+		// class_specifier/struct_specifier (excluded above) whose own methods
+		// are reached via the normal fallthrough recursion once the
+		// class/struct specifier itself doesn't match. Descend first so those
+		// nested items are chunked individually; fall back to the whole
+		// namespace only when nothing meaningful is found inside (e.g. a
+		// namespace with only forward declarations or #define-style content).
+		vec!["namespace_definition"]
+	}
+
 	fn get_symbol_kinds(&self) -> Vec<&'static str> {
 		// Symbol tier restores class/struct containers and drops noise:
 		// `declaration` matches every local variable declaration (its

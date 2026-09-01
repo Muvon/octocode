@@ -29,7 +29,15 @@ impl Language for Bash {
 	}
 
 	fn get_meaningful_kinds(&self) -> Vec<&'static str> {
-		vec!["function_definition", "command"] // command for source/. statements
+		// `redirected_statement` wraps a command plus its redirects/heredocs
+		// (e.g. `cat <<EOF > out.txt`); the heredoc body is a sibling of the
+		// inner `command` node, outside its byte range, so without capturing
+		// `redirected_statement` itself the heredoc content is silently
+		// dropped. Since the walker matches top-down and stops descending
+		// once a meaningful kind matches, this also means a bare
+		// `redirected_statement` (e.g. `echo hi > file.txt`) is captured once
+		// as itself and its inner `command` is never visited separately.
+		vec!["function_definition", "command", "redirected_statement"] // command for source/. statements
 	}
 
 	fn get_symbol_kinds(&self) -> Vec<&'static str> {
@@ -234,8 +242,13 @@ impl Bash {
 					}
 				}
 
-				// Recursively check child nodes
-				Self::extract_bash_sources_from_node(child, contents, imports);
+				// Don't descend into a nested function_definition: the
+				// caller's own full-tree walk (walk_ast/walk_for_imports_exports)
+				// visits it directly and scans its body independently, so
+				// recursing into it here would scan the same subtree twice.
+				if child.kind() != "function_definition" {
+					Self::extract_bash_sources_from_node(child, contents, imports);
+				}
 
 				if !cursor.goto_next_sibling() {
 					break;

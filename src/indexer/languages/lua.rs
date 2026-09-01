@@ -145,13 +145,6 @@ impl Language for Lua {
 			_ => {}
 		}
 
-		// Recursively check children
-		for child in node.children(&mut node.walk()) {
-			let (child_imports, child_exports) = self.extract_imports_exports(child, contents);
-			imports.extend(child_imports);
-			exports.extend(child_exports);
-		}
-
 		(imports, exports)
 	}
 

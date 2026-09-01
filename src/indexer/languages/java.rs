@@ -49,6 +49,16 @@ impl Language for Java {
 		]
 	}
 
+	fn descend_first_kinds(&self) -> Vec<&'static str> {
+		// `record_declaration`'s body uses the same `class_body` production as
+		// `class_declaration` (excluded from meaningful kinds), so a record
+		// with explicit methods/a compact constructor currently becomes one
+		// oversized block. Descend first so those are chunked individually;
+		// fall back to the whole node for a plain data record with only
+		// implicit accessors and no explicit methods.
+		vec!["record_declaration"]
+	}
+
 	fn get_symbol_kinds(&self) -> Vec<&'static str> {
 		// Symbol tier restores the type containers chunking excludes and drops
 		// non-symbol noise: field_declaration would name the symbol after its

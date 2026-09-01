@@ -66,13 +66,17 @@ public class Animal {
 		assert!(has_import, "Should extract import declarations");
 
 		let has_class = regions.iter().any(|r| r.node_kind == "class_declaration");
-		assert!(has_class, "Should extract class declaration");
+		assert!(
+			!has_class,
+			"class with substantial init/method inside should not collapse into one region, got {:?}",
+			regions.iter().map(|r| &r.node_kind).collect::<Vec<_>>()
+		);
 		let has_func = regions
 			.iter()
-			.any(|r| r.node_kind == "function_declaration" || r.node_kind == "class_declaration");
+			.any(|r| r.node_kind == "function_declaration" || r.node_kind == "init_declaration");
 		assert!(
 			has_func,
-			"Should extract function or class declaration (speak or Animal)"
+			"Should extract function or init declaration split out of the class (speak or init)"
 		);
 	}
 
@@ -118,11 +122,22 @@ enum Direction {
 			.any(|r| r.node_kind == "protocol_declaration");
 		assert!(has_protocol, "Should extract protocol declaration");
 
-		// struct and enum parse as class_declaration in tree-sitter-swift
+		// struct and enum parse as class_declaration in tree-sitter-swift, but with
+		// substantial methods (draw/opposite) inside they now split those out instead
+		// of collapsing the whole struct/enum into one class_declaration region.
 		let has_type_decl = regions.iter().any(|r| r.node_kind == "class_declaration");
 		assert!(
-			has_type_decl,
-			"Should extract struct/enum as class_declaration"
+			!has_type_decl,
+			"struct/enum with substantial methods inside should not collapse into class_declaration, got {:?}",
+			regions.iter().map(|r| &r.node_kind).collect::<Vec<_>>()
+		);
+
+		let has_func = regions
+			.iter()
+			.any(|r| r.node_kind == "function_declaration");
+		assert!(
+			has_func,
+			"Should extract draw/opposite as function_declaration regions"
 		);
 	}
 
@@ -162,10 +177,22 @@ extension String {
 			"Should extract typealias declarations"
 		);
 
+		// The extension has a real trimmed() func and an isEmpty computed property,
+		// so it now splits trimmed() out instead of collapsing the whole extension
+		// into one class_declaration region.
 		let has_extension = regions.iter().any(|r| r.node_kind == "class_declaration");
 		assert!(
-			has_extension,
-			"Should extract extension as class_declaration"
+			!has_extension,
+			"extension with substantial func/property inside should not collapse into class_declaration, got {:?}",
+			regions.iter().map(|r| &r.node_kind).collect::<Vec<_>>()
+		);
+
+		let has_func = regions
+			.iter()
+			.any(|r| r.node_kind == "function_declaration");
+		assert!(
+			has_func,
+			"Should extract trimmed() as function_declaration region"
 		);
 	}
 
@@ -189,6 +216,70 @@ func greet(name: String) -> String {
 		assert!(
 			!regions.is_empty(),
 			"Should extract free functions (may be merged into one region)"
+		);
+	}
+
+	#[test]
+	fn test_class_body_splits_into_individual_methods() {
+		// Non-trivial content so the smart single-line merge pass doesn't recombine them.
+		let code = r#"
+class Foo {
+    func a() {
+        let x = 1
+        let y = 2
+        print(x + y)
+    }
+    func b() {
+        let m = 10
+        let n = 20
+        print(m * n)
+    }
+}
+"#;
+		let (mut parser, lang) = make_parser();
+		let tree = parser.parse(code, None).unwrap();
+		let mut regions = Vec::new();
+		extract_meaningful_regions(tree.root_node(), code, lang.as_ref(), &mut regions);
+
+		let class_regions: Vec<_> = regions
+			.iter()
+			.filter(|r| r.node_kind == "class_declaration")
+			.collect();
+		assert_eq!(
+			class_regions.len(),
+			0,
+			"class with methods inside should not collapse into one region, got {:?}",
+			regions.iter().map(|r| &r.node_kind).collect::<Vec<_>>()
+		);
+
+		let function_regions: Vec<_> = regions
+			.iter()
+			.filter(|r| r.node_kind == "function_declaration")
+			.collect();
+		assert_eq!(
+			function_regions.len(),
+			2,
+			"expected a region per method inside class"
+		);
+	}
+
+	#[test]
+	fn test_empty_extension_stays_single_region() {
+		let code = r#"extension Foo: Equatable {}"#;
+		let (mut parser, lang) = make_parser();
+		let tree = parser.parse(code, None).unwrap();
+		let mut regions = Vec::new();
+		extract_meaningful_regions(tree.root_node(), code, lang.as_ref(), &mut regions);
+
+		let class_regions: Vec<_> = regions
+			.iter()
+			.filter(|r| r.node_kind == "class_declaration")
+			.collect();
+		assert_eq!(
+			class_regions.len(),
+			1,
+			"empty extension should remain its own single region, got {:?}",
+			regions.iter().map(|r| &r.node_kind).collect::<Vec<_>>()
 		);
 	}
 

@@ -2336,7 +2336,7 @@ Brief content.
 "#;
 
 		let hierarchy = parse_document_hierarchy(test_content);
-		let chunks = hierarchy.bottom_up_chunking(2000); // 2000 char target
+		let chunks = hierarchy.bottom_up_chunking(2000, 100); // 2000 char target, 100 char overlap
 
 		// Verify no chunks are extremely tiny (less than 100 chars as reasonable minimum)
 		let tiny_chunks: Vec<&ChunkResult> = chunks

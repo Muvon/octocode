@@ -19,15 +19,23 @@ use tree_sitter::Node;
 
 // Import all language modules
 mod bash;
+#[cfg(test)]
+mod bash_test;
 mod cpp;
 #[cfg(test)]
 mod cpp_test;
 mod css;
+#[cfg(test)]
+mod css_test;
 mod elixir;
 #[cfg(test)]
 mod elixir_test;
 mod go;
+#[cfg(test)]
+mod go_test;
 mod java;
+#[cfg(test)]
+mod java_test;
 mod javascript;
 #[cfg(test)]
 mod javascript_test;
@@ -35,6 +43,8 @@ mod json;
 #[cfg(test)]
 mod json_test;
 mod lua;
+#[cfg(test)]
+mod lua_test;
 mod markdown;
 mod php;
 #[cfg(test)]

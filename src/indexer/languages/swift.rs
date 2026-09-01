@@ -47,6 +47,17 @@ impl Language for Swift {
 		]
 	}
 
+	fn descend_first_kinds(&self) -> Vec<&'static str> {
+		// This grammar unifies class/struct/enum/extension/actor bodies under
+		// `class_declaration`. Its body holds function_declaration/
+		// init_declaration/subscript_declaration/nested class_declaration
+		// (already meaningful). Descend first so those are chunked
+		// individually; fall back to the whole node for e.g. an empty
+		// extension or a case-only enum (enum cases are not themselves a
+		// meaningful kind).
+		vec!["class_declaration"]
+	}
+
 	fn get_symbol_kinds(&self) -> Vec<&'static str> {
 		vec![
 			"function_declaration",

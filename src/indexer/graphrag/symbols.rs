@@ -130,6 +130,52 @@ pub fn symbol_node_ids(path: &str, symbols: &[SymbolDecl]) -> Vec<String> {
 		.collect()
 }
 
+/// Indices into `symbols`, sorted by `start_line` (ties broken by original
+/// index so backward scans in `find_owning_symbol` reproduce declaration
+/// order), optionally restricted to `kind == "function"`.
+fn symbol_start_order(symbols: &[SymbolDecl], functions_only: bool) -> Vec<usize> {
+	let mut order: Vec<usize> = (0..symbols.len())
+		.filter(|&i| !functions_only || symbols[i].kind == "function")
+		.collect();
+	order.sort_by_key(|&i| (symbols[i].start_line, i));
+	order
+}
+
+/// Find the innermost symbol (smallest `end_line - start_line` span) whose
+/// range contains `line`, using an `order` produced by `symbol_start_order`.
+/// Ties break toward the earlier-declared symbol (smaller original index),
+/// matching `symbols.iter().enumerate().min_by_key(span)`.
+fn find_owning_symbol(symbols: &[SymbolDecl], order: &[usize], line: u32) -> Option<usize> {
+	// Everything at or after `pos` has start_line > line and can't contain it.
+	let pos = order.partition_point(|&i| symbols[i].start_line <= line);
+	let mut best: Option<(u32, usize)> = None;
+	for &idx in order[..pos].iter().rev() {
+		let symbol = &symbols[idx];
+		if line <= symbol.end_line {
+			let span = symbol.end_line.saturating_sub(symbol.start_line);
+			let better = match best {
+				Some((best_span, best_idx)) => {
+					span < best_span || (span == best_span && idx < best_idx)
+				}
+				None => true,
+			};
+			if better {
+				best = Some((span, idx));
+			}
+		}
+		// As we scan backward, start_line is non-increasing, so the smallest
+		// span any earlier candidate could achieve (were it to contain `line`)
+		// is `line - start_line`, which only grows. Once that floor exceeds the
+		// best span found, no earlier candidate can win and we can stop.
+		if let Some((best_span, _)) = best {
+			if line.saturating_sub(symbol.start_line) > best_span {
+				break;
+			}
+		}
+	}
+	best.map(|(_, idx)| idx)
+}
+
 /// Map a tree-sitter node kind to a coarse symbol kind for the `kind` column.
 pub fn symbol_kind_from_node_kind(kind: &str) -> &'static str {
 	if kind.contains("function")
@@ -429,6 +475,9 @@ struct SymbolIndex {
 	by_owner: HashMap<(String, String), Vec<String>>,
 	/// File + owning type/module + symbol name → symbol node ids.
 	by_file_owner: HashMap<(String, String, String), Vec<String>>,
+	/// File path → symbol node ids in `file.symbols` order, computed once here
+	/// so callers iterating the same files never recompute `symbol_node_ids`.
+	by_file_symbol_ids: HashMap<String, Vec<String>>,
 }
 
 impl SymbolIndex {
@@ -438,10 +487,11 @@ impl SymbolIndex {
 			by_file: HashMap::new(),
 			by_owner: HashMap::new(),
 			by_file_owner: HashMap::new(),
+			by_file_symbol_ids: HashMap::new(),
 		};
 		for file in files {
 			let ids = symbol_node_ids(&file.path, &file.symbols);
-			for (symbol, id) in file.symbols.iter().zip(ids) {
+			for (symbol, id) in file.symbols.iter().zip(ids.iter()) {
 				index
 					.by_name
 					.entry(symbol.name.clone())
@@ -464,9 +514,10 @@ impl SymbolIndex {
 						.by_file_owner
 						.entry((file.path.clone(), owner.clone(), symbol.name.clone()))
 						.or_default()
-						.push(id);
+						.push(id.clone());
 				}
 			}
+			index.by_file_symbol_ids.insert(file.path.clone(), ids);
 		}
 		index
 	}
@@ -550,8 +601,8 @@ impl SymbolIndex {
 		target: &CallTarget,
 		imports: &[(String, String)],
 		bindings: &[(ImportBinding, String)],
+		imported_files: &[String],
 	) -> Vec<(&str, Provenance, f32)> {
-		let imported_files: Vec<String> = imports.iter().map(|(_, path)| path.clone()).collect();
 		let mut bound_targets = Vec::new();
 		for (binding, path) in bindings {
 			if target.qualifier.is_none() && binding.local_name == target.name {
@@ -588,7 +639,7 @@ impl SymbolIndex {
 		}
 
 		let Some(qualifier) = target.qualifier.as_deref() else {
-			return self.resolve(source_path, &target.name, &imported_files, false);
+			return self.resolve(source_path, &target.name, imported_files, false);
 		};
 		let qualifier_leaf = qualifier
 			.rsplit("::")
@@ -667,7 +718,7 @@ impl SymbolIndex {
 
 		// Unknown instance receiver: retain only a uniquely resolvable scoped
 		// target and mark it inferred; never fan out ubiquitous method names.
-		self.resolve(source_path, &target.name, &imported_files, false)
+		self.resolve(source_path, &target.name, imported_files, false)
 			.into_iter()
 			.map(|(id, _, confidence)| (id, Provenance::Inferred, confidence.min(0.65)))
 			.collect()
@@ -716,19 +767,30 @@ pub fn discover_symbol_relationships(new_files: &[SymbolFileData]) -> Vec<CodeRe
 			.map(|(_, path)| path.clone())
 			.collect();
 
-		let symbol_ids = symbol_node_ids(&source_file.path, &source_file.symbols);
+		let symbol_ids = index
+			.by_file_symbol_ids
+			.get(&source_file.path)
+			.unwrap_or_else(|| {
+				panic!(
+					"SymbolIndex::build was not given this file: {}",
+					source_file.path
+				)
+			});
+		// Symbol indices sorted by start_line (ties broken by original index) so
+		// `owning_symbol` below can binary-search + scan backward for the
+		// innermost containing declaration instead of scanning every symbol per
+		// call site / type relation.
+		let symbols_by_start = symbol_start_order(&source_file.symbols, false);
+		let functions_by_start = symbol_start_order(&source_file.symbols, true);
+
 		let owning_symbol = |line: u32, functions_only: bool| {
-			source_file
-				.symbols
-				.iter()
-				.enumerate()
-				.filter(|(_, symbol)| {
-					line >= symbol.start_line
-						&& line <= symbol.end_line
-						&& (!functions_only || symbol.kind == "function")
-				})
-				.min_by_key(|(_, symbol)| symbol.end_line.saturating_sub(symbol.start_line))
-				.map(|(index, symbol)| (symbol_ids[index].as_str(), symbol))
+			let order = if functions_only {
+				&functions_by_start
+			} else {
+				&symbols_by_start
+			};
+			find_owning_symbol(&source_file.symbols, order, line)
+				.map(|idx| (symbol_ids[idx].as_str(), &source_file.symbols[idx]))
 		};
 
 		for (line, callee) in &source_file.calls {
@@ -756,6 +818,7 @@ pub fn discover_symbol_relationships(new_files: &[SymbolFileData]) -> Vec<CodeRe
 					callee,
 					&resolved_imports,
 					&resolved_bindings,
+					&imported_files,
 				) {
 					relationships.push(CodeRelationship {
 						source: source_id.to_string(),
@@ -953,6 +1016,56 @@ pub fn main_fn() {
 			symbol_node_ids("src/lib.rs", &symbols),
 			vec!["src/lib.rs::new@5", "src/lib.rs::new@21", "src/lib.rs::run"]
 		);
+	}
+
+	/// Reference implementation: the original O(S) linear scan `owning_symbol`
+	/// used before `find_owning_symbol` was introduced.
+	fn linear_owning_symbol(
+		symbols: &[SymbolDecl],
+		line: u32,
+		functions_only: bool,
+	) -> Option<usize> {
+		symbols
+			.iter()
+			.enumerate()
+			.filter(|(_, symbol)| {
+				line >= symbol.start_line
+					&& line <= symbol.end_line
+					&& (!functions_only || symbol.kind == "function")
+			})
+			.min_by_key(|(_, symbol)| symbol.end_line.saturating_sub(symbol.start_line))
+			.map(|(index, _)| index)
+	}
+
+	#[test]
+	fn find_owning_symbol_matches_linear_reference_on_nested_overlapping_and_tied_ranges() {
+		// Deliberately overlapping/nested ranges plus two exact-span ties:
+		// - inner_a (function) and const_x (const) both span lines 20..=30
+		//   (a cross-kind tie, only relevant when functions_only == false).
+		// - inner_a (function) and inner_b (function) both have span 10 and
+		//   both contain line 25 (a same-kind tie, relevant when
+		//   functions_only == true too).
+		let symbols = vec![
+			declaration("outer", "class", 0, 100),
+			declaration("mid", "function", 10, 50),
+			declaration("inner_a", "function", 20, 30),
+			declaration("inner_b", "function", 15, 25),
+			declaration("const_x", "const", 20, 30),
+			declaration("sibling", "function", 60, 70),
+			declaration("tiny", "function", 22, 22),
+		];
+
+		for line in 0..=100u32 {
+			for functions_only in [false, true] {
+				let order = symbol_start_order(&symbols, functions_only);
+				let optimized = find_owning_symbol(&symbols, &order, line);
+				let reference = linear_owning_symbol(&symbols, line, functions_only);
+				assert_eq!(
+					optimized, reference,
+					"mismatch at line={line} functions_only={functions_only}"
+				);
+			}
+		}
 	}
 
 	#[test]
