@@ -1260,7 +1260,7 @@ func helper(x int) int {
 			"Should create Calls edge from main.rs to config.rs"
 		);
 
-		// Should also have Imports relationship (via last-segment matching)
+		// Should also have Imports relationship (via crate path resolution)
 		let import_rels: Vec<_> = relationships
 			.iter()
 			.filter(|r| r.relation_type == crate::indexer::graphrag::types::RelationType::Imports)
@@ -1273,8 +1273,8 @@ func helper(x int) int {
 	}
 
 	#[test]
-	fn test_import_last_segment_matching() {
-		// Test that "crate::config::Config" matches against export "Config"
+	fn test_import_resolves_to_defining_file() {
+		// Test that "crate::config::Config" resolves to src/config.rs
 		let node_a = CodeNode {
 			id: "src/main.rs".to_string(),
 			name: "main".to_string(),
@@ -1326,7 +1326,7 @@ func helper(x int) int {
 			import_rels
 				.iter()
 				.any(|r| r.source == "src/main.rs" && r.target == "src/config.rs"),
-			"crate::config::Config should match export Config via last-segment matching"
+			"crate::config::Config should resolve to src/config.rs"
 		);
 	}
 
@@ -1683,6 +1683,201 @@ function main(): void {
 				.iter()
 				.all(|relationship| relationship.relation_type != RelationType::Imports),
 			"Markdown links must not be emitted as code import relationships"
+		);
+	}
+
+	/// Issue #85: a file that defines and calls its own symbol must not get a
+	/// Calls edge to another file that happens to define the same name.
+	#[tokio::test]
+	async fn test_local_call_does_not_resolve_to_other_definer() {
+		use crate::indexer::graphrag::types::{FunctionInfo, RelationType};
+
+		// a.py: `def target(): ...` + `def main(): target()`
+		let a = CodeNode {
+			id: "a.py".to_string(),
+			name: "a".to_string(),
+			kind: "file".to_string(),
+			path: "a.py".to_string(),
+			description: String::new(),
+			symbols: vec!["target".to_string(), "main".to_string()],
+			hash: "a".to_string(),
+			embedding: Vec::new(),
+			imports: Vec::new(),
+			exports: vec!["target".to_string(), "main".to_string()],
+			functions: vec![FunctionInfo {
+				name: "main".to_string(),
+				signature: "def main()".to_string(),
+				start_line: 4,
+				end_line: 5,
+				calls: vec!["target".to_string()],
+				called_by: Vec::new(),
+				parameters: Vec::new(),
+				return_type: None,
+				extends: Vec::new(),
+				implements: Vec::new(),
+			}],
+			size_lines: 5,
+			language: "python".to_string(),
+		};
+
+		// b.py: `def target(): ...` — never imported by a.py
+		let b = CodeNode {
+			id: "b.py".to_string(),
+			name: "b".to_string(),
+			kind: "file".to_string(),
+			path: "b.py".to_string(),
+			description: String::new(),
+			symbols: vec!["target".to_string()],
+			hash: "b".to_string(),
+			embedding: Vec::new(),
+			imports: Vec::new(),
+			exports: vec!["target".to_string()],
+			functions: Vec::new(),
+			size_lines: 2,
+			language: "python".to_string(),
+		};
+
+		let relationships = RelationshipDiscovery::discover_relationships_efficiently(
+			std::slice::from_ref(&a),
+			&[a.clone(), b],
+		)
+		.await
+		.unwrap();
+
+		let wrong: Vec<_> = relationships
+			.iter()
+			.filter(|r| {
+				r.relation_type == RelationType::Calls && r.source == "a.py" && r.target == "b.py"
+			})
+			.collect();
+		assert!(
+			wrong.is_empty(),
+			"call to locally-defined target() must not resolve to b.py: {:?}",
+			wrong
+				.iter()
+				.map(|r| format!("{} -> {} ({})", r.source, r.target, r.description))
+				.collect::<Vec<_>>()
+		);
+	}
+
+	/// Issue #86: two files importing the same module must not get an Imports
+	/// edge between each other. Import-statement identifiers scraped into
+	/// `symbols` ("app", "core", "base", ...) must not act as import targets.
+	#[tokio::test]
+	async fn test_shared_import_does_not_link_co_importers() {
+		use crate::indexer::graphrag::types::RelationType;
+
+		// api.py: `from ..core.base import BaseModel` +
+		//         `from app.utils.auth import check as auth_check`
+		let api = CodeNode {
+			id: "app/handlers/api.py".to_string(),
+			name: "api".to_string(),
+			kind: "file".to_string(),
+			path: "app/handlers/api.py".to_string(),
+			description: String::new(),
+			// Identifiers the parser scrapes from the import statements land in
+			// symbols — this is what the phantom edge fed on.
+			symbols: vec![
+				"core".to_string(),
+				"base".to_string(),
+				"BaseModel".to_string(),
+				"app".to_string(),
+				"utils".to_string(),
+				"auth".to_string(),
+				"check".to_string(),
+				"auth_check".to_string(),
+				"handle".to_string(),
+			],
+			hash: "api".to_string(),
+			embedding: Vec::new(),
+			imports: vec!["..core.base".to_string(), "app.utils.auth".to_string()],
+			exports: vec!["handle".to_string()],
+			functions: Vec::new(),
+			size_lines: 10,
+			language: "python".to_string(),
+		};
+
+		// auth.py: `from app.core.base import main as base_main`
+		let auth = CodeNode {
+			id: "app/utils/auth.py".to_string(),
+			name: "auth".to_string(),
+			kind: "file".to_string(),
+			path: "app/utils/auth.py".to_string(),
+			description: String::new(),
+			symbols: vec![
+				"app".to_string(),
+				"core".to_string(),
+				"base".to_string(),
+				"main".to_string(),
+				"base_main".to_string(),
+				"check".to_string(),
+			],
+			hash: "auth".to_string(),
+			embedding: Vec::new(),
+			imports: vec!["app.core.base".to_string()],
+			exports: vec!["check".to_string()],
+			functions: Vec::new(),
+			size_lines: 5,
+			language: "python".to_string(),
+		};
+
+		let base = CodeNode {
+			id: "app/core/base.py".to_string(),
+			name: "base".to_string(),
+			kind: "file".to_string(),
+			path: "app/core/base.py".to_string(),
+			description: String::new(),
+			symbols: vec!["main".to_string(), "BaseModel".to_string()],
+			hash: "base".to_string(),
+			embedding: Vec::new(),
+			imports: Vec::new(),
+			exports: vec!["main".to_string(), "BaseModel".to_string()],
+			functions: Vec::new(),
+			size_lines: 8,
+			language: "python".to_string(),
+		};
+
+		let all = vec![api.clone(), auth.clone(), base.clone()];
+		let relationships =
+			RelationshipDiscovery::discover_relationships_efficiently(&[api, auth], &all)
+				.await
+				.unwrap();
+
+		let imports: Vec<_> = relationships
+			.iter()
+			.filter(|r| r.relation_type == RelationType::Imports)
+			.collect();
+
+		// Phantom reverse edge: auth.py never imports api.py in any form.
+		let phantom: Vec<_> = imports
+			.iter()
+			.filter(|r| r.source == "app/utils/auth.py" && r.target == "app/handlers/api.py")
+			.collect();
+		assert!(
+			phantom.is_empty(),
+			"co-importers of app.core.base must not be linked: {:?}",
+			phantom
+				.iter()
+				.map(|r| format!("{} -> {} ({})", r.source, r.target, r.description))
+				.collect::<Vec<_>>()
+		);
+
+		// The genuine imports must survive, resolved to the actual files.
+		assert!(
+			imports
+				.iter()
+				.any(|r| r.source == "app/utils/auth.py" && r.target == "app/core/base.py"),
+			"auth.py imports app.core.base, expected edge to base.py: {:?}",
+			imports
+				.iter()
+				.map(|r| format!("{} -> {}", r.source, r.target))
+				.collect::<Vec<_>>()
+		);
+		assert!(
+			imports
+				.iter()
+				.any(|r| r.source == "app/handlers/api.py" && r.target == "app/utils/auth.py"),
+			"api.py imports app.utils.auth, expected edge to auth.py"
 		);
 	}
 }
