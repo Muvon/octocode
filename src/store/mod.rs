@@ -942,6 +942,11 @@ impl Store {
 		metadata_ops.store_file_metadata(file_path, mtime).await
 	}
 
+	pub async fn store_file_metadata_batch(&self, entries: &[(String, u64)]) -> Result<()> {
+		let metadata_ops = self.metadata_ops();
+		metadata_ops.store_file_metadata_batch(entries).await
+	}
+
 	pub async fn get_file_mtime(&self, file_path: &str) -> Result<Option<u64>> {
 		let metadata_ops = self.metadata_ops();
 		metadata_ops.get_file_mtime(file_path).await

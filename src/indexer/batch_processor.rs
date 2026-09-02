@@ -64,10 +64,12 @@ impl FileMetadataBatch {
 	/// Persist all pending file metadata to the store
 	/// This should only be called AFTER blocks are successfully stored
 	pub async fn persist(&self, store: &Store) -> Result<()> {
-		for (file_path, mtime) in &self.pending_files {
-			store.store_file_metadata(file_path, *mtime).await?;
-		}
-		Ok(())
+		let entries = self
+			.pending_files
+			.iter()
+			.map(|(file_path, mtime)| (file_path.clone(), *mtime))
+			.collect::<Vec<_>>();
+		store.store_file_metadata_batch(&entries).await
 	}
 }
 

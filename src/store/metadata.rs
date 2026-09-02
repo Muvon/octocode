@@ -26,8 +26,8 @@ use lancedb::{
 	Connection,
 };
 
-use crate::store::sql::escape_single_quotes;
-use crate::store::table_ops::TableOperations;
+use crate::store::sql::{escape_single_quotes, in_list_predicate};
+use crate::store::table_ops::{TableOperations, DELETE_PATHS_CHUNK};
 use crate::store::tables;
 
 /// Handles git and file metadata operations
@@ -173,6 +173,29 @@ impl<'a> MetadataOperations<'a> {
 		]))
 	}
 
+	fn file_metadata_record_batch(
+		entries: &[(String, u64)],
+		indexed_at: i64,
+	) -> Result<RecordBatch> {
+		let paths = entries
+			.iter()
+			.map(|(path, _)| path.as_str())
+			.collect::<Vec<_>>();
+		let mtimes = entries
+			.iter()
+			.map(|(_, mtime)| *mtime as i64)
+			.collect::<Vec<_>>();
+
+		Ok(RecordBatch::try_new(
+			Self::file_metadata_schema(),
+			vec![
+				Arc::new(StringArray::from(paths)),
+				Arc::new(Int64Array::from(mtimes)),
+				Arc::new(Int64Array::from(vec![indexed_at; entries.len()])),
+			],
+		)?)
+	}
+
 	/// Create the file metadata table.
 	async fn create_file_metadata_table(&self) -> Result<()> {
 		self.table_ops
@@ -180,57 +203,56 @@ impl<'a> MetadataOperations<'a> {
 			.await
 	}
 
-	/// Store file metadata (modification time, etc.)
-	pub async fn store_file_metadata(&self, file_path: &str, mtime: u64) -> Result<()> {
-		// Check if table exists, create if not
+	/// Store file metadata (modification time, etc.) in a batch.
+	pub async fn store_file_metadata_batch(&self, entries: &[(String, u64)]) -> Result<()> {
+		if entries.is_empty() {
+			return Ok(());
+		}
+
 		if !self.table_ops.table_exists(tables::FILE_METADATA).await? {
 			self.create_file_metadata_table().await?;
 		}
 
 		let table = self.db.open_table(tables::FILE_METADATA).execute().await?;
-		let path_predicate = format!("path = '{}'", escape_single_quotes(file_path));
+		let mut existing = Vec::new();
+		for chunk in entries.chunks(DELETE_PATHS_CHUNK) {
+			let paths = chunk
+				.iter()
+				.map(|(path, _)| path.clone())
+				.collect::<Vec<_>>();
+			let mut results = table
+				.query()
+				.only_if(in_list_predicate("path", &paths))
+				.select(Select::Columns(vec!["path".to_string()]))
+				.execute()
+				.await?;
 
-		// Check if file already exists in metadata
-		let mut existing_results = table
-			.query()
-			.only_if(path_predicate.clone())
-			.limit(1)
-			.execute()
-			.await?;
-
-		let mut file_exists = false;
-		while let Some(batch) = existing_results.try_next().await? {
-			if batch.num_rows() > 0 {
-				file_exists = true;
-				break;
+			while let Some(batch) = results.try_next().await? {
+				if let Some(path_array) = batch
+					.column_by_name("path")
+					.and_then(|column| column.as_any().downcast_ref::<StringArray>())
+				{
+					existing.extend(path_array.iter().flatten().map(str::to_string));
+				}
 			}
 		}
 
-		if file_exists {
-			// Update existing record using correct LanceDB UpdateBuilder API
-			table
-				.update()
-				.only_if(path_predicate)
-				.column("mtime", (mtime as i64).to_string())
-				.column("indexed_at", chrono::Utc::now().timestamp().to_string())
-				.execute()
-				.await?;
-		} else {
-			// Insert new record
-			let batch = RecordBatch::try_new(
-				Self::file_metadata_schema(),
-				vec![
-					Arc::new(StringArray::from(vec![file_path])),
-					Arc::new(Int64Array::from(vec![mtime as i64])),
-					Arc::new(Int64Array::from(vec![chrono::Utc::now().timestamp()])),
-				],
-			)?;
+		if !existing.is_empty() {
 			self.table_ops
-				.store_batch(tables::FILE_METADATA, batch)
+				.remove_blocks_by_paths(&existing, tables::FILE_METADATA)
 				.await?;
 		}
 
-		Ok(())
+		let batch = Self::file_metadata_record_batch(entries, chrono::Utc::now().timestamp())?;
+		self.table_ops
+			.store_batch(tables::FILE_METADATA, batch)
+			.await
+	}
+
+	/// Store file metadata (modification time, etc.)
+	pub async fn store_file_metadata(&self, file_path: &str, mtime: u64) -> Result<()> {
+		self.store_file_metadata_batch(std::slice::from_ref(&(file_path.to_string(), mtime)))
+			.await
 	}
 
 	/// Get file modification time from metadata
@@ -315,5 +337,53 @@ impl<'a> MetadataOperations<'a> {
 		}
 
 		Ok(metadata_map)
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn file_metadata_record_batch_round_trips_values() {
+		let entries = vec![
+			("src/main.rs".to_string(), 101),
+			("src/store/mod.rs".to_string(), 202),
+			("README.md".to_string(), 303),
+		];
+		let indexed_at = 1_234_567_890;
+		let batch = MetadataOperations::file_metadata_record_batch(&entries, indexed_at).unwrap();
+
+		assert_eq!(batch.num_rows(), 3);
+		let schema = batch.schema();
+		assert_eq!(schema.field(0).name(), "path");
+		assert_eq!(schema.field(1).name(), "mtime");
+		assert_eq!(schema.field(2).name(), "indexed_at");
+
+		let paths = batch
+			.column_by_name("path")
+			.unwrap()
+			.as_any()
+			.downcast_ref::<StringArray>()
+			.unwrap();
+		let mtimes = batch
+			.column_by_name("mtime")
+			.unwrap()
+			.as_any()
+			.downcast_ref::<Int64Array>()
+			.unwrap();
+		let indexed_ats = batch
+			.column_by_name("indexed_at")
+			.unwrap()
+			.as_any()
+			.downcast_ref::<Int64Array>()
+			.unwrap();
+
+		assert_eq!(
+			paths.iter().flatten().collect::<Vec<_>>(),
+			vec!["src/main.rs", "src/store/mod.rs", "README.md",]
+		);
+		assert_eq!(mtimes.values(), &[101, 202, 303]);
+		assert_eq!(indexed_ats.values(), &[indexed_at; 3]);
 	}
 }
