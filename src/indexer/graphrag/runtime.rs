@@ -356,6 +356,44 @@ pub fn merge_enrichment(base: &CodeGraph, enriched: CodeGraph, root: &Path) -> C
 	graph
 }
 
+/// Collapse symbol-level Calls/Extends/Implements edges onto their files for the
+/// persisted graph, which stores file nodes only. Same-file edges vanish (a file
+/// does not relate to itself); the symbol ids stay in the description so a file
+/// edge still names the declarations that produced it.
+pub fn file_level_relationships(graph: &CodeGraph) -> Vec<CodeRelationship> {
+	let file_of = |id: &str| graph.nodes.get(id).map(|node| node.path.as_str());
+	let mut projected: Vec<CodeRelationship> = graph
+		.relationships
+		.iter()
+		.filter(|rel| {
+			matches!(
+				rel.relation_type,
+				RelationType::Calls | RelationType::Extends | RelationType::Implements
+			)
+		})
+		.filter_map(|rel| {
+			let source = file_of(&rel.source)?;
+			let target = file_of(&rel.target)?;
+			(source != target).then(|| CodeRelationship {
+				source: source.to_string(),
+				target: target.to_string(),
+				relation_type: rel.relation_type.clone(),
+				description: format!("{} {} {}", rel.source, rel.relation_type, rel.target),
+				confidence: rel.confidence,
+				weight: rel.weight,
+				provenance: rel.provenance,
+			})
+		})
+		.collect();
+	projected.sort_unstable_by(|a, b| {
+		(&a.source, &a.target, &a.relation_type).cmp(&(&b.source, &b.target, &b.relation_type))
+	});
+	projected.dedup_by(|a, b| {
+		a.source == b.source && a.target == b.target && a.relation_type == b.relation_type
+	});
+	projected
+}
+
 /// Deterministic lexical seed lookup for the runtime graph. Relationship words
 /// are ignored so `what calls parse_config` seeds `parse_config`, not noise.
 pub fn search_nodes(graph: &CodeGraph, query: &str, limit: usize) -> Vec<CodeNode> {
@@ -652,6 +690,66 @@ mod tests {
 				&& relationship.target == "lib.rs::helper"
 				&& relationship.relation_type == RelationType::Calls
 		}));
+	}
+
+	#[test]
+	fn file_level_projection_drops_same_file_edges_and_keeps_symbol_ids() {
+		let mut graph = CodeGraph::default();
+		for (id, path) in [
+			("src/main.rs::main", "src/main.rs"),
+			("src/main.rs::helper", "src/main.rs"),
+			("src/config.rs::Config::new", "src/config.rs"),
+		] {
+			graph.nodes.insert(
+				id.to_string(),
+				CodeNode {
+					id: id.to_string(),
+					name: String::new(),
+					kind: "function".to_string(),
+					path: path.to_string(),
+					description: String::new(),
+					symbols: Vec::new(),
+					hash: String::new(),
+					embedding: Vec::new(),
+					imports: Vec::new(),
+					exports: Vec::new(),
+					functions: Vec::new(),
+					size_lines: 0,
+					language: "rust".to_string(),
+				},
+			);
+		}
+		let calls = |source: &str, target: &str| CodeRelationship {
+			source: source.to_string(),
+			target: target.to_string(),
+			relation_type: RelationType::Calls,
+			description: String::new(),
+			confidence: 0.9,
+			weight: 0.8,
+			provenance: Provenance::Extracted,
+		};
+		graph
+			.relationships
+			.push(calls("src/main.rs::main", "src/config.rs::Config::new"));
+		graph
+			.relationships
+			.push(calls("src/main.rs::helper", "src/config.rs::Config::new"));
+		graph
+			.relationships
+			.push(calls("src/main.rs::main", "src/main.rs::helper"));
+
+		let projected = file_level_relationships(&graph);
+		assert_eq!(projected.len(), 1, "{:?}", projected);
+		assert_eq!(projected[0].source, "src/main.rs");
+		assert_eq!(projected[0].target, "src/config.rs");
+		assert!(
+			projected[0].description.contains("src/main.rs::")
+				&& projected[0]
+					.description
+					.contains("src/config.rs::Config::new"),
+			"{}",
+			projected[0].description
+		);
 	}
 
 	#[test]

@@ -1180,99 +1180,6 @@ func helper(x int) int {
 	}
 
 	#[test]
-	fn test_calls_relationship_creation() {
-		// Test that function calls create Calls relationships via symbol index matching
-		let node_a = CodeNode {
-			id: "src/main.rs".to_string(),
-			name: "main".to_string(),
-			kind: "file".to_string(),
-			path: "src/main.rs".to_string(),
-			description: "Main entry point".to_string(),
-			symbols: vec!["main".to_string()],
-			hash: "hash_a".to_string(),
-			embedding: Vec::new(),
-			imports: vec!["crate::config::Config".to_string()],
-			exports: vec!["main".to_string()],
-			functions: vec![crate::indexer::graphrag::types::FunctionInfo {
-				name: "main".to_string(),
-				signature: "fn main()".to_string(),
-				start_line: 0,
-				end_line: 10,
-				calls: vec!["Config".to_string(), "run".to_string()],
-				called_by: Vec::new(),
-				parameters: Vec::new(),
-				return_type: None,
-				extends: Vec::new(),
-				implements: Vec::new(),
-			}],
-			size_lines: 10,
-			language: "rust".to_string(),
-		};
-
-		let node_b = CodeNode {
-			id: "src/config.rs".to_string(),
-			name: "config".to_string(),
-			kind: "file".to_string(),
-			path: "src/config.rs".to_string(),
-			description: "Configuration module".to_string(),
-			symbols: vec!["Config".to_string(), "run".to_string()],
-			hash: "hash_b".to_string(),
-			embedding: Vec::new(),
-			imports: Vec::new(),
-			exports: vec!["Config".to_string(), "run".to_string()],
-			functions: Vec::new(),
-			size_lines: 20,
-			language: "rust".to_string(),
-		};
-
-		let rt = tokio::runtime::Runtime::new().unwrap();
-		let relationships = rt.block_on(async {
-			RelationshipDiscovery::discover_relationships_efficiently(
-				std::slice::from_ref(&node_a),
-				&[node_a.clone(), node_b.clone()],
-			)
-			.await
-			.unwrap()
-		});
-
-		println!(
-			"Relationships: {:?}",
-			relationships
-				.iter()
-				.map(|r| (&r.source, &r.target, &r.relation_type))
-				.collect::<Vec<_>>()
-		);
-
-		// Should have Calls relationship from main.rs → config.rs
-		let calls_rels: Vec<_> = relationships
-			.iter()
-			.filter(|r| r.relation_type == crate::indexer::graphrag::types::RelationType::Calls)
-			.collect();
-
-		assert!(
-			!calls_rels.is_empty(),
-			"Should create Calls relationships from function calls"
-		);
-		assert!(
-			calls_rels
-				.iter()
-				.any(|r| r.source == "src/main.rs" && r.target == "src/config.rs"),
-			"Should create Calls edge from main.rs to config.rs"
-		);
-
-		// Should also have Imports relationship (via crate path resolution)
-		let import_rels: Vec<_> = relationships
-			.iter()
-			.filter(|r| r.relation_type == crate::indexer::graphrag::types::RelationType::Imports)
-			.collect();
-
-		assert!(
-			!import_rels.is_empty(),
-			"Should create Imports relationships from import matching"
-		);
-	}
-
-	#[test]
 	fn test_import_resolves_to_defining_file() {
 		// Test that "crate::config::Config" resolves to src/config.rs
 		let node_a = CodeNode {
@@ -1687,76 +1594,62 @@ function main(): void {
 	}
 
 	/// Issue #85: a file that defines and calls its own symbol must not get a
-	/// Calls edge to another file that happens to define the same name.
+	/// Calls edge to another file defining the same name. Runs the real Python
+	/// parser, the structural resolver and the file projection the persisted
+	/// graph stores.
 	#[tokio::test]
 	async fn test_local_call_does_not_resolve_to_other_definer() {
-		use crate::indexer::graphrag::types::{FunctionInfo, RelationType};
+		use crate::indexer::graphrag::runtime::{file_level_relationships, RuntimeGraphCache};
+		use crate::indexer::graphrag::types::RelationType;
 
-		// a.py: `def target(): ...` + `def main(): target()`
-		let a = CodeNode {
-			id: "a.py".to_string(),
-			name: "a".to_string(),
-			kind: "file".to_string(),
-			path: "a.py".to_string(),
-			description: String::new(),
-			symbols: vec!["target".to_string(), "main".to_string()],
-			hash: "a".to_string(),
-			embedding: Vec::new(),
-			imports: Vec::new(),
-			exports: vec!["target".to_string(), "main".to_string()],
-			functions: vec![FunctionInfo {
-				name: "main".to_string(),
-				signature: "def main()".to_string(),
-				start_line: 4,
-				end_line: 5,
-				calls: vec!["target".to_string()],
-				called_by: Vec::new(),
-				parameters: Vec::new(),
-				return_type: None,
-				extends: Vec::new(),
-				implements: Vec::new(),
-			}],
-			size_lines: 5,
-			language: "python".to_string(),
-		};
-
-		// b.py: `def target(): ...` — never imported by a.py
-		let b = CodeNode {
-			id: "b.py".to_string(),
-			name: "b".to_string(),
-			kind: "file".to_string(),
-			path: "b.py".to_string(),
-			description: String::new(),
-			symbols: vec!["target".to_string()],
-			hash: "b".to_string(),
-			embedding: Vec::new(),
-			imports: Vec::new(),
-			exports: vec!["target".to_string()],
-			functions: Vec::new(),
-			size_lines: 2,
-			language: "python".to_string(),
-		};
-
-		let relationships = RelationshipDiscovery::discover_relationships_efficiently(
-			std::slice::from_ref(&a),
-			&[a.clone(), b],
+		let root = std::env::temp_dir().join(format!(
+			"octocode-issue-85-{}-{}",
+			std::process::id(),
+			std::time::SystemTime::now()
+				.duration_since(std::time::UNIX_EPOCH)
+				.unwrap()
+				.as_nanos()
+		));
+		std::fs::create_dir_all(&root).unwrap();
+		std::fs::write(
+			root.join("a.py"),
+			"def target():\n    return 1\n\ndef main():\n    target()\n",
 		)
-		.await
+		.unwrap();
+		std::fs::write(root.join("b.py"), "def target():\n    return 2\n").unwrap();
+		// Positive control: an explicit import must still project to a file edge.
+		std::fs::write(
+			root.join("c.py"),
+			"from b import target\n\ndef run():\n    target()\n",
+		)
 		.unwrap();
 
-		let wrong: Vec<_> = relationships
-			.iter()
-			.filter(|r| {
-				r.relation_type == RelationType::Calls && r.source == "a.py" && r.target == "b.py"
-			})
+		let graph = RuntimeGraphCache::default().graph(&root).await.unwrap();
+		std::fs::remove_dir_all(&root).unwrap();
+
+		let calls: Vec<_> = file_level_relationships(&graph)
+			.into_iter()
+			.filter(|r| r.relation_type == RelationType::Calls)
 			.collect();
+		let shown: Vec<String> = calls
+			.iter()
+			.map(|r| format!("{} -> {} ({})", r.source, r.target, r.description))
+			.collect();
+
 		assert!(
-			wrong.is_empty(),
-			"call to locally-defined target() must not resolve to b.py: {:?}",
-			wrong
+			!calls
 				.iter()
-				.map(|r| format!("{} -> {} ({})", r.source, r.target, r.description))
-				.collect::<Vec<_>>()
+				.any(|r| r.source == "a.py" && r.target == "b.py"),
+			"call to locally-defined target() must not resolve to b.py: {:?}",
+			shown
+		);
+		assert!(
+			calls.iter().any(|r| r.source == "c.py"
+				&& r.target == "b.py"
+				&& r.description.contains("c.py::run")
+				&& r.description.contains("b.py::target")),
+			"imported call must project to c.py -> b.py naming both symbols: {:?}",
+			shown
 		);
 	}
 

@@ -22,12 +22,13 @@ use crate::embedding::{
 use crate::indexer::graphrag::ai::AIEnhancements;
 use crate::indexer::graphrag::database::DatabaseOperations;
 use crate::indexer::graphrag::relationships::RelationshipDiscovery;
+use crate::indexer::graphrag::runtime::{self, RuntimeGraphCache};
 use crate::indexer::graphrag::symbols::{extract_symbols_from_file, FileAstData};
 use crate::indexer::graphrag::types::{CodeGraph, CodeNode, CodeRelationship};
 use crate::indexer::graphrag::utils::{
 	cosine_similarity, detect_project_root, detect_project_root_from, to_relative_path,
 };
-use crate::indexer::languages::TypeRelationKind;
+use crate::indexer::languages::resolution_utils::FileRegistry;
 use crate::state::SharedState;
 use crate::store::{CodeBlock, Store};
 use anyhow::{Context, Result};
@@ -44,6 +45,9 @@ pub struct GraphBuilder {
 	store: Store,
 	project_root: PathBuf, // Project root for relative path calculations
 	ai_enhancements: Option<AIEnhancements>,
+	// Live structural graph: the resolver for symbol-level edges, projected onto
+	// files at discovery time. Stamp-cached, so unchanged trees are not re-parsed.
+	runtime_cache: RuntimeGraphCache,
 	quiet: bool, // Quiet flag for suppressing console output
 }
 
@@ -99,6 +103,7 @@ impl GraphBuilder {
 			store,
 			project_root,
 			ai_enhancements,
+			runtime_cache: RuntimeGraphCache::default(),
 			quiet,
 		})
 	}
@@ -295,24 +300,6 @@ impl GraphBuilder {
 			};
 			let imports = ast_data.imports.clone();
 			let exports = ast_data.exports.clone();
-			let file_calls: Vec<(u32, String)> = ast_data
-				.calls
-				.iter()
-				.map(|(line, call)| {
-					let name = if call.qualifier.is_none() {
-						ast_data
-							.import_bindings
-							.iter()
-							.find(|binding| binding.local_name == call.name)
-							.and_then(|binding| binding.imported_name.clone())
-							.unwrap_or_else(|| call.name.clone())
-					} else {
-						call.name.clone()
-					};
-					(*line, name)
-				})
-				.collect();
-			let file_type_rels = ast_data.type_relations.clone();
 
 			if !self.quiet && (!imports.is_empty() || !exports.is_empty()) {
 				eprintln!(
@@ -327,80 +314,6 @@ impl GraphBuilder {
 				if !exports.is_empty() {
 					eprintln!("  Exports: {:?}", exports);
 				}
-			}
-
-			// Attribute callees + type relations (extends/implements).
-			// When per-function FunctionInfo entries are available, attribute
-			// callees by line range. When they are not — currently always, see
-			// extract_functions_from_block — synthesize a single file-scope
-			// FunctionInfo so the edges still reach relationships.rs, which
-			// emits at (source_file.id → target_file.id) granularity.
-
-			if !all_functions.is_empty() {
-				for func in &mut all_functions {
-					func.calls = file_calls
-						.iter()
-						.filter(|(line, _)| *line >= func.start_line && *line <= func.end_line)
-						.map(|(_, callee)| callee.clone())
-						.collect();
-					func.calls.sort();
-					func.calls.dedup();
-
-					let in_range = |line: u32| line >= func.start_line && line <= func.end_line;
-					func.extends = file_type_rels
-						.iter()
-						.filter(|relation| {
-							relation.kind == TypeRelationKind::Extends && in_range(relation.line)
-						})
-						.map(|relation| relation.target_name.clone())
-						.collect();
-					func.extends.sort();
-					func.extends.dedup();
-
-					func.implements = file_type_rels
-						.iter()
-						.filter(|relation| {
-							relation.kind == TypeRelationKind::Implements && in_range(relation.line)
-						})
-						.map(|relation| relation.target_name.clone())
-						.collect();
-					func.implements.sort();
-					func.implements.dedup();
-				}
-			} else if !file_calls.is_empty() || !file_type_rels.is_empty() {
-				let mut callees: Vec<String> =
-					file_calls.into_iter().map(|(_, callee)| callee).collect();
-				callees.sort();
-				callees.dedup();
-
-				let mut extends: Vec<String> = file_type_rels
-					.iter()
-					.filter(|relation| relation.kind == TypeRelationKind::Extends)
-					.map(|relation| relation.target_name.clone())
-					.collect();
-				extends.sort();
-				extends.dedup();
-
-				let mut implements: Vec<String> = file_type_rels
-					.into_iter()
-					.filter(|relation| relation.kind == TypeRelationKind::Implements)
-					.map(|relation| relation.target_name)
-					.collect();
-				implements.sort();
-				implements.dedup();
-
-				all_functions.push(crate::indexer::graphrag::types::FunctionInfo {
-					name: file_name.clone(),
-					signature: String::new(),
-					start_line: 0,
-					end_line: u32::MAX,
-					calls: callees,
-					called_by: Vec::new(),
-					parameters: Vec::new(),
-					return_type: None,
-					extends,
-					implements,
-				});
 			}
 
 			// Generate description - collect for batch AI processing when enabled
@@ -764,32 +677,32 @@ impl GraphBuilder {
 					.map(|node| node.without_embedding())
 					.collect::<Vec<CodeNode>>();
 
-				// Keys that imports resolve against (mirrors the symbol index and
-				// last-path-segment matching in RelationshipDiscovery).
-				let new_keys: std::collections::HashSet<&str> = selected
-					.iter()
-					.filter(|n| n.language != "markdown")
-					.flat_map(|n| n.exports.iter().chain(n.symbols.iter()))
-					.map(|s| s.as_str())
+				// Unchanged files whose imports resolve to a node from this run
+				// (node ids are project-relative paths, so resolved paths compare
+				// directly against them).
+				let all_paths: Vec<String> = graph
+					.nodes
+					.values()
+					.filter(|node| !node.is_symbol_node())
+					.map(|node| node.path.clone())
 					.collect();
-				let imports_new = |import: &str| {
-					let clean = import
-						.trim_start_matches("import_")
-						.trim_start_matches("use_")
-						.trim_start_matches("from_");
-					let last = import
-						.rsplit([':', '.', '/'])
-						.next()
-						.unwrap_or(import)
-						.trim();
-					new_keys.contains(import) || new_keys.contains(clean) || new_keys.contains(last)
-				};
+				let registry = FileRegistry::new(&all_paths);
 				let importers: Vec<CodeNode> = graph
 					.nodes
 					.values()
 					.filter(|node| !node.is_symbol_node())
 					.filter(|node| !processed_node_ids.contains(&node.id))
-					.filter(|node| node.imports.iter().any(|i| imports_new(i)))
+					.filter(|node| {
+						crate::indexer::languages::get_language(&node.language).is_some_and(
+							|language| {
+								node.imports.iter().any(|import| {
+									language
+										.resolve_import(import, &node.path, &registry)
+										.is_some_and(|path| processed_node_ids.contains(&path))
+								})
+							},
+						)
+					})
 					.map(|node| node.without_embedding())
 					.collect();
 				selected.extend(importers);
@@ -800,7 +713,7 @@ impl GraphBuilder {
 				// Process relationships in batches to avoid storing everything at the end
 				let relationship_batch_size = self.config.index.embeddings_batch_size * 4; // Larger batches for relationships
 
-				let all_relationships = if self.llm_enabled() {
+				let mut all_relationships = if self.llm_enabled() {
 					// Enhanced relationship discovery with optional AI for complex cases
 					self.discover_relationships_with_ai_enhancement(&all_processed_nodes)
 						.await?
@@ -809,6 +722,13 @@ impl GraphBuilder {
 					self.discover_relationships_efficiently(&all_processed_nodes)
 						.await?
 				};
+
+				// Calls/Extends/Implements resolved per declaration by the live
+				// structural graph, projected onto files. It spans every file, so
+				// unchanged callers of a new file need no source-side selection;
+				// the filter below keeps only edges touching this run.
+				let structural = self.runtime_cache.graph(&self.project_root).await?;
+				all_relationships.extend(runtime::file_level_relationships(&structural));
 
 				// Storage is append-only: keep only edges that touch a node from
 				// this run, or the importer sources added above would re-append

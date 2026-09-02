@@ -30,22 +30,12 @@ impl RelationshipDiscovery {
 	) -> Result<Vec<CodeRelationship>> {
 		let mut relationships = Vec::new();
 
-		// Pre-build lookup indexes for O(1) symbol resolution instead of O(N) scans
-		// Borrow the symbol strings as keys instead of cloning them — they live in
-		// `all_nodes`, which outlives this index.
-		let mut symbol_index: std::collections::HashMap<&str, Vec<&str>> =
-			std::collections::HashMap::new();
-		for node in all_nodes {
-			// Markdown "exports" are section headings — generic prose like "Config"
-			// or "Overview". Indexing them as importable symbols makes every code
-			// import whose last segment matches a heading resolve to a document.
-			if node.language == "markdown" {
-				continue;
-			}
-			for sym in node.exports.iter().chain(node.symbols.iter()) {
-				symbol_index.entry(sym.as_str()).or_default().push(&node.id);
-			}
-		}
+		// Symbol-level edges (Calls/Extends/Implements) are NOT resolved here. The
+		// live structural graph resolves them per declaration and the builder
+		// projects those onto files (`runtime::file_level_relationships`).
+		// Matching bare names against a file-wide symbol set linked every file
+		// mentioning the name (issues #85, #86).
+
 		// Pre-build path index for parent-child lookups
 		let all_node_ids: Vec<(&str, &str)> = all_nodes
 			.iter()
@@ -62,24 +52,6 @@ impl RelationshipDiscovery {
 		let registry = crate::indexer::languages::resolution_utils::FileRegistry::new(&all_files);
 
 		for source_file in new_files {
-			let imported_node_ids: std::collections::HashSet<&str> =
-				crate::indexer::languages::get_language(&source_file.language)
-					.map(|language| {
-						source_file
-							.imports
-							.iter()
-							.filter_map(|import| {
-								language.resolve_import(import, &source_file.path, &registry)
-							})
-							.filter_map(|path| file_map.get(&path).map(|node| node.id.as_str()))
-							.collect()
-					})
-					.unwrap_or_default();
-			// Import edges come only from `resolve_import_relationships` (path
-			// resolution). Matching import strings against the symbol index by bare
-			// name linked every file mentioning the name — including co-importers,
-			// whose import-statement identifiers land in `symbols` (issue #86).
-
 			// 1. Hierarchical module relationships (high confidence)
 			for &(other_id, other_path) in &all_node_ids {
 				if other_id == source_file.id {
@@ -105,7 +77,7 @@ impl RelationshipDiscovery {
 				}
 			}
 
-			// 2. Language-specific pattern relationships
+			// 2. Import resolution + language-specific patterns
 			Self::discover_language_specific_relationships(
 				source_file,
 				all_nodes,
@@ -113,89 +85,6 @@ impl RelationshipDiscovery {
 				&registry,
 				&mut relationships,
 			);
-
-			// 3. Function call relationships from extracted call sites
-			for function in &source_file.functions {
-				for callee in &function.calls {
-					if let Some(target_ids) = symbol_index.get(callee.as_str()) {
-						let target_ids = Self::select_scoped_targets(
-							target_ids,
-							&imported_node_ids,
-							source_file.id.as_str(),
-						);
-						for target_id in target_ids {
-							if target_id != source_file.id {
-								relationships.push(CodeRelationship {
-									source: source_file.id.clone(),
-									target: target_id.to_string(),
-									relation_type:
-										crate::indexer::graphrag::types::RelationType::Calls,
-									description: format!("{} calls {}", function.name, callee),
-									confidence: 0.85,
-									weight: 0.8,
-									provenance:
-										crate::indexer::graphrag::types::Provenance::Inferred,
-								});
-							}
-						}
-					}
-				}
-
-				// 4. Inheritance edges (e.g. `class Foo extends Bar`,
-				//    `trait A: B`, `class C(D)`).
-				for extended in &function.extends {
-					if let Some(target_ids) = symbol_index.get(extended.as_str()) {
-						for target_id in Self::select_scoped_targets(
-							target_ids,
-							&imported_node_ids,
-							source_file.id.as_str(),
-						) {
-							if target_id != source_file.id {
-								relationships.push(CodeRelationship {
-									source: source_file.id.clone(),
-									target: target_id.to_string(),
-									relation_type:
-										crate::indexer::graphrag::types::RelationType::Extends,
-									description: format!("{} extends {}", function.name, extended),
-									confidence: 0.9,
-									weight: 1.0,
-									provenance:
-										crate::indexer::graphrag::types::Provenance::Inferred,
-								});
-							}
-						}
-					}
-				}
-
-				// 6. Interface / trait implementation edges
-				//    (e.g. `class Foo implements Bar`, `impl Trait for Type`).
-				for implemented in &function.implements {
-					if let Some(target_ids) = symbol_index.get(implemented.as_str()) {
-						for target_id in Self::select_scoped_targets(
-							target_ids,
-							&imported_node_ids,
-							source_file.id.as_str(),
-						) {
-							if target_id != source_file.id {
-								relationships.push(CodeRelationship {
-									source: source_file.id.clone(),
-									target: target_id.to_string(),
-									relation_type:
-										crate::indexer::graphrag::types::RelationType::Implements,
-									description: format!(
-										"{} implements {}",
-										function.name, implemented
-									),
-									confidence: 0.9,
-									weight: 1.0,
-									provenance:
-										crate::indexer::graphrag::types::Provenance::Inferred,
-								});
-							}
-						}
-					}
-				}
-			}
 		}
 
 		// Deduplicate relationships (borrow the fields — no per-comparison clones;
@@ -208,49 +97,6 @@ impl RelationshipDiscovery {
 		});
 
 		Ok(relationships)
-	}
-
-	/// Prefer a single imported declaration, then the local declaration, then a
-	/// single global declaration. Ambiguous file-level matches are dropped
-	/// rather than fanning one call out to every file that happens to export a
-	/// ubiquitous name such as `run`.
-	fn select_scoped_targets<'a>(
-		target_ids: &[&'a str],
-		imported_node_ids: &std::collections::HashSet<&str>,
-		source_id: &str,
-	) -> Vec<&'a str> {
-		let mut imported: Vec<_> = target_ids
-			.iter()
-			.copied()
-			.filter(|target| *target != source_id && imported_node_ids.contains(*target))
-			.collect();
-		imported.sort_unstable();
-		imported.dedup();
-		if imported.len() == 1 {
-			return imported;
-		}
-		if imported.len() > 1 {
-			return Vec::new();
-		}
-
-		// A symbol the source file declares itself binds locally; self-edges are
-		// suppressed by the caller, so there is nothing cross-file to guess at.
-		if target_ids.contains(&source_id) {
-			return Vec::new();
-		}
-
-		let mut global: Vec<_> = target_ids
-			.iter()
-			.copied()
-			.filter(|target| *target != source_id)
-			.collect();
-		global.sort_unstable();
-		global.dedup();
-		if global.len() == 1 {
-			global
-		} else {
-			Vec::new()
-		}
 	}
 
 	// Discover language-specific relationships with import resolution
@@ -680,43 +526,5 @@ impl RelationshipDiscovery {
 		} else {
 			format!("{} {} file ({} lines)", file_name, language, lines)
 		}
-	}
-}
-
-#[cfg(test)]
-mod scoped_target_tests {
-	use super::RelationshipDiscovery;
-	use std::collections::HashSet;
-
-	#[test]
-	fn imported_target_wins_over_unrelated_global_match() {
-		let targets = ["src/a.rs", "src/b.rs"];
-		let imported = HashSet::from(["src/b.rs"]);
-		assert_eq!(
-			RelationshipDiscovery::select_scoped_targets(&targets, &imported, "src/main.rs"),
-			vec!["src/b.rs"]
-		);
-	}
-
-	#[test]
-	fn locally_defined_symbol_is_not_resolved_cross_file() {
-		// Issue #85: the source file defines the symbol itself; the call must
-		// not fall through to the one other file defining the same name.
-		let targets = ["a.py", "b.py"];
-		assert!(
-			RelationshipDiscovery::select_scoped_targets(&targets, &HashSet::new(), "a.py")
-				.is_empty()
-		);
-	}
-
-	#[test]
-	fn ambiguous_targets_are_not_fanned_out() {
-		let targets = ["src/a.rs", "src/b.rs"];
-		assert!(RelationshipDiscovery::select_scoped_targets(
-			&targets,
-			&HashSet::new(),
-			"src/main.rs"
-		)
-		.is_empty());
 	}
 }
