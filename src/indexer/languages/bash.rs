@@ -188,7 +188,7 @@ impl Language for Bash {
 
 		if import_path.starts_with("./") || import_path.starts_with("../") {
 			// Relative source
-			self.resolve_relative_source(import_path, source_file, &registry)
+			self.resolve_relative_source(import_path, source_file, registry)
 		} else {
 			// Absolute source
 			registry.find_exact_file(import_path)

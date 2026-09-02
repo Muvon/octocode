@@ -460,7 +460,7 @@ impl Language for Cpp {
 		if import_path.len() >= 2 && import_path.starts_with('"') && import_path.ends_with('"') {
 			// Local include: #include "header.h"
 			let header_name = &import_path[1..import_path.len() - 1];
-			self.resolve_local_include(header_name, source_file, &registry)
+			self.resolve_local_include(header_name, source_file, registry)
 		} else if import_path.len() >= 2
 			&& import_path.starts_with('<')
 			&& import_path.ends_with('>')
@@ -471,7 +471,7 @@ impl Language for Cpp {
 		} else {
 			// Direct path or unquoted header - try local resolution first, then search common directories
 			if let Some(local_result) =
-				self.resolve_local_include(import_path, source_file, &registry)
+				self.resolve_local_include(import_path, source_file, registry)
 			{
 				Some(local_result)
 			} else if let Some(exact_result) = registry.find_exact_file(import_path) {

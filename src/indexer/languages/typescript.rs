@@ -341,7 +341,7 @@ impl Language for TypeScript {
 			// Relative import - handle TypeScript-specific extensions with enhanced matching
 			if let Some(relative_path) = resolve_relative_path(source_file, import_path) {
 				// Use enhanced TypeScript file matching
-				return self.find_matching_ts_file(&relative_path, &registry);
+				return self.find_matching_ts_file(&relative_path, registry);
 			}
 		} else {
 			// Use enhanced JavaScript resolution for absolute/module imports
@@ -352,7 +352,7 @@ impl Language for TypeScript {
 			}
 
 			// Try TypeScript-specific module resolution
-			return self.resolve_ts_module_import(import_path, source_file, &registry);
+			return self.resolve_ts_module_import(import_path, source_file, registry);
 		}
 
 		None

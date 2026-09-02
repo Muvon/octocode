@@ -54,7 +54,6 @@ mod cpp_tests {
 	#[test]
 	fn test_namespace_splits_into_individual_functions() {
 		use crate::indexer::code_region_extractor::extract_meaningful_regions;
-		use crate::indexer::languages::Language;
 		use tree_sitter::Parser;
 
 		// Non-trivial content so the smart single-line merge pass doesn't recombine them.
@@ -106,7 +105,6 @@ namespace app {
 	#[test]
 	fn test_empty_namespace_falls_back_to_single_region() {
 		use crate::indexer::code_region_extractor::extract_meaningful_regions;
-		use crate::indexer::languages::Language;
 		use tree_sitter::Parser;
 
 		let code = r#"

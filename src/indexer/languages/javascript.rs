@@ -285,13 +285,13 @@ impl Language for JavaScript {
 
 		if import_path.starts_with("./") || import_path.starts_with("../") {
 			// Relative import
-			self.resolve_relative_import(import_path, source_file, &registry)
+			self.resolve_relative_import(import_path, source_file, registry)
 		} else if import_path.starts_with('/') {
 			// Absolute import from project root
-			self.resolve_absolute_import(import_path, &registry)
+			self.resolve_absolute_import(import_path, registry)
 		} else {
 			// Module import - look in node_modules or as relative
-			self.resolve_module_import(import_path, source_file, &registry)
+			self.resolve_module_import(import_path, source_file, registry)
 		}
 	}
 

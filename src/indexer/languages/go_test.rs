@@ -15,7 +15,7 @@
 #[cfg(test)]
 mod go_tests {
 	use crate::indexer::code_region_extractor::{extract_meaningful_regions, CodeRegion};
-	use crate::indexer::languages::{self, Language};
+	use crate::indexer::languages;
 	use tree_sitter::Parser;
 
 	fn parse_regions(source: &str) -> Vec<CodeRegion> {

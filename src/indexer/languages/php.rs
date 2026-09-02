@@ -304,24 +304,24 @@ impl Language for Php {
 		if import_path.starts_with("./") || import_path.starts_with("../") {
 			// Relative path - resolve directly
 			if let Some(relative_path) = resolve_relative_path(source_file, import_path) {
-				return self.find_matching_php_file(&relative_path, &registry);
+				return self.find_matching_php_file(&relative_path, registry);
 			}
 		} else if import_path.ends_with(".php") || !import_path.contains("/") {
 			// Simple filename like "Config.php" - look in same directory as source
 			let source_path = std::path::Path::new(source_file);
 			if let Some(source_dir) = source_path.parent() {
 				let target_path = source_dir.join(import_path);
-				if let Some(found) = self.find_matching_php_file(&target_path, &registry) {
+				if let Some(found) = self.find_matching_php_file(&target_path, registry) {
 					return Some(found);
 				}
 			}
 			// Also try namespace resolution as fallback
 			let file_path = PathNormalizer::normalize_separators(import_path);
-			return self.resolve_namespace_import(&file_path, source_file, &registry);
+			return self.resolve_namespace_import(&file_path, source_file, registry);
 		} else {
 			// Convert namespace to file path and try PSR-4 patterns
 			let file_path = PathNormalizer::normalize_separators(import_path);
-			return self.resolve_namespace_import(&file_path, source_file, &registry);
+			return self.resolve_namespace_import(&file_path, source_file, registry);
 		}
 
 		None

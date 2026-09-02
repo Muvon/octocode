@@ -219,10 +219,10 @@ impl Language for Python {
 
 		if import_path.starts_with('.') {
 			// Relative import: .module or ..module
-			self.resolve_relative_import(import_path, source_file, &registry)
+			self.resolve_relative_import(import_path, source_file, registry)
 		} else {
 			// Absolute import - look from project root or in same package
-			self.resolve_absolute_import(import_path, source_file, &registry)
+			self.resolve_absolute_import(import_path, source_file, registry)
 		}
 	}
 

@@ -287,13 +287,13 @@ impl Language for Ruby {
 		if import_path.starts_with("relative:") {
 			// require_relative import
 			let relative_path = import_path.strip_prefix("relative:")?;
-			self.resolve_relative_require(relative_path, source_file, &registry)
+			self.resolve_relative_require(relative_path, source_file, registry)
 		} else if import_path.starts_with("./") || import_path.starts_with("../") {
 			// Relative require
-			self.resolve_relative_require(import_path, source_file, &registry)
+			self.resolve_relative_require(import_path, source_file, registry)
 		} else {
 			// Absolute require
-			self.resolve_absolute_require(import_path, &registry)
+			self.resolve_absolute_require(import_path, registry)
 		}
 	}
 

@@ -452,7 +452,7 @@ mod tests {
 		let canonical = file_path.canonicalize().expect("failed to canonicalize");
 		let registered_path = canonical.to_string_lossy().to_string();
 
-		let registry = FileRegistry::new(&[registered_path.clone()]);
+		let registry = FileRegistry::new(std::slice::from_ref(&registered_path));
 
 		// Query with a textually different but equivalent path (redundant
 		// `..` component) so the fast string-match path misses and the
