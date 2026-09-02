@@ -1,5 +1,39 @@
 # Changelog
 
+## [0.24.0] - 2026-09-02
+
+### 📋 Release Summary
+
+This release includes a breaking change to file registry behavior (5bed72b2) and adds support for indexing nested Svelte code regions (49db8a21). Graph-based code understanding and reindexing were improved, with more reliable local call/import resolution and more accurate parsing of comments and code fences (ee668c0d, c5997d7d, 1793c982, 0e5db1b2, bcd723b4, da60d04b). Performance and dependency updates further improve indexing and metadata storage (ab04950a, 5b3e95a8).
+
+
+### 🚨 Breaking Changes
+
+⚠️ **Important**: This release contains breaking changes that may require code updates.
+
+- **indexer**: share file registry `5bed72b2`
+
+### ✨ New Features & Enhancements
+
+- **svelte**: index nested code regions `49db8a21`
+
+### 🔧 Improvements & Optimizations
+
+- **graphrag**: resolve edges at runtime `c5997d7d`
+- **registry**: pass refs directly to resolvers `da60d04b`
+- **store**: batch file metadata writes `ab04950a`
+- **graphrag**: streamline reindexing `1793c982`
+- **indexer**: rework parsing and chunking `0e5db1b2`
+
+### 🐛 Bug Fixes & Stability
+
+- **graphrag**: resolve local calls and imports `ee668c0d`
+- **indexer**: improve comment and fence parsing `bcd723b4`
+
+### 🔄 Other Changes
+
+1 maintenance, dependency, and tooling update not listed individually.
+
 ## [0.23.1] - 2026-08-31
 
 ### 📋 Release Summary
