@@ -621,29 +621,39 @@ impl Store {
 
 	// Delegate other operations to modular components
 	pub async fn remove_blocks_by_path(&self, file_path: &str) -> Result<()> {
-		let table_ops = self.table_ops();
-		table_ops
-			.remove_blocks_by_path(file_path, tables::CODE_BLOCKS)
-			.await?;
-		table_ops
-			.remove_blocks_by_path(file_path, tables::TEXT_BLOCKS)
-			.await?;
-		table_ops
-			.remove_blocks_by_path(file_path, tables::DOCUMENT_BLOCKS)
-			.await?;
-		// Clean up GraphRAG data for the file
-		table_ops
-			.remove_blocks_by_path(file_path, tables::GRAPHRAG_NODES)
-			.await?;
-		// Use specific GraphRAG operation for relationships (they don't have a 'path' field)
+		self.remove_blocks_by_paths(std::slice::from_ref(&file_path.to_string()))
+			.await
+	}
+
+	pub async fn remove_blocks_by_paths(&self, paths: &[String]) -> Result<()> {
+		if paths.is_empty() {
+			return Ok(());
+		}
+
 		let graphrag_ops = self.graphrag_ops();
 		graphrag_ops
-			.remove_graph_relationships_by_path(file_path)
+			.remove_graph_relationships_by_paths(paths)
+			.await?;
+
+		let table_ops = self.table_ops();
+		table_ops
+			.remove_blocks_by_paths(paths, tables::GRAPHRAG_NODES)
+			.await?;
+		table_ops
+			.remove_blocks_by_paths(paths, tables::CODE_BLOCKS)
+			.await?;
+		table_ops
+			.remove_blocks_by_paths(paths, tables::TEXT_BLOCKS)
+			.await?;
+		table_ops
+			.remove_blocks_by_paths(paths, tables::DOCUMENT_BLOCKS)
 			.await?;
 		// Also remove file metadata to prevent stale mtime from causing skip-on-reindex
 		table_ops
-			.remove_blocks_by_path(file_path, tables::FILE_METADATA)
+			.remove_blocks_by_paths(paths, tables::FILE_METADATA)
 			.await?;
+
+		tracing::info!(files = paths.len(), "Removed indexed data for files");
 		Ok(())
 	}
 
@@ -1003,6 +1013,11 @@ impl Store {
 	pub async fn remove_graph_nodes_by_path(&self, file_path: &str) -> Result<usize> {
 		let graphrag_ops = self.graphrag_ops();
 		graphrag_ops.remove_graph_nodes_by_path(file_path).await
+	}
+
+	pub async fn remove_graph_nodes_by_paths(&self, paths: &[String]) -> Result<usize> {
+		let graphrag_ops = self.graphrag_ops();
+		graphrag_ops.remove_graph_nodes_by_paths(paths).await
 	}
 
 	pub async fn remove_graph_relationships_by_path(&self, file_path: &str) -> Result<usize> {

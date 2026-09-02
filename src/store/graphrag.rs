@@ -22,7 +22,11 @@ use arrow_array::{Array, RecordBatch, StringArray};
 use arrow_schema::{DataType, Field, Schema};
 
 // LanceDB imports
-use crate::store::{sql::escape_single_quotes, table_ops::TableOperations, tables, CodeBlock};
+use crate::store::{
+	sql::{escape_single_quotes, in_list_predicate},
+	table_ops::{TableOperations, DELETE_PATHS_CHUNK},
+	tables, CodeBlock,
+};
 use futures::TryStreamExt;
 use lancedb::{
 	query::{ExecutableQuery, QueryBase},
@@ -655,27 +659,33 @@ impl<'a> GraphRagOperations<'a> {
 
 	/// Remove GraphRAG nodes associated with a specific file path
 	pub async fn remove_graph_nodes_by_path(&self, file_path: &str) -> Result<usize> {
-		// Get node IDs before removal for cache invalidation
-		let node_ids = self.get_node_ids_for_file_path(file_path).await?;
+		self.remove_graph_nodes_by_paths(std::slice::from_ref(&file_path.to_string()))
+			.await
+	}
 
-		// CRITICAL FIX: Also remove relationships when removing nodes
-		let relationships_removed = self.remove_graph_relationships_by_path(file_path).await?;
+	/// Remove GraphRAG nodes associated with multiple file paths.
+	pub async fn remove_graph_nodes_by_paths(&self, paths: &[String]) -> Result<usize> {
+		if paths.is_empty() {
+			return Ok(0);
+		}
+
+		let node_ids = self.get_node_ids_for_file_paths(paths).await?;
+		let relationships_removed = self.remove_graph_relationships_by_paths(paths).await?;
 		let nodes_removed = node_ids.len();
 		self.table_ops
-			.remove_blocks_by_path(file_path, tables::GRAPHRAG_NODES)
+			.remove_blocks_by_paths(paths, tables::GRAPHRAG_NODES)
 			.await?;
 
-		// Invalidate cache for removed nodes
 		for node_id in node_ids {
 			self.invalidate_cache_for_node(&node_id);
 		}
 
 		if nodes_removed > 0 || relationships_removed > 0 {
 			tracing::info!(
-				file = %file_path,
+				files = paths.len(),
 				nodes_removed = nodes_removed,
 				relationships_removed = relationships_removed,
-				"Cleaned up GraphRAG data for file"
+				"Cleaned up GraphRAG data for files"
 			);
 		}
 
@@ -684,6 +694,12 @@ impl<'a> GraphRagOperations<'a> {
 
 	/// Remove GraphRAG relationships associated with a specific file path
 	pub async fn remove_graph_relationships_by_path(&self, file_path: &str) -> Result<usize> {
+		self.remove_graph_relationships_by_paths(std::slice::from_ref(&file_path.to_string()))
+			.await
+	}
+
+	/// Remove GraphRAG relationships associated with multiple file paths.
+	pub async fn remove_graph_relationships_by_paths(&self, paths: &[String]) -> Result<usize> {
 		if !self
 			.table_ops
 			.table_exists(tables::GRAPHRAG_RELATIONSHIPS)
@@ -692,28 +708,19 @@ impl<'a> GraphRagOperations<'a> {
 			return Ok(0);
 		}
 
-		// First, get all node IDs for this file path from graphrag_nodes
-		let node_ids = self.get_node_ids_for_file_path(file_path).await?;
+		let node_ids = self.get_node_ids_for_file_paths(paths).await?;
 		if node_ids.is_empty() {
-			return Ok(0); // No nodes for this file, so no relationships to remove
+			return Ok(0);
 		}
 
 		let table = self.get_table(tables::GRAPHRAG_RELATIONSHIPS).await?;
 
-		// Create filter for relationships where source OR target is any of the node IDs
-		let node_filters: Vec<String> = node_ids
-			.iter()
-			.flat_map(|node_id| {
-				let escaped = escape_single_quotes(node_id);
-				vec![
-					format!("source = '{}'", escaped),
-					format!("target = '{}'", escaped),
-				]
-			})
-			.collect();
-
-		if !node_filters.is_empty() {
-			let filter = node_filters.join(" OR ");
+		for chunk in node_ids.chunks(DELETE_PATHS_CHUNK) {
+			let filter = format!(
+				"{} OR {}",
+				in_list_predicate("source", chunk),
+				in_list_predicate("target", chunk)
+			);
 			table.delete(&filter).await.map_err(|e| {
 				anyhow::anyhow!("Failed to delete from graphrag_relationships: {}", e)
 			})?;
@@ -728,9 +735,12 @@ impl<'a> GraphRagOperations<'a> {
 		Ok(node_ids.len())
 	}
 
-	/// Get all node IDs for a specific file path from graphrag_nodes
-	async fn get_node_ids_for_file_path(&self, file_path: &str) -> Result<Vec<String>> {
+	/// Get all node IDs for multiple file paths from graphrag_nodes.
+	async fn get_node_ids_for_file_paths(&self, paths: &[String]) -> Result<Vec<String>> {
 		let mut node_ids = Vec::new();
+		if paths.is_empty() {
+			return Ok(node_ids);
+		}
 
 		if !self.table_ops.table_exists(tables::GRAPHRAG_NODES).await? {
 			return Ok(node_ids);
@@ -738,23 +748,23 @@ impl<'a> GraphRagOperations<'a> {
 
 		let table = self.get_table(tables::GRAPHRAG_NODES).await?;
 
-		// Query for nodes matching the file path, only selecting id column
-		let mut results = table
-			.query()
-			.only_if(format!("path = '{}'", escape_single_quotes(file_path)))
-			.select(lancedb::query::Select::Columns(vec!["id".to_string()]))
-			.execute()
-			.await?;
+		for chunk in paths.chunks(DELETE_PATHS_CHUNK) {
+			let mut results = table
+				.query()
+				.only_if(in_list_predicate("path", chunk))
+				.select(lancedb::query::Select::Columns(vec!["id".to_string()]))
+				.execute()
+				.await?;
 
-		// Process all result batches
-		while let Some(batch) = results.try_next().await? {
-			if batch.num_rows() > 0 {
-				if let Some(column) = batch.column_by_name("id") {
-					if let Some(id_array) =
-						column.as_any().downcast_ref::<arrow::array::StringArray>()
-					{
-						for i in 0..id_array.len() {
-							node_ids.push(id_array.value(i).to_string());
+			while let Some(batch) = results.try_next().await? {
+				if batch.num_rows() > 0 {
+					if let Some(column) = batch.column_by_name("id") {
+						if let Some(id_array) =
+							column.as_any().downcast_ref::<arrow::array::StringArray>()
+						{
+							for i in 0..id_array.len() {
+								node_ids.push(id_array.value(i).to_string());
+							}
 						}
 					}
 				}

@@ -147,7 +147,8 @@ impl GraphBuilder {
 				.push(block);
 		}
 
-		// Process each file
+		let mut files_to_process: HashMap<String, (String, String, Vec<&CodeBlock>)> =
+			HashMap::new();
 		for (file_path, file_blocks) in files_to_blocks {
 			// Skip files that no longer exist on disk to avoid IO errors
 			if !std::path::Path::new(&file_path).exists() {
@@ -176,403 +177,411 @@ impl GraphBuilder {
 
 			// Check if we already have this file with the same hash
 			let graph = self.graph.read().await;
-			let needs_processing = match graph.nodes.get(&relative_path) {
-				Some(existing_node) if existing_node.hash == content_hash => {
-					skipped_count += 1;
-					false
-				}
-				_ => true,
-			};
+			let unchanged = matches!(
+				graph.nodes.get(&relative_path),
+				Some(existing_node) if existing_node.hash == content_hash
+			);
 			drop(graph);
 
-			if needs_processing {
-				// CRITICAL FIX: Clean up old GraphRAG data for this file if it exists
-				// This ensures we don't have stale data when a file is reprocessed
-				if let Err(e) = self.store.remove_graph_nodes_by_path(&relative_path).await {
+			if unchanged {
+				skipped_count += 1;
+				continue;
+			}
+
+			files_to_process.insert(file_path, (relative_path, content_hash, file_blocks));
+		}
+
+		let relative_paths: Vec<String> = files_to_process
+			.values()
+			.map(|(relative_path, _, _)| relative_path.clone())
+			.collect();
+		if let Err(e) = self
+			.store
+			.remove_graph_nodes_by_paths(&relative_paths)
+			.await
+		{
+			if !self.quiet {
+				eprintln!(
+					"Warning: Failed to clean up old GraphRAG data for {} files: {}",
+					relative_paths.len(),
+					e
+				);
+			}
+		}
+
+		// Process each file that is missing from the graph or has changed.
+		for (file_path, (relative_path, content_hash, file_blocks)) in files_to_process {
+			// CRITICAL FIX: Also remove from in-memory graph to prevent duplicates.
+			// Path-based: covers the file node and cleans legacy persisted symbol rows.
+			// ("{path}::{symbol}") plus every edge touching them.
+			{
+				let mut graph = self.graph.write().await;
+				let stale_ids: HashSet<String> = graph
+					.nodes
+					.iter()
+					.filter(|(_, n)| n.path == relative_path)
+					.map(|(id, _)| id.clone())
+					.collect();
+				if !stale_ids.is_empty() {
 					if !self.quiet {
 						eprintln!(
-							"Warning: Failed to clean up old GraphRAG data for {}: {}",
-							relative_path, e
+							"🗑️  Removed {} stale in-memory node(s) for: {}",
+							stale_ids.len(),
+							relative_path
 						);
 					}
-				}
-
-				// CRITICAL FIX: Also remove from in-memory graph to prevent duplicates.
-				// Path-based: covers the file node and cleans legacy persisted symbol rows.
-				// ("{path}::{symbol}") plus every edge touching them.
-				{
-					let mut graph = self.graph.write().await;
-					let stale_ids: HashSet<String> = graph
-						.nodes
-						.iter()
-						.filter(|(_, n)| n.path == relative_path)
-						.map(|(id, _)| id.clone())
-						.collect();
-					if !stale_ids.is_empty() {
-						if !self.quiet {
-							eprintln!(
-								"🗑️  Removed {} stale in-memory node(s) for: {}",
-								stale_ids.len(),
-								relative_path
-							);
-						}
-						graph.nodes.retain(|id, _| !stale_ids.contains(id));
-						graph.relationships.retain(|rel| {
-							!stale_ids.contains(&rel.source) && !stale_ids.contains(&rel.target)
-						});
-					}
-				}
-
-				// Extract file information efficiently
-				let file_name = Path::new(&file_path)
-					.file_stem()
-					.and_then(|s| s.to_str())
-					.unwrap_or("unknown")
-					.to_string();
-
-				// Determine file kind based on path patterns
-				let kind = RelationshipDiscovery::determine_file_kind(&relative_path);
-
-				// Extract language from the first block (should be consistent)
-				let language = file_blocks
-					.first()
-					.map(|b| b.language.clone())
-					.unwrap_or_else(|| "unknown".to_string());
-
-				// Collect all symbols from all blocks
-				let mut all_symbols = HashSet::new();
-				let mut all_functions = Vec::new();
-				let mut total_lines = 0;
-
-				for block in &file_blocks {
-					all_symbols.extend(block.symbols.iter().cloned());
-					total_lines = total_lines.max(block.end_line);
-
-					// Extract function information from this block
-					if let Ok(functions) =
-						RelationshipDiscovery::extract_functions_from_block(block)
-					{
-						all_functions.extend(functions);
-					}
-				}
-
-				let symbols: Vec<String> = all_symbols.into_iter().collect();
-
-				// Unified single-pass AST extraction: imports, exports, call
-				// sites, type relations, and symbol declarations from ONE
-				// tree-sitter parse (replaces three per-file parses).
-				let ast_data = match extract_symbols_from_file(&file_path, &language) {
-					Ok(data) => data,
-					Err(e) => {
-						if !self.quiet {
-							eprintln!("⚠️  AST extraction failed for {}: {}", relative_path, e);
-						}
-						// Fallback to the old heuristic if AST parsing fails
-						let (imports, exports) =
-							RelationshipDiscovery::extract_imports_exports_efficient(
-								&symbols,
-								&language,
-								&relative_path,
-							);
-						FileAstData {
-							imports,
-							exports,
-							..FileAstData::default()
-						}
-					}
-				};
-				let imports = ast_data.imports.clone();
-				let exports = ast_data.exports.clone();
-				let file_calls: Vec<(u32, String)> = ast_data
-					.calls
-					.iter()
-					.map(|(line, call)| {
-						let name = if call.qualifier.is_none() {
-							ast_data
-								.import_bindings
-								.iter()
-								.find(|binding| binding.local_name == call.name)
-								.and_then(|binding| binding.imported_name.clone())
-								.unwrap_or_else(|| call.name.clone())
-						} else {
-							call.name.clone()
-						};
-						(*line, name)
-					})
-					.collect();
-				let file_type_rels = ast_data.type_relations.clone();
-
-				if !self.quiet && (!imports.is_empty() || !exports.is_empty()) {
-					eprintln!(
-						"📦 Found {} imports, {} exports in {}",
-						imports.len(),
-						exports.len(),
-						relative_path
-					);
-					if !imports.is_empty() {
-						eprintln!("  Imports: {:?}", imports);
-					}
-					if !exports.is_empty() {
-						eprintln!("  Exports: {:?}", exports);
-					}
-				}
-
-				// Attribute callees + type relations (extends/implements).
-				// When per-function FunctionInfo entries are available, attribute
-				// callees by line range. When they are not — currently always, see
-				// extract_functions_from_block — synthesize a single file-scope
-				// FunctionInfo so the edges still reach relationships.rs, which
-				// emits at (source_file.id → target_file.id) granularity.
-
-				if !all_functions.is_empty() {
-					for func in &mut all_functions {
-						func.calls = file_calls
-							.iter()
-							.filter(|(line, _)| *line >= func.start_line && *line <= func.end_line)
-							.map(|(_, callee)| callee.clone())
-							.collect();
-						func.calls.sort();
-						func.calls.dedup();
-
-						let in_range = |line: u32| line >= func.start_line && line <= func.end_line;
-						func.extends = file_type_rels
-							.iter()
-							.filter(|relation| {
-								relation.kind == TypeRelationKind::Extends
-									&& in_range(relation.line)
-							})
-							.map(|relation| relation.target_name.clone())
-							.collect();
-						func.extends.sort();
-						func.extends.dedup();
-
-						func.implements = file_type_rels
-							.iter()
-							.filter(|relation| {
-								relation.kind == TypeRelationKind::Implements
-									&& in_range(relation.line)
-							})
-							.map(|relation| relation.target_name.clone())
-							.collect();
-						func.implements.sort();
-						func.implements.dedup();
-					}
-				} else if !file_calls.is_empty() || !file_type_rels.is_empty() {
-					let mut callees: Vec<String> =
-						file_calls.into_iter().map(|(_, callee)| callee).collect();
-					callees.sort();
-					callees.dedup();
-
-					let mut extends: Vec<String> = file_type_rels
-						.iter()
-						.filter(|relation| relation.kind == TypeRelationKind::Extends)
-						.map(|relation| relation.target_name.clone())
-						.collect();
-					extends.sort();
-					extends.dedup();
-
-					let mut implements: Vec<String> = file_type_rels
-						.into_iter()
-						.filter(|relation| relation.kind == TypeRelationKind::Implements)
-						.map(|relation| relation.target_name)
-						.collect();
-					implements.sort();
-					implements.dedup();
-
-					all_functions.push(crate::indexer::graphrag::types::FunctionInfo {
-						name: file_name.clone(),
-						signature: String::new(),
-						start_line: 0,
-						end_line: u32::MAX,
-						calls: callees,
-						called_by: Vec::new(),
-						parameters: Vec::new(),
-						return_type: None,
-						extends,
-						implements,
+					graph.nodes.retain(|id, _| !stale_ids.contains(id));
+					graph.relationships.retain(|rel| {
+						!stale_ids.contains(&rel.source) && !stale_ids.contains(&rel.target)
 					});
 				}
+			}
 
-				// Generate description - collect for batch AI processing when enabled
-				let description = if self.llm_enabled()
-					&& self.should_use_ai_for_description(&symbols, total_lines as u32, &language)
-				{
+			// Extract file information efficiently
+			let file_name = Path::new(&file_path)
+				.file_stem()
+				.and_then(|s| s.to_str())
+				.unwrap_or("unknown")
+				.to_string();
+
+			// Determine file kind based on path patterns
+			let kind = RelationshipDiscovery::determine_file_kind(&relative_path);
+
+			// Extract language from the first block (should be consistent)
+			let language = file_blocks
+				.first()
+				.map(|b| b.language.clone())
+				.unwrap_or_else(|| "unknown".to_string());
+
+			// Collect all symbols from all blocks
+			let mut all_symbols = HashSet::new();
+			let mut all_functions = Vec::new();
+			let mut total_lines = 0;
+
+			for block in &file_blocks {
+				all_symbols.extend(block.symbols.iter().cloned());
+				total_lines = total_lines.max(block.end_line);
+
+				// Extract function information from this block
+				if let Ok(functions) = RelationshipDiscovery::extract_functions_from_block(block) {
+					all_functions.extend(functions);
+				}
+			}
+
+			let symbols: Vec<String> = all_symbols.into_iter().collect();
+
+			// Unified single-pass AST extraction: imports, exports, call
+			// sites, type relations, and symbol declarations from ONE
+			// tree-sitter parse (replaces three per-file parses).
+			let ast_data = match extract_symbols_from_file(&file_path, &language) {
+				Ok(data) => data,
+				Err(e) => {
 					if !self.quiet {
-						eprintln!(
-							"🤖 Collecting for AI batch: {} ({} lines, {} symbols)",
-							relative_path,
-							total_lines,
-							symbols.len()
+						eprintln!("⚠️  AST extraction failed for {}: {}", relative_path, e);
+					}
+					// Fallback to the old heuristic if AST parsing fails
+					let (imports, exports) =
+						RelationshipDiscovery::extract_imports_exports_efficient(
+							&symbols,
+							&language,
+							&relative_path,
 						);
+					FileAstData {
+						imports,
+						exports,
+						..FileAstData::default()
+					}
+				}
+			};
+			let imports = ast_data.imports.clone();
+			let exports = ast_data.exports.clone();
+			let file_calls: Vec<(u32, String)> = ast_data
+				.calls
+				.iter()
+				.map(|(line, call)| {
+					let name = if call.qualifier.is_none() {
+						ast_data
+							.import_bindings
+							.iter()
+							.find(|binding| binding.local_name == call.name)
+							.and_then(|binding| binding.imported_name.clone())
+							.unwrap_or_else(|| call.name.clone())
+					} else {
+						call.name.clone()
+					};
+					(*line, name)
+				})
+				.collect();
+			let file_type_rels = ast_data.type_relations.clone();
+
+			if !self.quiet && (!imports.is_empty() || !exports.is_empty()) {
+				eprintln!(
+					"📦 Found {} imports, {} exports in {}",
+					imports.len(),
+					exports.len(),
+					relative_path
+				);
+				if !imports.is_empty() {
+					eprintln!("  Imports: {:?}", imports);
+				}
+				if !exports.is_empty() {
+					eprintln!("  Exports: {:?}", exports);
+				}
+			}
+
+			// Attribute callees + type relations (extends/implements).
+			// When per-function FunctionInfo entries are available, attribute
+			// callees by line range. When they are not — currently always, see
+			// extract_functions_from_block — synthesize a single file-scope
+			// FunctionInfo so the edges still reach relationships.rs, which
+			// emits at (source_file.id → target_file.id) granularity.
+
+			if !all_functions.is_empty() {
+				for func in &mut all_functions {
+					func.calls = file_calls
+						.iter()
+						.filter(|(line, _)| *line >= func.start_line && *line <= func.end_line)
+						.map(|(_, callee)| callee.clone())
+						.collect();
+					func.calls.sort();
+					func.calls.dedup();
+
+					let in_range = |line: u32| line >= func.start_line && line <= func.end_line;
+					func.extends = file_type_rels
+						.iter()
+						.filter(|relation| {
+							relation.kind == TypeRelationKind::Extends && in_range(relation.line)
+						})
+						.map(|relation| relation.target_name.clone())
+						.collect();
+					func.extends.sort();
+					func.extends.dedup();
+
+					func.implements = file_type_rels
+						.iter()
+						.filter(|relation| {
+							relation.kind == TypeRelationKind::Implements && in_range(relation.line)
+						})
+						.map(|relation| relation.target_name.clone())
+						.collect();
+					func.implements.sort();
+					func.implements.dedup();
+				}
+			} else if !file_calls.is_empty() || !file_type_rels.is_empty() {
+				let mut callees: Vec<String> =
+					file_calls.into_iter().map(|(_, callee)| callee).collect();
+				callees.sort();
+				callees.dedup();
+
+				let mut extends: Vec<String> = file_type_rels
+					.iter()
+					.filter(|relation| relation.kind == TypeRelationKind::Extends)
+					.map(|relation| relation.target_name.clone())
+					.collect();
+				extends.sort();
+				extends.dedup();
+
+				let mut implements: Vec<String> = file_type_rels
+					.into_iter()
+					.filter(|relation| relation.kind == TypeRelationKind::Implements)
+					.map(|relation| relation.target_name)
+					.collect();
+				implements.sort();
+				implements.dedup();
+
+				all_functions.push(crate::indexer::graphrag::types::FunctionInfo {
+					name: file_name.clone(),
+					signature: String::new(),
+					start_line: 0,
+					end_line: u32::MAX,
+					calls: callees,
+					called_by: Vec::new(),
+					parameters: Vec::new(),
+					return_type: None,
+					extends,
+					implements,
+				});
+			}
+
+			// Generate description - collect for batch AI processing when enabled
+			let description = if self.llm_enabled()
+				&& self.should_use_ai_for_description(&symbols, total_lines as u32, &language)
+			{
+				if !self.quiet {
+					eprintln!(
+						"🤖 Collecting for AI batch: {} ({} lines, {} symbols)",
+						relative_path,
+						total_lines,
+						symbols.len()
+					);
+				}
+
+				// Collect file for batch processing
+				let content_sample = self.build_content_sample_for_ai(&file_blocks);
+				let file_for_ai = crate::indexer::graphrag::ai::FileForAI {
+					file_id: relative_path.clone(), // FIXED: Use relative_path to match node.id
+					file_path: file_path.clone(),
+					language: language.clone(),
+					symbols: symbols.clone(),
+					content_sample,
+					function_count: symbols
+						.iter()
+						.filter(|s| {
+							s.contains("fn ") || s.contains("function ") || s.contains("def ")
+						})
+						.count(),
+					class_count: symbols
+						.iter()
+						.filter(|s| {
+							s.contains("class ")
+								|| s.contains("struct ") || s.contains("interface ")
+						})
+						.count(),
+				};
+				ai_batch_queue.push(file_for_ai);
+
+				// Process AI batch when it reaches configured size
+				if ai_batch_queue.len() >= self.config.graphrag.llm.ai_batch_size {
+					if !self.quiet {
+						eprintln!("🚀 Processing AI batch: {} files", ai_batch_queue.len());
 					}
 
-					// Collect file for batch processing
-					let content_sample = self.build_content_sample_for_ai(&file_blocks);
-					let file_for_ai = crate::indexer::graphrag::ai::FileForAI {
-						file_id: relative_path.clone(), // FIXED: Use relative_path to match node.id
-						file_path: file_path.clone(),
-						language: language.clone(),
-						symbols: symbols.clone(),
-						content_sample,
-						function_count: symbols
-							.iter()
-							.filter(|s| {
-								s.contains("fn ") || s.contains("function ") || s.contains("def ")
-							})
-							.count(),
-						class_count: symbols
-							.iter()
-							.filter(|s| {
-								s.contains("class ")
-									|| s.contains("struct ") || s.contains("interface ")
-							})
-							.count(),
-					};
-					ai_batch_queue.push(file_for_ai);
-
-					// Process AI batch when it reaches configured size
-					if ai_batch_queue.len() >= self.config.graphrag.llm.ai_batch_size {
-						if !self.quiet {
-							eprintln!("🚀 Processing AI batch: {} files", ai_batch_queue.len());
-						}
-
-						// Call batch AI extraction through AI enhancements
-						if let Some(ref ai_enhancements) = self.ai_enhancements {
-							match ai_enhancements
-								.extract_ai_descriptions_batch(&ai_batch_queue)
-								.await
-							{
-								Ok(batch_descriptions) => {
-									// Store all descriptions from batch
-									for (file_path, description) in batch_descriptions {
-										ai_descriptions.insert(file_path, description);
-									}
-									if !self.quiet {
-										eprintln!(
-											"✅ AI batch processing completed: {} descriptions",
-											ai_descriptions.len()
-										);
-									}
+					// Call batch AI extraction through AI enhancements
+					if let Some(ref ai_enhancements) = self.ai_enhancements {
+						match ai_enhancements
+							.extract_ai_descriptions_batch(&ai_batch_queue)
+							.await
+						{
+							Ok(batch_descriptions) => {
+								// Store all descriptions from batch
+								for (file_path, description) in batch_descriptions {
+									ai_descriptions.insert(file_path, description);
 								}
-								Err(e) => {
-									if !self.quiet {
-										eprintln!(
+								if !self.quiet {
+									eprintln!(
+										"✅ AI batch processing completed: {} descriptions",
+										ai_descriptions.len()
+									);
+								}
+							}
+							Err(e) => {
+								if !self.quiet {
+									eprintln!(
 											"⚠️  AI batch failed after retries: {}. Deferring {} files to next run.",
 											e, ai_batch_queue.len()
 										);
-									}
-									let failed_ids: HashSet<String> =
-										ai_batch_queue.iter().map(|f| f.file_id.clone()).collect();
-									// pending_embeddings grows 1:1 with new_nodes (paired by
-									// position, not id), so dropping entries from new_nodes
-									// alone would desync the embedding assignment in
-									// process_nodes_batch. Drop the same positions from both.
-									let keep: Vec<bool> = new_nodes
-										.iter()
-										.map(|n| !failed_ids.contains(&n.id))
-										.collect();
-									let mut keep_iter = keep.iter();
-									new_nodes.retain(|_| *keep_iter.next().unwrap());
-									let mut keep_iter = keep.iter();
-									pending_embeddings.retain(|_| *keep_iter.next().unwrap());
 								}
+								let failed_ids: HashSet<String> =
+									ai_batch_queue.iter().map(|f| f.file_id.clone()).collect();
+								// pending_embeddings grows 1:1 with new_nodes (paired by
+								// position, not id), so dropping entries from new_nodes
+								// alone would desync the embedding assignment in
+								// process_nodes_batch. Drop the same positions from both.
+								let keep: Vec<bool> = new_nodes
+									.iter()
+									.map(|n| !failed_ids.contains(&n.id))
+									.collect();
+								let mut keep_iter = keep.iter();
+								new_nodes.retain(|_| *keep_iter.next().unwrap());
+								let mut keep_iter = keep.iter();
+								pending_embeddings.retain(|_| *keep_iter.next().unwrap());
 							}
 						}
+					}
 
-						// Clear the processed batch
-						ai_batch_queue.clear();
+					// Clear the processed batch
+					ai_batch_queue.clear();
 
-						// Update node descriptions immediately with newly generated AI descriptions
-						if !ai_descriptions.is_empty() {
-							// Update nodes in the graph with AI descriptions
-							{
-								let mut graph = self.graph.write().await;
-								for (file_path, ai_description) in &ai_descriptions {
-									if let Some(node) = graph.nodes.get_mut(file_path) {
-										node.description = ai_description.clone();
-									}
-								}
-							}
-
-							// Also update any pending nodes that haven't been added to graph yet
-							for node in &mut new_nodes {
-								if let Some(ai_description) = ai_descriptions.get(&node.id) {
+					// Update node descriptions immediately with newly generated AI descriptions
+					if !ai_descriptions.is_empty() {
+						// Update nodes in the graph with AI descriptions
+						{
+							let mut graph = self.graph.write().await;
+							for (file_path, ai_description) in &ai_descriptions {
+								if let Some(node) = graph.nodes.get_mut(file_path) {
 									node.description = ai_description.clone();
 								}
 							}
 						}
+
+						// Also update any pending nodes that haven't been added to graph yet
+						for node in &mut new_nodes {
+							if let Some(ai_description) = ai_descriptions.get(&node.id) {
+								node.description = ai_description.clone();
+							}
+						}
 					}
-
-					// For now, use simple description - will be replaced after batch processing
-					RelationshipDiscovery::generate_simple_description(
-						&file_name,
-						&language,
-						&symbols,
-						total_lines as u32,
-					)
-				} else {
-					if !self.quiet && self.llm_enabled() {
-						eprintln!(
-							"📝 Using simple description for: {} (AI criteria not met)",
-							relative_path
-						);
-					}
-					RelationshipDiscovery::generate_simple_description(
-						&file_name,
-						&language,
-						&symbols,
-						total_lines as u32,
-					)
-				};
-
-				// Generate summary text for embedding (include description for semantic quality)
-				let summary_text = format!(
-					"{}\n{}\nKey symbols: {}",
-					description,
-					language,
-					symbols.join(", ")
-				);
-
-				// Store summary text for batch embedding generation
-				pending_embeddings.push(summary_text);
-
-				// Create the file node without embedding (will be added later)
-				let node = CodeNode {
-					id: relative_path.clone(),
-					name: file_name,
-					kind,
-					path: relative_path.clone(),
-					description,
-					symbols,
-					imports,
-					exports,
-					functions: all_functions,
-					hash: content_hash,
-					embedding: Vec::new(), // Will be filled after batch embedding
-					size_lines: total_lines as u32,
-					language: language.clone(),
-				};
-
-				new_nodes.push(node);
-				processed_count += 1;
-
-				// Update state if provided
-				if let Some(ref state) = state {
-					let mut state_guard = state.write();
-					state_guard.status_message = format!("Processing file: {}", file_path);
 				}
 
-				// Check if we should process batch (same logic as normal indexing)
-				if self.should_process_batch(&pending_embeddings) {
-					self.process_nodes_batch(
-						&mut new_nodes,
-						&mut pending_embeddings,
-						&mut batches_processed,
-						&ai_descriptions, // Pass AI descriptions
-						&mut processed_node_ids,
-					)
-					.await?;
+				// For now, use simple description - will be replaced after batch processing
+				RelationshipDiscovery::generate_simple_description(
+					&file_name,
+					&language,
+					&symbols,
+					total_lines as u32,
+				)
+			} else {
+				if !self.quiet && self.llm_enabled() {
+					eprintln!(
+						"📝 Using simple description for: {} (AI criteria not met)",
+						relative_path
+					);
 				}
+				RelationshipDiscovery::generate_simple_description(
+					&file_name,
+					&language,
+					&symbols,
+					total_lines as u32,
+				)
+			};
+
+			// Generate summary text for embedding (include description for semantic quality)
+			let summary_text = format!(
+				"{}\n{}\nKey symbols: {}",
+				description,
+				language,
+				symbols.join(", ")
+			);
+
+			// Store summary text for batch embedding generation
+			pending_embeddings.push(summary_text);
+
+			// Create the file node without embedding (will be added later)
+			let node = CodeNode {
+				id: relative_path.clone(),
+				name: file_name,
+				kind,
+				path: relative_path.clone(),
+				description,
+				symbols,
+				imports,
+				exports,
+				functions: all_functions,
+				hash: content_hash,
+				embedding: Vec::new(), // Will be filled after batch embedding
+				size_lines: total_lines as u32,
+				language: language.clone(),
+			};
+
+			new_nodes.push(node);
+			processed_count += 1;
+
+			// Update state if provided
+			if let Some(ref state) = state {
+				let mut state_guard = state.write();
+				state_guard.status_message = format!("Processing file: {}", file_path);
+			}
+
+			// Check if we should process batch (same logic as normal indexing)
+			if self.should_process_batch(&pending_embeddings) {
+				self.process_nodes_batch(
+					&mut new_nodes,
+					&mut pending_embeddings,
+					&mut batches_processed,
+					&ai_descriptions, // Pass AI descriptions
+					&mut processed_node_ids,
+				)
+				.await?;
 			}
 		}
 

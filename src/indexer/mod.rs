@@ -295,70 +295,41 @@ async fn cleanup_deleted_files_optimized(
 	// Create ignore matcher to check against .noindex and .gitignore patterns
 	let ignore_matcher = NoindexWalker::create_matcher(current_dir, quiet)?;
 
-	// Use parallel processing for file existence checks
 	let mut files_to_remove = Vec::new();
 
-	// Convert HashSet to Vec for chunking
-	let indexed_files_vec: Vec<String> = indexed_files.into_iter().collect();
+	for indexed_file in indexed_files {
+		// Always treat indexed paths as relative to current directory
+		let absolute_path = current_dir.join(&indexed_file);
 
-	// Process files in chunks to avoid overwhelming the file system
-	const CHUNK_SIZE: usize = 100;
-	for chunk in indexed_files_vec.chunks(CHUNK_SIZE) {
-		for indexed_file in chunk {
-			// Always treat indexed paths as relative to current directory
-			let absolute_path = current_dir.join(indexed_file);
-
-			// Check if file was deleted
-			if !absolute_path.exists() {
-				files_to_remove.push(indexed_file.clone());
-			} else {
-				// Check if file is now ignored by .noindex or .gitignore patterns
-				let is_ignored = ignore_matcher
-					.matched(&absolute_path, absolute_path.is_dir())
-					.is_ignore();
-				if is_ignored {
-					files_to_remove.push(indexed_file.clone());
-				}
+		// Check if file was deleted
+		if !absolute_path.exists() {
+			files_to_remove.push(indexed_file);
+		} else {
+			// Check if file is now ignored by .noindex or .gitignore patterns
+			let is_ignored = ignore_matcher
+				.matched(&absolute_path, absolute_path.is_dir())
+				.is_ignore();
+			if is_ignored {
+				files_to_remove.push(indexed_file);
 			}
-		}
-
-		// Process removals in batches to avoid overwhelming the database
-		if files_to_remove.len() >= CHUNK_SIZE {
-			for file_to_remove in &files_to_remove {
-				if let Err(e) = store.remove_blocks_by_path(file_to_remove).await {
-					if !quiet {
-						eprintln!(
-							"Warning: Failed to remove blocks for {}: {}",
-							file_to_remove, e
-						);
-					}
-					tracing::warn!(
-						file = %file_to_remove,
-						error = %e,
-						"Failed to remove blocks during cleanup"
-					);
-				}
-			}
-			files_to_remove.clear();
-
-			// Flush after each chunk to maintain data consistency
-			store.flush().await?;
 		}
 	}
 
-	// Remove any remaining files
 	if !files_to_remove.is_empty() {
-		for file_to_remove in &files_to_remove {
-			if let Err(e) = store.remove_blocks_by_path(file_to_remove).await {
-				if !quiet {
-					eprintln!(
-						"Warning: Failed to remove blocks for {}: {}",
-						file_to_remove, e
-					);
-				}
+		if let Err(e) = store.remove_blocks_by_paths(&files_to_remove).await {
+			if !quiet {
+				eprintln!(
+					"Warning: Failed to remove blocks for {} files: {}",
+					files_to_remove.len(),
+					e
+				);
 			}
+			tracing::warn!(
+				files = files_to_remove.len(),
+				error = %e,
+				"Failed to remove blocks during cleanup"
+			);
 		}
-		// Final flush
 		store.flush().await?;
 	}
 
@@ -665,11 +636,15 @@ pub async fn index_branch_delta(
 
 			// Files no longer in delta (reverted to match main) — remove from branch DB
 			let mut removed_any = false;
-			for path in old_changed.difference(&new_changed) {
-				match branch_store.remove_blocks_by_path(path).await {
+			let reverted_paths: Vec<String> = old_changed
+				.difference(&new_changed)
+				.map(|path| (*path).to_string())
+				.collect();
+			if !reverted_paths.is_empty() {
+				match branch_store.remove_blocks_by_paths(&reverted_paths).await {
 					Ok(()) => removed_any = true,
 					Err(e) => {
-						tracing::warn!(path = %path, error = %e, "Failed to remove reverted file from branch DB")
+						tracing::warn!(files = reverted_paths.len(), error = %e, "Failed to remove reverted file from branch DB")
 					}
 				}
 			}
@@ -716,19 +691,22 @@ pub async fn index_branch_delta(
 		// now matching main would keep its old branch-DB rows and shadow main.
 		if force_rebuild {
 			if let Some(ref prev) = existing_manifest {
-				for path in prev.changed_paths.iter().chain(prev.deleted_paths.iter()) {
-					if let Err(e) = branch_store.remove_blocks_by_path(path).await {
-						tracing::warn!(path = %path, error = %e, "Failed to scrub prior-manifest path during branch rebuild");
-					}
+				let prior_paths: Vec<String> = prev
+					.changed_paths
+					.iter()
+					.chain(prev.deleted_paths.iter())
+					.cloned()
+					.collect();
+				if let Err(e) = branch_store.remove_blocks_by_paths(&prior_paths).await {
+					tracing::warn!(files = prior_paths.len(), error = %e, "Failed to scrub prior-manifest path during branch rebuild");
 				}
 			}
 		}
 
 		// Clean up existing data for files we're about to re-process
-		for file_path in &files_to_process {
-			if let Err(e) = branch_store.remove_blocks_by_path(file_path).await {
-				tracing::warn!(path = %file_path, error = %e, "Failed to clean up branch block");
-			}
+		let files_to_scrub: Vec<String> = files_to_process.iter().cloned().collect();
+		if let Err(e) = branch_store.remove_blocks_by_paths(&files_to_scrub).await {
+			tracing::warn!(files = files_to_scrub.len(), error = %e, "Failed to clean up branch block");
 		}
 		if !files_to_process.is_empty() || force_rebuild {
 			branch_store.flush().await?;
@@ -1155,23 +1133,45 @@ pub async fn index_files_with_quiet(
 						// Commit hash changed - get files changed since last indexed commit
 						match git::get_changed_files_since_commit(git_root, &last_commit) {
 							Ok(changed_files) => {
+								let git_diff_count = changed_files.len();
+								let file_metadata = store.get_all_file_metadata().await?;
+								// Rows re-indexed before a timed-out round keep their metadata, so
+								// retries scrub and process only the remaining files in the diff.
+								let changed_files: Vec<String> = changed_files
+									.into_iter()
+									.filter(|file_path| {
+										match (
+											get_file_mtime(&current_dir.join(file_path)),
+											file_metadata.get(file_path.as_str()),
+										) {
+											(Ok(actual), Some(stored)) => actual > *stored,
+											_ => true,
+										}
+									})
+									.collect();
+
 								if !quiet {
 									println!(
-										"🚀 Git optimization: Commit changed, found {} files to reindex",
+										"🚀 Git optimization: Commit changed, found {} files in diff, {} need reindexing",
+										git_diff_count,
 										changed_files.len()
 									);
 								}
 
 								// Clean up existing data for changed files (includes GraphRAG cleanup)
-								for file_path in &changed_files {
-									if let Err(e) = store.remove_blocks_by_path(file_path).await {
-										if !quiet {
-											eprintln!(
-												"Warning: Failed to clean up data for {}: {}",
-												file_path, e
-											);
-										}
+								if let Err(e) = store.remove_blocks_by_paths(&changed_files).await {
+									if !quiet {
+										eprintln!(
+											"Warning: Failed to clean up data for {} changed files: {}",
+											changed_files.len(),
+											e
+										);
 									}
+									tracing::warn!(
+										files = changed_files.len(),
+										error = %e,
+										"Failed to clean up changed files"
+									);
 								}
 
 								// CRITICAL: Flush immediately after cleanup to persist removals

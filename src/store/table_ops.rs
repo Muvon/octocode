@@ -27,7 +27,9 @@ use lancedb::{
 	Connection,
 };
 
-use crate::store::sql::escape_single_quotes;
+use crate::store::sql::{escape_single_quotes, in_list_predicate};
+
+pub(crate) const DELETE_PATHS_CHUNK: usize = 500;
 
 /// Generic table operations for LanceDB
 pub struct TableOperations<'a> {
@@ -139,16 +141,28 @@ impl<'a> TableOperations<'a> {
 	/// Remove blocks by path from a table.
 	/// Returns Ok(()) on success. Avoids pre/post `count_rows` (each is a full scan).
 	pub async fn remove_blocks_by_path(&self, file_path: &str, table_name: &str) -> Result<()> {
+		self.remove_blocks_by_paths(std::slice::from_ref(&file_path.to_string()), table_name)
+			.await
+	}
+
+	/// Remove blocks for multiple paths from a table in bounded delete predicates.
+	pub async fn remove_blocks_by_paths(&self, paths: &[String], table_name: &str) -> Result<()> {
+		if paths.is_empty() {
+			return Ok(());
+		}
+
 		if !self.table_exists(table_name).await? {
 			return Ok(());
 		}
 
 		let table = self.db.open_table(table_name).execute().await?;
 
-		table
-			.delete(&format!("path = '{}'", escape_single_quotes(file_path)))
-			.await
-			.map_err(|e| anyhow::anyhow!("Failed to delete from {}: {}", table_name, e))?;
+		for chunk in paths.chunks(DELETE_PATHS_CHUNK) {
+			table
+				.delete(&in_list_predicate("path", chunk))
+				.await
+				.map_err(|e| anyhow::anyhow!("Failed to delete from {}: {}", table_name, e))?;
+		}
 
 		Ok(())
 	}

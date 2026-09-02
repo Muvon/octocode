@@ -30,6 +30,17 @@ pub fn escape_single_quotes(value: &str) -> String {
 	value.replace('\'', "''")
 }
 
+/// Build a SQL `IN` predicate with safely escaped string values.
+pub fn in_list_predicate(column: &str, values: &[String]) -> String {
+	debug_assert!(!values.is_empty());
+	let values = values
+		.iter()
+		.map(|value| format!("'{}'", escape_single_quotes(value)))
+		.collect::<Vec<_>>()
+		.join(",");
+	format!("{} IN ({})", column, values)
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
@@ -61,5 +72,29 @@ mod tests {
 		let p = "weird/o'brien.rs";
 		let predicate = format!("path = '{}'", escape_single_quotes(p));
 		assert_eq!(predicate, "path = 'weird/o''brien.rs'");
+	}
+
+	#[test]
+	fn in_list_with_single_value() {
+		assert_eq!(
+			in_list_predicate("path", &["src/main.rs".to_string()]),
+			"path IN ('src/main.rs')"
+		);
+	}
+
+	#[test]
+	fn in_list_with_multiple_values() {
+		assert_eq!(
+			in_list_predicate("path", &["src/a.rs".to_string(), "src/b.rs".to_string()]),
+			"path IN ('src/a.rs','src/b.rs')"
+		);
+	}
+
+	#[test]
+	fn in_list_escapes_apostrophes() {
+		assert_eq!(
+			in_list_predicate("path", &["src/it's.rs".to_string()]),
+			"path IN ('src/it''s.rs')"
+		);
 	}
 }
