@@ -217,67 +217,152 @@ fn extract_name(node: Node, contents: &str, lang_impl: &dyn languages::Language)
 	symbols.into_iter().next()
 }
 
+/// Maximum number of blank source lines allowed between two consecutive
+/// comment siblings for them to still be considered part of the same doc
+/// block. Prevents an unrelated, separated comment from merging into a
+/// distinct nearby doc block.
+const MAX_BLANK_LINES_BETWEEN_COMMENTS: usize = 1;
+
+/// Clean up comment markers from a single comment node's raw text.
+///
+/// Block comments (`/* ... */` or `/** ... */`) have their opening/closing
+/// markers stripped and a leading `*` (with following space) stripped from
+/// each inner line, since tree-sitter represents these as one node spanning
+/// multiple lines. Line comments (`//`, or any other single-line syntax)
+/// keep the previous single-pass trimming behavior.
+fn clean_comment_text(comment: &str) -> String {
+	let trimmed = comment.trim();
+	if trimmed.starts_with("/*") {
+		let inner = trimmed
+			.trim_start_matches("/**")
+			.trim_start_matches("/*")
+			.trim_end_matches("*/");
+		inner
+			.lines()
+			.map(|line| {
+				let line = line.trim();
+				match line.strip_prefix('*') {
+					Some(rest) => rest.trim_start(),
+					None => line,
+				}
+			})
+			.collect::<Vec<_>>()
+			.join("\n")
+			.trim()
+			.to_string()
+	} else {
+		trimmed
+			.trim_start_matches('/')
+			.trim_start_matches('*')
+			.trim_start_matches('/')
+			.trim_end_matches("*/")
+			.trim()
+			.to_string()
+	}
+}
+
 /// Extract a preceding comment if available
 fn extract_preceding_comment(node: Node, contents: &str) -> Option<String> {
-	if let Some(parent) = node.parent() {
-		// Track only the immediately-preceding sibling instead of buffering all.
-		let mut prev: Option<Node> = None;
-		let mut cursor = parent.walk();
+	let parent = node.parent()?;
 
-		if cursor.goto_first_child() {
-			loop {
-				let current = cursor.node();
-				if current.id() == node.id() {
-					break;
-				}
-				prev = Some(current);
-				if !cursor.goto_next_sibling() {
-					break;
-				}
+	// Track only the immediately-preceding sibling instead of buffering all.
+	let mut prev: Option<Node> = None;
+	let mut cursor = parent.walk();
+
+	if cursor.goto_first_child() {
+		loop {
+			let current = cursor.node();
+			if current.id() == node.id() {
+				break;
 			}
-		}
-
-		// Check the last sibling before our node
-		if let Some(last) = prev {
-			if last.kind().contains("comment") {
-				if let Ok(comment) = last.utf8_text(contents.as_bytes()) {
-					// Clean up comment markers
-					let comment = comment
-						.trim()
-						.trim_start_matches("/")
-						.trim_start_matches("*")
-						.trim_start_matches("/")
-						.trim_end_matches("*/")
-						.trim();
-					return Some(comment.to_string());
-				}
+			prev = Some(current);
+			if !cursor.goto_next_sibling() {
+				break;
 			}
 		}
 	}
-	None
+
+	let last = prev?;
+	if !last.kind().contains("comment") {
+		return None;
+	}
+
+	// A multi-line `//`-style doc comment is one sibling node per line in
+	// virtually all C-family tree-sitter grammars. Walk backward through as
+	// many consecutive comment siblings as belong to the same block.
+	let mut comment_nodes = vec![last];
+	let mut current = last;
+	while let Some(sibling) = current.prev_sibling() {
+		if !sibling.kind().contains("comment") {
+			break;
+		}
+		let gap = current
+			.start_position()
+			.row
+			.saturating_sub(sibling.end_position().row + 1);
+		if gap > MAX_BLANK_LINES_BETWEEN_COMMENTS {
+			break;
+		}
+		comment_nodes.push(sibling);
+		current = sibling;
+	}
+	comment_nodes.reverse();
+
+	let lines: Vec<String> = comment_nodes
+		.into_iter()
+		.filter_map(|n| n.utf8_text(contents.as_bytes()).ok())
+		.map(clean_comment_text)
+		.collect();
+
+	if lines.is_empty() {
+		None
+	} else {
+		Some(lines.join("\n"))
+	}
 }
 
 /// Extract a file-level comment (usually at the top of the file)
 fn extract_file_comment(root: Node, contents: &str) -> Option<String> {
 	let mut cursor = root.walk();
-	if cursor.goto_first_child() {
-		// Check if the first node is a comment
-		let first = cursor.node();
-		if first.kind().contains("comment") {
-			if let Ok(comment) = first.utf8_text(contents.as_bytes()) {
-				// Clean up comment markers
-				let comment = comment
-					.trim()
-					.trim_start_matches("/")
-					.trim_start_matches("*")
-					.trim_start_matches("/")
-					.trim_end_matches("*/")
-					.trim();
-				return Some(comment.to_string());
-			}
-		}
+	if !cursor.goto_first_child() {
+		return None;
 	}
-	None
+
+	let first = cursor.node();
+	if !first.kind().contains("comment") {
+		return None;
+	}
+
+	// Same chaining as `extract_preceding_comment`, but forward from the
+	// file's leading comment(s) since there is no preceding sibling here.
+	let mut comment_nodes = vec![first];
+	let mut current = first;
+	while let Some(sibling) = current.next_sibling() {
+		if !sibling.kind().contains("comment") {
+			break;
+		}
+		let gap = sibling
+			.start_position()
+			.row
+			.saturating_sub(current.end_position().row + 1);
+		if gap > MAX_BLANK_LINES_BETWEEN_COMMENTS {
+			break;
+		}
+		comment_nodes.push(sibling);
+		current = sibling;
+	}
+
+	let lines: Vec<String> = comment_nodes
+		.into_iter()
+		.filter_map(|n| n.utf8_text(contents.as_bytes()).ok())
+		.map(clean_comment_text)
+		.collect();
+
+	if lines.is_empty() {
+		None
+	} else {
+		Some(lines.join("\n"))
+	}
 }
 
 /// Get the full text of a node
@@ -321,13 +406,8 @@ fn map_node_kind_to_simple_with_context(node: Node, _contents: &str) -> String {
 	let kind = node.kind();
 
 	// Special handling for C++ declaration nodes
-	if kind == "declaration" {
-		// Check if this declaration contains a function_declarator
-		for child in node.children(&mut node.walk()) {
-			if child.kind() == "function_declarator" {
-				return "function".to_string();
-			}
-		}
+	if kind == "declaration" && contains_function_declarator(node) {
+		return "function".to_string();
 	}
 
 	// Special handling for namespace_definition
@@ -339,6 +419,19 @@ fn map_node_kind_to_simple_with_context(node: Node, _contents: &str) -> String {
 	map_node_kind_to_simple(kind)
 }
 
+/// Recursively search a declaration's subtree for a `function_declarator`.
+/// Pointer/reference-returning declarations (e.g. `int* foo();`) wrap it
+/// inside an intermediate `pointer_declarator`/`reference_declarator`, so a
+/// direct-children-only check would miss it.
+fn contains_function_declarator(node: Node) -> bool {
+	for child in node.children(&mut node.walk()) {
+		if child.kind() == "function_declarator" || contains_function_declarator(child) {
+			return true;
+		}
+	}
+	false
+}
+
 /// Detect language based on file extension (re-exported from file_utils)
 fn detect_language(path: &Path) -> Option<&str> {
 	use crate::indexer::file_utils::FileUtils;
@@ -347,14 +440,33 @@ fn detect_language(path: &Path) -> Option<&str> {
 
 /// Extract signatures from markdown content
 fn extract_markdown_signatures(contents: &str) -> Vec<SignatureItem> {
+	use crate::indexer::markdown_processor::detect_code_fence;
+
 	let mut signatures = Vec::new();
 	let lines: Vec<&str> = contents.lines().collect();
+	let mut fence_marker: Option<String> = None;
 
 	for (line_idx, line) in lines.iter().enumerate() {
 		let trimmed = line.trim();
 
+		// Track fenced code blocks so a `#`-prefixed line inside one (a shell
+		// shebang, a Python comment, a C #include, ...) isn't mistaken for a
+		// markdown heading.
+		if let Some(fence) = detect_code_fence(trimmed) {
+			match &fence_marker {
+				None => fence_marker = Some(fence),
+				Some(marker) if trimmed.starts_with(marker.as_str()) => fence_marker = None,
+				_ => {}
+			}
+			continue;
+		}
+
+		if fence_marker.is_some() {
+			continue;
+		}
+
 		// Check if this is a heading
-		if trimmed.starts_with('#') && !trimmed.starts_with("```") {
+		if trimmed.starts_with('#') {
 			let heading_level = trimmed.chars().take_while(|&c| c == '#').count();
 			let heading_text = trimmed.trim_start_matches('#').trim();
 
@@ -468,5 +580,95 @@ fn extract_markdown_file_comment(contents: &str) -> Option<String> {
 		None
 	} else {
 		Some(comment_lines.join(" ").trim().to_string())
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	fn parse(lang: &str, source: &str) -> (tree_sitter::Tree, Box<dyn languages::Language>) {
+		let lang_impl = languages::get_language(lang).unwrap();
+		let mut parser = Parser::new();
+		parser.set_language(&lang_impl.get_ts_language()).unwrap();
+		let tree = parser.parse(source, None).unwrap();
+		(tree, lang_impl)
+	}
+
+	#[test]
+	fn multiline_line_comment_block_captures_all_lines_in_order() {
+		let source = "// line1\n// line2\n// line3\nfn foo() {}\n";
+		let (tree, lang_impl) = parse("rust", source);
+		let sigs = extract_signatures(tree.root_node(), source, lang_impl.as_ref());
+		let foo = sigs.iter().find(|s| s.name == "foo").unwrap();
+		assert_eq!(foo.description.as_deref(), Some("line1\nline2\nline3"));
+	}
+
+	#[test]
+	fn distinct_comment_groups_are_not_merged() {
+		// Two blank lines separate the unrelated comment from the doc block
+		// that actually precedes `bar`, which is only one blank line above it.
+		let source = "// unrelated comment\n\n\n// doc line1\n// doc line2\nfn bar() {}\n";
+		let (tree, lang_impl) = parse("rust", source);
+		let sigs = extract_signatures(tree.root_node(), source, lang_impl.as_ref());
+		let bar = sigs.iter().find(|s| s.name == "bar").unwrap();
+		assert_eq!(bar.description.as_deref(), Some("doc line1\ndoc line2"));
+	}
+
+	#[test]
+	fn clean_comment_text_strips_block_comment_markers_per_line() {
+		let input = "/**\n * This is a function.\n * It does X.\n */";
+		assert_eq!(clean_comment_text(input), "This is a function.\nIt does X.");
+	}
+
+	#[test]
+	fn clean_comment_text_leaves_line_comment_unchanged() {
+		assert_eq!(clean_comment_text("// comment"), "comment");
+	}
+
+	#[test]
+	fn block_comment_before_function_is_cleaned() {
+		let source = "/**\n * This is a function.\n * It does X.\n */\nfn baz() {}\n";
+		let (tree, lang_impl) = parse("rust", source);
+		let sigs = extract_signatures(tree.root_node(), source, lang_impl.as_ref());
+		let baz = sigs.iter().find(|s| s.name == "baz").unwrap();
+		assert_eq!(
+			baz.description.as_deref(),
+			Some("This is a function.\nIt does X.")
+		);
+	}
+
+	#[test]
+	fn file_comment_chains_consecutive_leading_lines() {
+		let source = "// header line1\n// header line2\nfn foo() {}\n";
+		let (tree, _lang_impl) = parse("rust", source);
+		let file_comment = extract_file_comment(tree.root_node(), source);
+		assert_eq!(file_comment.as_deref(), Some("header line1\nheader line2"));
+	}
+
+	#[test]
+	fn markdown_heading_inside_fenced_code_block_is_ignored() {
+		let markdown = "# Real Heading\n\nSome text.\n\n```bash\n#!/bin/bash\necho hi\n```\n\n## Another Heading\n";
+		let sigs = extract_markdown_signatures(markdown);
+		let names: Vec<&str> = sigs.iter().map(|s| s.name.as_str()).collect();
+		assert_eq!(names, vec!["Real Heading", "Another Heading"]);
+	}
+
+	#[test]
+	fn cpp_pointer_returning_declaration_is_classified_as_function() {
+		let source = "int* foo();\n";
+		let (tree, lang_impl) = parse("cpp", source);
+		let sigs = extract_signatures(tree.root_node(), source, lang_impl.as_ref());
+		let foo = sigs.iter().find(|s| s.name == "foo").unwrap();
+		assert_eq!(foo.kind, "function");
+	}
+
+	#[test]
+	fn cpp_plain_variable_declaration_is_unaffected() {
+		let source = "int x;\n";
+		let (tree, lang_impl) = parse("cpp", source);
+		let sigs = extract_signatures(tree.root_node(), source, lang_impl.as_ref());
+		let x = sigs.iter().find(|s| s.name == "x").unwrap();
+		assert_eq!(x.kind, "declaration");
 	}
 }

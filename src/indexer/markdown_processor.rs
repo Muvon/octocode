@@ -817,7 +817,7 @@ pub fn parse_document_hierarchy(contents: &str) -> DocumentHierarchy {
 }
 
 /// Helper function to detect code fences and return the fence type
-fn detect_code_fence(line: &str) -> Option<String> {
+pub(crate) fn detect_code_fence(line: &str) -> Option<String> {
 	let trimmed = line.trim_start();
 	if trimmed.starts_with("```") {
 		// Extract the fence (``` or longer sequences like ````)

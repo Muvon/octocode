@@ -347,21 +347,25 @@ fn run_specs_over_files(
 		let inside_ranges: Option<Vec<(usize, usize)>> = set.inside_idx.map(|i| {
 			buckets[i]
 				.iter()
+				.take(MAX_PER_FILE_MATCHES)
 				.map(|m| (m.start_byte, m.end_byte))
 				.collect()
 		});
 		let has_ranges: Option<Vec<(usize, usize)>> = set.has_idx.map(|i| {
 			buckets[i]
 				.iter()
+				.take(MAX_PER_FILE_MATCHES)
 				.map(|m| (m.start_byte, m.end_byte))
 				.collect()
 		});
 		let mut out: Vec<Vec<GrepMatch>> = Vec::with_capacity(set.n_strategies);
-		for bucket in buckets.into_iter().take(set.n_strategies) {
-			let mut filtered =
-				filter_by_containment(bucket, inside_ranges.as_deref(), has_ranges.as_deref());
-			filtered.truncate(MAX_PER_FILE_MATCHES);
-			out.push(filtered);
+		for mut bucket in buckets.into_iter().take(set.n_strategies) {
+			bucket.truncate(MAX_PER_FILE_MATCHES);
+			out.push(filter_by_containment(
+				bucket,
+				inside_ranges.as_deref(),
+				has_ranges.as_deref(),
+			));
 		}
 		Some(out)
 	});
@@ -750,7 +754,7 @@ fn item_keyword_kind(pattern: &str, language: &str) -> Option<(&'static str, &'s
 			&& trimmed[kw.len()..]
 				.chars()
 				.next()
-				.map(|c| c.is_whitespace())
+				.map(|c| c.is_whitespace() || c == '<')
 				.unwrap_or(false)
 	};
 	match language {
@@ -1147,5 +1151,65 @@ mod tests {
 		let kept = filter_by_containment(vec![m(0, 20), m(30, 40)], None, Some(&[(5, 10)]));
 		assert_eq!(kept.len(), 1);
 		assert_eq!(kept[0].start_byte, 0);
+	}
+
+	#[test]
+	fn test_run_specs_over_files_truncates_before_containment_scan() {
+		// 1000 one-line functions, each with its own unwrap call — both the
+		// pattern bucket and the `inside: function_item` range bucket have
+		// 1000 candidates, well past MAX_PER_FILE_MATCHES (500). This proves
+		// truncation happens BEFORE the O(n*m) containment scan (bounding it
+		// to 500*500 instead of 1000*1000) while still returning correct,
+		// capped results rather than a corrupted or empty subset.
+		let content: String = (0..1000)
+			.map(|i| format!("fn f{}() {{ x.unwrap(); }}\n", i))
+			.collect();
+		let files = vec![fd("many.rs", &content, true)];
+		let out = smart_search(
+			&files,
+			"$X.unwrap()",
+			"rust",
+			&[],
+			Some("function_item"),
+			None,
+		);
+		assert_eq!(out.matches.len(), MAX_PER_FILE_MATCHES);
+		assert_eq!(out.matches[0].line, 1);
+		assert_eq!(
+			out.matches[MAX_PER_FILE_MATCHES - 1].line,
+			MAX_PER_FILE_MATCHES
+		);
+		assert!(out.matches.iter().all(|m| m.text.contains("unwrap")));
+	}
+
+	#[test]
+	fn test_item_keyword_kind_generic_impl() {
+		assert_eq!(
+			item_keyword_kind("impl<T> Trait for Struct<T> { $$$ }", "rust"),
+			Some(("impl_item", "impl blocks"))
+		);
+		// Non-generic impl: no regression.
+		assert_eq!(
+			item_keyword_kind("impl Foo { $$$ }", "rust"),
+			Some(("impl_item", "impl blocks"))
+		);
+	}
+
+	#[test]
+	fn test_item_keyword_kind_other_keywords_unaffected() {
+		// Real generic items place `<` after the name, not glued to the
+		// keyword; broadening `starts()` to accept `<` must not break these.
+		assert_eq!(
+			item_keyword_kind("struct Foo<T> { $$$ }", "rust"),
+			Some(("struct_item", "struct definitions"))
+		);
+		assert_eq!(
+			item_keyword_kind("enum Bar<T> { $$$ }", "rust"),
+			Some(("enum_item", "enum definitions"))
+		);
+		assert_eq!(
+			item_keyword_kind("fn foo<T>() {}", "rust"),
+			Some(("function_item", "function definitions"))
+		);
 	}
 }
