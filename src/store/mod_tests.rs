@@ -51,6 +51,24 @@ pub(crate) fn use_offline_test_config() {
 	std::env::set_var("OCTOCODE_CONFIG_PATH", path);
 }
 
+/// A `Config` pinned to the same key-free, download-free embedding models that
+/// `use_offline_test_config` writes.
+///
+/// Anything that builds an embedding provider from an *explicit* config —
+/// `GraphBuilder` reads `config.embedding.text_model` directly — must use this
+/// rather than `Config::default()`. The shipped default names a fastembed model
+/// that is downloaded on first construction, so a default-config test passes
+/// only on a machine whose model cache is already warm, and concurrent tests
+/// race each other for the download lock. Setting `OCTOCODE_CONFIG_PATH` does
+/// not help here, because the passed config never goes through `Config::load`.
+pub(crate) fn offline_config() -> Config {
+	use_offline_test_config();
+	let mut config = Config::default();
+	config.embedding.code_model = "voyage:voyage-code-3".to_string();
+	config.embedding.text_model = "voyage:voyage-3.5-lite".to_string();
+	config
+}
+
 /// A `Store` backed by a fresh LanceDB database in a temp directory, with all
 /// block tables created.
 pub(crate) async fn test_store() -> (TempDir, Store) {

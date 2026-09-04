@@ -291,7 +291,9 @@ mod tests {
 	mod store_backed {
 		use super::super::super::*;
 		use crate::config::Config;
-		use crate::store::mod_tests::{code_block, embedding, test_store, CODE_DIM};
+		use crate::store::mod_tests::{
+			code_block, embedding, offline_config, test_store, CODE_DIM,
+		};
 		use crate::store::tables;
 		use tempfile::TempDir;
 
@@ -416,7 +418,7 @@ mod tests {
 			persist_and_store_metadata(
 				&store,
 				Some(outside.path()),
-				&Config::default(),
+				&offline_config(),
 				true,
 				"test",
 			)
@@ -439,7 +441,7 @@ mod tests {
 				.await
 				.unwrap();
 
-			handle_file_change(&store, "src/gone.rs", &Config::default())
+			handle_file_change(&store, "src/gone.rs", &offline_config())
 				.await
 				.unwrap();
 
@@ -486,7 +488,7 @@ mod tests {
 			index_files_with_quiet(
 				&store,
 				state.clone(),
-				&Config::default(),
+				&offline_config(),
 				Some(dir.path()),
 				true,
 			)
@@ -524,7 +526,7 @@ mod tests {
 			index_files_with_quiet(
 				&store,
 				state.clone(),
-				&Config::default(),
+				&offline_config(),
 				Some(dir.path()),
 				true,
 			)
@@ -559,7 +561,7 @@ mod tests {
 			index_files_with_quiet(
 				&store,
 				state.clone(),
-				&Config::default(),
+				&offline_config(),
 				Some(dir.path()),
 				true,
 			)

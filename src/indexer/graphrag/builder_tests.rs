@@ -15,11 +15,10 @@
 #[cfg(test)]
 mod tests {
 	use super::super::*;
-	use crate::config::Config;
 	use crate::indexer::graphrag::types::RelationType;
 	use crate::state::create_shared_state;
 	use crate::store::mod_tests::{
-		code_block, graph_node, graph_relationship, use_offline_test_config,
+		code_block, graph_node, graph_relationship, offline_config, use_offline_test_config,
 	};
 	use std::collections::HashSet;
 	use tempfile::TempDir;
@@ -49,7 +48,7 @@ mod tests {
 			.unwrap();
 		drop(store);
 
-		let mut config = Config::default();
+		let mut config = offline_config();
 		config.graphrag.use_llm = false;
 		let builder = GraphBuilder::new_with_quiet(config, dir.path(), true)
 			.await
@@ -69,7 +68,7 @@ mod tests {
 	async fn a_project_without_a_graph_loads_an_empty_one() {
 		use_offline_test_config();
 		let dir = TempDir::new().unwrap();
-		let mut config = Config::default();
+		let mut config = offline_config();
 		config.graphrag.use_llm = false;
 
 		let builder = GraphBuilder::new_with_quiet(config, dir.path(), true)
@@ -82,7 +81,7 @@ mod tests {
 	async fn an_unparseable_embedding_model_is_rejected() {
 		use_offline_test_config();
 		let dir = TempDir::new().unwrap();
-		let mut config = Config::default();
+		let mut config = offline_config();
 		config.embedding.text_model = "no-provider-prefix".to_string();
 
 		// `GraphBuilder` is not `Debug`, so unwrap_err() is unavailable here.
@@ -247,7 +246,7 @@ mod tests {
 	async fn llm_project() -> (TempDir, GraphBuilder) {
 		use_offline_test_config();
 		let dir = TempDir::new().unwrap();
-		let mut config = Config::default();
+		let mut config = offline_config();
 		config.graphrag.use_llm = true;
 		let builder = GraphBuilder::new_with_quiet(config, dir.path(), true)
 			.await
@@ -290,7 +289,7 @@ mod tests {
 		// sibling temp dir is unambiguously outside it.
 		let dir = TempDir::new().unwrap();
 		std::fs::write(dir.path().join("Cargo.toml"), "[package]").unwrap();
-		let mut config = Config::default();
+		let mut config = offline_config();
 		config.graphrag.use_llm = false;
 		let builder = GraphBuilder::new_with_quiet(config, dir.path(), true)
 			.await

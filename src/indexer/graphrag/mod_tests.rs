@@ -14,11 +14,12 @@
 
 #[cfg(test)]
 mod tests {
-	use crate::config::Config;
 	use crate::indexer::graphrag::database::DatabaseOperations;
 	use crate::indexer::graphrag::types::RelationType;
 	use crate::indexer::graphrag::GraphRAG;
-	use crate::store::mod_tests::{graph_node, graph_relationship, use_offline_test_config};
+	use crate::store::mod_tests::{
+		graph_node, graph_relationship, offline_config, use_offline_test_config,
+	};
 	use crate::store::Store;
 	use tempfile::TempDir;
 
@@ -50,7 +51,7 @@ mod tests {
 			.unwrap();
 		drop(store);
 
-		let mut config = Config::default();
+		let mut config = offline_config();
 		config.graphrag.use_llm = false;
 		(dir, GraphRAG::new(config, working))
 	}
