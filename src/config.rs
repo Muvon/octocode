@@ -293,6 +293,30 @@ impl Default for SearchConfig {
 	}
 }
 
+/// Reasoning effort hint for thinking-capable models.
+/// Maps 1:1 to `octolib::llm::ReasoningEffort`. Models without thinking support ignore it.
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum ReasoningEffortConfig {
+	Low,
+	Medium,
+	High,
+	XHigh,
+	Max,
+}
+
+impl ReasoningEffortConfig {
+	pub fn to_octolib(self) -> octolib::llm::ReasoningEffort {
+		match self {
+			ReasoningEffortConfig::Low => octolib::llm::ReasoningEffort::Low,
+			ReasoningEffortConfig::Medium => octolib::llm::ReasoningEffort::Medium,
+			ReasoningEffortConfig::High => octolib::llm::ReasoningEffort::High,
+			ReasoningEffortConfig::XHigh => octolib::llm::ReasoningEffort::XHigh,
+			ReasoningEffortConfig::Max => octolib::llm::ReasoningEffort::Max,
+		}
+	}
+}
+
 /// PageIndex-style reasoning retrieval. After hybrid retrieval gathers a
 /// candidate pool, an LLM reasons over each candidate's code (path, symbols,
 /// body) and re-ranks by true relevance, fused with the hybrid rank via RRF.
@@ -314,20 +338,14 @@ pub struct ReasoningConfig {
 	/// >1 leans on the LLM ordering; the hybrid rank always contributes as a
 	/// > recall floor so LLM-omitted true hits aren't lost.
 	pub reasoning_weight: f32,
-	/// Thinking budget for the ranking call: "low" | "medium" | "high" | "xhigh" | "max",
-	/// or "default" to send nothing and let the provider decide.
+	/// Thinking budget for the ranking call.
 	///
-	/// Ranking is a selection task, not a deliberation task, so this defaults to
-	/// "low". Left at the provider default, a thinking model spends most of
+	/// Ranking is a selection task, not a deliberation task, so the template ships
+	/// "low". Left at a thinking model's own default, the model spends all of
 	/// `llm.max_tokens` on chain-of-thought before emitting the JSON — measured at
-	/// 3776 of 4000 tokens for a 25-candidate pool — and once the thinking crosses
-	/// that ceiling the JSON is truncated, unparseable, and retried to no effect.
-	#[serde(default = "default_reasoning_effort")]
-	pub reasoning_effort: String,
-}
-
-fn default_reasoning_effort() -> String {
-	"low".to_string()
+	/// 4000 of 4000 tokens for a 25-candidate pool — and the content then comes
+	/// back empty, unparseable, and retried three more times to no effect.
+	pub reasoning_effort: ReasoningEffortConfig,
 }
 
 impl Default for ReasoningConfig {
@@ -339,7 +357,7 @@ impl Default for ReasoningConfig {
 			final_top_k: 10,
 			context_level: "full".to_string(),
 			reasoning_weight: 2.0,
-			reasoning_effort: default_reasoning_effort(),
+			reasoning_effort: ReasoningEffortConfig::Low,
 		}
 	}
 }
@@ -555,9 +573,56 @@ mod tests {
 	}
 
 	#[test]
+	fn reasoning_effort_reads_the_lowercase_toml_spelling() {
+		#[derive(serde::Deserialize)]
+		struct Holder {
+			effort: ReasoningEffortConfig,
+		}
+
+		for (spelling, expected) in [
+			("low", ReasoningEffortConfig::Low),
+			("medium", ReasoningEffortConfig::Medium),
+			("high", ReasoningEffortConfig::High),
+			("xhigh", ReasoningEffortConfig::XHigh),
+			("max", ReasoningEffortConfig::Max),
+		] {
+			let parsed: Holder = toml::from_str(&format!("effort = \"{spelling}\""))
+				.unwrap_or_else(|e| panic!("{spelling} should deserialize: {e}"));
+			assert_eq!(parsed.effort, expected);
+		}
+
+		// The field is required: a config that omits it must fail rather than
+		// silently inherit a default the file never states.
+		assert!(toml::from_str::<Holder>("").is_err());
+	}
+
+	#[test]
+	fn reasoning_effort_maps_one_to_one_onto_octolib() {
+		use octolib::llm::ReasoningEffort;
+		for (ours, theirs) in [
+			(ReasoningEffortConfig::Low, ReasoningEffort::Low),
+			(ReasoningEffortConfig::Medium, ReasoningEffort::Medium),
+			(ReasoningEffortConfig::High, ReasoningEffort::High),
+			(ReasoningEffortConfig::XHigh, ReasoningEffort::XHigh),
+			(ReasoningEffortConfig::Max, ReasoningEffort::Max),
+		] {
+			assert_eq!(ours.to_octolib(), theirs);
+		}
+	}
+
+	#[test]
+	fn the_template_ships_a_low_ranking_budget() {
+		let config = Config::load_from_template().expect("template should load");
+		assert_eq!(
+			config.search.reasoning.reasoning_effort,
+			ReasoningEffortConfig::Low
+		);
+	}
+
+	#[test]
 	fn test_default_config() {
 		let config = Config::load_from_template().expect("Failed to load template config");
-		assert_eq!(config.version, 2);
+		assert_eq!(config.version, 3);
 		assert_eq!(config.llm.model, "openrouter:openai/gpt-4o-mini");
 		assert_eq!(config.index.chunk_size, 2000);
 		assert_eq!(config.search.max_results, 20);
@@ -605,7 +670,7 @@ mod tests {
 		assert!(result.is_ok(), "Should be able to load from template");
 
 		let config = result.expect("Template config should load successfully");
-		assert_eq!(config.version, 2);
+		assert_eq!(config.version, 3);
 		assert_eq!(config.llm.model, "openrouter:openai/gpt-4o-mini");
 		assert_eq!(config.index.chunk_size, 2000);
 		assert_eq!(config.search.max_results, 20);
@@ -682,7 +747,7 @@ mod tests {
 	fn test_toml_missing_optional_sections_uses_defaults() {
 		// A config.toml that omits whole tables (legal TOML) must fall back to
 		// sane defaults instead of panicking via serde's #[serde(default)].
-		let minimal = "version = 2\n";
+		let minimal = "version = 3\n";
 		let config: Config = toml::from_str(minimal).expect("should deserialize with defaults");
 		assert_eq!(config.search.max_results, 20);
 		assert!(!config.graphrag.enabled);
@@ -695,7 +760,7 @@ mod tests {
 
 		let config = Config::load_from_path(&config_path).expect("config should be created");
 
-		assert_eq!(config.version, 2);
+		assert_eq!(config.version, 3);
 		assert_eq!(
 			fs::read_to_string(&config_path).unwrap(),
 			DEFAULT_CONFIG_TEMPLATE
@@ -711,7 +776,7 @@ mod tests {
 
 		let config = Config::load_from_path(&config_path).expect("current config should load");
 
-		assert_eq!(config.version, 2);
+		assert_eq!(config.version, 3);
 		assert!(siblings(&config_path, "lock").is_empty());
 	}
 
@@ -725,7 +790,7 @@ mod tests {
 		let config = Config::load_from_path(&config_path).expect("v1 config should migrate");
 		let migrated = fs::read_to_string(&config_path).unwrap();
 
-		assert_eq!(config.version, 2);
+		assert_eq!(config.version, 3);
 		assert_eq!(config.search.hybrid.default_vector_weight, 0.73);
 		assert_eq!(config.search.hybrid.rrf_k, 60.0);
 		assert!(!config.search.reasoning.enabled);
@@ -743,7 +808,7 @@ mod tests {
 	fn future_version_is_rejected_without_modifying_file() {
 		let temp = TempConfigDir::new();
 		let config_path = temp.config_path();
-		let future = DEFAULT_CONFIG_TEMPLATE.replacen("version = 2", "version = 3", 1);
+		let future = DEFAULT_CONFIG_TEMPLATE.replacen("version = 3", "version = 4", 1);
 		fs::write(&config_path, &future).unwrap();
 
 		let error = Config::load_from_path(&config_path).expect_err("future config should fail");
@@ -778,7 +843,7 @@ mod tests {
 
 		let config = Config::load_from_path(&config_path).expect("v1 config should migrate");
 
-		assert_eq!(config.version, 2);
+		assert_eq!(config.version, 3);
 		assert_eq!(
 			fs::read_to_string(&stale_backup).unwrap(),
 			"backup of an earlier config"
@@ -816,6 +881,6 @@ mod tests {
 
 		let migrated = fs::read_to_string(config_path.as_ref()).unwrap();
 		let config: Config = toml::from_str(&migrated).expect("final config should be valid");
-		assert_eq!(config.version, 2);
+		assert_eq!(config.version, 3);
 	}
 }

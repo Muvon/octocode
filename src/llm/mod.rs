@@ -17,7 +17,7 @@
 //! This module provides a clean wrapper around octolib's LLM functionality
 //! with octocode-specific helpers and configuration integration.
 
-use crate::config::Config;
+use crate::config::{Config, ReasoningEffortConfig};
 use anyhow::Result;
 use serde::de::DeserializeOwned;
 use std::time::Duration;
@@ -68,18 +68,8 @@ impl LlmClient {
 	}
 
 	/// Set the thinking budget for every call this client makes.
-	///
-	/// Accepts the config spelling; anything unrecognised (including "default")
-	/// leaves the provider default in place.
-	pub fn with_reasoning_effort(mut self, effort: &str) -> Self {
-		self.reasoning_effort = match effort.trim().to_ascii_lowercase().as_str() {
-			"low" => Some(ReasoningEffort::Low),
-			"medium" => Some(ReasoningEffort::Medium),
-			"high" => Some(ReasoningEffort::High),
-			"xhigh" => Some(ReasoningEffort::XHigh),
-			"max" => Some(ReasoningEffort::Max),
-			_ => None,
-		};
+	pub fn with_reasoning_effort(mut self, effort: ReasoningEffortConfig) -> Self {
+		self.reasoning_effort = Some(effort.to_octolib());
 		self
 	}
 
