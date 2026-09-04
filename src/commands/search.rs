@@ -23,6 +23,10 @@ use octocode::store::Store;
 
 use crate::commands::OutputFormat;
 
+#[cfg(test)]
+#[path = "search_tests.rs"]
+mod search_tests;
+
 fn validate_detail_level(s: &str) -> Result<String, String> {
 	match s {
 		"signatures" | "partial" | "full" => Ok(s.to_string()),

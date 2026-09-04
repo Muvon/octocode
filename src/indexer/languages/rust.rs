@@ -364,7 +364,26 @@ fn find_enclosing_node<'a>(node: Node<'a>, target_kind: &str) -> Option<Node<'a>
 //   - Glob:     `use crate::utils::*;`                → ["crate::utils"]  (resolve the module itself)
 //   - Alias:    `use std::sync::Arc as StdArc;`       → ["std::sync::Arc"]
 fn expand_rust_use_paths(use_text: &str) -> Vec<String> {
-	let cleaned = match use_text.trim().strip_prefix("use ") {
+	// A re-export carries a visibility prefix (`pub use`, `pub(crate) use`);
+	// stripping only "use " leaves it unmatched and drops the import entirely.
+	// The prefix only counts when `pub` is a whole token, so a path such as
+	// `use public::thing;` is left alone.
+	let trimmed = use_text.trim();
+	let without_visibility = trimmed
+		.strip_prefix("pub")
+		.filter(|rest| rest.starts_with(char::is_whitespace) || rest.starts_with('('))
+		.map(|rest| {
+			let rest = rest.trim_start();
+			match rest.strip_prefix('(') {
+				Some(inner) => inner
+					.split_once(')')
+					.map_or(rest, |(_, tail)| tail)
+					.trim_start(),
+				None => rest,
+			}
+		})
+		.unwrap_or(trimmed);
+	let cleaned = match without_visibility.strip_prefix("use ") {
 		Some(s) => s.trim_end_matches(';').trim(),
 		None => return Vec::new(),
 	};

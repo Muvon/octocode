@@ -262,9 +262,12 @@ impl Css {
 						}
 					}
 					"pseudo_class_selector" | "pseudo_element_selector" => {
-						// Extract pseudo-class/element names
+						// The pseudo name is a `class_name` child; the selector it
+						// decorates is nested in the same node. Matching only a
+						// direct `identifier` found neither, so `.card:hover`
+						// yielded no symbol at all.
 						for pseudo_child in child.children(&mut child.walk()) {
-							if pseudo_child.kind() == "identifier" {
+							if matches!(pseudo_child.kind(), "class_name" | "identifier") {
 								if let Ok(pseudo_name) = pseudo_child.utf8_text(contents.as_bytes())
 								{
 									let name = format!(":{}", pseudo_name.trim());
@@ -274,6 +277,8 @@ impl Css {
 								}
 							}
 						}
+						// Then the decorated selector (`.card` in `.card:hover`).
+						Self::extract_css_selectors(child, contents, symbols);
 					}
 					_ => {
 						// Recursively process other selector components

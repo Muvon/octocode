@@ -26,6 +26,10 @@ use octocode::utils::diff_chunker;
 const MAX_RETRIES: usize = 2;
 const RETRY_DELAY_MS: u64 = 1000;
 
+#[cfg(test)]
+#[path = "commit_tests.rs"]
+mod commit_tests;
+
 /// Retry wrapper for LLM calls with exponential backoff
 async fn call_llm_with_retry<F, Fut>(operation: F, context: &str) -> Result<String>
 where

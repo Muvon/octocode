@@ -62,13 +62,18 @@ impl Language for Lua {
 
 		match node.kind() {
 			"function_declaration" | "function_definition" | "local_function" => {
-				// Extract function name
-				for child in node.children(&mut node.walk()) {
-					if child.kind() == "identifier" {
-						if let Ok(name) = child.utf8_text(contents.as_bytes()) {
-							symbols.push(name.to_string());
+				// Extract function name. A dotted or colon name (`function M.encode()`,
+				// `function M:decode()`) is a `dot_index_expression` /
+				// `method_index_expression`, not a bare `identifier`, so read the
+				// `name` field and keep only the terminal segment.
+				if let Some(name_node) = node.child_by_field_name("name") {
+					if let Ok(text) = name_node.utf8_text(contents.as_bytes()) {
+						if let Some(target) = super::extract_call_target(text) {
+							symbols.push(target.name);
+							if let Some(owner) = target.qualifier {
+								symbols.push(owner);
+							}
 						}
-						break;
 					}
 				}
 
@@ -260,10 +265,23 @@ impl Lua {
 				// `local x = 5` parses as `variable_declaration` in tree-sitter-lua,
 				// not `local_declaration` (which isn't a real node kind).
 				"variable_declaration" | "assignment_statement" => {
-					// Extract variable names from declarations/assignments
+					// Extract variable names from declarations/assignments. An
+					// initialised local (`local x = 1`) nests its `variable_list`
+					// under an inner `assignment_statement`, so that level is walked
+					// too — otherwise every initialised local is dropped.
 					for grandchild in child.children(&mut child.walk()) {
-						if grandchild.kind() == "variable_list" {
-							self.extract_lua_variable_list(grandchild, contents, symbols);
+						match grandchild.kind() {
+							"variable_list" => {
+								self.extract_lua_variable_list(grandchild, contents, symbols);
+							}
+							"assignment_statement" => {
+								for great in grandchild.children(&mut grandchild.walk()) {
+									if great.kind() == "variable_list" {
+										self.extract_lua_variable_list(great, contents, symbols);
+									}
+								}
+							}
+							_ => {}
 						}
 					}
 				}

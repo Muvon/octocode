@@ -24,6 +24,10 @@ use octocode::config::Config;
 use octocode::indexer::git_utils::GitUtils;
 use octocode::llm::LlmClient;
 
+#[cfg(test)]
+#[path = "release_tests.rs"]
+mod release_tests;
+
 #[derive(Args, Debug)]
 pub struct ReleaseArgs {
 	/// Changelog file path (default: CHANGELOG.md)

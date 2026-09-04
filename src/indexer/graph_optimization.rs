@@ -587,9 +587,10 @@ fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
 
 /// Check if a word is likely to be a technical term
 fn is_likely_technical_term(word: &str) -> bool {
-	let word = word
-		.trim_matches(|c: char| !c.is_alphanumeric())
-		.to_lowercase();
+	// Keep the original casing around: the camelCase/PascalCase check below has to
+	// run before lowercasing, otherwise it can never fire.
+	let trimmed = word.trim_matches(|c: char| !c.is_alphanumeric());
+	let word = trimmed.to_lowercase();
 
 	// Skip common English words
 	let common_words = [
@@ -605,7 +606,7 @@ fn is_likely_technical_term(word: &str) -> bool {
 
 	// Words with mixed case are likely technical terms (camelCase, PascalCase)
 	let has_mixed_case =
-		word.chars().any(|c| c.is_uppercase()) && word.chars().any(|c| c.is_lowercase());
+		trimmed.chars().any(|c| c.is_uppercase()) && trimmed.chars().any(|c| c.is_lowercase());
 
 	// Words with underscores are likely technical terms
 	let has_underscore = word.contains('_');

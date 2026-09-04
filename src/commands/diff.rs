@@ -25,6 +25,10 @@ use octocode::utils::diff_chunker;
 
 use crate::commands::OutputFormat;
 
+#[cfg(test)]
+#[path = "diff_tests.rs"]
+mod diff_tests;
+
 #[derive(Debug, Args)]
 pub struct DiffArgs {
 	/// Target: commit hash, commit range (a..b), branch name, or omit for working changes

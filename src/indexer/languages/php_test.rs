@@ -1,7 +1,8 @@
-use crate::indexer::code_region_extractor::extract_meaningful_regions;
+use crate::indexer::code_region_extractor::{extract_meaningful_regions, CodeRegion};
 use crate::indexer::languages::php::Php;
-use crate::indexer::languages::Language;
-use tree_sitter::Parser;
+use crate::indexer::languages::resolution_utils::FileRegistry;
+use crate::indexer::languages::{CallTarget, Language, TypeRelationKind};
+use tree_sitter::{Node, Parser, Tree};
 
 #[test]
 fn test_php_method_chunking() {
@@ -472,4 +473,479 @@ function standalone() {
 		"unbraced namespace declaration should remain its own single region unchanged, got {:?}",
 		regions.iter().map(|r| &r.node_kind).collect::<Vec<_>>()
 	);
+}
+
+fn parse_tree(source: &str) -> Tree {
+	let mut parser = Parser::new();
+	parser.set_language(&Php {}.get_ts_language()).unwrap();
+	parser.parse(source, None).unwrap()
+}
+
+fn nodes_of_kind<'a>(node: Node<'a>, kind: &str, out: &mut Vec<Node<'a>>) {
+	if node.kind() == kind {
+		out.push(node);
+	}
+	let mut cursor = node.walk();
+	for child in node.children(&mut cursor) {
+		nodes_of_kind(child, kind, out);
+	}
+}
+
+/// The `index`-th node of `kind` in document order.
+fn nth_node<'a>(tree: &'a Tree, kind: &str, index: usize) -> Node<'a> {
+	let mut found = Vec::new();
+	nodes_of_kind(tree.root_node(), kind, &mut found);
+	*found
+		.get(index)
+		.unwrap_or_else(|| panic!("no {kind} node at index {index}"))
+}
+
+fn first_node<'a>(tree: &'a Tree, kind: &str) -> Node<'a> {
+	nth_node(tree, kind, 0)
+}
+
+fn parse_regions(source: &str) -> Vec<CodeRegion> {
+	let php = Php {};
+	let tree = parse_tree(source);
+	let mut regions = Vec::new();
+	extract_meaningful_regions(tree.root_node(), source, &php, &mut regions);
+	regions
+}
+
+fn registry(files: &[&str]) -> FileRegistry {
+	let owned: Vec<String> = files.iter().map(|f| f.to_string()).collect();
+	FileRegistry::new(&owned)
+}
+
+#[test]
+fn the_language_is_named_php_and_owns_the_php_extension() {
+	let php = Php {};
+	assert_eq!(php.name(), "php");
+	assert_eq!(php.get_file_extensions(), vec!["php"]);
+}
+
+#[test]
+fn the_symbol_tier_restores_the_containers_chunking_drops() {
+	let php = Php {};
+	assert_eq!(
+		php.get_meaningful_kinds(),
+		vec![
+			"function_definition",
+			"method_declaration",
+			"namespace_definition",
+			"namespace_use_declaration",
+		]
+	);
+	assert_eq!(
+		php.get_symbol_kinds(),
+		vec![
+			"function_definition",
+			"method_declaration",
+			"class_declaration",
+			"interface_declaration",
+			"trait_declaration",
+			"enum_declaration",
+		]
+	);
+	assert_eq!(php.descend_first_kinds(), vec!["namespace_definition"]);
+}
+
+#[test]
+fn every_node_type_description_arm_is_reachable() {
+	let php = Php {};
+	assert_eq!(
+		php.get_node_type_description("function_definition"),
+		"function declarations"
+	);
+	assert_eq!(
+		php.get_node_type_description("method_declaration"),
+		"function declarations"
+	);
+	assert_eq!(
+		php.get_node_type_description("class_declaration"),
+		"class declarations"
+	);
+	assert_eq!(
+		php.get_node_type_description("trait_declaration"),
+		"trait declarations"
+	);
+	assert_eq!(
+		php.get_node_type_description("interface_declaration"),
+		"interface declarations"
+	);
+	assert_eq!(
+		php.get_node_type_description("property_declaration"),
+		"property declarations"
+	);
+	assert_eq!(
+		php.get_node_type_description("const_declaration"),
+		"constant declarations"
+	);
+	assert_eq!(
+		php.get_node_type_description("namespace_definition"),
+		"namespace declarations"
+	);
+	assert_eq!(
+		php.get_node_type_description("use_declaration"),
+		"use statements"
+	);
+	assert_eq!(
+		php.get_node_type_description("namespace_use_declaration"),
+		"declarations"
+	);
+}
+
+#[test]
+fn semantic_groups_join_functions_with_methods_but_not_with_classes() {
+	let php = Php {};
+	assert!(php.are_node_types_equivalent("function_definition", "method_declaration"));
+	assert!(php.are_node_types_equivalent("class_declaration", "trait_declaration"));
+	assert!(php.are_node_types_equivalent("interface_declaration", "class_declaration"));
+	assert!(php.are_node_types_equivalent("property_declaration", "const_declaration"));
+	assert!(php.are_node_types_equivalent("namespace_definition", "use_declaration"));
+	assert!(php.are_node_types_equivalent("enum_declaration", "enum_declaration"));
+
+	assert!(!php.are_node_types_equivalent("function_definition", "class_declaration"));
+	assert!(!php.are_node_types_equivalent("enum_declaration", "class_declaration"));
+	assert!(!php.are_node_types_equivalent("comment", "namespace_definition"));
+}
+
+#[test]
+fn a_method_symbol_list_carries_the_name_of_its_container() {
+	let source = r#"<?php
+trait Loggable {
+    public function log($m) { return $m; }
+}
+enum Suit {
+    public function color(): string { return 'red'; }
+}
+class Plain {
+    public function bare() { return 1; }
+}
+"#;
+	let tree = parse_tree(source);
+	let php = Php {};
+	for (index, expected) in [
+		vec!["Loggable".to_string(), "log".to_string()],
+		vec!["Suit".to_string(), "color".to_string()],
+		vec!["Plain".to_string(), "bare".to_string()],
+	]
+	.into_iter()
+	.enumerate()
+	{
+		assert_eq!(
+			php.extract_symbols(nth_node(&tree, "method_declaration", index), source),
+			expected
+		);
+	}
+}
+
+#[test]
+fn a_standalone_function_contributes_only_its_own_name() {
+	let source = "<?php\nfunction helper($x) {\n    return $x + 1;\n}\n";
+	let tree = parse_tree(source);
+	let node = first_node(&tree, "function_definition");
+	assert_eq!(
+		Php {}.extract_symbols(node, source),
+		vec!["helper".to_string()]
+	);
+}
+
+#[test]
+fn an_unhandled_node_kind_falls_back_to_identifier_extraction() {
+	let source =
+		"<?php\nfunction f() {\n  $total = 1;\n  $total = $total + 1;\n  return $total;\n}\n";
+	let tree = parse_tree(source);
+	let body = first_node(&tree, "compound_statement");
+	// The `$` prefix is stripped and repeats are collapsed.
+	assert_eq!(
+		Php {}.extract_symbols(body, source),
+		vec!["total".to_string()]
+	);
+}
+
+#[test]
+fn identifier_extraction_strips_the_dollar_prefix_and_deduplicates() {
+	let source =
+		"<?php\nfunction f() {\n  $total = 1;\n  $total = $total + 1;\n  return $total;\n}\n";
+	let tree = parse_tree(source);
+	let body = first_node(&tree, "compound_statement");
+	let mut symbols = Vec::new();
+	Php {}.extract_identifiers(body, source, &mut symbols);
+	assert_eq!(symbols, vec!["total".to_string()]);
+}
+
+#[test]
+fn every_use_statement_form_yields_slash_separated_paths() {
+	let source = r#"<?php
+use App\Contracts\Jsonable;
+use App\Support\Str as StrHelper;
+use App\Http\{Request, Response as Resp};
+"#;
+	let tree = parse_tree(source);
+	let php = Php {};
+	assert_eq!(
+		php.extract_imports_exports(nth_node(&tree, "namespace_use_declaration", 0), source)
+			.0,
+		vec!["App/Contracts/Jsonable".to_string()]
+	);
+	assert_eq!(
+		php.extract_imports_exports(nth_node(&tree, "namespace_use_declaration", 1), source)
+			.0,
+		vec!["App/Support/Str".to_string()]
+	);
+	assert_eq!(
+		php.extract_imports_exports(nth_node(&tree, "namespace_use_declaration", 2), source)
+			.0,
+		vec![
+			"App/Http/Request".to_string(),
+			"App/Http/Response".to_string(),
+		]
+	);
+}
+
+#[test]
+fn a_use_function_statement_drops_the_keyword_from_the_import_path() {
+	// The `function`/`const` modifier must be stripped along with `use `, or the
+	// resolver is handed an unresolvable path.
+	let source = "<?php\nuse function App\\Helpers\\slugify;\nuse const App\\LIMIT;\n";
+	let tree = parse_tree(source);
+	let php = Php {};
+	assert_eq!(
+		php.extract_imports_exports(nth_node(&tree, "namespace_use_declaration", 0), source)
+			.0,
+		vec!["App/Helpers/slugify".to_string()]
+	);
+	assert_eq!(
+		php.extract_imports_exports(nth_node(&tree, "namespace_use_declaration", 1), source)
+			.0,
+		vec!["App/LIMIT".to_string()]
+	);
+}
+
+#[test]
+fn every_named_declaration_exports_its_own_name() {
+	let source = r#"<?php
+namespace App\Models;
+
+interface Jsonable {}
+
+trait Loggable {}
+
+enum Status {}
+
+class User
+{
+    public function greet() { return 1; }
+}
+
+function helper() { return 1; }
+"#;
+	let tree = parse_tree(source);
+	let php = Php {};
+	for (kind, expected) in [
+		("namespace_definition", "App\\Models"),
+		("interface_declaration", "Jsonable"),
+		("trait_declaration", "Loggable"),
+		("enum_declaration", "Status"),
+		("class_declaration", "User"),
+		("method_declaration", "greet"),
+		("function_definition", "helper"),
+	] {
+		let (imports, exports) = php.extract_imports_exports(first_node(&tree, kind), source);
+		assert!(imports.is_empty(), "{kind} should not import anything");
+		assert_eq!(
+			exports,
+			vec![expected.to_string()],
+			"wrong export for {kind}"
+		);
+	}
+}
+
+#[test]
+fn a_trait_use_inside_a_class_is_neither_an_import_nor_an_export() {
+	// `use Loggable;` inside a class body is a `use_declaration`, not a
+	// `namespace_use_declaration`, so it falls through the match untouched.
+	let source = "<?php\nclass User\n{\n    use Loggable;\n}\n";
+	let tree = parse_tree(source);
+	let node = first_node(&tree, "use_declaration");
+	let (imports, exports) = Php {}.extract_imports_exports(node, source);
+	assert!(imports.is_empty());
+	assert!(exports.is_empty());
+}
+
+#[test]
+fn each_call_syntax_keeps_its_receiver_as_the_qualifier() {
+	let source = r#"<?php
+class User
+{
+    public function greet($who)
+    {
+        strtoupper($who);
+        $this->log($who);
+        StrHelper::slug($who);
+    }
+}
+"#;
+	let tree = parse_tree(source);
+	let php = Php {};
+	assert_eq!(
+		php.extract_function_calls(first_node(&tree, "function_call_expression"), source),
+		vec![CallTarget {
+			name: "strtoupper".to_string(),
+			qualifier: None,
+		}]
+	);
+	assert_eq!(
+		php.extract_function_calls(first_node(&tree, "member_call_expression"), source),
+		vec![CallTarget {
+			name: "log".to_string(),
+			qualifier: Some("$this".to_string()),
+		}]
+	);
+	assert_eq!(
+		php.extract_function_calls(first_node(&tree, "scoped_call_expression"), source),
+		vec![CallTarget {
+			name: "slug".to_string(),
+			qualifier: Some("StrHelper".to_string()),
+		}]
+	);
+}
+
+#[test]
+fn a_node_that_is_not_a_call_yields_no_call_targets() {
+	let source = "<?php\nclass User\n{\n    private $name;\n}\n";
+	let tree = parse_tree(source);
+	let node = first_node(&tree, "property_declaration");
+	assert!(Php {}.extract_function_calls(node, source).is_empty());
+}
+
+#[test]
+fn a_class_reports_both_its_base_and_every_interface_it_implements() {
+	let source = "<?php\nclass User extends BaseModel implements Jsonable, Countable {}\n";
+	let tree = parse_tree(source);
+	let node = first_node(&tree, "class_declaration");
+	assert_eq!(
+		Php {}.extract_type_relations(node, source),
+		vec![
+			(TypeRelationKind::Extends, "BaseModel".to_string()),
+			(TypeRelationKind::Implements, "Jsonable".to_string()),
+			(TypeRelationKind::Implements, "Countable".to_string()),
+		]
+	);
+}
+
+#[test]
+fn an_interface_extends_every_parent_and_an_enum_only_implements() {
+	let source = r#"<?php
+interface Jsonable extends Arrayable, Countable {}
+
+enum Status implements HasLabel {}
+"#;
+	let tree = parse_tree(source);
+	let php = Php {};
+	assert_eq!(
+		php.extract_type_relations(first_node(&tree, "interface_declaration"), source),
+		vec![
+			(TypeRelationKind::Extends, "Arrayable".to_string()),
+			(TypeRelationKind::Extends, "Countable".to_string()),
+		]
+	);
+	assert_eq!(
+		php.extract_type_relations(first_node(&tree, "enum_declaration"), source),
+		vec![(TypeRelationKind::Implements, "HasLabel".to_string())]
+	);
+}
+
+#[test]
+fn a_plain_class_and_a_trait_report_no_type_relations() {
+	let source = "<?php\nclass Plain {}\n\ntrait Loggable {}\n";
+	let tree = parse_tree(source);
+	let php = Php {};
+	assert!(php
+		.extract_type_relations(first_node(&tree, "class_declaration"), source)
+		.is_empty());
+	assert!(php
+		.extract_type_relations(first_node(&tree, "trait_declaration"), source)
+		.is_empty());
+}
+
+#[test]
+fn a_fully_qualified_parent_reports_only_its_terminal_name() {
+	// `simple_type_name` treats `\` as a namespace separator, like `::` and `.`.
+	let source = "<?php\nclass A extends \\Vendor\\Base implements \\Vendor\\I {}\n";
+	let tree = parse_tree(source);
+	let node = first_node(&tree, "class_declaration");
+	assert_eq!(
+		Php {}.extract_type_relations(node, source),
+		vec![
+			(TypeRelationKind::Extends, "Base".to_string()),
+			(TypeRelationKind::Implements, "I".to_string()),
+		]
+	);
+}
+
+#[test]
+fn a_relative_include_resolves_against_the_source_directory() {
+	let files = registry(&[
+		"src/App/Models/User.php",
+		"src/App/Config.php",
+		"src/App/Models/Post.php",
+	]);
+	assert_eq!(
+		Php {}.resolve_import("../Config.php", "src/App/Models/User.php", &files),
+		Some("src/App/Config.php".to_string())
+	);
+}
+
+#[test]
+fn a_bare_filename_resolves_next_to_the_source_file() {
+	let files = registry(&["src/App/Models/User.php", "src/App/Models/Post.php"]);
+	assert_eq!(
+		Php {}.resolve_import("Post.php", "src/App/Models/User.php", &files),
+		Some("src/App/Models/Post.php".to_string())
+	);
+}
+
+#[test]
+fn a_namespace_import_resolves_through_the_psr_4_candidates() {
+	let files = registry(&["src/App/Models/User.php", "src/App/Config.php"]);
+	assert_eq!(
+		Php {}.resolve_import("App/Config", "src/App/Models/User.php", &files),
+		Some("src/App/Config.php".to_string())
+	);
+}
+
+#[test]
+fn an_unknown_third_party_namespace_resolves_to_nothing() {
+	let files = registry(&["src/App/Models/User.php", "src/App/Config.php"]);
+	assert_eq!(
+		Php {}.resolve_import("Guzzle/Http/Client", "src/App/Models/User.php", &files),
+		None
+	);
+}
+
+#[test]
+fn consecutive_use_statements_merge_under_the_fallback_description() {
+	let source = "<?php\n\nuse App\\A;\nuse App\\B;\n\nfunction solo() {\n    $x = 1;\n    $y = 2;\n    return $x + $y;\n}\n";
+	let regions = parse_regions(source);
+	assert_eq!(
+		regions
+			.iter()
+			.map(|r| r.node_kind.as_str())
+			.collect::<Vec<_>>(),
+		vec!["namespace_use_declaration", "function_definition"]
+	);
+	assert!(
+		regions[0]
+			.content
+			.starts_with("// Merged declarations (2 declarations)\n"),
+		"namespace_use_declaration has no description arm, so the fallback applies: {:?}",
+		regions[0].content
+	);
+	assert_eq!(
+		regions[0].symbols,
+		vec!["A".to_string(), "App".to_string(), "B".to_string()]
+	);
+	assert_eq!(regions[1].symbols, vec!["solo".to_string()]);
 }

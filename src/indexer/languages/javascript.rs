@@ -151,8 +151,12 @@ impl Language for JavaScript {
 		}
 
 		super::extract_identifiers_default(node, contents, symbols, |kind, _text| {
-			// Include identifiers and names, but exclude property identifiers
-			(kind.contains("identifier") || kind.contains("name")) && kind != "property_identifier"
+			// Include identifiers and names, but exclude property identifiers.
+			// `named_imports` also contains "name" and would otherwise leak the
+			// whole `{ a, b }` brace list in as one symbol.
+			(kind.contains("identifier") || kind.contains("name"))
+				&& kind != "property_identifier"
+				&& kind != "named_imports"
 		});
 	}
 
@@ -458,21 +462,24 @@ pub fn parse_js_import_statement_full_path(import_text: &str) -> Option<Vec<Stri
 	let mut imports = Vec::new();
 	let cleaned = import_text.trim();
 
-	// Extract the module path from 'from' clause
-	if cleaned.contains(" from ") {
-		if let Some(from_pos) = cleaned.find(" from ") {
-			let module_part = &cleaned[from_pos + 6..]; // Skip " from "
-											   // Remove all quotes and semicolon around module path
-			let module_path = module_part
-				.trim()
-				.trim_start_matches('\'')
-				.trim_start_matches('"')
-				.trim_end_matches(';')
-				.trim_end_matches('\'')
-				.trim_end_matches('"');
-			if !module_path.is_empty() {
-				imports.push(module_path.to_string());
-			}
+	// Extract the module path: after the `from` clause, or — for a side-effect
+	// import (`import './styles.css';`) — straight after `import`, which has no
+	// `from` at all and would otherwise leave the dependency unrecorded.
+	let module_part = match cleaned.find(" from ") {
+		Some(from_pos) => Some(&cleaned[from_pos + 6..]),
+		None => cleaned.strip_prefix("import "),
+	};
+	if let Some(module_part) = module_part {
+		// Remove all quotes and semicolon around module path
+		let module_path = module_part
+			.trim()
+			.trim_start_matches('\'')
+			.trim_start_matches('"')
+			.trim_end_matches(';')
+			.trim_end_matches('\'')
+			.trim_end_matches('"');
+		if !module_path.is_empty() {
+			imports.push(module_path.to_string());
 		}
 	}
 
@@ -539,27 +546,10 @@ pub fn parse_js_export_statement(export_text: &str) -> Option<Vec<String>> {
 	// Get the first line for parsing (export statements are usually on the first line)
 	let first_line = cleaned.lines().next().unwrap_or(cleaned);
 
-	// Handle: export { foo, bar }
-	if let Some(start) = first_line.find('{') {
-		if let Some(end) = first_line.find('}') {
-			let items = &first_line[start + 1..end];
-			for item in items.split(',') {
-				let item = item.trim();
-				// Handle: foo as bar -> extract 'foo'
-				let name = if let Some(as_pos) = item.find(" as ") {
-					&item[..as_pos]
-				} else {
-					item
-				};
-				if !name.is_empty() {
-					exports.push(name.to_string());
-				}
-			}
-			return Some(exports);
-		}
-	}
-
 	// Handle: export function foo() {} or export const foo = ...
+	// Checked BEFORE the brace form: a one-line `export function foo() { ... }`
+	// also contains braces, and the brace branch would read its body as a
+	// named-export list.
 	if let Some(rest) = first_line.strip_prefix("export ") {
 		// Skip "export "
 		if rest.starts_with("function ")
@@ -567,11 +557,38 @@ pub fn parse_js_export_statement(export_text: &str) -> Option<Vec<String>> {
 			|| rest.starts_with("let ")
 			|| rest.starts_with("var ")
 		{
-			// Extract identifier after keyword
+			// Extract identifier after keyword. The token still carries whatever
+			// follows the name on the same line (`foo()`, `foo=`), so cut at the
+			// first character that cannot appear in a JS identifier.
 			let parts: Vec<&str> = rest.split_whitespace().collect();
 			if parts.len() >= 2 {
-				let name = parts[1].trim_end_matches('(').trim_end_matches('=');
-				exports.push(name.to_string());
+				let name = parts[1]
+					.split(|c: char| !(c.is_alphanumeric() || c == '_' || c == '$'))
+					.next()
+					.unwrap_or(parts[1]);
+				if !name.is_empty() {
+					exports.push(name.to_string());
+					return Some(exports);
+				}
+			}
+		}
+
+		// Handle: export { foo, bar }
+		if let Some(start) = first_line.find('{') {
+			if let Some(end) = first_line.find('}') {
+				let items = &first_line[start + 1..end];
+				for item in items.split(',') {
+					let item = item.trim();
+					// Handle: foo as bar -> extract 'foo'
+					let name = if let Some(as_pos) = item.find(" as ") {
+						&item[..as_pos]
+					} else {
+						item
+					};
+					if !name.is_empty() {
+						exports.push(name.to_string());
+					}
+				}
 				return Some(exports);
 			}
 		}

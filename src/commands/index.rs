@@ -42,6 +42,10 @@ pub struct IndexArgs {
 	pub graphrag: Option<String>,
 }
 
+#[cfg(test)]
+#[path = "index_tests.rs"]
+mod index_tests;
+
 pub async fn execute(
 	store: &Store,
 	config: &Config,

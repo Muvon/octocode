@@ -106,9 +106,11 @@ impl Language for Ruby {
 
 		match node.kind() {
 			"method" | "singleton_method" | "class" | "module" => {
-				// Find method, class, or module name
+				// Find method, class, or module name. A namespaced definition
+				// (`module Outer::Inner`) is named by a `scope_resolution`, so
+				// matching only identifier/constant leaves it with no symbol.
 				for child in node.children(&mut node.walk()) {
-					if child.kind() == "identifier" || child.kind() == "constant" {
+					if matches!(child.kind(), "identifier" | "constant" | "scope_resolution") {
 						if let Ok(name) = child.utf8_text(contents.as_bytes()) {
 							symbols.push(name.to_string());
 						}

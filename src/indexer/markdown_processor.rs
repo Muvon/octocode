@@ -31,6 +31,10 @@ struct ParserState {
 	code_block_start: usize, // Line where code block started
 }
 /// Represents a header section with hierarchical relationships
+#[cfg(test)]
+#[path = "markdown_processor_tests.rs"]
+mod markdown_processor_tests;
+
 #[derive(Debug, Clone)]
 pub struct HeaderSection {
 	level: usize,
@@ -325,7 +329,8 @@ impl DocumentHierarchy {
 					tiny_chunk.context.last().unwrap_or(&tiny_chunk.title),
 					tiny_chunk.storage_content
 				);
-				prev_chunk.end_line = tiny_chunk.end_line;
+				prev_chunk.start_line = prev_chunk.start_line.min(tiny_chunk.start_line);
+				prev_chunk.end_line = prev_chunk.end_line.max(tiny_chunk.end_line);
 			}
 		}
 
@@ -337,7 +342,7 @@ impl DocumentHierarchy {
 		first: &ChunkResult,
 		second: &ChunkResult,
 	) -> Option<ChunkResult> {
-		// Only merge if they're reasonably close in the document
+		// Only merge if they're reasonably close in the document.
 		if second.start_line.saturating_sub(first.end_line) <= 5 {
 			Some(ChunkResult {
 				title: first.title.clone(),
@@ -349,8 +354,11 @@ impl DocumentHierarchy {
 				),
 				context: first.context.clone(),
 				level: first.level.min(second.level),
-				start_line: first.start_line,
-				end_line: second.end_line,
+				// `bottom_up_chunking` emits deepest-level chunks first, so a merged
+				// pair is not necessarily in document order. Span both inputs —
+				// taking first.start/second.end directly yields an inverted range.
+				start_line: first.start_line.min(second.start_line),
+				end_line: first.end_line.max(second.end_line),
 			})
 		} else {
 			None

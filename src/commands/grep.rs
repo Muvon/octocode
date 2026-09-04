@@ -17,6 +17,10 @@ use octocode::grep;
 use std::collections::HashMap;
 use std::path::Path;
 
+#[cfg(test)]
+#[path = "grep_tests.rs"]
+mod grep_tests;
+
 #[derive(Args, Debug)]
 pub struct GrepArgs {
 	/// AST pattern to search for (e.g. '$FUNC.unwrap()', 'if err != nil { $$$ }')

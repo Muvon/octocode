@@ -22,6 +22,10 @@ use octocode::storage::{get_project_identifier, get_project_storage_path};
 
 /// Magic marker written at the archive root so `import` can validate the file
 /// was produced by `octocode export` (and not some random tar.zst).
+#[cfg(test)]
+#[path = "export_tests.rs"]
+mod export_tests;
+
 const MARKER_FILE: &str = "octocode-export.marker";
 const MARKER_CONTENT: &str = "octocode-export-v1\n";
 

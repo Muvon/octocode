@@ -26,6 +26,10 @@ use crate::state::SharedState;
 use crate::store::{DocumentBlock, Store, TextBlock};
 use anyhow::Result;
 
+#[cfg(test)]
+#[path = "file_processor_tests.rs"]
+mod file_processor_tests;
+
 /// Check if a file extension is allowed for text indexing
 pub fn is_allowed_text_extension(path: &std::path::Path) -> bool {
 	FileUtils::is_allowed_text_extension(path)

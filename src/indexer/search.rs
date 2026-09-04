@@ -20,6 +20,10 @@ use crate::store::{CodeBlock, DocumentBlock, Store, TextBlock};
 use anyhow::Result;
 use std::collections::HashSet;
 
+#[cfg(test)]
+#[path = "search_tests.rs"]
+mod search_tests;
+
 /// Optional branch context for branch-aware search.
 /// When present, search queries both the main store and the branch delta store,
 /// merging results with branch priority.

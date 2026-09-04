@@ -26,6 +26,12 @@ pub struct Cpp {}
 fn find_cpp_declarator_name<'a>(node: Node<'a>, contents: &'a str) -> Option<&'a str> {
 	match node.kind() {
 		"identifier" | "field_identifier" => node.utf8_text(contents.as_bytes()).ok(),
+		// An out-of-line member definition (`void Widget::resize() {}`) nests the
+		// name under a `qualified_identifier`, which carries `scope`/`name` fields
+		// rather than a `declarator` one — without this the name is lost.
+		"qualified_identifier" => node
+			.child_by_field_name("name")
+			.and_then(|child| find_cpp_declarator_name(child, contents)),
 		_ => node
 			.child_by_field_name("declarator")
 			.and_then(|child| find_cpp_declarator_name(child, contents)),
@@ -132,18 +138,14 @@ impl Language for Cpp {
 
 		match node.kind() {
 			"function_definition" => {
-				// Find function name
+				// Find function name. Reuse the shared declarator walk so an
+				// out-of-line member definition (`void Widget::resize() {}`), whose
+				// name sits under a `qualified_identifier`, resolves here exactly as
+				// it does for `extract_declaration_name`.
 				for child in node.children(&mut node.walk()) {
 					if child.kind() == "function_declarator" {
-						for decl_child in child.children(&mut child.walk()) {
-							if decl_child.kind() == "identifier"
-								|| decl_child.kind() == "field_identifier"
-							{
-								if let Ok(name) = decl_child.utf8_text(contents.as_bytes()) {
-									symbols.push(name.to_string());
-								}
-								break;
-							}
+						if let Some(name) = find_cpp_declarator_name(child, contents) {
+							symbols.push(name.to_string());
 						}
 						break;
 					}
@@ -278,9 +280,9 @@ impl Language for Cpp {
 			// Preprocessor directives
 			&[
 				"preproc_include",
-				"preproc_define",
+				"preproc_def",
+				"preproc_function_def",
 				"preproc_ifdef",
-				"preproc_ifndef",
 			],
 		];
 
@@ -306,7 +308,7 @@ impl Language for Cpp {
 			"namespace_definition" => "namespace declarations",
 			"template_declaration" => "template declarations",
 			"declaration" => "variable declarations",
-			"preproc_include" | "preproc_define" | "preproc_ifdef" | "preproc_ifndef" => {
+			"preproc_include" | "preproc_def" | "preproc_function_def" | "preproc_ifdef" => {
 				"preprocessor directives"
 			}
 			_ => "declarations",
@@ -384,8 +386,9 @@ impl Language for Cpp {
 					}
 				}
 			}
-			// Extract exports from macro definitions
-			"preproc_define" => {
+			// Extract exports from macro definitions. The grammar emits
+			// `preproc_def` / `preproc_function_def`; there is no `preproc_define`.
+			"preproc_def" | "preproc_function_def" => {
 				if let Some(macro_name) = self.extract_macro_name(node, contents) {
 					exports.push(macro_name);
 				}
@@ -547,11 +550,18 @@ impl Cpp {
 	}
 
 	/// Extract members from class/struct/enum
+	#[allow(clippy::only_used_in_recursion)]
 	fn extract_cpp_members(&self, node: Node, contents: &str, symbols: &mut Vec<String>) {
 		let mut cursor = node.walk();
 		if cursor.goto_first_child() {
 			loop {
 				let child = cursor.node();
+
+				// Members hang off the specifier's body list, never directly off the
+				// specifier itself, so the arms below only fire after this descent.
+				if matches!(child.kind(), "field_declaration_list" | "enumerator_list") {
+					self.extract_cpp_members(child, contents, symbols);
+				}
 
 				match child.kind() {
 					"field_declaration" => {
@@ -574,6 +584,21 @@ impl Cpp {
 						for fn_child in child.children(&mut child.walk()) {
 							if fn_child.kind() == "function_declarator" {
 								if let Some(name) = find_cpp_declarator_name(fn_child, contents) {
+									if !symbols.iter().any(|s| s.as_str() == name) {
+										symbols.push(name.to_string());
+									}
+								}
+								break;
+							}
+						}
+					}
+					"enumerator" => {
+						// A top-level enum reaches its constants through the
+						// `enumerator_list` descent above rather than through the
+						// nested-enum arm below.
+						for enumerator_child in child.children(&mut child.walk()) {
+							if enumerator_child.kind() == "identifier" {
+								if let Ok(name) = enumerator_child.utf8_text(contents.as_bytes()) {
 									if !symbols.iter().any(|s| s.as_str() == name) {
 										symbols.push(name.to_string());
 									}

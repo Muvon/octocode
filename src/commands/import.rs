@@ -19,6 +19,10 @@ use std::path::{Path, PathBuf};
 use octocode::lock::IndexLock;
 use octocode::storage::ensure_project_storage_exists;
 
+#[cfg(test)]
+#[path = "import_tests.rs"]
+mod import_tests;
+
 const MARKER_FILE: &str = "octocode-export.marker";
 const MARKER_PREFIX: &str = "octocode-export-v";
 

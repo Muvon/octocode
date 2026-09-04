@@ -50,6 +50,8 @@ mod php;
 #[cfg(test)]
 mod php_test;
 mod python;
+#[cfg(test)]
+mod python_test;
 pub mod resolution_utils;
 mod ruby;
 #[cfg(test)]
@@ -434,11 +436,19 @@ pub fn extract_symbol_by_kind(node: Node, contents: &str, target_kind: &str) -> 
 /// qualified or generic type expression. Examples:
 /// `std::collections::HashMap<K, V>` → `HashMap`,
 /// `com.example.Foo` → `Foo`,
+/// `App\\Models\\User` → `User`,
+/// `Store[T]` → `Store`, `factory(Base)` → `factory`,
 /// `Foo<T>` → `Foo`, `Bar` → `Bar`.
 pub fn simple_type_name(text: &str) -> Option<String> {
-	let stripped = text.split('<').next().unwrap_or(text);
+	// Cut at the first bracket of any kind: trimming only the ends leaves the
+	// opening bracket behind (`Store[T]` → `Store[T`).
+	let stripped = text.split(['<', '[', '(']).next().unwrap_or(text);
 	let after_colons = stripped.rsplit("::").next().unwrap_or(stripped);
-	let after_dots = after_colons.rsplit('.').next().unwrap_or(after_colons);
+	let after_backslash = after_colons.rsplit('\\').next().unwrap_or(after_colons);
+	let after_dots = after_backslash
+		.rsplit('.')
+		.next()
+		.unwrap_or(after_backslash);
 	let trimmed = after_dots
 		.trim()
 		.trim_matches(|character: char| !character.is_alphanumeric() && character != '_');

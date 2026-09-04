@@ -40,6 +40,10 @@ use octocode::embedding::{
 #[cfg(feature = "fastembed")]
 use octocode::embedding::provider::fastembed::FastEmbedProviderImpl;
 
+#[cfg(test)]
+#[path = "models_tests.rs"]
+mod models_tests;
+
 #[derive(Subcommand, Debug, Clone)]
 pub enum ModelsCommand {
 	/// List all supported models for embedding providers

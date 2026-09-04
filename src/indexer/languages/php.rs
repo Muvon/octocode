@@ -340,7 +340,15 @@ fn parse_php_use_statement(use_text: &str) -> Option<Vec<String>> {
 	let mut imports = Vec::new();
 	let cleaned = use_text.trim();
 
-	let rest = cleaned.strip_prefix("use ")?.trim_end_matches(';');
+	// `use function Foo\\bar;` and `use const Foo\\BAZ;` are import forms too;
+	// leaving the keyword in place yields an unresolvable path.
+	let after_use = cleaned.strip_prefix("use ")?.trim_start();
+	let rest = after_use
+		.strip_prefix("function ")
+		.or_else(|| after_use.strip_prefix("const "))
+		.unwrap_or(after_use)
+		.trim()
+		.trim_end_matches(';');
 
 	// Handle grouped: use Prefix\{A, B as C, D}
 	if let Some(brace_start) = rest.find('{') {

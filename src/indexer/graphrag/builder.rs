@@ -37,6 +37,10 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
+#[cfg(test)]
+#[path = "builder_tests.rs"]
+mod builder_tests;
+
 // Manages the creation and storage of the code graph with project-relative paths
 pub struct GraphBuilder {
 	config: Config,

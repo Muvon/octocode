@@ -123,11 +123,12 @@ impl Language for Go {
 				}
 			}
 			"type_declaration" => {
-				// Extract type name
+				// Extract type name. A Go type name is a `type_identifier`, so an
+				// exact match on "identifier" never fires.
 				for child in node.children(&mut node.walk()) {
 					if child.kind() == "type_spec" {
 						if let Some(name) =
-							super::extract_symbol_by_kind(child, contents, "identifier")
+							super::extract_symbol_by_kind(child, contents, "type_identifier")
 						{
 							symbols.push(name);
 						}
@@ -152,7 +153,8 @@ impl Language for Go {
 				}
 			}
 			"type_spec" => {
-				if let Some(name) = super::extract_symbol_by_kind(node, contents, "identifier") {
+				if let Some(name) = super::extract_symbol_by_kind(node, contents, "type_identifier")
+				{
 					symbols.push(name);
 				}
 			}
@@ -224,17 +226,29 @@ impl Language for Go {
 			| "type_declaration"
 			| "const_declaration"
 			| "var_declaration" => {
-				// In Go, exported items start with uppercase letter
-				// Extract the name and check if it's exported
-				for child in node.children(&mut node.walk()) {
-					if child.kind() == "identifier" || child.kind() == "field_identifier" {
-						if let Ok(name) = child.utf8_text(contents.as_bytes()) {
-							// Go convention: exported names start with uppercase
-							if name.chars().next().is_some_and(|c| c.is_uppercase()) {
-								exports.push(name.to_string());
+				// In Go, exported items start with an uppercase letter. Func and
+				// method names are direct children, but a type/var/const name sits
+				// one level down inside its spec node, so both levels are scanned.
+				let mut push_if_exported = |node: Node| {
+					for child in node.children(&mut node.walk()) {
+						if matches!(
+							child.kind(),
+							"identifier" | "field_identifier" | "type_identifier"
+						) {
+							if let Ok(name) = child.utf8_text(contents.as_bytes()) {
+								if name.chars().next().is_some_and(|c| c.is_uppercase()) {
+									exports.push(name.to_string());
+								}
+								break;
 							}
-							break;
 						}
+					}
+				};
+
+				push_if_exported(node);
+				for child in node.children(&mut node.walk()) {
+					if matches!(child.kind(), "type_spec" | "var_spec" | "const_spec") {
+						push_if_exported(child);
 					}
 				}
 			}
@@ -380,8 +394,10 @@ impl Go {
 							}
 						}
 					}
-					"block" => {
-						// Recursively process nested blocks
+					"block" | "statement_list" => {
+						// A block's statements are wrapped in a `statement_list`, so
+						// without descending through it no body declaration is ever
+						// reached.
 						self.extract_go_variables(child, contents, symbols);
 					}
 					"if_statement" | "for_statement" => {
@@ -391,6 +407,9 @@ impl Go {
 								self.extract_go_variables(stmt_child, contents, symbols);
 							}
 						}
+					}
+					"labeled_statement" => {
+						self.extract_go_variables(child, contents, symbols);
 					}
 					"expression_switch_statement" | "type_switch_statement" => {
 						// Switch statements hold case clauses (and an optional init
@@ -415,6 +434,7 @@ impl Go {
 	}
 
 	/// Extract field names from struct or interface types
+	#[allow(clippy::only_used_in_recursion)]
 	fn extract_struct_interface_fields(
 		&self,
 		node: Node,
@@ -426,6 +446,12 @@ impl Go {
 			loop {
 				let child = cursor.node();
 
+				// Fields and method specs hang off the body list, never directly
+				// off the struct/interface node itself.
+				if matches!(child.kind(), "field_declaration_list" | "interface_type") {
+					self.extract_struct_interface_fields(child, contents, symbols);
+				}
+
 				if child.kind() == "field_declaration" {
 					for field_child in child.children(&mut child.walk()) {
 						if field_child.kind() == "field_identifier" {
@@ -436,8 +462,8 @@ impl Go {
 							}
 						}
 					}
-				} else if child.kind() == "method_spec" {
-					// For interface methods
+				} else if matches!(child.kind(), "method_spec" | "method_elem") {
+					// For interface methods; the grammar names them `method_elem`.
 					for method_child in child.children(&mut child.walk()) {
 						if method_child.kind() == "field_identifier" {
 							if let Ok(name) = method_child.utf8_text(contents.as_bytes()) {

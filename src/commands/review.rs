@@ -22,6 +22,10 @@ use octocode::config::Config;
 use octocode::indexer::git_utils::GitUtils;
 use octocode::utils::diff_chunker;
 
+#[cfg(test)]
+#[path = "review_tests.rs"]
+mod review_tests;
+
 #[derive(Args, Debug)]
 pub struct ReviewArgs {
 	/// Add all changes before reviewing

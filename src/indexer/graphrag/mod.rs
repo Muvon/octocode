@@ -17,12 +17,19 @@
 pub mod ai;
 pub mod builder;
 pub mod database;
+#[cfg(test)]
+mod database_tests;
 pub mod relationships;
+#[cfg(test)]
+mod relationships_tests;
 pub mod runtime;
 pub mod symbols;
 pub mod types;
 pub mod utils;
 
+#[cfg(test)]
+#[path = "mod_tests.rs"]
+mod graphrag_mod_tests;
 #[cfg(test)]
 mod tests;
 

@@ -93,7 +93,7 @@ pub async fn execute(args: &ViewArgs) -> Result<(), anyhow::Error> {
 	}
 
 	// Extract signatures from matching files
-	let signatures = indexer::extract_file_signatures(&matching_files)?;
+	let signatures = indexer::extract_file_signatures(&matching_files, &current_dir)?;
 
 	// Display results in the requested format
 	if args.format.is_json() {

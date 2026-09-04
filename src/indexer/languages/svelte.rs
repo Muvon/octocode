@@ -397,9 +397,11 @@ impl Svelte {
 		contents: &str,
 		symbols: &mut Vec<String>,
 	) {
-		// Check for Svelte-specific attributes
+		// Check for Svelte-specific attributes. A self-closing component
+		// (`<Modal on:close={h} />`) is a `self_closing_tag`, so without it the
+		// component name and all its directives are lost.
 		for child in node.children(&mut node.walk()) {
-			if child.kind() == "start_tag" {
+			if matches!(child.kind(), "start_tag" | "self_closing_tag") {
 				for tag_child in child.children(&mut child.walk()) {
 					if tag_child.kind() == "attribute" {
 						for attr_child in tag_child.children(&mut tag_child.walk()) {
@@ -755,7 +757,9 @@ impl Svelte {
 
 	// Helper to extract quoted strings
 	fn extract_quoted_string(text: &str) -> Option<String> {
-		let text = text.trim();
+		// A semicolon-terminated import (`from 'svelte';`) still carries its `;`
+		// here, which would fail the closing-quote check and drop the path.
+		let text = text.trim().trim_end_matches(';').trim();
 		if (text.starts_with('"') && text.ends_with('"'))
 			|| (text.starts_with('\'') && text.ends_with('\''))
 		{

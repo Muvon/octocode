@@ -23,6 +23,9 @@ use anyhow::{anyhow, Context, Result};
 use clap::Args;
 
 mod utils;
+#[cfg(test)]
+#[path = "format/utils_tests.rs"]
+mod utils_tests;
 
 use utils::*;
 

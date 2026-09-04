@@ -202,11 +202,19 @@ impl Language for Bash {
 
 impl Bash {
 	/// Extract variable assignments in bash
+	#[allow(clippy::only_used_in_recursion)]
 	fn extract_bash_variables(&self, node: Node, contents: &str, symbols: &mut Vec<String>) {
 		let mut cursor = node.walk();
 		if cursor.goto_first_child() {
 			loop {
 				let child = cursor.node();
+
+				// A function body is a `compound_statement`, so its assignments are
+				// never direct children of the `function_definition` — without this
+				// descent no local variable is ever collected.
+				if matches!(child.kind(), "compound_statement" | "subshell") {
+					self.extract_bash_variables(child, contents, symbols);
+				}
 
 				if child.kind() == "variable_assignment" {
 					for var_child in child.children(&mut child.walk()) {

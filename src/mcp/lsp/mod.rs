@@ -19,7 +19,13 @@
 
 pub mod client;
 pub mod protocol;
+#[cfg(test)]
+#[path = "protocol_tests.rs"]
+mod protocol_tests;
 pub mod provider;
+#[cfg(test)]
+#[path = "provider_tests.rs"]
+mod provider_tests;
 pub mod tools;
 
 pub use provider::LspProvider;

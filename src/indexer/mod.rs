@@ -17,19 +17,28 @@
 
 pub mod batch_processor; // Batch processing utilities for embedding operations
 pub mod branch; // Branch-aware delta indexing
+#[cfg(test)]
+mod branch_tests;
 pub mod code_region_extractor; // Code region extraction and smart merging utilities
 pub mod commits; // Commit history indexing
 pub mod contextual; // Contextual chunk enrichment for improved semantic search
 pub mod differential_processor; // Differential processing utilities for incremental updates
 pub mod file_processor; // File processing utilities for text and markdown files
 pub mod graph_optimization;
+#[cfg(test)]
+mod graph_optimization_tests;
 pub mod graphrag; // GraphRAG generation for code relationships (modular implementation)
 pub mod languages; // Language-specific processors
 pub mod markdown_processor; // Markdown document processing utilities
 pub mod search; // Search functionality // Task-focused graph extraction and optimization
 pub mod signature_extractor; // Code signature extraction utilities
 
+#[cfg(test)]
+#[path = "mod_tests.rs"]
+mod indexer_mod_tests;
 pub mod render_utils;
+#[cfg(test)]
+mod render_utils_tests;
 pub use batch_processor::*;
 pub use code_region_extractor::*;
 pub use differential_processor::*;
@@ -53,8 +62,14 @@ pub use render_utils::*;
 // Import the new modular utilities
 mod file_utils;
 pub mod git_utils;
+#[cfg(test)]
+mod git_utils_tests;
 mod path_utils;
+#[cfg(test)]
+mod path_utils_tests;
 mod text_processing;
+#[cfg(test)]
+mod text_processing_tests;
 
 use self::file_utils::FileUtils;
 
@@ -305,9 +320,12 @@ async fn cleanup_deleted_files_optimized(
 		if !absolute_path.exists() {
 			files_to_remove.push(indexed_file);
 		} else {
-			// Check if file is now ignored by .noindex or .gitignore patterns
+			// Check if file is now ignored by .noindex or .gitignore patterns.
+			// Parents must be consulted too: a directory rule like `target/` does
+			// not match `target/app.rs` on its own, so `matched` alone would keep
+			// every already-indexed file under a newly ignored directory forever.
 			let is_ignored = ignore_matcher
-				.matched(&absolute_path, absolute_path.is_dir())
+				.matched_path_or_any_parents(&absolute_path, absolute_path.is_dir())
 				.is_ignore();
 			if is_ignored {
 				files_to_remove.push(indexed_file);

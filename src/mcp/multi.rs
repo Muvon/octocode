@@ -49,6 +49,10 @@ use crate::config::Config;
 use crate::mcp::logging::init_mcp_logging;
 use crate::mcp::server::{BackgroundServices, McpServer};
 
+#[cfg(test)]
+#[path = "multi_tests.rs"]
+mod multi_tests;
+
 const INSTANCE_CLEANUP_INTERVAL_MS: u64 = 300_000; // 5 minutes
 const INSTANCE_IDLE_TIMEOUT_MS: u64 = 1_800_000; // 30 minutes
 

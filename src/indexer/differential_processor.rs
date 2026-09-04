@@ -31,6 +31,10 @@ use anyhow::Result;
 use std::collections::HashSet;
 use tree_sitter::{Node, Parser};
 
+#[cfg(test)]
+#[path = "differential_processor_tests.rs"]
+mod differential_processor_tests;
+
 /// Walk the whole tree and accumulate imports + exports from every node the
 /// language parser recognizes. The per-language `extract_imports_exports`
 /// inspects a single node's kind, so we have to visit every descendant — the

@@ -29,6 +29,10 @@ use std::collections::HashMap;
 
 /// Tracks file metadata for atomic storage after batch persistence
 /// This ensures file metadata is only stored AFTER blocks are successfully persisted
+#[cfg(test)]
+#[path = "batch_processor_tests.rs"]
+mod batch_processor_tests;
+
 #[derive(Default)]
 pub struct FileMetadataBatch {
 	/// Map of file path -> modification time

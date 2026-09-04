@@ -359,6 +359,10 @@ impl LlmClient {
 }
 
 #[cfg(test)]
+#[path = "mod_tests.rs"]
+mod llm_mod_tests;
+
+#[cfg(test)]
 mod tests {
 	use super::*;
 

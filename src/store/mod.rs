@@ -39,16 +39,28 @@ use self::{
 };
 
 pub mod batch_converter;
+#[cfg(test)]
+mod batch_converter_tests;
 pub mod block_trait;
 pub mod debug;
+#[cfg(test)]
+mod debug_tests;
 pub mod graphrag;
+#[cfg(test)]
+mod graphrag_tests;
 #[cfg(test)]
 mod hybrid_tests;
 pub mod metadata;
+#[cfg(test)]
+pub(crate) mod mod_tests;
 pub mod sql;
 pub mod table_ops;
+#[cfg(test)]
+mod table_ops_tests;
 pub mod vector_optimizer;
 pub mod weighted_rrf;
+#[cfg(test)]
+mod weighted_rrf_tests;
 
 /// Canonical LanceDB table names. These are the single source of truth for the
 /// physical table identifiers — referenced everywhere instead of repeating the
@@ -353,6 +365,25 @@ impl Store {
 		Ok(table)
 	}
 
+	/// Drop the cached handle (and its index-presence flags) for a table.
+	///
+	/// A LanceDB `Table` handle is pinned to the dataset version it was opened
+	/// at. Deletes and drops issued through `TableOperations` go via a freshly
+	/// opened handle, so without this the cached handle keeps serving rows that
+	/// were already removed — or points at a table that no longer exists.
+	async fn invalidate_table_handle(&self, table_name: &str) {
+		self.table_cache.write().await.remove(table_name);
+		self.vector_index_present.write().await.remove(table_name);
+		self.fts_index_present.write().await.remove(table_name);
+	}
+
+	/// Drop every cached handle, for operations that reset the whole database.
+	async fn invalidate_all_table_handles(&self) {
+		self.table_cache.write().await.clear();
+		self.vector_index_present.write().await.clear();
+		self.fts_index_present.write().await.clear();
+	}
+
 	/// Build a `TableOperations` bound to this Store's connection.
 	fn table_ops(&self) -> TableOperations<'_> {
 		TableOperations::new(&self.db)
@@ -653,6 +684,15 @@ impl Store {
 			.remove_blocks_by_paths(paths, tables::FILE_METADATA)
 			.await?;
 
+		for table in [
+			tables::GRAPHRAG_NODES,
+			tables::CODE_BLOCKS,
+			tables::TEXT_BLOCKS,
+			tables::DOCUMENT_BLOCKS,
+		] {
+			self.invalidate_table_handle(table).await;
+		}
+
 		tracing::info!(files = paths.len(), "Removed indexed data for files");
 		Ok(())
 	}
@@ -737,12 +777,16 @@ impl Store {
 
 	pub async fn clear_all_tables(&self) -> Result<()> {
 		let table_ops = self.table_ops();
-		table_ops.clear_all_tables().await
+		table_ops.clear_all_tables().await?;
+		self.invalidate_all_table_handles().await;
+		Ok(())
 	}
 
 	pub async fn clear_code_table(&self) -> Result<()> {
 		let table_ops = self.table_ops();
-		table_ops.clear_table(tables::CODE_BLOCKS).await
+		table_ops.clear_table(tables::CODE_BLOCKS).await?;
+		self.invalidate_table_handle(tables::CODE_BLOCKS).await;
+		Ok(())
 	}
 
 	// ============================================================================
@@ -889,17 +933,23 @@ impl Store {
 
 	pub async fn clear_docs_table(&self) -> Result<()> {
 		let table_ops = self.table_ops();
-		table_ops.clear_table(tables::DOCUMENT_BLOCKS).await
+		table_ops.clear_table(tables::DOCUMENT_BLOCKS).await?;
+		self.invalidate_table_handle(tables::DOCUMENT_BLOCKS).await;
+		Ok(())
 	}
 
 	pub async fn clear_text_table(&self) -> Result<()> {
 		let table_ops = self.table_ops();
-		table_ops.clear_table(tables::TEXT_BLOCKS).await
+		table_ops.clear_table(tables::TEXT_BLOCKS).await?;
+		self.invalidate_table_handle(tables::TEXT_BLOCKS).await;
+		Ok(())
 	}
 
 	pub async fn clear_commits_table(&self) -> Result<()> {
 		let table_ops = self.table_ops();
-		table_ops.clear_table(tables::COMMIT_BLOCKS).await
+		table_ops.clear_table(tables::COMMIT_BLOCKS).await?;
+		self.invalidate_table_handle(tables::COMMIT_BLOCKS).await;
+		Ok(())
 	}
 
 	pub async fn clear_commits_git_metadata(&self) -> Result<()> {

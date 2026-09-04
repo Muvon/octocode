@@ -123,6 +123,9 @@ http-body-util = "0.1"  # Required for proxy HTTP body types (matches rmcp's ver
 # with ort (pyke prebuilt onnxruntime, built /MD). Pinned by SHA so a
 # force-push on the fork branch cannot silently flip our build.
 # Upstream PR: https://github.com/Narsil/esaxx-rs/pull/19 (unmerged).
+[dev-dependencies]
+tempfile = "3.27.0"
+
 [patch.crates-io]
 esaxx-rs = { git = "https://github.com/ocentra/esaxx-rs", rev = "4f4fd5acd624e43c770a0d198fcaa9d97bfd7f0b" }
 

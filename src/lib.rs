@@ -21,14 +21,22 @@ pub mod indexer;
 pub mod language;
 pub mod llm;
 pub mod lock;
+#[cfg(test)]
+mod lock_tests;
 pub mod mcp;
 pub mod reasoning;
+#[cfg(test)]
+mod reasoning_tests;
 pub mod reranker;
+#[cfg(test)]
+mod reranker_tests;
 pub mod state;
 pub mod storage;
 pub mod store;
 pub mod utils;
 pub mod watcher_config;
+#[cfg(test)]
+mod watcher_config_tests;
 
 // Re-export commonly used items for convenience
 pub use config::Config;

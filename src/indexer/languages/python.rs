@@ -260,9 +260,11 @@ impl Python {
 						}
 					}
 					"expression_statement" => {
-						// Check for augmented assignments like 'x += 1'
+						// tree-sitter-python wraps both `x = 1` and `x += 1` in an
+						// expression_statement, so neither assignment node is ever a
+						// direct child of the block.
 						for expr_child in child.children(&mut child.walk()) {
-							if expr_child.kind() == "augmented_assignment" {
+							if matches!(expr_child.kind(), "assignment" | "augmented_assignment") {
 								let mut aug_cursor = expr_child.walk();
 								if aug_cursor.goto_first_child() {
 									// First child is target

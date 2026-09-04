@@ -23,6 +23,10 @@ use octocode::utils::truncate_at_char_boundary;
 
 use crate::commands::OutputFormat;
 
+#[cfg(test)]
+#[path = "explain_tests.rs"]
+mod explain_tests;
+
 #[derive(Debug, Args)]
 pub struct ExplainArgs {
 	/// Target to explain: file path, file:symbol, or search query

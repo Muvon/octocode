@@ -20,12 +20,21 @@
 //! The server automatically enables available tools based on configuration.
 
 pub mod graphrag;
+#[cfg(test)]
+mod graphrag_tests;
 pub mod logging;
+#[cfg(test)]
+mod logging_tests;
 pub mod lsp;
 pub mod multi;
 pub mod semantic_code;
+#[cfg(test)]
+mod semantic_code_tests;
 pub mod server;
 pub mod structural;
+#[cfg(test)]
+#[path = "structural_tests.rs"]
+mod structural_tests;
 pub mod types;
 pub mod watcher;
 

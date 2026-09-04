@@ -57,6 +57,10 @@ const MCP_MAX_PENDING_EVENTS: usize = 100;
 const MCP_INDEX_TIMEOUT_MS: u64 = 300_000; // 5 minutes
 
 // ---------------------------------------------------------------------------
+#[cfg(test)]
+#[path = "server_tests.rs"]
+mod server_tests;
+
 // Parameter structs for rmcp tool schema generation
 // ---------------------------------------------------------------------------
 

@@ -16,6 +16,8 @@ pub mod branch;
 pub mod clear;
 pub mod commit;
 pub mod config;
+#[cfg(test)]
+mod config_tests;
 pub mod diff;
 pub mod explain;
 pub mod export;
@@ -28,6 +30,8 @@ pub mod logs;
 pub mod mcp;
 pub mod models;
 pub mod output_format;
+#[cfg(test)]
+mod output_format_tests;
 pub mod release;
 pub mod review;
 pub mod search;

@@ -46,11 +46,17 @@ pub struct SignatureItem {
 	pub end_line: usize,             // End line number
 }
 
-/// Extract signatures from multiple files
-pub fn extract_file_signatures(files: &[PathBuf]) -> Result<Vec<FileSignature>> {
+/// Extract signatures from multiple files.
+///
+/// `base_dir` is the root the reported paths are made relative to. It must be
+/// the directory the caller is serving — the MCP tools work against an explicit
+/// working directory that need not be the process CWD, and resolving against
+/// the CWD there collapses every path to a bare file name the client cannot
+/// locate.
+pub fn extract_file_signatures(files: &[PathBuf], base_dir: &Path) -> Result<Vec<FileSignature>> {
 	let mut all_signatures = Vec::new();
 	let mut parser = Parser::new();
-	let current_dir = std::env::current_dir()?;
+	let current_dir = base_dir.to_path_buf();
 
 	for file_path in files {
 		if let Some(language) = detect_language(file_path) {

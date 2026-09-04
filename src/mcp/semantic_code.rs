@@ -385,7 +385,7 @@ impl SemanticCodeProvider {
 		}
 
 		// Extract signatures from matching files
-		let signatures = match extract_file_signatures(&matching_files) {
+		let signatures = match extract_file_signatures(&matching_files, &self.working_directory) {
 			Ok(sigs) => sigs,
 			Err(e) => {
 				return Err(McpError::internal_error(

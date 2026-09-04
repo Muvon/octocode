@@ -115,6 +115,14 @@ impl<'a> GraphRagOperations<'a> {
 		Ok(table)
 	}
 
+	/// Drop the cached handle for a table. A LanceDB `Table` handle is pinned to
+	/// the dataset version it was opened at, so a delete or drop issued through
+	/// `TableOperations` (which opens its own handle) leaves the cached one
+	/// serving rows that are already gone.
+	async fn invalidate_table_handle(&self, table_name: &str) {
+		self.table_cache.write().await.remove(table_name);
+	}
+
 	// ============================================================================
 	// Adjacency Cache Management
 	// ============================================================================
@@ -642,6 +650,7 @@ impl<'a> GraphRagOperations<'a> {
 	/// Clear all graph nodes from the database
 	pub async fn clear_graph_nodes(&self) -> Result<()> {
 		self.table_ops.clear_table(tables::GRAPHRAG_NODES).await?;
+		self.invalidate_table_handle(tables::GRAPHRAG_NODES).await;
 		// Clear cache when clearing nodes
 		self.clear_cache();
 		Ok(())
@@ -652,6 +661,8 @@ impl<'a> GraphRagOperations<'a> {
 		self.table_ops
 			.clear_table(tables::GRAPHRAG_RELATIONSHIPS)
 			.await?;
+		self.invalidate_table_handle(tables::GRAPHRAG_RELATIONSHIPS)
+			.await;
 		// Clear cache when clearing relationships
 		self.clear_cache();
 		Ok(())
@@ -675,6 +686,7 @@ impl<'a> GraphRagOperations<'a> {
 		self.table_ops
 			.remove_blocks_by_paths(paths, tables::GRAPHRAG_NODES)
 			.await?;
+		self.invalidate_table_handle(tables::GRAPHRAG_NODES).await;
 
 		for node_id in node_ids {
 			self.invalidate_cache_for_node(&node_id);
