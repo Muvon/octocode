@@ -32,11 +32,16 @@ mod tests {
 
 	type Progress = Arc<RwLock<HashMap<String, ProgressState>>>;
 
+	/// The interpreter that runs the stub servers below. GitHub's Windows
+	/// runners expose it as `python`; `python3` there is usually an App Execute
+	/// alias that is not a real interpreter.
+	const PYTHON: &str = if cfg!(windows) { "python" } else { "python3" };
+
 	/// Spawn a Python one-shot writer and hand back its stdout as the reader the
 	/// framing parser expects. The `Child` must stay alive for the pipe to stay
 	/// readable, so it is returned alongside.
 	async fn python_stream(program: &str) -> (Child, BufReader<ChildStdout>) {
-		let mut child = tokio::process::Command::new("python3")
+		let mut child = tokio::process::Command::new(PYTHON)
 			.arg("-c")
 			.arg(program)
 			.stdin(std::process::Stdio::null())
@@ -44,7 +49,7 @@ mod tests {
 			.stderr(std::process::Stdio::null())
 			.kill_on_drop(true)
 			.spawn()
-			.expect("python3 must be available for the LSP framing tests");
+			.expect("a python interpreter must be available for the LSP framing tests");
 		let stdout = child.stdout.take().expect("piped stdout");
 		(child, BufReader::new(stdout))
 	}
@@ -464,7 +469,7 @@ sys.stdout.buffer.flush()
 	async fn stopping_a_running_server_closes_stdin_and_drops_the_connection() {
 		// A server that blocks on stdin stays alive until it is killed.
 		let client = LspClient::new(
-			"python3 -c __import__(\"sys\").stdin.read()".to_string(),
+			format!("{PYTHON} -c __import__(\"sys\").stdin.read()"),
 			std::env::temp_dir(),
 		);
 		client.start().await.expect("the child should start");

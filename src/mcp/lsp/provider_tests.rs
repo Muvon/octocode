@@ -147,6 +147,11 @@ while True:
     write_message({"jsonrpc": "2.0", "id": request_id, "result": result})
 "#;
 
+	/// The interpreter that runs the stub servers below. GitHub's Windows
+	/// runners expose it as `python`; `python3` there is usually an App Execute
+	/// alias that is not a real interpreter.
+	const PYTHON: &str = if cfg!(windows) { "python" } else { "python3" };
+
 	/// A workspace containing one Rust file plus the stub server script.
 	fn workspace() -> (TempDir, String) {
 		workspace_mode("normal")
@@ -163,7 +168,7 @@ while True:
 
 		let script = dir.path().join("stub_lsp.py");
 		std::fs::write(&script, STUB_SERVER).unwrap();
-		let command = format!("python3 {} {}", script.display(), mode);
+		let command = format!("{PYTHON} {} {}", script.display(), mode);
 		(dir, command)
 	}
 

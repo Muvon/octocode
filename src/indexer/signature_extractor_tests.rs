@@ -297,7 +297,9 @@ mod tests {
 
 		let out = extract_file_signatures(&[file], dir.path()).expect("extract");
 		assert_eq!(out.len(), 1);
-		assert_eq!(out[0].path, "src/inner/lib.rs");
+		// Compared as a `Path`: the reported string keeps the platform's own
+		// separator, so Windows yields `src\inner\lib.rs` for the same file.
+		assert_eq!(Path::new(&out[0].path), Path::new("src/inner/lib.rs"));
 		assert_eq!(out[0].language, "rust");
 		assert_eq!(out[0].file_comment.as_deref(), Some("Crate docs"));
 		assert_eq!(names(&out[0].signatures), ["helper"]);
