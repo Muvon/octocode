@@ -25,7 +25,7 @@ use std::time::Duration;
 // Re-export octolib types for convenience
 pub use octolib::llm::{
 	AiProvider, ChatCompletionParams, Message, MessageBuilder, ProviderFactory, ProviderResponse,
-	StructuredOutputRequest, TokenUsage,
+	ReasoningEffort, StructuredOutputRequest, TokenUsage,
 };
 
 /// LLM client wrapper that integrates octolib with octocode configuration
@@ -35,6 +35,9 @@ pub struct LlmClient {
 	model: String,
 	temperature: f32,
 	max_tokens: usize,
+	/// Thinking budget for every call this client makes. `None` leaves it to the
+	/// provider default.
+	reasoning_effort: Option<ReasoningEffort>,
 }
 
 impl LlmClient {
@@ -47,6 +50,7 @@ impl LlmClient {
 			model,
 			temperature: config.llm.temperature,
 			max_tokens: config.llm.max_tokens,
+			reasoning_effort: None,
 		})
 	}
 
@@ -59,7 +63,32 @@ impl LlmClient {
 			model,
 			temperature: config.llm.temperature,
 			max_tokens: config.llm.max_tokens,
+			reasoning_effort: None,
 		})
+	}
+
+	/// Set the thinking budget for every call this client makes.
+	///
+	/// Accepts the config spelling; anything unrecognised (including "default")
+	/// leaves the provider default in place.
+	pub fn with_reasoning_effort(mut self, effort: &str) -> Self {
+		self.reasoning_effort = match effort.trim().to_ascii_lowercase().as_str() {
+			"low" => Some(ReasoningEffort::Low),
+			"medium" => Some(ReasoningEffort::Medium),
+			"high" => Some(ReasoningEffort::High),
+			"xhigh" => Some(ReasoningEffort::XHigh),
+			"max" => Some(ReasoningEffort::Max),
+			_ => None,
+		};
+		self
+	}
+
+	/// Apply this client's thinking budget, if it has one.
+	fn with_effort(&self, params: ChatCompletionParams) -> ChatCompletionParams {
+		match self.reasoning_effort {
+			Some(effort) => params.with_reasoning_effort(effort),
+			None => params,
+		}
 	}
 
 	/// Maximum number of retries for LLM calls with exponential backoff
@@ -81,14 +110,14 @@ impl LlmClient {
 				tokio::time::sleep(delay).await;
 			}
 
-			let params = ChatCompletionParams::new(
+			let params = self.with_effort(ChatCompletionParams::new(
 				&messages,
 				&self.model,
 				self.temperature,
 				1.0,                    // top_p
 				50,                     // min_tokens
 				self.max_tokens as u32, // max_tokens (convert usize to u32)
-			);
+			));
 
 			match self.provider.chat_completion(params).await {
 				Ok(response) => {
@@ -131,15 +160,17 @@ impl LlmClient {
 		}
 
 		let structured_request = StructuredOutputRequest::json();
-		let params = ChatCompletionParams::new(
-			&messages,
-			&self.model,
-			self.temperature,
-			1.0,                    // top_p
-			50,                     // min_tokens
-			self.max_tokens as u32, // max_tokens (convert usize to u32)
-		)
-		.with_structured_output(structured_request);
+		let params = self.with_effort(
+			ChatCompletionParams::new(
+				&messages,
+				&self.model,
+				self.temperature,
+				1.0,                    // top_p
+				50,                     // min_tokens
+				self.max_tokens as u32, // max_tokens (convert usize to u32)
+			)
+			.with_structured_output(structured_request),
+		);
 
 		let response = self.provider.chat_completion(params).await?;
 
@@ -174,14 +205,14 @@ impl LlmClient {
 		messages: Vec<Message>,
 		temperature: f32,
 	) -> Result<String> {
-		let params = ChatCompletionParams::new(
+		let params = self.with_effort(ChatCompletionParams::new(
 			&messages,
 			&self.model,
 			temperature,
 			1.0,                    // top_p
 			50,                     // min_tokens
 			self.max_tokens as u32, // max_tokens (convert usize to u32)
-		);
+		));
 
 		let response = self.provider.chat_completion(params).await?;
 
@@ -241,15 +272,17 @@ impl LlmClient {
 					Some(s) => StructuredOutputRequest::json_schema(s.clone()).with_strict_mode(),
 					None => StructuredOutputRequest::json(),
 				};
-				let params = ChatCompletionParams::new(
-					&messages,
-					&self.model,
-					self.temperature,
-					1.0,
-					50,
-					self.max_tokens as u32,
-				)
-				.with_structured_output(structured_request);
+				let params = self.with_effort(
+					ChatCompletionParams::new(
+						&messages,
+						&self.model,
+						self.temperature,
+						1.0,
+						50,
+						self.max_tokens as u32,
+					)
+					.with_structured_output(structured_request),
+				);
 
 				match self.provider.chat_completion(params).await {
 					Ok(response) => {

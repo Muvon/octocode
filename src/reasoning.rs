@@ -54,7 +54,7 @@ pub async fn reason_rank_code_blocks(
 	pool.truncate(rc.max_candidates.max(1));
 
 	let client = match LlmClient::with_model(config, &rc.model) {
-		Ok(c) => c,
+		Ok(c) => c.with_reasoning_effort(&rc.reasoning_effort),
 		Err(e) => {
 			tracing::warn!("reasoning: cannot build LLM client ({e}); keeping input order");
 			return Ok(pool);

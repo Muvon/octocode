@@ -97,6 +97,13 @@ context_level = "full"
 # Weight of the reasoning rank vs the hybrid rank in the RRF fusion. The hybrid rank always
 # contributes as a recall floor; >1 leans on the LLM ordering. 2.0 was the benchmark optimum.
 reasoning_weight = 2.0
+# Thinking budget for the ranking call: "low" | "medium" | "high" | "xhigh" | "max",
+# or "default" to send nothing and let the provider decide. Ranking is selection, not
+# deliberation, so "low" is the default: left to the provider default a thinking model
+# spends most of llm.max_tokens on chain-of-thought before the JSON (measured: 3776 of
+# 4000 for 25 candidates), and once it crosses that ceiling the JSON is truncated,
+# unparseable, and retried three more times to no effect.
+reasoning_effort = "low"
 
 [embedding]
 # Local models via fastembed (no API key required, downloaded on first use to system cache)

@@ -314,6 +314,20 @@ pub struct ReasoningConfig {
 	/// >1 leans on the LLM ordering; the hybrid rank always contributes as a
 	/// > recall floor so LLM-omitted true hits aren't lost.
 	pub reasoning_weight: f32,
+	/// Thinking budget for the ranking call: "low" | "medium" | "high" | "xhigh" | "max",
+	/// or "default" to send nothing and let the provider decide.
+	///
+	/// Ranking is a selection task, not a deliberation task, so this defaults to
+	/// "low". Left at the provider default, a thinking model spends most of
+	/// `llm.max_tokens` on chain-of-thought before emitting the JSON — measured at
+	/// 3776 of 4000 tokens for a 25-candidate pool — and once the thinking crosses
+	/// that ceiling the JSON is truncated, unparseable, and retried to no effect.
+	#[serde(default = "default_reasoning_effort")]
+	pub reasoning_effort: String,
+}
+
+fn default_reasoning_effort() -> String {
+	"low".to_string()
 }
 
 impl Default for ReasoningConfig {
@@ -325,6 +339,7 @@ impl Default for ReasoningConfig {
 			final_top_k: 10,
 			context_level: "full".to_string(),
 			reasoning_weight: 2.0,
+			reasoning_effort: default_reasoning_effort(),
 		}
 	}
 }
