@@ -91,7 +91,7 @@ pub fn to_relative_path(absolute_path: &str, project_root: &Path) -> Result<Stri
 		if abs_path.is_relative() {
 			project_root.join(&abs_path)
 		} else {
-			abs_path
+			abs_path.clone()
 		}
 	});
 
@@ -99,7 +99,18 @@ pub fn to_relative_path(absolute_path: &str, project_root: &Path) -> Result<Stri
 		.canonicalize()
 		.unwrap_or_else(|_| project_root.to_path_buf());
 
-	let relative = canonical_abs.strip_prefix(&canonical_root).map_err(|_| {
+	// `canonicalize` resolves only a path that exists, so a file deleted since it
+	// was indexed keeps its raw form while the root still resolves. Where the
+	// root reaches the filesystem through a symlink the two then sit in
+	// different namespaces — on macOS a temp dir is `/var/folders/...` raw but
+	// `/private/var/folders/...` resolved — and they never share a prefix even
+	// though the path is plainly inside the project. Retry against the unresolved
+	// root before declaring the path outside it.
+	if let Ok(relative) = canonical_abs.strip_prefix(&canonical_root) {
+		return Ok(relative.to_string_lossy().to_string());
+	}
+
+	let relative = canonical_abs.strip_prefix(project_root).map_err(|_| {
 		anyhow::anyhow!(
 			"Path {} (canonical: {}) is not within project root {} (canonical: {})",
 			absolute_path,
