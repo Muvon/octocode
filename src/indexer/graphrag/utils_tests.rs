@@ -228,4 +228,36 @@ mod tests {
 		assert!(json.contains("\"id\": \"src/a.rs\""), "{json}");
 		assert!(render_graphrag_nodes_json(&nodes).is_ok());
 	}
+
+	/// Reproduces the macOS CI failure on any unix: `/var` is a symlink to
+	/// `/private/var` there, so a temp-dir project root canonicalizes into a
+	/// different namespace than a path that cannot be canonicalized because it
+	/// no longer exists on disk. A symlinked root reproduces the same shape.
+	#[cfg(unix)]
+	#[test]
+	fn a_path_under_a_symlinked_root_is_relativized_even_when_it_is_gone_from_disk() {
+		let outer = TempDir::new().expect("tempdir");
+		let real = outer.path().join("real");
+		std::fs::create_dir_all(real.join("src")).expect("mkdir");
+		let link = outer.path().join("link");
+		std::os::unix::fs::symlink(&real, &link).expect("symlink");
+
+		// Present on disk: both sides canonicalize into the real directory.
+		let existing = link.join("src/there.rs");
+		std::fs::write(&existing, "fn there() {}\n").expect("write");
+		assert_eq!(
+			to_relative_path(&existing.to_string_lossy(), &link).unwrap(),
+			"src/there.rs"
+		);
+
+		// Absent from disk — a file deleted since it was indexed. `canonicalize`
+		// leaves it under the symlink while the root resolves through it, which
+		// is exactly the state that reported the path as outside the project.
+		let deleted = link.join("src/gone.rs");
+		assert!(!deleted.exists());
+		assert_eq!(
+			to_relative_path(&deleted.to_string_lossy(), &link).unwrap(),
+			"src/gone.rs"
+		);
+	}
 }
