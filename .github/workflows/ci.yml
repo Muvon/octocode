@@ -6,6 +6,16 @@ on:
   pull_request:
     branches: [ master, main, develop ]
 
+# A new push supersedes whatever is still running for the same branch or PR.
+# The matrix here costs ~20 minutes per macOS/Windows leg, so letting several
+# pushes queue up burns runners on commits nobody is looking at any more.
+# Grouping by workflow + ref keeps master, each branch and each PR independent.
+# Release is deliberately not covered: it is keyed on a tag and must always run
+# to completion.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
