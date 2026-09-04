@@ -546,12 +546,6 @@ mod tests {
 			language: "rust".to_string(),
 		}
 	}
-	// Expected IDs must use the native separator: scan_sources builds
-	// relative paths from OS walker output (`\` on Windows).
-	fn native_path(relative: &str) -> String {
-		relative.replace('/', std::path::MAIN_SEPARATOR_STR)
-	}
-
 	#[test]
 	fn lexical_search_prefers_exact_symbol_over_path_match() {
 		let mut graph = CodeGraph::default();
@@ -786,15 +780,17 @@ mod tests {
 		let graph = build_graph(files);
 		std::fs::remove_dir_all(&root).expect("temporary source directory should be removed");
 
-		let accounts = native_path("lib/fixture/accounts.ex");
-		let repo = native_path("lib/fixture/repo.ex");
-		let renderable_protocol = native_path("lib/fixture/renderable.ex::Fixture.Renderable");
-		let accounts_fetch = native_path("lib/fixture/accounts.ex::Fixture.Accounts::fetch");
-		let repo_get = native_path("lib/fixture/repo.ex::Fixture.Repo::get");
+		// `scan_sources` reports every relative path with forward slashes on every
+		// platform, so the expected node ids are spelled the same way here.
+		let accounts = "lib/fixture/accounts.ex".to_string();
+		let repo = "lib/fixture/repo.ex".to_string();
+		let renderable_protocol = "lib/fixture/renderable.ex::Fixture.Renderable".to_string();
+		let accounts_fetch = "lib/fixture/accounts.ex::Fixture.Accounts::fetch".to_string();
+		let repo_get = "lib/fixture/repo.ex::Fixture.Repo::get".to_string();
 		let impl_renderable =
-			native_path("lib/fixture/renderable.ex::Fixture.Renderable for Fixture.User");
+			"lib/fixture/renderable.ex::Fixture.Renderable for Fixture.User".to_string();
 		let test_fetch =
-			native_path("lib/fixture/accounts_test.exs::Fixture.AccountsTest::fetches an account");
+			"lib/fixture/accounts_test.exs::Fixture.AccountsTest::fetches an account".to_string();
 
 		assert!(graph.nodes.contains_key(&accounts));
 		assert!(graph.nodes.contains_key(&accounts_fetch));
