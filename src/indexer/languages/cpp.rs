@@ -559,7 +559,15 @@ impl Cpp {
 
 				// Members hang off the specifier's body list, never directly off the
 				// specifier itself, so the arms below only fire after this descent.
-				if matches!(child.kind(), "field_declaration_list" | "enumerator_list") {
+				// A nested enum is wrapped one level deeper still — the grammar
+				// emits `field_declaration_list > field_declaration >
+				// enum_specifier` — so without descending through
+				// `field_declaration` the `enum_specifier` arm below is dead and
+				// every enum constant declared inside a class is dropped.
+				if matches!(
+					child.kind(),
+					"field_declaration_list" | "enumerator_list" | "field_declaration"
+				) {
 					self.extract_cpp_members(child, contents, symbols);
 				}
 

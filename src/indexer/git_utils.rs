@@ -68,12 +68,25 @@ impl GitUtils {
 			.current_dir(repo_path)
 			.output()?;
 
-		if output.status.success() {
-			let stdout = String::from_utf8(output.stdout)?;
-			for line in stdout.lines() {
-				if !line.trim().is_empty() {
-					changed_files.insert(line.trim().to_string());
-				}
+		// A recorded last-indexed commit can stop being reachable (rebase, squash,
+		// force-push, `git gc`, a shallow clone), and `git diff <gone> HEAD` then
+		// exits 128. Reporting that as an empty diff makes the caller index zero
+		// files and still stamp the new commit hash, so the index silently marks
+		// itself up to date while missing every change since the vanished commit.
+		// Failing loudly instead reaches the caller's fallback, which reindexes
+		// everything.
+		if !output.status.success() {
+			anyhow::bail!(
+				"git diff {}..HEAD failed: {}",
+				since_commit,
+				String::from_utf8_lossy(&output.stderr).trim()
+			);
+		}
+
+		let stdout = String::from_utf8(output.stdout)?;
+		for line in stdout.lines() {
+			if !line.trim().is_empty() {
+				changed_files.insert(line.trim().to_string());
 			}
 		}
 

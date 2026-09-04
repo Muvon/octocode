@@ -456,3 +456,7 @@ mod tests {
 		assert!(!is_parent_child_relationship("src\\main.rs", "src\\lib.rs"));
 	}
 }
+
+#[cfg(test)]
+#[path = "utils_tests.rs"]
+mod utils_tests;

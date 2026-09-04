@@ -163,6 +163,61 @@ mod tests {
 	}
 
 	#[tokio::test]
+	async fn the_rejected_model_string_is_named_in_the_error() {
+		let cfg = config(true, "voyage-rerank-2.5");
+		let message = rerank_code_blocks_with_octolib("q", code_blocks(1), &cfg)
+			.await
+			.unwrap_err()
+			.to_string();
+		assert!(message.contains("voyage-rerank-2.5"), "{message}");
+		assert!(message.contains("voyage:rerank-2.5"), "{message}");
+	}
+
+	#[tokio::test]
+	async fn a_disabled_reranker_preserves_order_and_content_for_every_block_type() {
+		let cfg = config(false, "voyage:rerank-2.5");
+
+		let docs = document_blocks(3);
+		let out = rerank_doc_blocks_with_octolib("q", docs.clone(), &cfg)
+			.await
+			.unwrap();
+		assert_eq!(
+			out.iter().map(|b| b.path.as_str()).collect::<Vec<_>>(),
+			docs.iter().map(|b| b.path.as_str()).collect::<Vec<_>>()
+		);
+		assert!(out.iter().all(|b| b.distance.is_none()));
+
+		let texts = text_blocks(3);
+		let out = rerank_text_blocks_with_octolib("q", texts.clone(), &cfg)
+			.await
+			.unwrap();
+		assert_eq!(out[0].content, texts[0].content);
+		assert_eq!(out[2].content, texts[2].content);
+
+		let commits = commit_blocks(3);
+		let out = rerank_commit_blocks_with_octolib("q", commits.clone(), &cfg)
+			.await
+			.unwrap();
+		assert_eq!(
+			out.iter().map(|b| b.hash.as_str()).collect::<Vec<_>>(),
+			commits.iter().map(|b| b.hash.as_str()).collect::<Vec<_>>()
+		);
+	}
+
+	#[tokio::test]
+	async fn a_disabled_reranker_ignores_the_candidate_and_result_caps() {
+		// Truncation to `top_k_candidates` and `final_top_k` happens only on the
+		// enabled path; a disabled reranker is a pass-through.
+		let mut cfg = config(false, "voyage:rerank-2.5");
+		cfg.top_k_candidates = 1;
+		cfg.final_top_k = 1;
+		let out = rerank_code_blocks_with_octolib("q", code_blocks(5), &cfg)
+			.await
+			.unwrap();
+		assert_eq!(out.len(), 5);
+	}
+
+	#[tokio::test]
 	async fn the_format_check_applies_to_every_block_type() {
 		let cfg = config(true, "rerank-2.5");
 		assert!(rerank_text_blocks_with_octolib("q", text_blocks(1), &cfg)

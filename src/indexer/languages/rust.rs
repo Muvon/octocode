@@ -522,6 +522,14 @@ impl Rust {
 			}
 		}
 
+		// A single segment that matched no module file is an item declared at the
+		// crate root, e.g. `crate::Url` for a `pub struct Url` in lib.rs. Only the
+		// one-segment form falls back: a longer path that resolved nothing is a
+		// module we failed to find, and pointing it at the root would invent an edge.
+		if parts.len() == 1 {
+			return Some(crate_root);
+		}
+
 		None
 	}
 

@@ -1773,4 +1773,78 @@ function main(): void {
 			"api.py imports app.utils.auth, expected edge to auth.py"
 		);
 	}
+	/// Issue #86, the half the co-importer fixture never reached: a wildcard
+	/// export made the reverse edge fire on every importer, because the guard
+	/// was `import_path.contains(export_item) || export_item == "*"`. There is
+	/// no export relation type, so the reverse edge asserted that the exporter
+	/// imported its own importer.
+	#[tokio::test]
+	async fn test_wildcard_export_does_not_create_reverse_import() {
+		use crate::indexer::graphrag::types::RelationType;
+
+		let api = CodeNode {
+			id: "app/handlers/api.py".to_string(),
+			name: "api".to_string(),
+			kind: "file".to_string(),
+			path: "app/handlers/api.py".to_string(),
+			description: String::new(),
+			symbols: vec!["handle".to_string()],
+			hash: "api".to_string(),
+			embedding: Vec::new(),
+			imports: vec!["app.utils.auth".to_string()],
+			exports: vec!["handle".to_string()],
+			functions: Vec::new(),
+			size_lines: 10,
+			language: "python".to_string(),
+		};
+
+		// A re-exporting module: the export list carries "*".
+		let auth = CodeNode {
+			id: "app/utils/auth.py".to_string(),
+			name: "auth".to_string(),
+			kind: "file".to_string(),
+			path: "app/utils/auth.py".to_string(),
+			description: String::new(),
+			symbols: vec!["check".to_string()],
+			hash: "auth".to_string(),
+			embedding: Vec::new(),
+			imports: Vec::new(),
+			exports: vec!["*".to_string()],
+			functions: Vec::new(),
+			size_lines: 5,
+			language: "python".to_string(),
+		};
+
+		let all = vec![api.clone(), auth.clone()];
+		let relationships = RelationshipDiscovery::discover_relationships_efficiently(&[api], &all)
+			.await
+			.unwrap();
+
+		let reverse: Vec<_> = relationships
+			.iter()
+			.filter(|r| {
+				r.relation_type == RelationType::Imports
+					&& r.source == "app/utils/auth.py"
+					&& r.target == "app/handlers/api.py"
+			})
+			.collect();
+		assert!(
+			reverse.is_empty(),
+			"auth.py imports nothing; a wildcard export must not make it import api.py: {:?}",
+			reverse
+				.iter()
+				.map(|r| format!("{} -> {} ({})", r.source, r.target, r.description))
+				.collect::<Vec<_>>()
+		);
+
+		// The real direction still has to be there.
+		assert!(
+			relationships.iter().any(|r| {
+				r.relation_type == RelationType::Imports
+					&& r.source == "app/handlers/api.py"
+					&& r.target == "app/utils/auth.py"
+			}),
+			"api.py imports app.utils.auth, expected edge to auth.py"
+		);
+	}
 }

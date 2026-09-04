@@ -232,3 +232,7 @@ pub fn calculate_content_hash(contents: &str) -> String {
 	hasher.update(contents.as_bytes());
 	format!("{:x}", hasher.finalize())
 }
+
+#[cfg(test)]
+#[path = "mod_tests.rs"]
+mod embedding_mod_tests;

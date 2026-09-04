@@ -269,7 +269,7 @@ mod tests {
 	}
 
 	#[test]
-	fn full_detail_cli_rendering_truncates_against_the_configured_budget() {
+	fn full_detail_cli_rendering_runs_over_the_configured_budget_without_panicking() {
 		let mut config = Config::default();
 		config.search.search_block_max_characters = 40;
 		render_code_blocks_with_config(
@@ -405,6 +405,126 @@ mod tests {
 		assert!(docs.is_empty());
 		assert!(texts.is_empty());
 		assert!(commits.is_empty());
+	}
+
+	#[test]
+	fn a_block_of_exactly_ten_lines_is_previewed_whole() {
+		// Ten lines is the boundary of the "short content" fast path.
+		let preview = get_code_preview_with_lines(&lines(10, "x"), 3, "rust");
+		assert_eq!(preview.lines().count(), 10);
+		assert_eq!(preview.lines().next().unwrap(), "3: x1");
+		assert_eq!(preview.lines().last().unwrap(), "12: x10");
+		assert!(!preview.contains("more lines"));
+	}
+
+	#[test]
+	fn a_code_preview_whose_tail_is_short_lists_every_remaining_line() {
+		// Four comment lines are skipped, four lines are shown, and the three
+		// that remain are listed rather than summarised.
+		let content = format!("// a\n// b\n// c\n// d\n{}", lines(7, "code"));
+		assert_eq!(
+			get_code_preview_with_lines(&content, 1, "rust"),
+			"5: code1\n6: code2\n7: code3\n8: code4\n9: code5\n10: code6\n11: code7"
+		);
+	}
+
+	#[test]
+	fn a_text_preview_whose_tail_is_short_lists_every_remaining_line() {
+		let content = format!("\n\n\n\n{}", lines(7, "t"));
+		assert_eq!(
+			get_text_preview_with_lines(&content, 1),
+			"5: t1\n6: t2\n7: t3\n8: t4\n9: t5\n10: t6\n11: t7"
+		);
+	}
+
+	#[test]
+	fn a_doc_preview_summarises_a_long_tail_and_keeps_the_last_three_lines() {
+		assert_eq!(
+			get_doc_preview_with_lines(&lines(12, "d"), 1),
+			"1: d1\n2: d2\n3: d3\n4: d4\n... (8 more lines)\n10: d10\n11: d11\n12: d12"
+		);
+	}
+
+	#[test]
+	fn a_block_that_is_nothing_but_comments_is_previewed_from_its_first_line() {
+		// No non-comment line exists, so the skip loop finds no start and the
+		// preview falls back to the top of the block.
+		let content = (1..=12)
+			.map(|i| format!("// note {i}"))
+			.collect::<Vec<_>>()
+			.join("\n");
+		let preview = get_code_preview_with_lines(&content, 1, "rust");
+		assert!(preview.starts_with("1: // note 1"), "{preview}");
+		assert!(preview.contains("... (8 more lines)"), "{preview}");
+		assert!(preview.ends_with("12: // note 12"), "{preview}");
+	}
+
+	#[test]
+	fn a_long_query_keeps_the_configured_weights_even_with_code_punctuation() {
+		// The identifier heuristic only fires for queries of three words or less.
+		assert_eq!(
+			classify_query_weights("where is Store::new called from", 0.8, 0.2),
+			(0.8, 0.2)
+		);
+		// Exactly three words with a symbol still counts as an identifier lookup.
+		assert_eq!(
+			classify_query_weights("Store::new call site", 0.8, 0.2),
+			(0.3, 0.7)
+		);
+	}
+
+	#[test]
+	fn cross_query_fusion_keeps_the_closest_copy_of_a_duplicated_block() {
+		// Same hash, different cosine: the better (lower) distance becomes the
+		// representative while both appearances still add to the fused score.
+		let far = code("src/shared.rs", "shared", Some(0.9));
+		let near = code("src/shared.rs", "shared", Some(0.1));
+		let results = vec![
+			query_result(0, vec![far, code("src/other.rs", "o", Some(0.2))]),
+			query_result(1, vec![near]),
+		];
+
+		let (code_blocks, _, _, _) = deduplicate_and_merge_results(results, None);
+		assert_eq!(code_blocks.len(), 2);
+		assert_eq!(code_blocks[0].path, "src/shared.rs");
+		assert_eq!(
+			code_blocks[0].distance,
+			Some(0.1),
+			"the closer copy must survive deduplication"
+		);
+	}
+
+	#[test]
+	fn cross_query_fusion_breaks_score_ties_deterministically_by_hash() {
+		// Two blocks seen once each at the same rank tie on fused score and have
+		// no distance to separate them, so the hash decides the order.
+		let mut first = code("src/zeta.rs", "z", None);
+		first.hash = "hash-b".to_string();
+		let mut second = code("src/alpha.rs", "a", None);
+		second.hash = "hash-a".to_string();
+
+		let (code_blocks, _, _, _) = deduplicate_and_merge_results(
+			vec![query_result(0, vec![first]), query_result(1, vec![second])],
+			None,
+		);
+		assert_eq!(code_blocks.len(), 2);
+		assert_eq!(code_blocks[0].hash, "hash-a");
+		assert_eq!(code_blocks[1].hash, "hash-b");
+	}
+
+	#[test]
+	fn a_block_without_a_distance_survives_the_threshold_filter() {
+		// Threshold filtering only drops blocks that actually carry a cosine.
+		let results = vec![query_result(
+			0,
+			vec![
+				code("src/unscored.rs", "u", None),
+				code("src/far.rs", "f", Some(0.9)),
+			],
+		)];
+		let (code_blocks, _, _, _) = deduplicate_and_merge_results(results, Some(0.5));
+		assert_eq!(code_blocks.len(), 1);
+		assert_eq!(code_blocks[0].path, "src/unscored.rs");
 	}
 
 	mod execution {

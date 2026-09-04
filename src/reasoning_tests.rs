@@ -107,6 +107,55 @@ mod tests {
 	}
 
 	#[tokio::test]
+	async fn the_fallback_order_keeps_the_original_distances_untouched() {
+		// The fused ranking overwrites `distance` with a rank-derived value, so
+		// unchanged distances prove no reasoning ranking was applied.
+		let mut config = Config::default();
+		config.search.reasoning.enabled = true;
+		config.search.reasoning.model = "no-provider-prefix".to_string();
+
+		let input = blocks(3);
+		let out = reason_rank_code_blocks("query", input.clone(), &config)
+			.await
+			.unwrap();
+		let distances: Vec<_> = out.iter().map(|b| b.distance).collect();
+		assert_eq!(
+			distances,
+			input.iter().map(|b| b.distance).collect::<Vec<_>>()
+		);
+	}
+
+	#[tokio::test]
+	async fn the_fallback_ignores_the_final_result_cap() {
+		// `final_top_k` is applied only to a successfully fused list; the
+		// fallback must surface the whole candidate pool so recall is unharmed.
+		let mut config = Config::default();
+		config.search.reasoning.enabled = true;
+		config.search.reasoning.model = "no-provider-prefix".to_string();
+		config.search.reasoning.max_candidates = 10;
+		config.search.reasoning.final_top_k = 1;
+
+		let out = reason_rank_code_blocks("query", blocks(4), &config)
+			.await
+			.unwrap();
+		assert_eq!(out.len(), 4);
+	}
+
+	#[tokio::test]
+	async fn a_candidate_budget_larger_than_the_pool_keeps_every_candidate() {
+		let mut config = Config::default();
+		config.search.reasoning.enabled = true;
+		config.search.reasoning.model = "no-provider-prefix".to_string();
+		config.search.reasoning.max_candidates = 100;
+
+		let out = reason_rank_code_blocks("query", blocks(3), &config)
+			.await
+			.unwrap();
+		assert_eq!(out.len(), 3);
+		assert_eq!(out[2].path, "src/f2.rs");
+	}
+
+	#[tokio::test]
 	async fn a_candidate_without_symbols_is_still_described() {
 		let mut config = Config::default();
 		config.search.reasoning.enabled = true;

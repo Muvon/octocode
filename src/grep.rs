@@ -116,6 +116,7 @@ impl LanguageExt for AstElixir {
 }
 
 /// A single match result from structural search.
+#[derive(Debug)]
 pub struct GrepMatch {
 	pub file: String,
 	pub line: usize,
@@ -1142,6 +1143,12 @@ pub fn canonical_kind(intent: &str, language: &str) -> Option<&'static str> {
 		}
 
 		// ---- return / try ----
+		// Rust and Ruby do not have a `return_statement` kind: Rust's grammar is
+		// expression-oriented (`return_expression`) and Ruby names the node plain
+		// `return`. Falling through to the generic arm would hand back a kind the
+		// grammar rejects, defeating the point of this rescue mapping.
+		("return" | "return_expression", "rust") => Some("return_expression"),
+		("return", "ruby") => Some("return"),
 		("return" | "return_statement", _) => Some("return_statement"),
 		("try" | "try_statement", "javascript" | "typescript" | "java" | "python") => {
 			Some("try_statement")
@@ -2659,3 +2666,7 @@ end
 		);
 	}
 }
+
+#[cfg(test)]
+#[path = "grep_tests.rs"]
+mod grep_tests;

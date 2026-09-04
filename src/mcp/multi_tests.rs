@@ -169,4 +169,151 @@ mod tests {
 	fn injecting_into_no_tools_yields_no_tools() {
 		assert!(inject_project_arg(vec![], &["alpha".to_string()]).is_empty());
 	}
+
+	/// A `MultiServer` over `keys`, wired like `MultiServer::new` but without
+	/// initializing logging. `mcp_index` is pinned off so `get_server` builds a
+	/// handler without a store or background threads.
+	fn multi_server(root: &TempDir, keys: &[&str]) -> MultiServer {
+		let repos: HashMap<String, PathBuf> = keys
+			.iter()
+			.map(|k| {
+				let path = root.path().join(k);
+				std::fs::create_dir_all(&path).unwrap();
+				(k.to_string(), path)
+			})
+			.collect();
+
+		let mut sorted: Vec<String> = repos.keys().cloned().collect();
+		sorted.sort();
+		let tools = inject_project_arg(
+			vec![tool("semantic_search", json!({"type": "object"}))],
+			&sorted,
+		);
+
+		let mut config = Config::default();
+		config.index.mcp_index = false;
+
+		MultiServer {
+			config,
+			no_git: true,
+			debug: false,
+			repos: Arc::new(repos),
+			instances: Arc::new(Mutex::new(HashMap::new())),
+			tools: Arc::new(tools),
+		}
+	}
+
+	#[test]
+	fn the_project_list_is_sorted_and_comma_separated() {
+		let dir = TempDir::new().unwrap();
+		let server = multi_server(&dir, &["zeta", "alpha", "mid"]);
+		assert_eq!(server.project_list(), "alpha, mid, zeta");
+	}
+
+	#[test]
+	fn a_root_without_projects_reports_a_placeholder_list() {
+		let dir = TempDir::new().unwrap();
+		let server = multi_server(&dir, &[]);
+		assert_eq!(server.project_list(), "(none discovered)");
+	}
+
+	#[test]
+	fn the_server_info_advertises_the_repositories_and_the_project_argument() {
+		let dir = TempDir::new().unwrap();
+		let server = multi_server(&dir, &["beta", "alpha"]);
+		let info = server.get_info();
+
+		let instructions = info.instructions.as_deref().unwrap();
+		assert!(
+			instructions.contains("2 repositories are available (alpha, beta)"),
+			"{instructions}"
+		);
+		assert!(
+			instructions.contains("every tool requires a `project` argument"),
+			"{instructions}"
+		);
+		assert_eq!(info.server_info.name, "octocode-mcp");
+		assert_eq!(info.server_info.version, env!("CARGO_PKG_VERSION"));
+		assert_eq!(info.protocol_version, ProtocolVersion::V_2026_07_28);
+		assert!(
+			info.capabilities.tools.is_some(),
+			"multi mode serves tools, so the capability must be advertised"
+		);
+	}
+
+	#[test]
+	fn the_server_info_still_renders_with_no_repositories() {
+		let dir = TempDir::new().unwrap();
+		let server = multi_server(&dir, &[]);
+		let instructions = server.get_info().instructions.unwrap();
+		assert!(
+			instructions.contains("0 repositories are available ((none discovered))"),
+			"{instructions}"
+		);
+	}
+
+	#[test]
+	fn a_tool_is_looked_up_by_name_with_the_project_argument_attached() {
+		let dir = TempDir::new().unwrap();
+		let server = multi_server(&dir, &["alpha"]);
+
+		let found = server.get_tool("semantic_search").expect("injected tool");
+		assert_eq!(found.name.as_ref(), "semantic_search");
+		assert_eq!(found.input_schema["required"], json!(["project"]));
+		assert_eq!(
+			found.input_schema["properties"]["project"]["enum"],
+			json!(["alpha"])
+		);
+
+		assert!(server.get_tool("semantic_searc").is_none());
+	}
+
+	#[tokio::test]
+	async fn an_unknown_project_is_rejected_with_the_available_list() {
+		let dir = TempDir::new().unwrap();
+		let server = multi_server(&dir, &["alpha", "beta"]);
+
+		let Err(err) = server.get_server("gamma").await else {
+			panic!("an unknown project must not resolve to a handler");
+		};
+		assert_eq!(err.code, rmcp::model::ErrorCode::INVALID_PARAMS);
+		assert!(
+			err.message.contains("Unknown project 'gamma'"),
+			"{}",
+			err.message
+		);
+		assert!(
+			err.message.contains("Available repositories: alpha, beta"),
+			"{}",
+			err.message
+		);
+		assert!(
+			server.instances.lock().await.is_empty(),
+			"a failed lookup must not create an instance"
+		);
+	}
+
+	#[tokio::test]
+	async fn a_repo_handler_is_built_once_per_project_and_reused() {
+		let dir = TempDir::new().unwrap();
+		let server = multi_server(&dir, &["alpha", "beta"]);
+
+		server.get_server("alpha").await.unwrap();
+		let first_seen = server.instances.lock().await["alpha"].last_accessed;
+
+		// Instant has nanosecond resolution; a real pause makes the refreshed
+		// timestamp strictly greater.
+		tokio::time::sleep(Duration::from_millis(5)).await;
+		server.get_server("alpha").await.unwrap();
+		server.get_server("beta").await.unwrap();
+
+		let guard = server.instances.lock().await;
+		let mut keys: Vec<&str> = guard.keys().map(String::as_str).collect();
+		keys.sort();
+		assert_eq!(keys, vec!["alpha", "beta"]);
+		assert!(
+			guard["alpha"].last_accessed > first_seen,
+			"serving a cached instance must refresh its idle timer"
+		);
+	}
 }

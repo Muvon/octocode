@@ -231,7 +231,7 @@ mod tests {
 	}
 
 	#[test]
-	fn a_wildcard_export_adds_the_inferred_reverse_edge() {
+	fn a_wildcard_export_adds_no_reverse_edge() {
 		let mut source = node("src/main.rs", "rust");
 		source.imports = vec!["crate::helper".to_string()];
 		let mut target = node("src/helper.rs", "rust");
@@ -241,12 +241,12 @@ mod tests {
 		let mut relationships = Vec::new();
 		RelationshipDiscovery::discover_import_relationships(&source, &all, &mut relationships);
 
-		let reverse: Vec<_> = relationships
-			.iter()
-			.filter(|r| r.source == "src/helper.rs" && r.target == "src/main.rs")
-			.collect();
-		assert_eq!(reverse.len(), 1, "got {relationships:?}");
-		assert_eq!(reverse[0].confidence, 0.9);
+		// `helper.rs` exporting `*` does not make it an importer of `main.rs`.
+		// Only the forward edge the import statement actually states is recorded.
+		assert_eq!(relationships.len(), 1, "got {relationships:?}");
+		assert_eq!(relationships[0].source, "src/main.rs");
+		assert_eq!(relationships[0].target, "src/helper.rs");
+		assert_eq!(relationships[0].relation_type, RelationType::Imports);
 	}
 
 	#[tokio::test]

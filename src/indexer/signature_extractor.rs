@@ -257,10 +257,17 @@ fn clean_comment_text(comment: &str) -> String {
 			.trim()
 			.to_string()
 	} else {
-		trimmed
+		let cleaned = trimmed
 			.trim_start_matches('/')
 			.trim_start_matches('*')
-			.trim_start_matches('/')
+			.trim_start_matches('/');
+		// `//!` inner doc comments leave the `!` behind, so the file-level
+		// description of every Rust module that uses them started with one.
+		// Only a tight `//!` is affected: `// !note` keeps its space and is
+		// left alone.
+		cleaned
+			.strip_prefix('!')
+			.unwrap_or(cleaned)
 			.trim_end_matches("*/")
 			.trim()
 			.to_string()
@@ -564,6 +571,16 @@ fn extract_markdown_file_comment(contents: &str) -> Option<String> {
 			continue;
 		}
 
+		// A `---` line is a frontmatter delimiter or a horizontal rule, never
+		// prose. Without this an empty or unterminated frontmatter block was
+		// reported verbatim as the document's description.
+		if trimmed == "---" {
+			if found_content {
+				break;
+			}
+			continue;
+		}
+
 		// Empty line handling
 		if trimmed.is_empty() {
 			if found_content {
@@ -678,3 +695,7 @@ mod tests {
 		assert_eq!(x.kind, "declaration");
 	}
 }
+
+#[cfg(test)]
+#[path = "signature_extractor_tests.rs"]
+mod signature_extractor_tests;

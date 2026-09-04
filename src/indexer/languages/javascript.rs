@@ -490,55 +490,6 @@ pub fn parse_js_import_statement_full_path(import_text: &str) -> Option<Vec<Stri
 	}
 }
 
-pub fn parse_js_import_statement(import_text: &str) -> Option<Vec<String>> {
-	let mut imports = Vec::new();
-	let cleaned = import_text.trim();
-
-	// Handle: import { foo, bar } from 'module'
-	if let Some(start) = cleaned.find('{') {
-		if let Some(end) = cleaned.find('}') {
-			let items = &cleaned[start + 1..end];
-			for item in items.split(',') {
-				let item = item.trim();
-				// Handle: foo as bar -> extract 'foo'
-				let name = if let Some(as_pos) = item.find(" as ") {
-					&item[..as_pos]
-				} else {
-					item
-				};
-				if !name.is_empty() {
-					imports.push(name.to_string());
-				}
-			}
-			return Some(imports);
-		}
-	}
-
-	// Handle: import foo from 'module'
-	if cleaned.starts_with("import ") && cleaned.contains(" from ") {
-		if let Some(from_pos) = cleaned.find(" from ") {
-			let import_part = &cleaned[7..from_pos].trim(); // Skip "import "
-			if !import_part.starts_with('{') && !import_part.starts_with('*') {
-				imports.push(import_part.to_string());
-				return Some(imports);
-			}
-		}
-	}
-
-	// Handle: import * as foo from 'module'
-	if cleaned.contains("* as ") {
-		if let Some(as_pos) = cleaned.find("* as ") {
-			if let Some(from_pos) = cleaned.find(" from ") {
-				let alias = &cleaned[as_pos + 5..from_pos].trim();
-				imports.push(alias.to_string());
-				return Some(imports);
-			}
-		}
-	}
-
-	None
-}
-
 pub fn parse_js_export_statement(export_text: &str) -> Option<Vec<String>> {
 	let mut exports = Vec::new();
 	let cleaned = export_text.trim();

@@ -227,11 +227,13 @@ impl Language for TypeScript {
 
 		match node.kind() {
 			"import_statement" => {
-				// TypeScript supports same import patterns as JavaScript plus type imports
-				// Handle: import type { Foo } from 'module'
-				// Handle: import { type Foo, Bar } from 'module'
+				// Yields the module PATH, not the bound names: every consumer of
+				// `CodeNode::imports` feeds it straight to `resolve_import`, which
+				// resolves a path to a file. Reporting `Foo` for
+				// `import type { Foo } from './foo'` left every TypeScript import
+				// unresolvable, so no Imports edge was ever built for a .ts file.
 				if let Ok(import_text) = node.utf8_text(contents.as_bytes()) {
-					if let Some(imported_items) = parse_ts_import_statement(import_text) {
+					if let Some(imported_items) = parse_js_import_statement_full_path(import_text) {
 						imports.extend(imported_items);
 					}
 				}
@@ -511,59 +513,6 @@ impl TypeScript {
 	}
 }
 
-// Helper functions for TypeScript import/export parsing
-fn parse_ts_import_statement(import_text: &str) -> Option<Vec<String>> {
-	let mut imports = Vec::new();
-	let cleaned = import_text.trim();
-
-	// Handle TypeScript type imports: import type { Foo } from 'module'
-	if let Some(type_import) = cleaned.strip_prefix("import type ") {
-		// Skip "import type "
-		if let Some(start) = type_import.find('{') {
-			if let Some(end) = type_import.find('}') {
-				let items = &type_import[start + 1..end];
-				for item in items.split(',') {
-					let item = item.trim();
-					if !item.is_empty() {
-						imports.push(item.to_string());
-					}
-				}
-				return Some(imports);
-			}
-		}
-	}
-
-	// Handle mixed imports: import { type Foo, Bar } from 'module'
-	if let Some(start) = cleaned.find('{') {
-		if let Some(end) = cleaned.find('}') {
-			let items = &cleaned[start + 1..end];
-			for item in items.split(',') {
-				let item = item.trim();
-				// Remove 'type' keyword if present
-				let name = if let Some(stripped) = item.strip_prefix("type ") {
-					stripped
-				} else {
-					item
-				};
-				// Handle: foo as bar -> extract 'foo'
-				let name = if let Some(as_pos) = name.find(" as ") {
-					&name[..as_pos]
-				} else {
-					name
-				};
-				if !name.is_empty() {
-					imports.push(name.to_string());
-				}
-			}
-			return Some(imports);
-		}
-	}
-
-	// Fall back to JavaScript parsing for regular imports
-	// Reuse JavaScript logic for standard cases
-	parse_js_import_statement(import_text)
-}
-
 fn parse_ts_export_statement(export_text: &str) -> Option<Vec<String>> {
 	let mut exports = Vec::new();
 	let cleaned = export_text.trim();
@@ -608,7 +557,7 @@ fn parse_ts_export_statement(export_text: &str) -> Option<Vec<String>> {
 
 // Helper functions for TypeScript import/export parsing
 // Re-export JavaScript helper functions for TypeScript to use
-use super::javascript::{parse_js_export_statement, parse_js_import_statement};
+use super::javascript::{parse_js_export_statement, parse_js_import_statement_full_path};
 
 /// Walk a `class_heritage` node and collect both extends and implements targets.
 fn collect_ts_heritage(

@@ -632,3 +632,7 @@ impl AIEnhancements {
 		}
 	}
 }
+
+#[cfg(test)]
+#[path = "ai_tests.rs"]
+mod ai_tests;

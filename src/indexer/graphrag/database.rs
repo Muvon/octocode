@@ -88,13 +88,16 @@ impl<'a> DatabaseOperations<'a> {
 	pub async fn load_graph(&self, _project_root: &Path, quiet: bool) -> Result<CodeGraph> {
 		let mut graph = CodeGraph::default();
 
-		// Check if the tables exist
-		if !self
-			.store
-			.tables_exist(&["graphrag_nodes", "graphrag_relationships"])
-			.await?
-		{
-			return Ok(graph); // Return empty graph if tables don't exist
+		// Only the node table is required. Both graphrag tables are created
+		// lazily on first write, and a run that discovers no relationships
+		// persists via `save_graph_incremental(nodes, &[])` — so it writes
+		// `graphrag_nodes` and never creates `graphrag_relationships`. Demanding
+		// both made every later load return an empty graph, hiding the persisted
+		// nodes from get-node, search, overview and find-path.
+		// `get_graph_relationships()` below already answers an empty batch when
+		// its own table is absent.
+		if !self.store.tables_exist(&["graphrag_nodes"]).await? {
+			return Ok(graph); // Return empty graph if the node table doesn't exist
 		}
 
 		// Get all nodes via full table scan (not vector search — avoids zero-vector returning 0 results)

@@ -524,15 +524,17 @@ impl Svelte {
 			return extract_destructured_names(pattern);
 		}
 
+		// Cut at the first character that cannot appear in a JS identifier, so a
+		// declaration written without spaces (`let tight=1;`) yields `tight`
+		// rather than `tight=1;`.
 		let name = rest
-			.split_whitespace()
+			.split(|c: char| !(c.is_alphanumeric() || c == '_' || c == '$'))
 			.next()
-			.unwrap_or("")
-			.trim_end_matches('=')
-			.trim_end_matches(',')
-			.trim();
-		if rest.split_whitespace().count() >= 3 && !name.is_empty() && !self.is_svelte_keyword(name)
-		{
+			.unwrap_or("");
+		// An initialiser is what separates a usable declaration from a bare
+		// `let x;` — spacing around `=` is not, so the presence of the `=` is
+		// what gets checked rather than a whitespace token count.
+		if find_assignment_eq(rest).is_some() && !name.is_empty() && !self.is_svelte_keyword(name) {
 			vec![name.to_string()]
 		} else {
 			Vec::new()

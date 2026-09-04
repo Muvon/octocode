@@ -630,3 +630,7 @@ impl LspProvider {
 		Ok(vec![])
 	}
 }
+
+#[cfg(test)]
+#[path = "tools_tests.rs"]
+mod tools_tests;

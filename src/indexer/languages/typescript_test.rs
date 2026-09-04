@@ -493,7 +493,7 @@ fn identifier_extraction_keeps_the_receiver_and_drops_the_property() {
 }
 
 #[test]
-fn import_statements_yield_the_imported_names_not_the_module_path() {
+fn import_statements_yield_the_module_path() {
 	let source = r#"import type { Foo } from './foo';
 import { type Bar, Baz as Qux } from './bar';
 import Default from './default';
@@ -512,13 +512,30 @@ import './side-effect';
 		imports
 	};
 
-	assert_eq!(as_strs(&names(0)), ["Foo"]);
-	// `type` modifiers are stripped and `as` aliases keep the source name.
-	assert_eq!(as_strs(&names(1)), ["Bar", "Baz"]);
-	assert_eq!(as_strs(&names(2)), ["Default"]);
-	assert_eq!(as_strs(&names(3)), ["ns"]);
-	// A side-effect import binds nothing, so nothing is reported.
-	assert!(names(4).is_empty());
+	// The module path, not the bound names: `resolve_import` is the only
+	// consumer and it resolves a path to a file.
+	assert_eq!(as_strs(&names(0)), ["./foo"]);
+	assert_eq!(as_strs(&names(1)), ["./bar"]);
+	assert_eq!(as_strs(&names(2)), ["./default"]);
+	assert_eq!(as_strs(&names(3)), ["./ns"]);
+	// A side-effect import still records the dependency.
+	assert_eq!(as_strs(&names(4)), ["./side-effect"]);
+}
+
+#[test]
+fn a_typescript_import_resolves_to_the_file_it_names() {
+	let source = "import { Helper } from './helper';\n";
+	let tree = parse_tree(source);
+	let ts = TypeScript {};
+	let (imports, _) =
+		ts.extract_imports_exports(all_of_kind(&tree, "import_statement")[0], source);
+
+	let files = vec!["src/main.ts".to_string(), "src/helper.ts".to_string()];
+	let registry = crate::indexer::languages::resolution_utils::FileRegistry::new(&files);
+	assert_eq!(
+		ts.resolve_import(&imports[0], "src/main.ts", &registry),
+		Some("src/helper.ts".to_string())
+	);
 }
 
 #[test]

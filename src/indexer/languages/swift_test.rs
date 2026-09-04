@@ -701,4 +701,59 @@ func test() {
 			"type alias declarations"
 		);
 	}
+
+	#[test]
+	fn public_declarations_of_every_kind_are_exported_by_their_own_arm() {
+		// Each declaration kind reads its name a different way, so one case per
+		// arm of the export match.
+		for (code, kind, expected) in [
+			("public class Renderer {}", "class_declaration", "Renderer"),
+			(
+				"public protocol Drawable { func draw() }",
+				"protocol_declaration",
+				"Drawable",
+			),
+			(
+				"public typealias Handler = () -> Void",
+				"typealias_declaration",
+				"Handler",
+			),
+		] {
+			let (mut parser, lang) = make_parser();
+			let tree = parser.parse(code, None).unwrap();
+			let node = tree
+				.root_node()
+				.named_children(&mut tree.root_node().walk())
+				.find(|n| n.kind() == kind)
+				.unwrap_or_else(|| panic!("expected a {kind} for {code}"));
+
+			let (_, exports) = lang.extract_imports_exports(node, code);
+			assert!(
+				exports.contains(&expected.to_string()),
+				"{kind} should export {expected}, got {exports:?}"
+			);
+		}
+	}
+
+	#[test]
+	fn a_public_property_exports_the_name_it_binds() {
+		let code = "public class Box {\n\tpublic var width = 0\n}";
+		let (mut parser, lang) = make_parser();
+		let tree = parser.parse(code, None).unwrap();
+
+		let mut found = Vec::new();
+		fn walk<'a>(node: tree_sitter::Node<'a>, out: &mut Vec<tree_sitter::Node<'a>>) {
+			if node.kind() == "property_declaration" {
+				out.push(node);
+			}
+			for child in node.children(&mut node.walk()) {
+				walk(child, out);
+			}
+		}
+		walk(tree.root_node(), &mut found);
+		let property = found.first().copied().expect("a property_declaration");
+
+		let (_, exports) = lang.extract_imports_exports(property, code);
+		assert!(exports.contains(&"width".to_string()), "{exports:?}");
+	}
 }

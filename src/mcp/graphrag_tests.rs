@@ -15,8 +15,8 @@
 #[cfg(test)]
 mod tests {
 	use crate::config::Config;
-	use crate::mcp::graphrag::GraphRagProvider;
-	use serde_json::json;
+	use crate::mcp::graphrag::{GraphRagProvider, OutputFormat};
+	use serde_json::{json, Value};
 	use tempfile::TempDir;
 
 	/// A small Rust project whose live Tree-sitter graph has both a file node and
@@ -280,5 +280,167 @@ mod tests {
 		let (dir, provider) = project();
 		let cache = provider.runtime_cache();
 		assert!(cache.graph(dir.path()).await.is_ok());
+	}
+
+	#[test]
+	fn each_output_format_answers_only_to_its_own_predicate() {
+		let formats = [
+			OutputFormat::Text,
+			OutputFormat::Json,
+			OutputFormat::Md,
+			OutputFormat::Cli,
+		];
+		let expected = [
+			// (is_text, is_json, is_md, is_cli)
+			(true, false, false, false),
+			(false, true, false, false),
+			(false, false, true, false),
+			(false, false, false, true),
+		];
+
+		for (format, (text, json, md, cli)) in formats.iter().zip(expected) {
+			assert_eq!(format.is_text(), text, "{format:?}");
+			assert_eq!(format.is_json(), json, "{format:?}");
+			assert_eq!(format.is_md(), md, "{format:?}");
+			assert_eq!(format.is_cli(), cli, "{format:?}");
+		}
+	}
+
+	#[tokio::test]
+	async fn the_depth_bounds_are_inclusive_and_the_default_is_used_for_junk() {
+		let (_dir, provider) = project();
+		for depth in [1, 10] {
+			provider
+				.execute(&json!({"operation": "overview", "max_depth": depth}))
+				.await
+				.unwrap_or_else(|e| panic!("depth {depth} should be accepted: {e}"));
+		}
+
+		// A non-numeric depth is not an error: the documented default applies.
+		provider
+			.execute(&json!({"operation": "overview", "max_depth": "3"}))
+			.await
+			.expect("a non-numeric depth falls back to the default");
+	}
+
+	#[tokio::test]
+	async fn an_overview_reports_the_graph_mode_and_its_counts() {
+		let (_dir, provider) = project();
+
+		let text = provider
+			.execute(&json!({"operation": "overview"}))
+			.await
+			.unwrap();
+		// GraphRAG persistence is off, so the answer comes from the live graph.
+		assert!(
+			text.starts_with("Code Graph Overview (runtime_structural): "),
+			"{text}"
+		);
+		assert!(text.contains("Node Types:\n"), "{text}");
+		assert!(text.contains("Relationship Types:\n"), "{text}");
+
+		let markdown = provider
+			.execute(&json!({"operation": "overview", "format": "markdown"}))
+			.await
+			.unwrap();
+		assert!(
+			markdown.starts_with("# Code Graph Overview\n\nMode: `runtime_structural`\n"),
+			"{markdown}"
+		);
+		assert!(markdown.contains("## Node Types\n"), "{markdown}");
+
+		let raw = provider
+			.execute(&json!({"operation": "overview", "format": "json"}))
+			.await
+			.unwrap();
+		let parsed: Value = serde_json::from_str(&raw).expect("json format must parse");
+		assert_eq!(parsed["mode"], "runtime_structural");
+		assert!(
+			parsed["node_count"].as_u64().unwrap() >= 2,
+			"both source files are nodes: {raw}"
+		);
+		assert!(parsed["node_types"].is_object(), "{raw}");
+		assert!(parsed["relationship_types"].is_object(), "{raw}");
+	}
+
+	#[tokio::test]
+	async fn a_node_is_rendered_with_every_field_in_each_format() {
+		let (_dir, provider) = project();
+
+		let text = provider
+			.execute(&json!({"operation": "get-node", "node_id": "src/helper.rs"}))
+			.await
+			.unwrap();
+		assert!(text.starts_with("Node: "), "{text}");
+		for label in [
+			"\nID: ",
+			"\nKind: ",
+			"\nPath: ",
+			"\nDescription: ",
+			"\nSymbols: ",
+		] {
+			assert!(text.contains(label), "missing {label:?} in: {text}");
+		}
+
+		let markdown = provider
+			.execute(
+				&json!({"operation": "get-node", "node_id": "src/helper.rs", "format": "markdown"}),
+			)
+			.await
+			.unwrap();
+		assert!(markdown.starts_with("# Node: "), "{markdown}");
+		assert!(markdown.contains("**Kind:**"), "{markdown}");
+
+		let raw = provider
+			.execute(
+				&json!({"operation": "get-node", "node_id": "src/helper.rs", "format": "json"}),
+			)
+			.await
+			.unwrap();
+		let parsed: Value = serde_json::from_str(&raw).expect("json format must parse");
+		assert!(parsed["id"].is_string(), "{raw}");
+		assert!(parsed["name"].is_string(), "{raw}");
+		assert!(parsed["path"].is_string(), "{raw}");
+	}
+
+	#[tokio::test]
+	async fn relationships_are_returned_as_structured_edges_in_json() {
+		let (_dir, provider) = project();
+		let raw = provider
+			.execute(
+				&json!({"operation": "get-relationships", "node_id": "src/main.rs", "format": "json"}),
+			)
+			.await
+			.unwrap();
+
+		let parsed: Value = serde_json::from_str(&raw).expect("json format must parse");
+		let edges = parsed.as_array().expect("an array of relationships");
+		assert!(!edges.is_empty(), "main.rs calls helper: {raw}");
+		for edge in edges {
+			assert!(edge["source"].is_string(), "{edge}");
+			assert!(edge["target"].is_string(), "{edge}");
+			assert!(edge["relation_type"].is_string(), "{edge}");
+		}
+	}
+
+	#[tokio::test]
+	async fn a_search_answers_with_the_nodes_it_matched() {
+		let (_dir, provider) = project();
+
+		let raw = provider
+			.execute(&json!({"operation": "search", "query": "helper", "format": "json"}))
+			.await
+			.unwrap();
+		let parsed: Value = serde_json::from_str(&raw).expect("json format must parse");
+		let nodes = parsed.as_array().expect("an array of nodes");
+		assert!(!nodes.is_empty(), "`helper` exists in the corpus: {raw}");
+		assert!(
+			nodes
+				.iter()
+				.any(|node| node["path"].as_str() == Some("src/helper.rs")),
+			"{raw}"
+		);
+		// The search is capped, so it can never flood the model's context.
+		assert!(nodes.len() <= 50, "{raw}");
 	}
 }

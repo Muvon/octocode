@@ -46,6 +46,8 @@ mod lua;
 #[cfg(test)]
 mod lua_test;
 mod markdown;
+#[cfg(test)]
+mod markdown_test;
 mod php;
 #[cfg(test)]
 mod php_test;

@@ -386,7 +386,7 @@ fn destructured_declarations_yield_each_bound_name() {
 }
 
 #[test]
-fn declarations_without_a_spaced_initializer_are_skipped() {
+fn declarations_are_found_regardless_of_spacing_but_need_an_initializer() {
 	let source = r#"<script>
 	let bare;
 	let tight=1;
@@ -399,10 +399,9 @@ fn declarations_without_a_spaced_initializer_are_skipped() {
 	let script = first_of_kind(&tree, "script_element");
 	let symbols = Svelte {}.extract_symbols(script, source);
 
-	// The text scanner requires at least three whitespace-separated tokens
-	// after the keyword, so `let tight=1;` is dropped along with the
-	// genuinely nameless `let bare;`.
-	assert_eq!(as_strs(&symbols), ["also", "ok"]);
+	// `let bare;` has no initializer and is skipped; spacing around `=` does
+	// not matter.
+	assert_eq!(as_strs(&symbols), ["also", "ok", "tight"]);
 }
 
 #[test]

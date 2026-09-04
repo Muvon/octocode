@@ -727,4 +727,27 @@ public:
 			"neither the namespace nor the class should become a region"
 		);
 	}
+
+	#[test]
+	fn an_enum_nested_in_a_class_contributes_its_constants() {
+		// A top-level enum reaches its constants through the enumerator_list
+		// descent; a nested one arrives at the enum_specifier arm instead, so
+		// both routes need their own case.
+		let symbols = symbols_of(
+			"class Palette {\npublic:\n\tenum Shade { Light, Dark };\n\tint width;\n};\n",
+			"class_specifier",
+		);
+		assert!(symbols.contains(&"Light".to_string()), "{symbols:?}");
+		assert!(symbols.contains(&"Dark".to_string()), "{symbols:?}");
+		assert!(symbols.contains(&"width".to_string()), "{symbols:?}");
+	}
+
+	#[test]
+	fn a_repeated_enum_constant_name_is_only_recorded_once() {
+		let symbols = symbols_of(
+			"class Dup {\n\tenum A { Same };\n\tenum B { Same };\n};\n",
+			"class_specifier",
+		);
+		assert_eq!(symbols.iter().filter(|s| s.as_str() == "Same").count(), 1);
+	}
 }

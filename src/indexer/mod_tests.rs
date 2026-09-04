@@ -181,6 +181,113 @@ mod tests {
 		validate_llm_structured_output(&config, true).expect("nothing to validate");
 	}
 
+	fn run_git(repo: &Path, args: &[&str]) -> String {
+		let out = std::process::Command::new("git")
+			.args(args)
+			.current_dir(repo)
+			.output()
+			.unwrap_or_else(|e| panic!("git {args:?} failed to spawn: {e}"));
+		assert!(
+			out.status.success(),
+			"git {args:?} failed: {}",
+			String::from_utf8_lossy(&out.stderr)
+		);
+		String::from_utf8_lossy(&out.stdout).trim().to_string()
+	}
+
+	#[test]
+	fn a_noindex_file_in_the_root_or_a_common_subdirectory_is_detected() {
+		let dir = TempDir::new().unwrap();
+		assert!(!NoindexWalker::has_noindex_files(dir.path()));
+
+		std::fs::create_dir_all(dir.path().join("src")).unwrap();
+		std::fs::write(dir.path().join("src/.noindex"), "skip.rs\n").unwrap();
+		assert!(NoindexWalker::has_noindex_files(dir.path()));
+	}
+
+	#[test]
+	fn a_noindex_file_in_an_uncommon_subdirectory_is_not_detected() {
+		// Deliberate trade-off: detection probes the root plus a fixed list of
+		// common directories rather than walking the whole tree.
+		let dir = TempDir::new().unwrap();
+		std::fs::create_dir_all(dir.path().join("weird")).unwrap();
+		std::fs::write(dir.path().join("weird/.noindex"), "skip.rs\n").unwrap();
+		assert!(!NoindexWalker::has_noindex_files(dir.path()));
+
+		std::fs::write(dir.path().join(".noindex"), "skip.rs\n").unwrap();
+		assert!(NoindexWalker::has_noindex_files(dir.path()));
+	}
+
+	#[test]
+	fn noindex_detection_is_cached_per_directory() {
+		let dir = TempDir::new().unwrap();
+		std::fs::write(dir.path().join(".noindex"), "skip.rs\n").unwrap();
+		assert!(NoindexWalker::has_noindex_files_cached(dir.path()));
+
+		std::fs::remove_file(dir.path().join(".noindex")).unwrap();
+		assert!(!NoindexWalker::has_noindex_files(dir.path()));
+		assert!(
+			NoindexWalker::has_noindex_files_cached(dir.path()),
+			"the first answer is reused for the rest of the session"
+		);
+	}
+
+	#[test]
+	fn committed_changes_are_listed_between_two_commits() {
+		let dir = TempDir::new().unwrap();
+		run_git(dir.path(), &["init", "-q", "-b", "main"]);
+		run_git(dir.path(), &["config", "user.email", "t@t"]);
+		run_git(dir.path(), &["config", "user.name", "t"]);
+		std::fs::write(dir.path().join("a.txt"), "a\n").unwrap();
+		run_git(dir.path(), &["add", "."]);
+		run_git(dir.path(), &["commit", "-q", "-m", "first"]);
+		let first = run_git(dir.path(), &["rev-parse", "HEAD"]);
+
+		std::fs::write(dir.path().join("b.txt"), "b\n").unwrap();
+		run_git(dir.path(), &["add", "."]);
+		run_git(dir.path(), &["commit", "-q", "-m", "second"]);
+		let head = run_git(dir.path(), &["rev-parse", "HEAD"]);
+
+		assert_eq!(
+			git::get_changed_files_since_commit(dir.path(), &first).unwrap(),
+			vec!["b.txt".to_string()]
+		);
+		assert!(git::get_changed_files_since_commit(dir.path(), &head)
+			.unwrap()
+			.is_empty());
+	}
+
+	#[test]
+	fn a_model_without_structured_output_support_is_rejected() {
+		let mut config = Config::default();
+		config.graphrag.enabled = true;
+		config.graphrag.use_llm = true;
+		config.graphrag.llm.description_model = "minimax:MiniMax-M2".to_string();
+
+		let err = validate_llm_structured_output(&config, true)
+			.expect_err("a model without JSON schema support must block indexing")
+			.to_string();
+		assert!(err.contains("does not support structured output"), "{err}");
+		assert!(err.contains("graphrag.llm.description_model"), "{err}");
+	}
+
+	#[test]
+	fn a_model_whose_provider_cannot_be_resolved_is_only_a_warning() {
+		let mut config = Config::default();
+		config.index.contextual_descriptions = true;
+		config.index.contextual_model = "no-such-provider:some-model".to_string();
+
+		validate_llm_structured_output(&config, true)
+			.expect("an unresolvable model is reported later, not at validation time");
+	}
+
+	#[test]
+	fn the_shipped_default_contextual_model_passes_validation() {
+		let mut config = Config::default();
+		config.index.contextual_descriptions = true;
+		validate_llm_structured_output(&config, true).expect("default config must be usable");
+	}
+
 	mod store_backed {
 		use super::super::super::*;
 		use crate::config::Config;
@@ -346,6 +453,121 @@ mod tests {
 					.unwrap(),
 				1
 			);
+		}
+
+		/// A repository containing nothing the indexer can index, so a full run
+		/// completes without ever calling an embedding provider.
+		fn repo_without_indexable_files() -> TempDir {
+			let dir = TempDir::new().unwrap();
+			super::run_git(dir.path(), &["init", "-q", "-b", "main"]);
+			super::run_git(dir.path(), &["config", "user.email", "t@t"]);
+			super::run_git(dir.path(), &["config", "user.name", "t"]);
+			std::fs::write(dir.path().join("blob.bin"), "not indexable\n").unwrap();
+			super::run_git(dir.path(), &["add", "."]);
+			super::run_git(dir.path(), &["commit", "-q", "-m", "first"]);
+			dir
+		}
+
+		fn state_at(dir: &std::path::Path) -> crate::state::SharedState {
+			let state = crate::state::create_shared_state();
+			state.write().current_directory = dir.to_path_buf();
+			state
+		}
+
+		#[tokio::test]
+		async fn a_first_run_stamps_the_commit_even_with_nothing_to_index() {
+			let (_db, store) = test_store().await;
+			let dir = repo_without_indexable_files();
+			let head = super::run_git(dir.path(), &["rev-parse", "HEAD"]);
+			// Commit indexing needs embeddings; mark it done so the run is offline.
+			store.store_commits_last_commit_hash(&head).await.unwrap();
+
+			let state = state_at(dir.path());
+			index_files_with_quiet(
+				&store,
+				state.clone(),
+				&Config::default(),
+				Some(dir.path()),
+				true,
+			)
+			.await
+			.unwrap();
+
+			assert!(state.read().indexing_complete);
+			assert_eq!(state.read().indexed_files, 0);
+			assert_eq!(state.read().embedding_calls, 0);
+			assert_eq!(
+				store.get_last_commit_hash().await.unwrap(),
+				Some(head),
+				"the commit must be recorded even when zero files were indexed"
+			);
+		}
+
+		#[tokio::test]
+		async fn a_rerun_at_the_same_commit_skips_indexing_but_still_prunes_deleted_files() {
+			let (_db, store) = test_store().await;
+			let dir = repo_without_indexable_files();
+			let head = super::run_git(dir.path(), &["rev-parse", "HEAD"]);
+			store.store_commits_last_commit_hash(&head).await.unwrap();
+			store.store_git_metadata(&head).await.unwrap();
+
+			// A row whose file no longer exists on disk.
+			store
+				.store_code_blocks(
+					&[code_block("src/vanished.rs", "h1")],
+					&[embedding(CODE_DIM, 0)],
+				)
+				.await
+				.unwrap();
+
+			let state = state_at(dir.path());
+			index_files_with_quiet(
+				&store,
+				state.clone(),
+				&Config::default(),
+				Some(dir.path()),
+				true,
+			)
+			.await
+			.unwrap();
+
+			assert!(state.read().indexing_complete);
+			assert!(
+				!store
+					.get_all_indexed_file_paths()
+					.await
+					.unwrap()
+					.contains("src/vanished.rs"),
+				"the same-commit path must still drop rows for deleted files"
+			);
+		}
+
+		#[tokio::test]
+		async fn a_new_commit_advances_the_stored_commit_hash() {
+			let (_db, store) = test_store().await;
+			let dir = repo_without_indexable_files();
+			let first = super::run_git(dir.path(), &["rev-parse", "HEAD"]);
+			store.store_git_metadata(&first).await.unwrap();
+
+			std::fs::write(dir.path().join("second.bin"), "still not indexable\n").unwrap();
+			super::run_git(dir.path(), &["add", "."]);
+			super::run_git(dir.path(), &["commit", "-q", "-m", "second"]);
+			let head = super::run_git(dir.path(), &["rev-parse", "HEAD"]);
+			store.store_commits_last_commit_hash(&head).await.unwrap();
+
+			let state = state_at(dir.path());
+			index_files_with_quiet(
+				&store,
+				state.clone(),
+				&Config::default(),
+				Some(dir.path()),
+				true,
+			)
+			.await
+			.unwrap();
+
+			assert_eq!(store.get_last_commit_hash().await.unwrap(), Some(head));
+			assert_eq!(state.read().embedding_calls, 0);
 		}
 	}
 }

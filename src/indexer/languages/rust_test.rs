@@ -670,6 +670,29 @@ fn a_crate_path_falls_back_to_a_module_directory_mod_rs() {
 }
 
 #[test]
+fn a_single_segment_crate_path_falls_back_to_the_crate_root() {
+	// `crate::Url` names an item declared in lib.rs itself, so there is no
+	// module file to match; the crate root is the file that defines it.
+	let files = demo_crate();
+	assert_eq!(
+		Rust {}.resolve_import("crate::Url", "demo/src/graph/node.rs", &files),
+		Some("demo/src/lib.rs".to_string())
+	);
+}
+
+#[test]
+fn a_multi_segment_crate_path_that_matches_nothing_resolves_to_nothing() {
+	// The root fallback is deliberately limited to one segment: a longer path
+	// that resolved nothing is a module we failed to find, and pointing it at
+	// the root would invent an edge that does not exist.
+	let files = demo_crate();
+	assert_eq!(
+		Rust {}.resolve_import("crate::missing::Thing", "demo/src/lib.rs", &files),
+		None
+	);
+}
+
+#[test]
 fn a_super_path_resolves_against_the_source_files_own_directory() {
 	let files = demo_crate();
 	assert_eq!(

@@ -658,26 +658,6 @@ impl Clone for LspClient {
 	}
 }
 
-#[cfg(all(test, unix))]
-mod tests {
-	use super::LspClient;
-
-	#[tokio::test]
-	async fn reaps_lsp_process_that_exits_on_its_own() {
-		let client = LspClient::new("/usr/bin/true".to_string(), std::env::temp_dir());
-		client.start().await.expect("LSP child should start");
-
-		tokio::time::timeout(std::time::Duration::from_secs(2), async {
-			loop {
-				if client.process.lock().await.is_none() {
-					break;
-				}
-				tokio::task::yield_now().await;
-			}
-		})
-		.await
-		.expect("exited LSP child should be reaped promptly");
-
-		assert!(!client.is_connected());
-	}
-}
+#[cfg(test)]
+#[path = "client_tests.rs"]
+mod client_tests;

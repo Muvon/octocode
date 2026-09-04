@@ -205,4 +205,57 @@ mod tests {
 		.unwrap();
 		assert_eq!(forced.len(), first.len());
 	}
+
+	#[test]
+	fn an_extensionless_name_can_still_match_the_text_whitelist() {
+		assert!(is_allowed_text_extension(Path::new("Makefile")));
+		assert!(is_allowed_text_extension(Path::new("CHANGELOG")));
+		assert!(is_allowed_text_extension(Path::new("LICENSE.txt")));
+		assert!(!is_allowed_text_extension(Path::new("Cargo")));
+	}
+
+	#[test]
+	fn an_empty_file_is_not_treated_as_text() {
+		assert!(!is_text_file(""));
+	}
+
+	#[test]
+	fn chunk_overlap_replays_the_trailing_lines_of_the_previous_chunk() {
+		// `chunk_size` is a character budget while `overlap` counts lines: six
+		// "line N" lines do not fit in 40 characters, so chunks are five lines
+		// long and the next one restarts two lines earlier.
+		let content = (1..=20)
+			.map(|i| format!("line {i}"))
+			.collect::<Vec<_>>()
+			.join("\n");
+
+		let chunks = chunk_text(&content, 40, 2);
+		assert!(chunks.len() > 2, "got {} chunks", chunks.len());
+		assert_eq!((chunks[0].start_line, chunks[0].end_line), (1, 5));
+		assert_eq!((chunks[1].start_line, chunks[1].end_line), (4, 8));
+		assert!(chunks[1].content.starts_with("line 4"));
+	}
+
+	#[tokio::test]
+	async fn a_short_text_file_becomes_a_single_block_spanning_its_lines() {
+		let (_dir, store) = test_store().await;
+		let mut batch = Vec::new();
+		process_text_file(
+			&store,
+			"alpha\nbeta\n",
+			"notes.txt",
+			&mut batch,
+			&Config::default(),
+			state(false),
+		)
+		.await
+		.unwrap();
+
+		assert_eq!(batch.len(), 1);
+		assert_eq!(batch[0].path, "notes.txt");
+		assert_eq!(batch[0].language, "text");
+		assert_eq!(batch[0].start_line, 1);
+		assert_eq!(batch[0].end_line, 2);
+		assert!(!batch[0].hash.is_empty());
+	}
 }

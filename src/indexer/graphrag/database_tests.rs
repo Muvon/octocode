@@ -96,19 +96,24 @@ mod tests {
 	}
 
 	#[tokio::test]
-	async fn nodes_can_be_saved_without_any_relationships() {
+	async fn a_graph_with_no_relationships_still_loads_its_nodes() {
 		let (_dir, store) = test_store().await;
 		let ops = DatabaseOperations::new(&store);
 		ops.save_graph_incremental(&[graph_node("src/a.rs", "file", 0)], &[])
 			.await
 			.unwrap();
 
-		// `load_graph` needs both tables; with only nodes written it reports empty
-		// rather than failing.
+		// The relationship table is only created on first write, so a graph with
+		// no edges never creates it. Loading must still return the nodes.
 		let graph = ops.load_graph(Path::new("/repo"), true).await.unwrap();
-		assert!(graph.nodes.is_empty());
+		assert_eq!(graph.nodes.len(), 1);
+		assert!(graph.nodes.contains_key("src/a.rs"));
+		assert!(graph.relationships.is_empty());
 
-		// The nodes really are stored, though.
+		assert!(!store
+			.tables_exist(&["graphrag_relationships"])
+			.await
+			.unwrap());
 		assert_eq!(store.get_all_graph_nodes().await.unwrap().num_rows(), 1);
 	}
 

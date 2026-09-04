@@ -44,6 +44,16 @@ mod tests {
 		files.iter().map(|f| f.display.as_str()).collect()
 	}
 
+	/// An in-memory candidate file, bypassing the walk.
+	fn fd(display: &str, content: &str) -> FileData {
+		FileData {
+			path: std::path::PathBuf::from(display),
+			display: display.to_string(),
+			content: content.to_string(),
+			prefilter_hit: true,
+		}
+	}
+
 	#[test]
 	fn only_files_of_the_requested_language_are_collected() {
 		let dir = repo();
@@ -180,5 +190,248 @@ mod tests {
 		let outcome = symbol_search(&files, "helper", "rust", false);
 		assert_eq!(outcome.matches.len(), 1, "{:?}", outcome.diagnostic);
 		assert_eq!(outcome.matches[0].file, "src/inner/helper.rs");
+	}
+
+	#[test]
+	fn a_file_that_is_not_valid_utf8_is_skipped() {
+		let dir = repo();
+		std::fs::write(dir.path().join("src/blob.rs"), [0xff, 0xfe, 0x00, 0x01]).unwrap();
+		let (files, stamp) = collect_file_data(dir.path(), "rust", None, &[]);
+		assert!(
+			!displays(&files).contains(&"src/blob.rs"),
+			"unreadable candidates never reach the parser"
+		);
+		// It is skipped before it can be counted, so the stamp ignores it too.
+		assert_eq!(stamp.file_count, 2);
+	}
+
+	// --- Pass B: keyword broadening per language ---
+
+	#[test]
+	fn a_python_def_pattern_broadens_to_the_function_definition_kind() {
+		// The arity is wrong, so the structural pass finds nothing and the
+		// `def` keyword broadens the search to every function definition.
+		let files = vec![fd(
+			"app.py",
+			"@route(\"/\")\ndef handler():\n    return 1\n",
+		)];
+		let out = smart_search(&files, "def $N($A, $B, $C): $$$", "python", &[], None, None);
+		assert_eq!(out.matches.len(), 1, "{:?}", out.diagnostic);
+		let note = out.note.expect("a broadening note");
+		assert!(note.contains("[kind: function_definition]"), "{note}");
+		assert!(note.contains("function definitions"), "{note}");
+		assert!(
+			out.matches[0].text.contains("handler"),
+			"{}",
+			out.matches[0].text
+		);
+	}
+
+	#[test]
+	fn a_go_func_pattern_broadens_to_the_function_declaration_kind() {
+		let files = vec![fd("main.go", "package main\n\nfunc run() {}\n")];
+		let out = smart_search(&files, "func $N($A, $B) { $$$ }", "go", &[], None, None);
+		assert_eq!(out.matches.len(), 1, "{:?}", out.diagnostic);
+		let note = out.note.expect("a broadening note");
+		assert!(note.contains("[kind: function_declaration]"), "{note}");
+		assert!(
+			out.matches[0].text.contains("run"),
+			"{}",
+			out.matches[0].text
+		);
+	}
+
+	#[test]
+	fn a_typescript_class_pattern_broadens_to_the_class_declaration_kind() {
+		let files = vec![fd("app.ts", "class Widget {\n  render() {}\n}\n")];
+		let out = smart_search(
+			&files,
+			"class $N { constructor($$$) { $$$ } }",
+			"typescript",
+			&[],
+			None,
+			None,
+		);
+		assert_eq!(out.matches.len(), 1, "{:?}", out.diagnostic);
+		let note = out.note.expect("a broadening note");
+		assert!(note.contains("[kind: class_declaration]"), "{note}");
+	}
+
+	// --- Pass B: canonical kinds and contextual wrapping ---
+
+	#[test]
+	fn an_intent_word_is_mapped_to_the_canonical_kind_for_the_language() {
+		let files = vec![fd("a.rs", "fn main() {\n\thelper();\n}\nfn helper() {}\n")];
+		let out = smart_search(&files, "call", "rust", &[], None, None);
+		assert_eq!(out.matches.len(), 1, "{:?}", out.diagnostic);
+		let note = out.note.expect("a canonical-kind note");
+		assert!(note.contains("[kind: call_expression]"), "{note}");
+		assert!(note.contains("canonical rust kind for `call`"), "{note}");
+		assert_eq!(out.matches[0].line, 2);
+	}
+
+	#[test]
+	fn a_rust_type_expression_is_wrapped_in_a_type_alias_context() {
+		// `Arc<Mutex<$T>>` is not a standalone Rust item, so it only matches
+		// once the fallback wraps it as `type _ = ...;`.
+		let files = vec![fd(
+			"a.rs",
+			"pub struct Store {\n\tinner: Arc<Mutex<u32>>,\n}\n",
+		)];
+		let out = smart_search(&files, "Arc<Mutex<$T>>", "rust", &[], None, None);
+		assert_eq!(out.matches.len(), 1, "{:?}", out.diagnostic);
+		let note = out.note.expect("a context-wrap note");
+		assert!(note.contains("[context wrap:"), "{note}");
+		assert!(note.contains("generic_type"), "{note}");
+		assert_eq!(out.matches[0].line, 2);
+	}
+
+	#[test]
+	fn a_json_pair_pattern_falls_back_to_a_labelled_lexical_scan() {
+		// tree-sitter-json does not support metavariables, so neither the plain
+		// pattern nor the object-wrapped contextual strategy can match. The
+		// labelled lexical scan is what keeps the tool from answering empty.
+		let files = vec![fd("config.json", "{\n  \"key\": 7,\n  \"other\": 8\n}\n")];
+		let out = smart_search(&files, "\"key\": $V", "json", &[], None, None);
+		assert_eq!(out.matches.len(), 1);
+		assert_eq!(out.matches[0].line, 2);
+		let note = out.note.expect("a lexical fallback note");
+		assert!(note.contains("[lexical fallback]"), "{note}");
+		assert!(note.contains("not AST-verified"), "{note}");
+		assert!(out.diagnostic.is_some());
+	}
+
+	// --- Ranking ---
+
+	#[test]
+	fn matches_in_files_named_after_a_metavariable_are_ranked_first() {
+		// Base order is alphabetical by path, so `a_other.rs` would come first;
+		// the `$HELPER` metavariable boosts the file whose name mentions it.
+		let files = vec![
+			fd("a_other.rs", "fn a() { x.unwrap(); }\n"),
+			fd("b_helper.rs", "fn b() { y.unwrap(); }\n"),
+		];
+
+		let unranked = smart_search(&files, "$X.unwrap()", "rust", &[], None, None);
+		assert_eq!(unranked.matches[0].file, "a_other.rs");
+
+		let ranked = smart_search(&files, "$HELPER.unwrap()", "rust", &[], None, None);
+		assert_eq!(ranked.matches.len(), 2);
+		assert_eq!(ranked.matches[0].file, "b_helper.rs");
+		assert_eq!(ranked.matches[1].file, "a_other.rs");
+	}
+
+	// --- Diagnostics ---
+
+	#[test]
+	fn a_pattern_that_cannot_stand_alone_reports_the_parse_error_hint() {
+		// `pub struct $N { $$$ }` does not parse as a standalone Rust item
+		// (Pass B still rescues it by kind), so a total miss reports that.
+		let files = vec![fd("a.rs", "fn main() {}\n")];
+		let out = smart_search(&files, "pub struct $N { $$$ }", "rust", &[], None, None);
+		assert!(out.matches.is_empty());
+		assert!(out.note.is_none());
+
+		let diagnostic = out.diagnostic.expect("a diagnostic explains the miss");
+		assert!(
+			diagnostic.starts_with("No matches: pub struct $N { $$$ }"),
+			"{diagnostic}"
+		);
+		assert!(diagnostic.contains("parse_error=true"), "{diagnostic}");
+		assert!(diagnostic.contains("metavars=$N"), "{diagnostic}");
+		assert!(
+			diagnostic.contains("doesn't parse as standalone rust"),
+			"{diagnostic}"
+		);
+	}
+
+	#[test]
+	fn an_item_keyword_that_matches_nothing_suggests_its_tree_sitter_kind() {
+		// This one parses cleanly, so the diagnostic can offer the kind name
+		// instead of a parse hint.
+		let files = vec![fd("a.rs", "const A: u8 = 1;\n")];
+		let out = smart_search(&files, "fn helper() {}", "rust", &[], None, None);
+		assert!(out.matches.is_empty(), "{:?}", out.note);
+
+		let diagnostic = out.diagnostic.expect("a diagnostic explains the miss");
+		assert!(diagnostic.contains("parse_error=false"), "{diagnostic}");
+		assert!(diagnostic.contains("function definitions"), "{diagnostic}");
+		assert!(diagnostic.contains("`function_item`"), "{diagnostic}");
+	}
+
+	#[test]
+	fn an_intent_word_that_matches_nothing_suggests_the_canonical_kind() {
+		let files = vec![fd("a.rs", "fn main() {}\n")];
+		let out = smart_search(&files, "call", "rust", &[], None, None);
+		assert!(out.matches.is_empty(), "{:?}", out.note);
+
+		let diagnostic = out.diagnostic.expect("a diagnostic explains the miss");
+		assert!(
+			diagnostic.contains("canonical rust kind for this intent is 'call_expression'"),
+			"{diagnostic}"
+		);
+	}
+
+	#[test]
+	fn a_diagnostic_reports_the_metavariables_the_pattern_defined() {
+		let files = vec![fd("a.rs", "fn main() {}\n")];
+		let out = smart_search(&files, "$LEFT.frobnicate($RIGHT)", "rust", &[], None, None);
+		assert!(out.matches.is_empty());
+		let diagnostic = out.diagnostic.expect("a diagnostic explains the miss");
+		assert!(diagnostic.contains("$LEFT"), "{diagnostic}");
+		assert!(diagnostic.contains("$RIGHT"), "{diagnostic}");
+	}
+
+	// --- Symbol mode ---
+
+	#[test]
+	fn a_symbol_with_no_definition_falls_back_to_a_labelled_lexical_scan() {
+		let files = vec![fd(
+			"a.rs",
+			"// frobnicate is only mentioned here\nfn main() {}\n",
+		)];
+
+		let definitions = symbol_search(&files, "frobnicate", "rust", false);
+		assert_eq!(definitions.matches.len(), 1);
+		assert_eq!(definitions.matches[0].line, 1);
+		let note = definitions.note.expect("a lexical fallback note");
+		assert!(note.contains("[lexical fallback]"), "{note}");
+		assert!(note.contains("No definitions found"), "{note}");
+		assert!(definitions.diagnostic.is_none());
+
+		let references = symbol_search(&files, "frobnicate", "rust", true);
+		let note = references.note.expect("a lexical fallback note");
+		assert!(note.contains("No references found"), "{note}");
+	}
+
+	#[test]
+	fn a_symbol_too_short_to_scan_for_reports_a_diagnostic_instead() {
+		let files = vec![fd("a.rs", "fn helper() {}\n")];
+		let out = symbol_search(&files, "z*", "rust", false);
+		assert!(out.matches.is_empty());
+		assert!(out.note.is_none());
+
+		let diagnostic = out.diagnostic.expect("a diagnostic explains the miss");
+		assert!(
+			diagnostic.starts_with("No symbol definitions for `z*`"),
+			"{diagnostic}"
+		);
+		assert!(diagnostic.contains("1 files scanned"), "{diagnostic}");
+		assert!(diagnostic.contains("language: rust"), "{diagnostic}");
+	}
+
+	#[test]
+	fn symbol_references_include_the_definition_site_and_every_call() {
+		let files = vec![fd(
+			"a.rs",
+			"fn flush() {}\nfn main() {\n\tflush();\n\tflush();\n}\n",
+		)];
+		let out = symbol_search(&files, "flush", "rust", true);
+		assert_eq!(out.matches.len(), 3, "{:?}", out.diagnostic);
+		assert_eq!(out.note.unwrap(), "[symbol references: flush]");
+		assert_eq!(
+			out.matches.iter().map(|m| m.line).collect::<Vec<_>>(),
+			vec![1, 3, 4]
+		);
 	}
 }

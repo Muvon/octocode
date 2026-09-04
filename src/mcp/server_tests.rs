@@ -18,6 +18,7 @@ mod tests {
 	use crate::grep::GrepMatch;
 	use crate::mcp::structural::FileData;
 	use serde_json::json;
+	use tempfile::TempDir;
 
 	fn grep_match(file: &str, line: usize, text: &str) -> GrepMatch {
 		GrepMatch {
@@ -251,5 +252,449 @@ mod tests {
 		let params: GraphRagParams =
 			serde_json::from_value(json!({"operation": "overview"})).unwrap();
 		assert_eq!(params.operation, "overview");
+	}
+
+	#[test]
+	fn a_non_string_path_filter_is_rejected() {
+		assert!(serde_json::from_value::<StructuralSearchParams>(
+			json!({"language": "rust", "symbol": "x", "paths": 7})
+		)
+		.is_err());
+	}
+
+	#[test]
+	fn a_type_union_without_a_null_branch_is_left_alone() {
+		let mut schema = json!({"type": ["integer", "string"]});
+		strip_null_variants(&mut schema);
+		assert_eq!(schema["type"], json!(["integer", "string"]));
+	}
+
+	#[test]
+	fn a_result_set_at_the_hard_cap_is_marked_as_truncated() {
+		let matches: Vec<_> = (1..=crate::mcp::structural::MAX_TOTAL_MATCHES)
+			.map(|i| grep_match("src/a.rs", i, "hit"))
+			.collect();
+		let out = format_structural_response(&matches, None, None, 0, 5, 0, &[]);
+		let footer = out.lines().next_back().unwrap_or_default();
+		assert_eq!(
+			footer,
+			"Showing 1–5 of 10000+ matches across 1 files. Next page: offset=5. \
+			 Narrow with `paths`, `inside`, `has`, or metavariable `constraints`."
+		);
+	}
+
+	// -----------------------------------------------------------------------
+	// Per-repo handler (`new_repo_core`): providers and tool router only — no
+	// store, no LSP, no background threads.
+	// -----------------------------------------------------------------------
+
+	/// A repo directory containing `files`, plus a handler serving it.
+	fn repo_server(files: &[(&str, &str)]) -> (TempDir, McpServer) {
+		let dir = TempDir::new().unwrap();
+		for (name, content) in files {
+			std::fs::write(dir.path().join(name), content).unwrap();
+		}
+		let mut config = Config::default();
+		config.index.mcp_index = false;
+		let server = McpServer::new_repo_core(config, dir.path().to_path_buf());
+		(dir, server)
+	}
+
+	fn structural(arguments: serde_json::Value) -> Parameters<StructuralSearchParams> {
+		Parameters(serde_json::from_value(arguments).expect("valid structural_search arguments"))
+	}
+
+	/// Assert that no nullable form schemars emits for `Option<T>` survived.
+	fn assert_no_null_variants(value: &serde_json::Value, path: &str) {
+		match value {
+			serde_json::Value::Object(obj) => {
+				if let Some(types) = obj.get("type").and_then(|t| t.as_array()) {
+					assert!(
+						!types.iter().any(|t| t.as_str() == Some("null")),
+						"{path} still declares a nullable type array"
+					);
+				}
+				for key in ["anyOf", "oneOf"] {
+					if let Some(variants) = obj.get(key).and_then(|v| v.as_array()) {
+						assert!(
+							!variants
+								.iter()
+								.any(|v| v.get("type").and_then(|t| t.as_str()) == Some("null")),
+							"{path}.{key} still has a null branch"
+						);
+					}
+				}
+				for (key, nested) in obj {
+					assert_no_null_variants(nested, &format!("{path}.{key}"));
+				}
+			}
+			serde_json::Value::Array(items) => {
+				for (i, item) in items.iter().enumerate() {
+					assert_no_null_variants(item, &format!("{path}[{i}]"));
+				}
+			}
+			_ => {}
+		}
+	}
+
+	#[test]
+	fn a_repo_core_handler_exposes_every_tool_except_lsp() {
+		let (_dir, server) = repo_server(&[]);
+		let mut names: Vec<String> = server
+			.list_tool_defs()
+			.iter()
+			.map(|t| t.name.to_string())
+			.collect();
+		names.sort();
+		assert_eq!(
+			names,
+			vec![
+				"graphrag",
+				"semantic_search",
+				"structural_search",
+				"view_signatures"
+			]
+		);
+	}
+
+	#[test]
+	fn published_tool_schemas_carry_no_nullable_variants() {
+		let (_dir, server) = repo_server(&[]);
+		let tools = server.list_tool_defs();
+		assert!(!tools.is_empty());
+
+		for tool in &tools {
+			let schema = serde_json::Value::Object((*tool.input_schema).clone());
+			assert_no_null_variants(&schema, tool.name.as_ref());
+		}
+
+		// The hand-written union on `query` has no null branch, so it must
+		// survive stripping intact.
+		let semantic = tools
+			.iter()
+			.find(|t| t.name.as_ref() == "semantic_search")
+			.expect("semantic_search is published");
+		let branches = semantic.input_schema["properties"]["query"]["anyOf"]
+			.as_array()
+			.expect("query keeps its anyOf union");
+		assert_eq!(branches.len(), 2);
+	}
+
+	#[test]
+	fn the_server_info_warns_when_in_process_indexing_is_disabled() {
+		let (_dir, server) = repo_server(&[]);
+		let info = server.get_info();
+
+		let instructions = info.instructions.as_deref().unwrap();
+		assert!(
+			instructions.starts_with("NOTE: in-process indexing is disabled"),
+			"{instructions}"
+		);
+		assert_eq!(info.server_info.name, "octocode-mcp");
+		assert_eq!(info.server_info.version, env!("CARGO_PKG_VERSION"));
+		assert_eq!(info.protocol_version, ProtocolVersion::V_2026_07_28);
+		assert!(
+			info.capabilities.tools.is_some(),
+			"the tool capability must be advertised"
+		);
+	}
+
+	#[test]
+	fn the_server_info_describes_the_live_graph_when_indexing_is_enabled() {
+		let dir = TempDir::new().unwrap();
+		let mut config = Config::default();
+		config.index.mcp_index = true;
+		let server = McpServer::new_repo_core(config, dir.path().to_path_buf());
+
+		let instructions = server.get_info().instructions.unwrap();
+		assert!(
+			instructions.starts_with("This server provides semantic search"),
+			"{instructions}"
+		);
+	}
+
+	// -----------------------------------------------------------------------
+	// structural_search argument validation and dispatch
+	// -----------------------------------------------------------------------
+
+	#[tokio::test]
+	async fn structural_search_requires_exactly_one_query_mode() {
+		let (_dir, server) = repo_server(&[("a.rs", "fn a() {}\n")]);
+
+		let err = server
+			.structural_search(structural(json!({"language": "rust"})))
+			.await
+			.unwrap_err();
+		assert!(err.contains("(got: none)"), "{err}");
+
+		let err = server
+			.structural_search(structural(json!({
+				"language": "rust", "pattern": "$X.unwrap()", "symbol": "a"
+			})))
+			.await
+			.unwrap_err();
+		assert!(err.contains("(got: pattern, symbol)"), "{err}");
+	}
+
+	#[tokio::test]
+	async fn a_rewrite_without_a_pattern_is_rejected() {
+		let (_dir, server) = repo_server(&[("a.rs", "fn a() {}\n")]);
+		let err = server
+			.structural_search(structural(json!({
+				"language": "rust", "symbol": "a", "rewrite": "$X"
+			})))
+			.await
+			.unwrap_err();
+		assert_eq!(err, "`rewrite` requires `pattern`.");
+	}
+
+	#[tokio::test]
+	async fn an_unparseable_metavariable_constraint_names_the_variable() {
+		let (_dir, server) = repo_server(&[("a.rs", "fn a() {}\n")]);
+		let err = server
+			.structural_search(structural(json!({
+				"language": "rust", "symbol": "a", "constraints": {"NAME": "["}
+			})))
+			.await
+			.unwrap_err();
+		assert!(err.starts_with("Invalid regex for $NAME:"), "{err}");
+	}
+
+	#[tokio::test]
+	async fn no_candidate_files_explains_which_knob_to_turn() {
+		let (_dir, server) = repo_server(&[("a.rs", "fn a() {}\n")]);
+
+		let out = server
+			.structural_search(structural(json!({"language": "go", "symbol": "a"})))
+			.await
+			.unwrap();
+		assert!(
+			out.starts_with("No go files found. Check that `language`"),
+			"{out}"
+		);
+
+		let out = server
+			.structural_search(structural(json!({
+				"language": "rust", "symbol": "a", "paths": "does/not/exist"
+			})))
+			.await
+			.unwrap();
+		assert!(
+			out.starts_with("No rust files found matching paths [\"does/not/exist\"]."),
+			"{out}"
+		);
+	}
+
+	#[tokio::test]
+	async fn a_symbol_wildcard_finds_every_definition_and_counts_the_files() {
+		let (_dir, server) = repo_server(&[
+			("a.rs", "fn handle_alpha() {}\n"),
+			("b.rs", "fn handle_beta() {}\n"),
+			("c.rs", "fn unrelated() {}\n"),
+		]);
+
+		let out = server
+			.structural_search(structural(
+				json!({"language": "rust", "symbol": "handle_*"}),
+			))
+			.await
+			.unwrap();
+		assert!(out.contains("a.rs"), "{out}");
+		assert!(out.contains("b.rs"), "{out}");
+		assert!(!out.contains("c.rs"), "{out}");
+		assert!(out.ends_with("2 matches in 2 files."), "{out}");
+	}
+
+	#[tokio::test]
+	async fn an_unchanged_repeat_query_is_served_from_the_cache() {
+		let (_dir, server) = repo_server(&[("a.rs", "fn handle_alpha() {}\n")]);
+		let arguments = json!({"language": "rust", "symbol": "handle_alpha"});
+
+		let first = server
+			.structural_search(structural(arguments.clone()))
+			.await
+			.unwrap();
+		assert!(first.contains("a.rs"), "{first}");
+
+		// Swap the cached matches while leaving the fingerprint and repo stamp
+		// intact: an identical follow-up must replay the cache, not search again.
+		{
+			let mut cache = server.structural_cache.write();
+			let entry = cache.as_mut().expect("the first call fills the cache");
+			assert_eq!(entry.matches.len(), 1);
+			entry.matches = vec![grep_match("cached.rs", 42, "fn from_the_cache() {}")];
+			entry.note = Some("replayed".to_string());
+		}
+
+		let second = server
+			.structural_search(structural(arguments))
+			.await
+			.unwrap();
+		assert!(second.starts_with("replayed\n"), "{second}");
+		assert!(second.contains("cached.rs"), "{second}");
+	}
+
+	// -----------------------------------------------------------------------
+	// structural_search rewrite mode
+	// -----------------------------------------------------------------------
+
+	const REWRITE_SOURCE: &str = "fn main() {\n\tlet v = load().unwrap();\n}\n";
+
+	#[tokio::test]
+	async fn a_rewrite_previews_the_diff_without_touching_the_file() {
+		let (dir, server) = repo_server(&[("a.rs", REWRITE_SOURCE)]);
+
+		let out = server
+			.structural_search(structural(json!({
+				"language": "rust",
+				"pattern": "$X.unwrap()",
+				"rewrite": "$X.expect(\"boom\")"
+			})))
+			.await
+			.unwrap();
+
+		assert!(
+			out.ends_with("1 replacements across 1 files (preview, set update_all=true to apply)."),
+			"{out}"
+		);
+		assert_eq!(
+			std::fs::read_to_string(dir.path().join("a.rs")).unwrap(),
+			REWRITE_SOURCE,
+			"a preview must not write to disk"
+		);
+	}
+
+	#[tokio::test]
+	async fn applying_a_rewrite_updates_the_file_on_disk() {
+		let (dir, server) = repo_server(&[("a.rs", REWRITE_SOURCE)]);
+
+		let out = server
+			.structural_search(structural(json!({
+				"language": "rust",
+				"pattern": "$X.unwrap()",
+				"rewrite": "$X.expect(\"boom\")",
+				"update_all": true
+			})))
+			.await
+			.unwrap();
+
+		assert_eq!(out, "Applied 1 replacements across 1 files.");
+		let on_disk = std::fs::read_to_string(dir.path().join("a.rs")).unwrap();
+		assert!(on_disk.contains("load().expect(\"boom\")"), "{on_disk}");
+	}
+
+	#[tokio::test]
+	async fn a_rewrite_with_nothing_to_match_reports_no_matches() {
+		let (dir, server) = repo_server(&[("a.rs", REWRITE_SOURCE)]);
+
+		let out = server
+			.structural_search(structural(json!({
+				"language": "rust",
+				"pattern": "$X.no_such_method()",
+				"rewrite": "$X.expect(\"boom\")",
+				"update_all": true
+			})))
+			.await
+			.unwrap();
+
+		assert_eq!(out, "No matches found.");
+		assert_eq!(
+			std::fs::read_to_string(dir.path().join("a.rs")).unwrap(),
+			REWRITE_SOURCE
+		);
+	}
+
+	// -----------------------------------------------------------------------
+	// Background service lifecycle
+	// -----------------------------------------------------------------------
+
+	/// Four tasks that would each report in after 500ms. Aborting them drops
+	/// their sender, so the channel closes without ever delivering a message.
+	fn spawned_services() -> (BackgroundServices, mpsc::Receiver<()>) {
+		let (tx, rx) = mpsc::channel(4);
+		let mut handles: Vec<tokio::task::JoinHandle<()>> = (0..4)
+			.map(|_| {
+				let tx = tx.clone();
+				tokio::spawn(async move {
+					sleep(Duration::from_millis(500)).await;
+					let _ = tx.send(()).await;
+					std::future::pending::<()>().await;
+				})
+			})
+			.collect();
+		drop(tx);
+
+		let bg = BackgroundServices {
+			watcher_handle: handles.pop(),
+			index_handle: handles.pop(),
+			indexing_handle: handles.pop(),
+			lsp_init_handle: handles.pop(),
+		};
+		(bg, rx)
+	}
+
+	#[test]
+	fn an_inert_bundle_owns_no_tasks() {
+		let bg = BackgroundServices::none();
+		assert!(bg.watcher_handle.is_none());
+		assert!(bg.index_handle.is_none());
+		assert!(bg.indexing_handle.is_none());
+		assert!(bg.lsp_init_handle.is_none());
+	}
+
+	#[tokio::test]
+	async fn starting_background_services_owns_the_watcher_and_indexing_tasks() {
+		crate::store::mod_tests::use_offline_test_config();
+
+		// The database lives outside the watched directory: LanceDB's own writes
+		// would otherwise look like source changes to the watcher.
+		let db = TempDir::new().unwrap();
+		let repo = TempDir::new().unwrap();
+		let store = Arc::new(Store::new_with_path(db.path().join("db")).await.unwrap());
+
+		let bg = start_background_services(
+			Config::default(),
+			store,
+			repo.path().to_path_buf(),
+			true,
+			false,
+			None,
+			crate::indexer::graphrag::runtime::RuntimeGraphCache::default(),
+		)
+		.await
+		.expect("background services must start on an empty repository");
+
+		assert!(bg.watcher_handle.is_some());
+		assert!(bg.index_handle.is_some());
+		assert!(bg.indexing_handle.is_some());
+		assert!(
+			bg.lsp_init_handle.is_none(),
+			"the LSP initializer is attached by the caller, not here"
+		);
+		// Dropping the bundle here aborts all three tasks.
+	}
+
+	#[tokio::test]
+	async fn shutting_down_aborts_every_background_task() {
+		let (bg, mut rx) = spawned_services();
+		bg.shutdown().await;
+
+		let outcome = tokio::time::timeout(Duration::from_secs(5), rx.recv()).await;
+		assert_eq!(
+			outcome.expect("the channel must close once every task is aborted"),
+			None
+		);
+	}
+
+	#[tokio::test]
+	async fn dropping_the_bundle_aborts_every_background_task() {
+		let (bg, mut rx) = spawned_services();
+		drop(bg);
+
+		let outcome = tokio::time::timeout(Duration::from_secs(5), rx.recv()).await;
+		assert_eq!(
+			outcome.expect("the channel must close once every task is aborted"),
+			None
+		);
 	}
 }

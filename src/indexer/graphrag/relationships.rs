@@ -87,10 +87,19 @@ impl RelationshipDiscovery {
 			);
 		}
 
-		// Deduplicate relationships (borrow the fields — no per-comparison clones;
-		// unstable is fine since dedup only needs equal keys grouped together).
+		// Deduplicate relationships (borrow the fields — no per-comparison clones).
+		// `description` joins the sort key but NOT the dedup key: duplicates still
+		// collapse per (source, target, relation_type), while the description that
+		// survives is the lexicographically smallest instead of whichever order the
+		// unstable sort happened to leave it in. Without it two indexes of the same
+		// commit can label the same edge differently.
 		relationships.sort_unstable_by(|a, b| {
-			(&a.source, &a.target, &a.relation_type).cmp(&(&b.source, &b.target, &b.relation_type))
+			(&a.source, &a.target, &a.relation_type, &a.description).cmp(&(
+				&b.source,
+				&b.target,
+				&b.relation_type,
+				&b.description,
+			))
 		});
 		relationships.dedup_by(|a, b| {
 			a.source == b.source && a.target == b.target && a.relation_type == b.relation_type
@@ -190,28 +199,13 @@ impl RelationshipDiscovery {
 							provenance: crate::indexer::graphrag::types::Provenance::Extracted,
 						});
 
-						// Code exports may imply a reverse edge. Markdown headings are
-						// not exports, so document links remain directional References.
-						if source_file.language != "markdown" {
-							for export_item in &target_node.exports {
-								if import_path.contains(export_item) || export_item == "*" {
-									relationships.push(CodeRelationship {
-										source: target_node.id.clone(),
-										target: source_file.id.clone(),
-										relation_type:
-											crate::indexer::graphrag::types::RelationType::Imports,
-										description: format!(
-											"Exports {} to {}",
-											export_item, source_file.path
-										),
-										confidence: 0.9,
-										weight: 0.8,
-										provenance:
-											crate::indexer::graphrag::types::Provenance::Inferred,
-									});
-								}
-							}
-						}
+						// No reverse edge for the target's exports. An `Imports` edge
+						// pointing target -> source asserts the target imports the
+						// source, which is false, and it was matched by testing whether
+						// the import path merely *contained* a bare export name (with
+						// `*` matching everything). That is the phantom link between
+						// two files that share an import. The forward edge above
+						// already records the real relationship.
 					}
 				}
 			}

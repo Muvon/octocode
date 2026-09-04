@@ -197,4 +197,17 @@ mod tests {
 		let files = GitUtils::get_changed_files_for_commit(dir.path(), &root).unwrap();
 		assert_eq!(files, vec!["first.txt".to_string()]);
 	}
+
+	#[test]
+	fn a_diff_against_an_unreachable_commit_fails_instead_of_reporting_no_changes() {
+		// A last-indexed commit can stop being reachable after a rebase, squash,
+		// force-push or `git gc`. Answering "nothing changed" there makes the
+		// caller index zero files and still stamp the new commit, leaving the
+		// index permanently stale.
+		let dir = repo();
+		let missing = "0000000000000000000000000000000000000000";
+		let err = GitUtils::get_changed_files_since_commit(dir.path(), missing)
+			.expect_err("an unreachable commit must be an error");
+		assert!(err.to_string().contains("git diff"), "{err}");
+	}
 }

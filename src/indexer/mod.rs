@@ -17,8 +17,6 @@
 
 pub mod batch_processor; // Batch processing utilities for embedding operations
 pub mod branch; // Branch-aware delta indexing
-#[cfg(test)]
-mod branch_tests;
 pub mod code_region_extractor; // Code region extraction and smart merging utilities
 pub mod commits; // Commit history indexing
 pub mod contextual; // Contextual chunk enrichment for improved semantic search

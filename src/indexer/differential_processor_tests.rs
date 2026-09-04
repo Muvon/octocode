@@ -338,4 +338,242 @@ pub fn beta() -> u32 {
 		.unwrap();
 		assert!(second.is_empty(), "got {second:?}");
 	}
+
+	/// Full differential run that also exposes the GraphRAG collection.
+	async fn process_rust_full(
+		store: &Store,
+		config: &Config,
+		contents: &str,
+		file_path: &str,
+	) -> (Vec<CodeBlock>, Vec<CodeBlock>, crate::state::SharedState) {
+		let state = state(false);
+		let ctx = ProcessFileContext {
+			store,
+			config,
+			state: state.clone(),
+		};
+		let mut batch = Vec::new();
+		let mut all_blocks = Vec::new();
+		let mut file_context = FileContextMap::new();
+		process_file_differential(
+			&ctx,
+			contents,
+			file_path,
+			"rust",
+			&mut batch,
+			&mut [],
+			&mut all_blocks,
+			&mut file_context,
+		)
+		.await
+		.expect("processing must succeed");
+		(batch, all_blocks, state)
+	}
+
+	#[tokio::test]
+	async fn graphrag_collects_every_new_block_and_counts_it_in_state() {
+		let (_dir, store) = test_store().await;
+		let mut config = Config::default();
+		config.graphrag.enabled = true;
+
+		let (batch, all_blocks, state) =
+			process_rust_full(&store, &config, RUST_SOURCE, "src/lib.rs").await;
+
+		assert_eq!(all_blocks.len(), batch.len());
+		assert_eq!(state.read().graphrag_blocks, batch.len());
+	}
+
+	#[tokio::test]
+	async fn graphrag_refetches_blocks_that_are_already_stored() {
+		let (_dir, store) = test_store().await;
+		let mut config = Config::default();
+
+		// First pass with GraphRAG off just fills the store.
+		let (first, _) = process_rust(&store, &config, RUST_SOURCE, false).await;
+		let embeddings: Vec<_> = (0..first.len()).map(|i| embedding(CODE_DIM, i)).collect();
+		store.store_code_blocks(&first, &embeddings).await.unwrap();
+
+		config.graphrag.enabled = true;
+		let (batch, all_blocks, state) =
+			process_rust_full(&store, &config, RUST_SOURCE, "src/lib.rs").await;
+
+		assert!(batch.is_empty(), "stored blocks must not be re-embedded");
+		assert_eq!(
+			all_blocks.len(),
+			first.len(),
+			"the graph still needs every block, so they are read back from the store"
+		);
+		assert_eq!(state.read().graphrag_blocks, first.len());
+	}
+
+	#[tokio::test]
+	async fn a_region_that_disappears_has_its_stored_block_removed() {
+		let (_dir, store) = test_store().await;
+		let config = Config::default();
+
+		let (first, _) = process_rust(&store, &config, RUST_SOURCE, false).await;
+		let embeddings: Vec<_> = (0..first.len()).map(|i| embedding(CODE_DIM, i)).collect();
+		store.store_code_blocks(&first, &embeddings).await.unwrap();
+		let before = store
+			.get_file_blocks_metadata("src/lib.rs", "code_blocks")
+			.await
+			.unwrap();
+		assert_eq!(before.len(), first.len());
+
+		// `beta` is gone; only its block must be dropped.
+		let shrunk = "use std::fs;\n\npub fn alpha() -> u32 {\n\tlet first = 1;\n\tlet second = first + 1;\n\tfirst + second\n}\n";
+		process_rust(&store, &config, shrunk, false).await;
+
+		let after = store
+			.get_file_blocks_metadata("src/lib.rs", "code_blocks")
+			.await
+			.unwrap();
+		assert!(
+			after.len() < before.len(),
+			"stale blocks survived: {before:?} -> {after:?}"
+		);
+	}
+
+	#[tokio::test]
+	async fn the_legacy_path_emits_blocks_without_pruning_stale_ones() {
+		let (_dir, store) = test_store().await;
+		let config = Config::default();
+		let ctx = ProcessFileContext {
+			store: &store,
+			config: &config,
+			state: state(false),
+		};
+
+		let mut batch = Vec::new();
+		let mut all_blocks = Vec::new();
+		let mut file_context = FileContextMap::new();
+		process_file(
+			&ctx,
+			RUST_SOURCE,
+			"src/legacy.rs",
+			"rust",
+			&mut batch,
+			&mut [],
+			&mut all_blocks,
+			&mut file_context,
+		)
+		.await
+		.expect("processing must succeed");
+
+		assert!(batch.len() >= 2, "got {} blocks", batch.len());
+		assert!(batch.iter().all(|b| b.path == "src/legacy.rs"));
+		// GraphRAG is off, so nothing is cloned into the graph collection.
+		assert!(all_blocks.is_empty());
+
+		let embeddings: Vec<_> = (0..batch.len()).map(|i| embedding(CODE_DIM, i)).collect();
+		store.store_code_blocks(&batch, &embeddings).await.unwrap();
+
+		// The legacy path only skips known hashes; it never removes stale rows.
+		let mut second = Vec::new();
+		let mut second_all = Vec::new();
+		process_file(
+			&ctx,
+			"pub fn alpha() -> u32 {\n\t1\n}\n",
+			"src/legacy.rs",
+			"rust",
+			&mut second,
+			&mut [],
+			&mut second_all,
+			&mut file_context,
+		)
+		.await
+		.unwrap();
+		assert_eq!(
+			store
+				.get_file_blocks_metadata("src/legacy.rs", "code_blocks")
+				.await
+				.unwrap()
+				.len(),
+			batch.len()
+		);
+	}
+
+	#[tokio::test]
+	async fn an_unsupported_language_is_skipped_by_the_legacy_path_too() {
+		let (_dir, store) = test_store().await;
+		let config = Config::default();
+		let ctx = ProcessFileContext {
+			store: &store,
+			config: &config,
+			state: state(false),
+		};
+		let mut batch = Vec::new();
+		let mut all_blocks = Vec::new();
+		let mut file_context = FileContextMap::new();
+		process_file(
+			&ctx,
+			"whatever",
+			"a.zig",
+			"zig",
+			&mut batch,
+			&mut [],
+			&mut all_blocks,
+			&mut file_context,
+		)
+		.await
+		.expect("an unknown language must not be an error");
+		assert!(batch.is_empty());
+		assert!(all_blocks.is_empty());
+	}
+
+	#[tokio::test]
+	async fn a_markdown_section_that_disappears_has_its_block_removed() {
+		let (_dir, store) = test_store().await;
+		let mut config = Config::default();
+		// Bottom-up chunking merges small sections; a tight budget keeps the two
+		// sections in separate blocks so pruning is observable.
+		config.index.chunk_size = 200;
+		config.index.chunk_overlap = 0;
+
+		let kept =
+			"# Title\n\nThe introduction paragraph is deliberately long enough that it fills \
+			the chunk budget on its own and is never merged with the section that follows it here.\n";
+		let removed =
+			"\n## Removed\n\nThis second section is also long enough to stand on its own as \
+			a separate chunk, so deleting it must delete exactly one stored document block.\n";
+
+		let mut first = Vec::new();
+		process_markdown_file_differential(
+			&store,
+			&format!("{kept}{removed}"),
+			"doc.md",
+			&mut first,
+			&config,
+			state(false),
+		)
+		.await
+		.unwrap();
+		assert!(first.len() >= 2, "got {} blocks", first.len());
+		let embeddings: Vec<_> = (0..first.len()).map(|i| embedding(TEXT_DIM, i)).collect();
+		store
+			.store_document_blocks(&first, &embeddings)
+			.await
+			.unwrap();
+
+		let mut second = Vec::new();
+		process_markdown_file_differential(
+			&store,
+			kept,
+			"doc.md",
+			&mut second,
+			&config,
+			state(false),
+		)
+		.await
+		.unwrap();
+
+		let remaining = store
+			.get_file_blocks_metadata("doc.md", "document_blocks")
+			.await
+			.unwrap();
+		assert!(
+			remaining.len() < first.len(),
+			"the removed section must be pruned: {remaining:?}"
+		);
+	}
 }

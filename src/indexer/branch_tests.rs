@@ -14,7 +14,7 @@
 
 #[cfg(test)]
 mod tests {
-	use crate::indexer::branch::*;
+	use super::super::*;
 	use std::path::Path;
 	use std::process::Command;
 	use tempfile::TempDir;
@@ -74,12 +74,39 @@ mod tests {
 	}
 
 	#[test]
+	fn a_slash_in_a_branch_name_becomes_a_double_dash() {
+		assert_eq!(sanitize_branch_name("feature/foo"), "feature--foo");
+		assert_eq!(sanitize_branch_name("fix/deep/nested"), "fix--deep--nested");
+		assert_eq!(sanitize_branch_name("no-slash"), "no-slash");
+	}
+
+	#[test]
+	fn sanitizing_round_trips_for_ordinary_branch_names() {
+		for name in ["feature/foo", "main", "fix/a/b/c", "simple"] {
+			assert_eq!(desanitize_branch_name(&sanitize_branch_name(name)), name);
+		}
+	}
+
+	#[test]
+	fn desanitizing_is_lossy_for_a_name_that_already_contains_a_double_dash() {
+		// Documented limitation: desanitize is only a display hint. The canonical
+		// branch name lives in the manifest, which is what callers must trust.
+		assert_eq!(sanitize_branch_name("wip--x"), "wip--x");
+		assert_eq!(desanitize_branch_name("wip--x"), "wip/x");
+	}
+
+	#[test]
 	fn overridden_paths_covers_changed_and_deleted_files() {
 		let manifest = manifest(&["a.rs", "b.rs"], &["c.rs"], "");
 		let overridden = manifest.overridden_paths();
 		assert_eq!(overridden.len(), 3);
 		assert!(overridden.contains("a.rs"));
 		assert!(overridden.contains("c.rs"));
+	}
+
+	#[test]
+	fn a_branch_that_changed_nothing_overrides_nothing() {
+		assert!(manifest(&[], &[], "").overridden_paths().is_empty());
 	}
 
 	#[test]
@@ -108,9 +135,17 @@ mod tests {
 		save_manifest(&branch_dir, &original).unwrap();
 
 		let loaded = load_manifest(&branch_dir).unwrap().expect("manifest");
+		assert_eq!(loaded.version, 2);
 		assert_eq!(loaded.branch_name, "feature");
+		assert_eq!(loaded.base_branch, "main");
+		assert_eq!(loaded.base_commit, "aaa");
+		assert_eq!(loaded.branch_commit, "bbb");
 		assert_eq!(loaded.changed_paths, vec!["a.rs".to_string()]);
+		assert_eq!(loaded.deleted_paths, vec!["b.rs".to_string()]);
+		assert_eq!(loaded.indexed_at, 1_700_000_000);
+		assert_eq!(loaded.fork_point, "ccc");
 		assert_eq!(loaded.base_db_commit, "abc123");
+		assert_eq!(loaded.remote_base_observed, "");
 	}
 
 	#[test]
@@ -167,6 +202,57 @@ mod tests {
 	}
 
 	#[test]
+	fn nothing_exists_in_a_directory_that_is_not_a_repository() {
+		let dir = TempDir::new().unwrap();
+		assert!(!branch_exists_in_git(dir.path(), "main"));
+	}
+
+	#[test]
+	fn the_committed_diff_lists_every_touched_path() {
+		let dir = repo();
+		let mut all = get_diff_files(dir.path(), "main", None).unwrap();
+		all.sort();
+		assert_eq!(all, vec!["added.txt", "gone.txt", "keep.txt"]);
+	}
+
+	#[test]
+	fn the_delete_filter_narrows_the_diff_to_removed_paths() {
+		let dir = repo();
+		assert_eq!(
+			get_diff_files(dir.path(), "main", Some("D")).unwrap(),
+			vec!["gone.txt".to_string()]
+		);
+	}
+
+	#[test]
+	fn a_diff_against_an_unresolvable_ref_reports_the_range() {
+		let dir = repo();
+		let err = get_diff_files(dir.path(), "no-such-branch", None)
+			.expect_err("unknown ref must fail")
+			.to_string();
+		assert!(err.contains("no-such-branch...HEAD"), "{err}");
+	}
+
+	#[test]
+	fn a_clean_checkout_has_no_working_tree_changes() {
+		let dir = repo();
+		assert!(get_working_tree_changes(dir.path()).unwrap().is_empty());
+	}
+
+	#[test]
+	fn staged_unstaged_and_untracked_files_are_all_reported() {
+		let dir = repo();
+		std::fs::write(dir.path().join("keep.txt"), "edited again\n").unwrap();
+		std::fs::write(dir.path().join("staged.txt"), "staged\n").unwrap();
+		git(dir.path(), &["add", "staged.txt"]);
+		std::fs::write(dir.path().join("untracked.txt"), "new\n").unwrap();
+
+		let mut changes = get_working_tree_changes(dir.path()).unwrap();
+		changes.sort();
+		assert_eq!(changes, vec!["keep.txt", "staged.txt", "untracked.txt"]);
+	}
+
+	#[test]
 	fn the_delta_separates_changed_from_deleted_files() {
 		let dir = repo();
 		let (changed, deleted) = compute_branch_delta(dir.path(), "main").unwrap();
@@ -192,6 +278,15 @@ mod tests {
 	}
 
 	#[test]
+	fn the_default_branch_has_an_empty_delta_against_itself() {
+		let dir = repo();
+		git(dir.path(), &["checkout", "-q", "main"]);
+		let (changed, deleted) = compute_branch_delta(dir.path(), "main").unwrap();
+		assert!(changed.is_empty(), "{changed:?}");
+		assert!(deleted.is_empty(), "{deleted:?}");
+	}
+
+	#[test]
 	fn a_delta_against_an_unknown_base_is_an_error() {
 		let dir = repo();
 		assert!(compute_branch_delta(dir.path(), "no-such-branch").is_err());
@@ -209,6 +304,23 @@ mod tests {
 		let merged = get_merged_branches(dir.path(), "main").unwrap();
 		assert!(merged.contains(&"feature".to_string()), "{merged:?}");
 		assert!(!merged.contains(&"main".to_string()));
+	}
+
+	#[test]
+	fn an_unmerged_branch_is_not_listed_as_merged() {
+		let dir = repo();
+		assert_eq!(
+			get_merged_branches(dir.path(), "main").unwrap(),
+			Vec::<String>::new()
+		);
+	}
+
+	#[test]
+	fn a_failing_branch_listing_yields_no_merged_branches() {
+		// Not a repository: git exits non-zero, which is treated as "nothing
+		// merged" rather than an error so pruning stays a no-op.
+		let dir = TempDir::new().unwrap();
+		assert!(get_merged_branches(dir.path(), "main").unwrap().is_empty());
 	}
 
 	#[test]
@@ -238,6 +350,21 @@ mod tests {
 		let (branch_dir, manifest) = resolve_branch_state(project.path(), "feature").unwrap();
 		assert!(branch_dir.to_string_lossy().contains("feature"));
 		assert!(manifest.is_none());
+	}
+
+	#[test]
+	fn resolving_branch_state_returns_the_manifest_once_indexed() {
+		let project = TempDir::new().unwrap();
+		let branch_dir = crate::storage::get_branch_dir(project.path(), "feature/x").unwrap();
+		save_manifest(&branch_dir, &manifest(&["a.rs"], &[], "abc123")).unwrap();
+
+		let (resolved_dir, loaded) = resolve_branch_state(project.path(), "feature/x").unwrap();
+		assert_eq!(resolved_dir, branch_dir);
+		let loaded = loaded.expect("manifest must be loaded");
+		assert_eq!(loaded.changed_paths, vec!["a.rs".to_string()]);
+		assert_eq!(loaded.base_db_commit, "abc123");
+
+		delete_branch_index(project.path(), "feature/x").unwrap();
 	}
 
 	#[test]
@@ -281,5 +408,176 @@ mod tests {
 		assert!(list_indexed_branches(project.path()).unwrap().is_empty());
 
 		std::fs::remove_dir_all(&branches_dir).ok();
+	}
+
+	#[test]
+	fn pruning_keeps_a_branch_that_still_exists_and_is_unmerged() {
+		let dir = repo();
+		let project = TempDir::new().unwrap();
+		let branches_dir = crate::storage::get_branches_dir(project.path()).unwrap();
+		let mut m = manifest(&[], &[], "");
+		m.branch_name = "feature".to_string();
+		save_manifest(&branches_dir.join("feature"), &m).unwrap();
+
+		assert!(prune_branches(project.path(), dir.path(), false)
+			.unwrap()
+			.is_empty());
+		assert_eq!(list_indexed_branches(project.path()).unwrap().len(), 1);
+
+		std::fs::remove_dir_all(&branches_dir).ok();
+	}
+
+	mod store_backed {
+		use super::super::super::*;
+		use super::{git, repo};
+		use crate::config::Config;
+		use crate::state::create_shared_state;
+		use crate::store::mod_tests::test_store;
+		use std::path::Path;
+		use tempfile::TempDir;
+
+		/// A repository holding nothing the indexer can index, so a baseline
+		/// index walks the tree and produces zero embedding calls.
+		fn repo_without_indexable_files() -> TempDir {
+			let dir = TempDir::new().unwrap();
+			let path = dir.path();
+			git(path, &["init", "-q", "-b", "main"]);
+			git(path, &["config", "user.email", "test@example.com"]);
+			git(path, &["config", "user.name", "Test"]);
+			std::fs::write(path.join("blob.bin"), "not indexable\n").unwrap();
+			git(path, &["add", "."]);
+			git(path, &["commit", "-q", "-m", "base"]);
+			dir
+		}
+
+		fn state_at(dir: &Path) -> crate::state::SharedState {
+			let state = create_shared_state();
+			state.write().current_directory = dir.to_path_buf();
+			state
+		}
+
+		#[tokio::test]
+		async fn reconciling_fails_without_a_resolvable_default_branch() {
+			let (_db, store) = test_store().await;
+			let dir = TempDir::new().unwrap();
+			git(dir.path(), &["init", "-q", "-b", "main"]);
+
+			// A repository with no commits has no branch to diff against.
+			assert!(reconcile_master_state(
+				&store,
+				state_at(dir.path()),
+				&Config::default(),
+				dir.path(),
+				true,
+			)
+			.await
+			.is_err());
+		}
+
+		#[tokio::test]
+		async fn an_already_indexed_main_is_never_re_indexed() {
+			let (_db, store) = test_store().await;
+			let dir = repo();
+			git(dir.path(), &["checkout", "-q", "main"]);
+			let head = git(dir.path(), &["rev-parse", "HEAD"]);
+			store.store_git_metadata(&head).await.unwrap();
+
+			let master = reconcile_master_state(
+				&store,
+				state_at(dir.path()),
+				&Config::default(),
+				dir.path(),
+				true,
+			)
+			.await
+			.unwrap();
+
+			assert_eq!(master.branch_name, "main");
+			assert_eq!(master.db_commit.as_deref(), Some(head.as_str()));
+			assert_eq!(master.local_ref_commit, head);
+			// On the default branch the fork-point is HEAD itself.
+			assert_eq!(master.fork_point, head);
+			assert_eq!(master.remote_ref_commit, None);
+			assert!(!master.local_behind_remote);
+			assert!(
+				master.db_resynced_to.is_none(),
+				"a populated main index must not be rebuilt"
+			);
+		}
+
+		#[tokio::test]
+		async fn an_empty_main_index_is_baselined_and_stamped_with_head() {
+			let (_db, store) = test_store().await;
+			let dir = repo_without_indexable_files();
+			let head = git(dir.path(), &["rev-parse", "HEAD"]);
+			// Commit indexing needs embeddings; mark it up to date so the
+			// baseline stays offline.
+			store.store_commits_last_commit_hash(&head).await.unwrap();
+
+			let master = reconcile_master_state(
+				&store,
+				state_at(dir.path()),
+				&Config::default(),
+				dir.path(),
+				true,
+			)
+			.await
+			.unwrap();
+
+			assert_eq!(master.db_commit, None, "the DB was empty before the run");
+			assert_eq!(
+				master.db_resynced_to.as_deref(),
+				Some(head.as_str()),
+				"the baseline stamps the working tree HEAD"
+			);
+			assert_eq!(store.get_last_commit_hash().await.unwrap(), Some(head));
+		}
+
+		#[tokio::test]
+		async fn a_local_default_branch_behind_its_remote_is_flagged() {
+			let (_db, store) = test_store().await;
+			let origin = repo();
+			git(origin.path(), &["checkout", "-q", "main"]);
+
+			let workspace = TempDir::new().unwrap();
+			let clone = workspace.path().join("clone");
+			git(
+				origin.path(),
+				&[
+					"clone",
+					"-q",
+					origin.path().to_str().unwrap(),
+					clone.to_str().unwrap(),
+				],
+			);
+			git(&clone, &["config", "user.email", "test@example.com"]);
+			git(&clone, &["config", "user.name", "Test"]);
+			let cloned_head = git(&clone, &["rev-parse", "HEAD"]);
+			store.store_git_metadata(&cloned_head).await.unwrap();
+
+			// Move origin/main forward, then fetch so the clone can see it.
+			std::fs::write(origin.path().join("keep.txt"), "remote work\n").unwrap();
+			git(origin.path(), &["commit", "-qam", "remote work"]);
+			let origin_head = git(origin.path(), &["rev-parse", "HEAD"]);
+			git(&clone, &["fetch", "-q", "origin"]);
+
+			let master =
+				reconcile_master_state(&store, state_at(&clone), &Config::default(), &clone, true)
+					.await
+					.unwrap();
+
+			assert_eq!(master.branch_name, "main");
+			assert_eq!(master.local_ref_commit, cloned_head);
+			assert_eq!(
+				master.remote_ref_commit.as_deref(),
+				Some(origin_head.as_str())
+			);
+			assert!(
+				master.local_behind_remote,
+				"a stale local default branch must be surfaced"
+			);
+			// We warn but never pull, so the delta base stays the local ref.
+			assert_eq!(master.fork_point, cloned_head);
+		}
 	}
 }

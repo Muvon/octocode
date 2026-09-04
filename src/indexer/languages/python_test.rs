@@ -387,4 +387,14 @@ class Service:
 		assert_eq!(found[0].node_kind, "import_statement");
 		assert!(!found[0].content.contains("// Merged"));
 	}
+
+	#[test]
+	fn a_module_level_assignment_is_a_symbol_unless_its_name_is_private() {
+		let source = "TIMEOUT = 30\n_INTERNAL = 1\nRETRIES: int = 3\n";
+		let tree = parse(source);
+		let symbols = Python {}.extract_symbols(tree.root_node(), source);
+		assert!(symbols.contains(&"TIMEOUT".to_string()), "{symbols:?}");
+		assert!(symbols.contains(&"RETRIES".to_string()), "{symbols:?}");
+		assert!(!symbols.contains(&"_INTERNAL".to_string()), "{symbols:?}");
+	}
 }

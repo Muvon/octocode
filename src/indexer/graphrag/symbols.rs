@@ -1398,3 +1398,7 @@ end
 		}
 	}
 }
+
+#[cfg(test)]
+#[path = "symbols_tests.rs"]
+mod symbols_tests;

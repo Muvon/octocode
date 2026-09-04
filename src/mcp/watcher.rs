@@ -140,3 +140,7 @@ pub async fn run_watcher(
 
 	Ok(())
 }
+
+#[cfg(test)]
+#[path = "watcher_tests.rs"]
+mod watcher_tests;
