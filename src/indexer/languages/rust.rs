@@ -704,10 +704,16 @@ impl Rust {
 			for root_file in &["lib.rs", "main.rs"] {
 				let root_path = current_dir.join(root_file);
 
-				// Try exact string match first (fastest)
+				// Try string match first (fastest). `join` uses the platform
+				// separator, so on Windows the candidate is `demo\src\lib.rs` while
+				// the registry holds the `/` form; compare them normalized, and
+				// answer with the registry's own spelling.
 				let root_path_str = root_path.to_string_lossy().to_string();
-				if rust_files.iter().any(|f| f == &root_path_str) {
-					return Some(root_path_str);
+				if let Some(found) = crate::utils::path::PathNormalizer::find_path_in_collection(
+					&root_path_str,
+					rust_files,
+				) {
+					return Some(found.to_string());
 				}
 
 				// Try normalized path comparison for cross-platform compatibility

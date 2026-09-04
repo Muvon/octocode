@@ -161,11 +161,7 @@ pub fn collect_file_data(
 			if grep::language_from_extension(path) != Some(language) {
 				return ignore::WalkState::Continue;
 			}
-			let display = path
-				.strip_prefix(root)
-				.unwrap_or(path)
-				.to_string_lossy()
-				.to_string();
+			let display = crate::indexer::PathUtils::to_relative_string(path, root);
 			if let Some(filter) = filter_ref {
 				if !filter.iter().any(|p| p.matches(&display)) {
 					return ignore::WalkState::Continue;

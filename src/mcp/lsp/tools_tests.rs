@@ -20,10 +20,22 @@ mod tests {
 	use std::path::PathBuf;
 	use std::str::FromStr;
 
+	/// A workspace root that is a genuine absolute path on the host. Windows has
+	/// no rootless absolute path, so `file:///repo/...` is not a file URI there
+	/// and `Url::to_file_path` rejects it — the formatters would then fall back
+	/// to the raw URI and these assertions would be describing that fallback
+	/// rather than the relative-path rendering they are about.
+	const ROOT: &str = if cfg!(windows) { "C:/repo" } else { "/repo" };
+	const ROOT_URI: &str = if cfg!(windows) {
+		"file:///C:/repo"
+	} else {
+		"file:///repo"
+	};
+
 	/// The response helpers only read `working_directory`, so a provider that
 	/// never starts a server is enough to exercise all of them.
 	fn provider() -> LspProvider {
-		LspProvider::new(PathBuf::from("/repo"), "unused-command".to_string())
+		LspProvider::new(PathBuf::from(ROOT), "unused-command".to_string())
 	}
 
 	fn uri(text: &str) -> Uri {
@@ -54,7 +66,7 @@ mod tests {
 	fn a_path_inside_the_workspace_is_reported_relative() {
 		let provider = provider();
 		assert_eq!(
-			provider.make_path_relative(std::path::Path::new("/repo/src/lib.rs")),
+			provider.make_path_relative(std::path::Path::new(&format!("{ROOT}/src/lib.rs"))),
 			"src/lib.rs"
 		);
 		// Anything outside the workspace keeps its absolute form.
@@ -73,8 +85,8 @@ mod tests {
 		);
 
 		let out = provider.format_goto_definition_response(&[
-			location("file:///repo/src/lib.rs", 0, 7),
-			location("file:///repo/src/other.rs", 9, 1),
+			location(&format!("{ROOT_URI}/src/lib.rs"), 0, 7),
+			location(&format!("{ROOT_URI}/src/other.rs"), 9, 1),
 		]);
 		assert_eq!(out, "Definition found at src/lib.rs:1:8");
 	}
@@ -155,8 +167,8 @@ mod tests {
 		);
 
 		let out = provider.format_references_response(&[
-			location("file:///repo/src/lib.rs", 0, 7),
-			location("file:///repo/src/lib.rs", 4, 1),
+			location(&format!("{ROOT_URI}/src/lib.rs"), 0, 7),
+			location(&format!("{ROOT_URI}/src/lib.rs"), 4, 1),
 		]);
 		assert_eq!(
 			out,

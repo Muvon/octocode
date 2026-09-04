@@ -57,6 +57,9 @@ def write_message(payload):
     sys.stdout.buffer.flush()
 
 DOC_URI = None
+# A rootless `file:///stub.rs` is not a file URI on Windows, so the provider
+# cannot turn it back into a path; a real server there answers with a drive.
+FALLBACK_URI = "file:///C:/stub.rs" if sys.platform == "win32" else "file:///stub.rs"
 
 def location(uri, line, character):
     return {
@@ -81,7 +84,7 @@ while True:
         continue
 
     request_id = message["id"]
-    uri = DOC_URI or "file:///stub.rs"
+    uri = DOC_URI or FALLBACK_URI
     if method == "initialize" and MODE in ("initerror", "initgarbage"):
         if MODE == "initerror":
             write_message({"jsonrpc": "2.0", "id": request_id, "error": {"code": -32603, "message": "server exploded"}})

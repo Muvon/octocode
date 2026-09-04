@@ -122,11 +122,7 @@ fn scan_sources(root: &Path) -> (Vec<SourceFile>, RepositoryStamp) {
 		if metadata.len() > 5_000_000 {
 			continue;
 		}
-		let relative_path = path
-			.strip_prefix(root)
-			.unwrap_or(path)
-			.to_string_lossy()
-			.to_string();
+		let relative_path = crate::indexer::PathUtils::to_relative_string(path, root);
 		let modified_nanos = metadata
 			.modified()
 			.ok()

@@ -21,6 +21,7 @@ use tracing::{debug, warn};
 
 use super::protocol::{uri_to_file_path, LspRequest};
 use super::provider::LspProvider;
+use crate::utils::path::PathNormalizer;
 
 /// Response formatting utilities for AI-friendly output
 impl LspProvider {
@@ -475,10 +476,26 @@ impl LspProvider {
 
 	fn make_path_relative(&self, absolute_path: &std::path::Path) -> String {
 		if let Ok(relative) = absolute_path.strip_prefix(&self.working_directory) {
-			relative.to_string_lossy().to_string()
-		} else {
-			absolute_path.to_string_lossy().to_string()
+			return PathNormalizer::normalize_separators(&relative.to_string_lossy());
 		}
+
+		// On Windows `canonicalize` hands back a verbatim path (`\\?\C:\...`)
+		// while a path decoded from a `file://` URI never carries that prefix, so
+		// `strip_prefix` sees two different prefix components and fails for a file
+		// that is plainly inside the workspace. Compare the two as normalized
+		// strings with the prefix removed before giving up.
+		let path = PathNormalizer::normalize_separators(&absolute_path.to_string_lossy());
+		let root = PathNormalizer::normalize_separators(&self.working_directory.to_string_lossy());
+		let trimmed_path = path.strip_prefix("//?/").unwrap_or(&path);
+		let trimmed_root = root.strip_prefix("//?/").unwrap_or(&root);
+		if let Some(relative) = trimmed_path
+			.strip_prefix(trimmed_root)
+			.filter(|rest| rest.starts_with('/'))
+		{
+			return relative.trim_start_matches('/').to_string();
+		}
+
+		path
 	}
 
 	fn parse_goto_definition_response(&self, result: Value) -> Result<Vec<Location>> {

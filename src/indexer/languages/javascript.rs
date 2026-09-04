@@ -359,10 +359,16 @@ impl JavaScript {
 			"index.tsx",
 		];
 		for index_file in &index_candidates {
+			// `join` uses the platform separator, so on Windows the candidate is
+			// `src\components\index.js` while the registry holds the `/` form every
+			// import specifier and every stored path uses. Compare them normalized.
 			let index_path = target_path.join(index_file);
 			let index_str = index_path.to_string_lossy().to_string();
-			if let Some(exact_match) = registry.get_all_files().iter().find(|f| *f == &index_str) {
-				return Some(exact_match.clone());
+			if let Some(found) = crate::utils::path::PathNormalizer::find_path_in_collection(
+				&index_str,
+				registry.get_all_files(),
+			) {
+				return Some(found.to_string());
 			}
 		}
 

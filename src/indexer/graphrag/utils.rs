@@ -15,6 +15,7 @@
 // GraphRAG utility functions
 
 use crate::indexer::graphrag::types::CodeNode;
+use crate::utils::path::PathNormalizer;
 use anyhow::Result;
 use std::path::{Path, PathBuf};
 
@@ -107,7 +108,9 @@ pub fn to_relative_path(absolute_path: &str, project_root: &Path) -> Result<Stri
 	// though the path is plainly inside the project. Retry against the unresolved
 	// root before declaring the path outside it.
 	if let Ok(relative) = canonical_abs.strip_prefix(&canonical_root) {
-		return Ok(relative.to_string_lossy().to_string());
+		return Ok(PathNormalizer::normalize_separators(
+			&relative.to_string_lossy(),
+		));
 	}
 
 	let relative = canonical_abs.strip_prefix(project_root).map_err(|_| {
@@ -120,7 +123,9 @@ pub fn to_relative_path(absolute_path: &str, project_root: &Path) -> Result<Stri
 		)
 	})?;
 
-	Ok(relative.to_string_lossy().to_string())
+	Ok(PathNormalizer::normalize_separators(
+		&relative.to_string_lossy(),
+	))
 }
 
 // Render GraphRAG nodes to JSON format

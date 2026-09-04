@@ -40,13 +40,7 @@ mod tests {
 			.build()
 			.filter_map(Result::ok)
 			.filter(|e| e.file_type().is_some_and(|ft| ft.is_file()))
-			.map(|e| {
-				e.path()
-					.strip_prefix(dir)
-					.unwrap_or(e.path())
-					.to_string_lossy()
-					.to_string()
-			})
+			.map(|e| PathUtils::to_relative_string(e.path(), dir))
 			.collect()
 	}
 
