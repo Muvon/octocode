@@ -1,5 +1,41 @@
 # Changelog
 
+## [0.25.0] - 2026-09-05
+
+### 📋 Release Summary
+
+Configuration now uses typed reasoning-effort settings, and ranking can be tuned with a configurable thinking budget (40a3c58e, a5762cf7). Cross-platform path handling was improved, including Windows environments and missing symlinked paths, with expanded test coverage for greater reliability (8eb1ddf7, 73703bc0, 409c22a3, cc0b0ecc, aee6065a, 122eeb18). Website deployment has been removed from the project (dbc9a5f1).
+
+
+### 🚨 Breaking Changes
+
+⚠️ **Important**: This release contains breaking changes that may require code updates.
+
+- **config**: type reasoning effort settings `40a3c58e`
+- **website**: remove site deployment `dbc9a5f1`
+
+### ✨ New Features & Enhancements
+
+- **reasoning**: configure ranking thinking budget `a5762cf7`
+
+### 🔧 Improvements & Optimizations
+
+- **config**: update expected loader version `fca8b064`
+- **indexer**: cover symlinked root path handling `2bfc29f5`
+
+### 🐛 Bug Fixes & Stability
+
+- **indexer**: use forward slashes in node ID tests `8eb1ddf7`
+- **paths**: normalize cross-platform paths `73703bc0`
+- **tests**: support Windows Python and paths `409c22a3`
+- **indexer**: handle missing symlinked paths `cc0b0ecc`
+- **tests**: add more tests to expand coverage beyond 80%+ `aee6065a`
+- **tests**: expand test coverage `122eeb18`
+
+### 🔄 Other Changes
+
+2 maintenance, dependency, and tooling updates not listed individually.
+
 ## [0.24.0] - 2026-09-02
 
 ### 📋 Release Summary
