@@ -875,7 +875,7 @@ mod tests {
 					.expect("loader should not panic")
 					.unwrap()
 					.version,
-				2
+				3
 			);
 		}
 
