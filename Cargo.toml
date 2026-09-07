@@ -107,8 +107,8 @@ tar = "0.4"
 zstd = { version = "0.13", default-features = false, features = ["zstdmt"] }
 
 # Local dependency on octolib with embedding features
-# octolib = { path = "../octolib", features = ["fastembed", "huggingface"] }
-octolib = { version = "0.35.0", default-features = false }
+# octolib = { path = "../octolib", default-features = false, features = ["llm", "embeddings", "reranker", "fastembed", "huggingface"] }
+octolib = { version = "0.36.1", default-features = false, features = ["llm", "embeddings", "reranker"] }
 
 # MCP SDK - official Rust implementation
 rmcp = { version = "3.0.0", features = ["server", "macros", "transport-io", "transport-streamable-http-server"] }
