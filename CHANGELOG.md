@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.25.1] - 2026-09-11
+
+### 📋 Release Summary
+
+Updated project dependencies to refreshed versions for improved compatibility and maintenance (e6c586bd, bd7a8a5c).
+
+
+### 🔄 Other Changes
+
+2 maintenance, dependency, and tooling updates not listed individually.
+
 ## [0.25.0] - 2026-09-05
 
 ### 📋 Release Summary
