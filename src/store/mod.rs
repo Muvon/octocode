@@ -242,22 +242,17 @@ impl Store {
 		// Load the config to get the embedding provider and model info
 		let config = crate::config::Config::load()?;
 
-		// Get vector dimensions from both code and text model configurations
-		let (code_provider, code_model) =
-			crate::embedding::parse_provider_model(&config.embedding.code_model)
-				.map_err(|e| anyhow::anyhow!("Failed to parse code model: {}", e))?;
-		let code_vector_dim = config
-			.embedding
-			.get_vector_dimension(&code_provider, &code_model)
-			.await?;
-
-		let (text_provider, text_model) =
-			crate::embedding::parse_provider_model(&config.embedding.text_model)
-				.map_err(|e| anyhow::anyhow!("Failed to parse text model: {}", e))?;
-		let text_vector_dim = config
-			.embedding
-			.get_vector_dimension(&text_provider, &text_model)
-			.await?;
+		// Get vector dimensions from both code and text model configurations.
+		// Routed through the shared provider so local models resolve their
+		// dimension without loading weights in this process.
+		let code_vector_dim =
+			crate::embedding::create_shared_provider(&config.embedding.code_model)
+				.await?
+				.get_dimension();
+		let text_vector_dim =
+			crate::embedding::create_shared_provider(&config.embedding.text_model)
+				.await?
+				.get_dimension();
 
 		// Connect to LanceDB
 		let db = connect(storage_path).execute().await?;

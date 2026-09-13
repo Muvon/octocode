@@ -33,9 +33,7 @@
 use anyhow::Result;
 use clap::Subcommand;
 
-use octocode::embedding::{
-	provider::create_embedding_provider_from_parts, types::EmbeddingProviderType,
-};
+use octocode::embedding::{create_shared_provider, types::EmbeddingProviderType};
 
 #[cfg(feature = "fastembed")]
 use octocode::embedding::provider::fastembed::FastEmbedProviderImpl;
@@ -208,8 +206,10 @@ async fn get_model_info(model_spec: &str) -> Result<()> {
 	println!("Provider: {:?}", provider);
 	println!("Model: {}", model_name);
 
-	// Create provider instance to test validation
-	match create_embedding_provider_from_parts(&provider, &model_name).await {
+	// Route through the shared provider: joins the machine-wide service for
+	// local models instead of loading weights just to validate them
+	let spec = format!("{}:{}", provider_str, model_name);
+	match create_shared_provider(&spec).await {
 		Ok(provider_impl) => {
 			let supported = provider_impl.is_model_supported();
 

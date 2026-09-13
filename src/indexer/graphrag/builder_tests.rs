@@ -90,7 +90,7 @@ mod tests {
 			Err(e) => e,
 		};
 		assert!(
-			err.to_string().contains("Failed to parse provider model"),
+			format!("{err:#}").contains("Model format must be 'provider:model'"),
 			"{err}"
 		);
 	}

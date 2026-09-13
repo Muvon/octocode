@@ -16,6 +16,8 @@
 
 use crate::config::Config;
 use anyhow::Result;
+use std::collections::HashMap;
+use std::sync::{Arc, LazyLock, Mutex};
 use std::time::Duration;
 
 // Re-export core functionality from octolib::embedding
@@ -35,6 +37,55 @@ pub mod types {
 // Create a provider module for backward compatibility
 pub mod provider {
 	pub use octolib::embedding::provider::*;
+}
+
+mod shared;
+
+/// Loaded local model providers cached per model string. Local ONNX weights
+/// are shared machine-wide via the `shared` embedding service.
+static SHARED_PROVIDERS: LazyLock<Mutex<HashMap<String, Arc<dyn EmbeddingProvider>>>> =
+	LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// Create (or join) the shared embedding provider for a fully qualified
+/// model string (`provider:model`).
+///
+/// Local model providers (fastembed, huggingface) are shared machine-wide:
+/// one process loads the weights and serves inference; every other process
+/// on this machine — including this process requesting a second model —
+/// connects over loopback instead of loading its own copy. Falls back to a
+/// private provider when the service cannot be joined. API-backed providers
+/// are lightweight and constructed fresh.
+pub async fn create_shared_provider(model_string: &str) -> Result<Arc<dyn EmbeddingProvider>> {
+	let (provider, model) = parse_provider_model(model_string)?;
+
+	let is_local = matches!(
+		&provider,
+		EmbeddingProviderType::FastEmbed | EmbeddingProviderType::HuggingFace
+	);
+	if !is_local {
+		let boxed = create_embedding_provider_from_parts(&provider, &model).await?;
+		return Ok(Arc::from(boxed));
+	}
+
+	if let Some(cached) = SHARED_PROVIDERS.lock().unwrap().get(model_string) {
+		return Ok(cached.clone());
+	}
+
+	let built: Arc<dyn EmbeddingProvider> =
+		match shared::join(model_string, provider.clone(), &model).await {
+			Ok(shared) => Arc::new(shared),
+			Err(e) => {
+				tracing::warn!(
+					"shared embedding service unavailable ({e:#}); loading a private model"
+				);
+				Arc::from(create_embedding_provider_from_parts(&provider, &model).await?)
+			}
+		};
+	let mut cache = SHARED_PROVIDERS.lock().unwrap();
+	Ok(cache
+		.entry(model_string.to_string())
+		.or_insert(built)
+		.clone())
 }
 
 /// Configuration for embedding generation (octocode-specific)
@@ -93,13 +144,6 @@ pub async fn generate_embeddings(
 		&embedding_config.text_model
 	};
 
-	// Parse provider and model from the string
-	let (provider, model) = if let Some((p, m)) = model_string.split_once(':') {
-		(p, m)
-	} else {
-		return Err(anyhow::anyhow!("Invalid model format: {}", model_string));
-	};
-
 	let mut last_error = None;
 	for attempt in 0..=MAX_EMBEDDING_RETRIES {
 		if attempt > 0 {
@@ -113,10 +157,9 @@ pub async fn generate_embeddings(
 			tokio::time::sleep(delay).await;
 		}
 
-		match octolib::embedding::generate_embeddings_batch(
+		match embed_batches(
 			vec![contents.to_string()],
-			provider,
-			model,
+			model_string,
 			InputType::Query,
 			1,
 			embedding_config.max_tokens_per_batch,
@@ -153,13 +196,6 @@ pub async fn generate_embeddings_batch(
 		&embedding_config.text_model
 	};
 
-	// Parse provider and model from the string
-	let (provider, model) = if let Some((p, m)) = model_string.split_once(':') {
-		(p, m)
-	} else {
-		return Err(anyhow::anyhow!("Invalid model format: {}", model_string));
-	};
-
 	let mut last_error = None;
 	for attempt in 0..=MAX_EMBEDDING_RETRIES {
 		if attempt > 0 {
@@ -173,10 +209,9 @@ pub async fn generate_embeddings_batch(
 			tokio::time::sleep(delay).await;
 		}
 
-		match octolib::embedding::generate_embeddings_batch(
+		match embed_batches(
 			texts.to_vec(),
-			provider,
-			model,
+			model_string,
 			input_type.clone(),
 			embedding_config.batch_size,
 			embedding_config.max_tokens_per_batch,
@@ -190,6 +225,28 @@ pub async fn generate_embeddings_batch(
 
 	Err(last_error
 		.unwrap_or_else(|| anyhow::anyhow!("Embedding batch generation failed after retries")))
+}
+
+/// One shared-provider attempt: token-limited batching over a provider that
+/// outlives this call, so local models load once per machine instead of
+/// once per invocation.
+async fn embed_batches(
+	texts: Vec<String>,
+	model_string: &str,
+	input_type: InputType,
+	batch_size: usize,
+	max_tokens_per_batch: usize,
+) -> Result<Vec<Vec<f32>>> {
+	let provider = create_shared_provider(model_string).await?;
+	let batches = split_texts_into_token_limited_batches(texts, batch_size, max_tokens_per_batch);
+	let mut all_embeddings = Vec::new();
+	for batch in batches {
+		let (batch_embeddings, _usage) = provider
+			.generate_embeddings_batch(batch, input_type.clone())
+			.await?;
+		all_embeddings.extend(batch_embeddings);
+	}
+	Ok(all_embeddings)
 }
 
 /// Search mode embeddings result (octocode-specific)

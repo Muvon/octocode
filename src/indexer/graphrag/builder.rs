@@ -15,10 +15,7 @@
 // GraphRAG core builder implementation
 
 use crate::config::Config;
-use crate::embedding::{
-	calculate_unique_content_hash, create_embedding_provider_from_parts,
-	types::parse_provider_model, EmbeddingProvider,
-};
+use crate::embedding::{calculate_unique_content_hash, EmbeddingProvider};
 use crate::indexer::graphrag::ai::AIEnhancements;
 use crate::indexer::graphrag::database::DatabaseOperations;
 use crate::indexer::graphrag::relationships::RelationshipDiscovery;
@@ -45,7 +42,7 @@ mod builder_tests;
 pub struct GraphBuilder {
 	config: Config,
 	graph: Arc<RwLock<CodeGraph>>,
-	embedding_provider: Arc<Box<dyn EmbeddingProvider>>,
+	embedding_provider: Arc<dyn EmbeddingProvider>,
 	store: Store,
 	project_root: PathBuf, // Project root for relative path calculations
 	ai_enhancements: Option<AIEnhancements>,
@@ -78,18 +75,10 @@ impl GraphBuilder {
 			detect_project_root().unwrap_or_else(|_| working_dir.to_path_buf())
 		});
 
-		let model_string = &config.embedding.text_model;
-		let Ok((provider_type, model)) = parse_provider_model(model_string) else {
-			return Err(anyhow::anyhow!(
-				"Failed to parse provider model: {}",
-				model_string
-			));
-		};
-		let embedding_provider = Arc::new(
-			create_embedding_provider_from_parts(&provider_type, &model)
+		let embedding_provider =
+			crate::embedding::create_shared_provider(&config.embedding.text_model)
 				.await
-				.context("Failed to initialize embedding provider from config")?,
-		);
+				.context("Failed to initialize embedding provider from config")?;
 
 		let db_ops = DatabaseOperations::new(&store);
 		let graph = Arc::new(RwLock::new(db_ops.load_graph(&project_root, quiet).await?));

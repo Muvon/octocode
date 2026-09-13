@@ -42,7 +42,7 @@ overflow-checks = false # Disable overflow checks in release mode
 # Cross-compilation configuration is in .cargo/config.toml
 
 [dependencies]
-tokio = { version = "1.50.0", features = ["rt-multi-thread", "macros", "time", "sync", "io-util", "io-std", "process"] }
+tokio = { version = "1.50.0", features = ["rt-multi-thread", "macros", "time", "sync", "io-util", "io-std", "process", "net"] }
 ignore = "0.4.25"
 parking_lot = "0.12.5"
 lance-table = { version = "2.0.0", default-features = false, features = [] }

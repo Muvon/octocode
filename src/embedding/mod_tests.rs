@@ -132,7 +132,10 @@ mod tests {
 		let err = generate_embeddings("fn main() {}", true, &config)
 			.await
 			.expect_err("a model string without ':' must not reach the provider");
-		assert_eq!(err.to_string(), "Invalid model format: voyage-code-3");
+		assert_eq!(
+			err.to_string(),
+			"Model format must be 'provider:model' (e.g., 'jina:jina-embeddings-v4')"
+		);
 	}
 
 	#[tokio::test]
@@ -141,7 +144,10 @@ mod tests {
 		let err = generate_embeddings("some prose", false, &config)
 			.await
 			.expect_err("a model string without ':' must not reach the provider");
-		assert_eq!(err.to_string(), "Invalid model format: plain-text-model");
+		assert_eq!(
+			err.to_string(),
+			"Model format must be 'provider:model' (e.g., 'jina:jina-embeddings-v4')"
+		);
 	}
 
 	#[tokio::test]
@@ -154,14 +160,14 @@ mod tests {
 				.await
 				.unwrap_err()
 				.to_string(),
-			"Invalid model format: broken"
+			"Model format must be 'provider:model' (e.g., 'jina:jina-embeddings-v4')"
 		);
 		assert_eq!(
 			generate_embeddings("x", false, &config)
 				.await
 				.unwrap_err()
 				.to_string(),
-			"Invalid model format: also-broken"
+			"Model format must be 'provider:model' (e.g., 'jina:jina-embeddings-v4')"
 		);
 	}
 
@@ -174,14 +180,14 @@ mod tests {
 				.await
 				.unwrap_err()
 				.to_string(),
-			"Invalid model format: no-colon"
+			"Model format must be 'provider:model' (e.g., 'jina:jina-embeddings-v4')"
 		);
 		assert_eq!(
 			generate_embeddings_batch(&texts, false, &config, InputType::Query)
 				.await
 				.unwrap_err()
 				.to_string(),
-			"Invalid model format: still-no-colon"
+			"Model format must be 'provider:model' (e.g., 'jina:jina-embeddings-v4')"
 		);
 	}
 
@@ -193,7 +199,7 @@ mod tests {
 				.await
 				.unwrap_err()
 				.to_string(),
-			"Invalid model format: "
+			"Model format must be 'provider:model' (e.g., 'jina:jina-embeddings-v4')"
 		);
 	}
 }
