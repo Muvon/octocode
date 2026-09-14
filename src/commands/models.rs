@@ -72,6 +72,7 @@ async fn list_models(provider_filter: Option<String>) -> Result<()> {
 		vec![
 			EmbeddingProviderType::FastEmbed,
 			EmbeddingProviderType::HuggingFace,
+			EmbeddingProviderType::Onnx,
 			EmbeddingProviderType::Jina,
 			EmbeddingProviderType::Voyage,
 			EmbeddingProviderType::Google,
@@ -112,6 +113,10 @@ async fn list_models(provider_filter: Option<String>) -> Result<()> {
 				{
 					println!("  HuggingFace feature not enabled");
 				}
+			}
+			EmbeddingProviderType::Onnx => {
+				println!("  ONNX: Any HuggingFace repo with an onnx/ export");
+				println!("  Use 'info' command with specific model names");
 			}
 			EmbeddingProviderType::Jina => {
 				let jina_models = [
@@ -256,6 +261,7 @@ fn parse_provider(provider_str: &str) -> Result<EmbeddingProviderType> {
 	match provider_str.to_lowercase().as_str() {
 		"fastembed" => Ok(EmbeddingProviderType::FastEmbed),
 		"huggingface" => Ok(EmbeddingProviderType::HuggingFace),
+		"onnx" => Ok(EmbeddingProviderType::Onnx),
 		"jina" => Ok(EmbeddingProviderType::Jina),
 		"voyage" => Ok(EmbeddingProviderType::Voyage),
 		"google" => Ok(EmbeddingProviderType::Google),
@@ -265,7 +271,7 @@ fn parse_provider(provider_str: &str) -> Result<EmbeddingProviderType> {
 		"local" => Ok(EmbeddingProviderType::Local),
 		"together" => Ok(EmbeddingProviderType::Together),
 		_ => Err(anyhow::anyhow!(
-			"Unknown provider '{}'. Supported: fastembed, huggingface, jina, voyage, google, openai, openrouter, octohub, local, together",
+			"Unknown provider '{}'. Supported: fastembed, huggingface, onnx, jina, voyage, google, openai, openrouter, octohub, local, together",
 			provider_str
 		)),
 	}
