@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.26.0] - 2026-09-14
+
+### 📋 Release Summary
+
+This release adds support for listing and parsing ONNX providers (86a76b8a). Embedding providers can now be shared across processes for improved reuse and consistency (407dc05a), alongside updated dependencies (63d2e82c).
+
+
+### ✨ New Features & Enhancements
+
+- **models**: support ONNX provider listing and parsing `86a76b8a`
+- **embedding**: share providers across processes `407dc05a`
+
+### 🔄 Other Changes
+
+1 maintenance, dependency, and tooling update not listed individually.
+
 ## [0.25.1] - 2026-09-11
 
 ### 📋 Release Summary
