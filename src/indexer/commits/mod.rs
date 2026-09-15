@@ -132,6 +132,12 @@ pub async fn index_commits(
 		if verbose {
 			println!("Indexing commits: {}/{}", chunk_end, commit_blocks.len());
 		}
+
+		// Checkpoint progress after each stored batch so an interrupted run
+		// resumes here instead of re-indexing every commit from scratch.
+		if let Some(newest) = block_chunk.last() {
+			store.store_commits_last_commit_hash(&newest.hash).await?;
+		}
 	}
 
 	// Save last indexed commit hash (newest = last in our reversed list)
