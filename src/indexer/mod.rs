@@ -511,6 +511,24 @@ pub async fn index_files(
 	index_files_with_quiet(store, state, config, git_repo_root, false).await
 }
 
+/// Verbose mode: announce each file right before it is indexed (no-op otherwise).
+fn log_current_file(state: &SharedState, file_path: &str) {
+	let guard = state.read();
+	if guard.verbose {
+		let processed = guard.indexed_files + guard.skipped_files;
+		if guard.total_files > 0 {
+			println!(
+				"Indexing ({}/{}): {}",
+				processed + 1,
+				guard.total_files,
+				file_path
+			);
+		} else {
+			println!("Indexing: {}", file_path);
+		}
+	}
+}
+
 /// Index only the delta (changed files) for a non-default branch.
 ///
 /// This creates or updates a lightweight branch database containing only
@@ -765,6 +783,7 @@ pub async fn index_branch_delta(
 			if let Some(language) = detect_language(&full_path) {
 				match fs::read_to_string(&full_path) {
 					Ok(contents) => {
+						log_current_file(&state, file_path);
 						let ctx = ProcessFileContext {
 							store: branch_store,
 							config: &branch_config,
@@ -899,6 +918,7 @@ pub async fn index_branch_delta(
 			} else if is_allowed_text_extension(&full_path) && !is_markdown_file(&full_path) {
 				if let Ok(contents) = fs::read_to_string(&full_path) {
 					if is_text_file(&contents) {
+						log_current_file(&state, file_path);
 						process_text_file_differential(
 							branch_store,
 							&contents,
@@ -1421,6 +1441,7 @@ pub async fn index_files_with_quiet(
 			if let Some(language) = detect_language(&full_path) {
 				match fs::read_to_string(&full_path) {
 					Ok(contents) => {
+						log_current_file(&state, file_path);
 						// Store the file modification time after successful processing
 
 						let ctx = ProcessFileContext {
@@ -1564,6 +1585,7 @@ pub async fn index_files_with_quiet(
 					if let Ok(contents) = fs::read_to_string(&full_path) {
 						// Only process files that are likely to contain readable text
 						if is_text_file(&contents) {
+							log_current_file(&state, file_path);
 							process_text_file_differential(
 								store,
 								&contents,
@@ -1672,6 +1694,7 @@ pub async fn index_files_with_quiet(
 			if let Some(language) = detect_language(entry.path()) {
 				match fs::read_to_string(entry.path()) {
 					Ok(contents) => {
+						log_current_file(&state, &file_path);
 						// Store the file modification time after successful processing
 
 						let file_processed = if language == "markdown" {
@@ -1812,6 +1835,7 @@ pub async fn index_files_with_quiet(
 					if let Ok(contents) = fs::read_to_string(entry.path()) {
 						// Only process files that are likely to contain readable text
 						if is_text_file(&contents) {
+							log_current_file(&state, &file_path);
 							process_text_file_differential(
 								store,
 								&contents,

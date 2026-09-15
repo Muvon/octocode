@@ -40,6 +40,10 @@ pub struct IndexArgs {
 	/// Show GraphRAG connections for a specific file
 	#[arg(long, value_name = "FILE_PATH")]
 	pub graphrag: Option<String>,
+
+	/// Print each file as it is being indexed
+	#[arg(short, long)]
+	pub verbose: bool,
 }
 
 #[cfg(test)]
@@ -104,7 +108,11 @@ pub async fn execute(
 	}
 
 	let state = state::create_shared_state();
-	state.write().current_directory = current_dir.clone();
+	{
+		let mut guard = state.write();
+		guard.current_directory = current_dir.clone();
+		guard.verbose = args.verbose;
+	}
 
 	// Auto-detect branch context: if on a non-default branch, do delta indexing
 	let branch_context = if git_repo_root.is_some() {
@@ -170,6 +178,12 @@ pub async fn execute(
 }
 
 pub async fn display_indexing_progress(state: Arc<RwLock<state::IndexState>>) {
+	// In verbose mode the indexer prints each file itself; the spinner's \r
+	// redraws would garble that output, so don't display progress.
+	if state.read().verbose {
+		return;
+	}
+
 	let spinner_chars = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 	let mut spinner_idx = 0;
 	let mut last_indexed = 0;

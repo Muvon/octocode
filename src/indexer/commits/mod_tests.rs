@@ -112,7 +112,7 @@ mod tests {
 			message: "feat: add retry logic".to_string(),
 		}];
 
-		let descriptions = generate_descriptions(&config, dir.path(), &commits, true)
+		let descriptions = generate_descriptions(&config, dir.path(), &commits, true, false)
 			.await
 			.expect("an unavailable LLM downgrades to no descriptions");
 		assert!(descriptions.is_empty());
