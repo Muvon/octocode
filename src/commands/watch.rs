@@ -86,6 +86,7 @@ pub async fn execute(
 				list_files: false,
 				show_file: None,
 				graphrag: None,
+				verbose: false,
 			},
 		)
 		.await?
@@ -220,6 +221,7 @@ pub async fn execute(
 							list_files: false,
 							show_file: None,
 							graphrag: None,
+							verbose: false,
 						},
 					)
 					.await?

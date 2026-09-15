@@ -74,7 +74,8 @@ pub async fn index_commits(
 
 	// Generate AI descriptions if LLM enabled
 	let descriptions = if config.commits.use_llm {
-		generate_descriptions(config, repo_path, &commits, quiet).await?
+		let verbose = state.read().verbose;
+		generate_descriptions(config, repo_path, &commits, quiet, verbose).await?
 	} else {
 		std::collections::HashMap::new()
 	};
@@ -112,6 +113,7 @@ pub async fn index_commits(
 	// Batch embed using text model. Build each chunk's text copies inside the
 	// loop so we hold at most one batch of duplicated content at a time, not all.
 	let batch_size = config.index.embeddings_batch_size;
+	let verbose = state.read().verbose;
 	for chunk_start in (0..commit_blocks.len()).step_by(batch_size) {
 		let chunk_end = (chunk_start + batch_size).min(commit_blocks.len());
 		let block_chunk = &commit_blocks[chunk_start..chunk_end];
@@ -126,6 +128,10 @@ pub async fn index_commits(
 		.await?;
 
 		store.store_commit_blocks(block_chunk, &embeddings).await?;
+
+		if verbose {
+			println!("Indexing commits: {}/{}", chunk_end, commit_blocks.len());
+		}
 	}
 
 	// Save last indexed commit hash (newest = last in our reversed list)
@@ -151,6 +157,7 @@ async fn generate_descriptions(
 	repo_path: &Path,
 	commits: &[CommitEntry],
 	quiet: bool,
+	verbose: bool,
 ) -> Result<std::collections::HashMap<String, String>> {
 	let mut descriptions = std::collections::HashMap::new();
 
@@ -166,7 +173,15 @@ async fn generate_descriptions(
 
 	// Process in batches
 	let batch_size = 5;
-	for chunk in commits.chunks(batch_size) {
+	for (batch_idx, chunk) in commits.chunks(batch_size).enumerate() {
+		if verbose {
+			let done = batch_idx * batch_size;
+			println!(
+				"Generating commit descriptions: {}/{}",
+				done.min(commits.len()),
+				commits.len()
+			);
+		}
 		let mut prompt = String::new();
 
 		for (i, entry) in chunk.iter().enumerate() {

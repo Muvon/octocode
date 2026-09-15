@@ -33,6 +33,8 @@ pub struct IndexState {
 	pub counting_files: bool,
 	// Quiet mode for MCP server (no console output)
 	pub quiet_mode: bool,
+	// Verbose mode: print each file as it is being indexed
+	pub verbose: bool,
 }
 
 pub type SharedState = Arc<RwLock<IndexState>>;
