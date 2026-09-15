@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.26.1] - 2026-09-15
+
+### 📋 Release Summary
+
+Updated Rust dependencies to newer versions, improving the project’s maintenance and compatibility.
+
+
+### 🔄 Other Changes
+
+1 maintenance, dependency, and tooling update not listed individually.
+
 ## [0.26.0] - 2026-09-14
 
 ### 📋 Release Summary
