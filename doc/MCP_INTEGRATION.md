@@ -107,7 +107,8 @@ Semantic search across your codebase with multi-query support.
 - `query` (string or array) - Search query or multiple queries
 - `mode` (string, optional) - Search scope: "all", "code", "docs", "text", "commits"
 - `detail_level` (string, optional) - Detail level: "signatures", "partial", "full"
-- `max_results` (integer, optional) - Maximum results to return (1-20)
+- `language` (string, optional) - Filter code results by language (rust, python, typescript, go, etc.)
+- `max_results` (integer, optional) - Maximum results to return (1-20, default: 3)
 - `threshold` (number, optional) - Similarity threshold (0.0-1.0)
 
 **Single Query Example:**
@@ -135,8 +136,7 @@ Semantic search across your codebase with multi-query support.
 Extract and view function signatures, class definitions, and other meaningful code structures from files.
 
 **Parameters:**
-- `files` (array) - Array of file paths or glob patterns to analyze
-- `max_tokens` (integer, optional) - Maximum tokens in output before truncation (default: 2000)
+- `files` (array) - Array of file paths or glob patterns to analyze (1-100 entries; a bare string is accepted too)
 
 **Examples:**
 
@@ -150,8 +150,7 @@ Extract and view function signatures, class definitions, and other meaningful co
 **View signatures using glob patterns:**
 ```json
 {
-  "files": ["src/**/*.rs", "tests/**/*.rs"],
-  "max_tokens": 4000
+  "files": ["src/**/*.rs", "tests/**/*.rs"]
 }
 ```
 
@@ -234,10 +233,14 @@ Search or rewrite code by AST structure using ast-grep pattern syntax. Complemen
 - `pattern` (string) - AST pattern to search for (e.g. `$FUNC.unwrap()`, `if let Some($X) = $Y { $$$ }`)
 - `symbol` (string) - Find symbol DEFINITIONS by name, `*` wildcards supported (e.g. `handle_*`)
 - `references` (string) - Find symbol USAGES by name, `*` wildcards supported
-- `language` (string, required) - Language to search: rust, javascript, typescript, python, go, java, cpp, php, ruby, lua, bash, css, json, elixir
-- `paths` (array, optional) - File path substrings to filter results
+- `language` (string, required) - Language to search: rust, javascript, typescript, python, go, java, cpp, php, ruby, swift, lua, bash, css, json, elixir
+- `paths` (array or string, optional) - File path substrings or globs to narrow results (e.g. `src/mcp`, `src/**/*.rs`)
+- `inside` (string, optional) - Only keep matches inside a node matching this kind or pattern (e.g. `function_item`)
+- `has` (string, optional) - Only keep matches containing a node matching this kind or pattern (e.g. `$X.unwrap()`)
+- `constraints` (object, optional) - Regex constraints on captured metavariables, e.g. `{"NAME": "^handle_"}`
 - `context` (integer, optional) - Number of context lines around matches (default: 0)
 - `max_results` (integer, optional) - Maximum number of matches to return (default: 50)
+- `offset` (integer, optional) - Pagination offset into the full result set (default: 0)
 - `rewrite` (string, optional) - Rewrite template with metavariable substitution (e.g. `$VAR.expect("reason")`)
 - `update_all` (boolean, optional) - When true, apply rewrites to files in-place. When false/absent, returns a diff preview
 
@@ -301,6 +304,10 @@ octocode mcp --multi --path /path/to/parent/directory
 # Multi-repo over HTTP
 octocode mcp --multi --bind "127.0.0.1:8080" --path /workspace
 ```
+
+`--auto` selects the mode from the target directory instead: single-repo when
+`--path` is itself a git repo root, multi-repo when it is not but git
+repositories exist one level under it.
 
 **Features:**
 - Discovers git repositories one level under the specified directory
@@ -388,13 +395,10 @@ octocode mcp --multi --bind "127.0.0.1:8080" --path /workspace
 }
 ```
 
-## Next Steps
+### Custom Settings
 
-- **[MCP Client Setup Guide](MCP_CLIENTS.md)** — Detailed setup for 15+ clients
-- **[Commands Reference](COMMANDS.md)** — Learn all Octocode CLI commands
-- **[Configuration](CONFIGURATION.md)** — Customize indexing and search behavior
-- **[Advanced Usage](ADVANCED_USAGE.md)** — Advanced configuration and optimization
-# Start with custom settings
+```bash
+# Start with debug logging
 octocode mcp \
   --path /path/to/project \
   --debug
@@ -425,7 +429,7 @@ octocode mcp --path /personal/project --bind "127.0.0.1:8082"
 octocode mcp --path . --debug
 
 # Production environment
-octocode mcp --path /app --bind "127.0.0.1:8080" --quiet
+octocode mcp --path /app --bind "127.0.0.1:8080"
 ```
 
 ## Integration with Other AI Assistants
@@ -520,19 +524,6 @@ octocode mcp --path /your/project --debug
 
 This logs all MCP requests and responses to help diagnose problems.
 
-## Next Steps
-
-- **[MCP Client Setup Guide](MCP_CLIENTS.md)** — Detailed setup for 15+ clients
-- **[Commands Reference](COMMANDS.md)** — Learn all Octocode CLI commands
-- **[Configuration](CONFIGURATION.md)** — Customize indexing and search behavior
-- **[Advanced Usage](ADVANCED_USAGE.md)** — Advanced configuration and optimization
-
-# Configure search limits
-octocode config --max-results 20 --similarity-threshold 0.3
-```
-
-## Troubleshooting
-
 ### MCP Server Not Starting
 
 1. **Check path exists**: Ensure the project path is valid
@@ -561,7 +552,10 @@ octocode config --max-results 20 --similarity-threshold 0.3
 3. **Optimize indexing**: Use faster embedding models
 4. **Monitor resources**: Check CPU and memory usage
 
-For more detailed information, see:
-- [LSP Integration Guide](LSP_INTEGRATION.md)
-- [Advanced Usage](ADVANCED_USAGE.md)
-- [Configuration Guide](CONFIGURATION.md)
+## Next Steps
+
+- **[MCP Client Setup Guide](MCP_CLIENTS.md)** — Detailed setup for 15+ clients
+- **[Commands Reference](COMMANDS.md)** — Learn all Octocode CLI commands
+- **[Configuration](CONFIGURATION.md)** — Customize indexing and search behavior
+- **[Advanced Usage](ADVANCED_USAGE.md)** — Advanced configuration and optimization
+- **[LSP Integration Guide](LSP_INTEGRATION.md)** — Language server integration

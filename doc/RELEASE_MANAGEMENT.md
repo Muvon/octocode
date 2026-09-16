@@ -10,7 +10,7 @@ Octocode provides intelligent release automation that analyzes your commit histo
 
 - **AI Version Calculation**: Analyzes commit history to determine semantic version bumps
 - **Automatic Changelog**: Generates structured changelogs from commit messages
-- **Multi-Project Support**: Works with Rust, Node.js, PHP, and Go projects
+- **Multi-Project Support**: Works with Rust, Node.js, PHP, Go, and Python projects
 - **Git Integration**: Creates release commits and annotated tags automatically
 - **Dry Run Mode**: Preview changes before execution
 - **Conventional Commits**: Supports conventional commit format for precise version calculation
@@ -97,6 +97,21 @@ go 1.21
 
 **Note**: Go projects use a `VERSION` file since `go.mod` doesn't contain version information.
 
+### Python Projects (pyproject.toml)
+
+```toml
+[project]
+name = "my-project"
+version = "0.1.0"
+```
+
+The `version` key under `[project]` or `[tool.poetry]` is updated in place; formatting is preserved.
+
+**Files updated:**
+- `pyproject.toml` - Project version
+- `uv.lock` - Refreshed via `uv lock` when present
+- `CHANGELOG.md` - Release notes
+
 ## How It Works
 
 ### 1. Project Detection
@@ -106,6 +121,7 @@ Octocode automatically detects your project type by scanning for:
 - `package.json` → Node.js project
 - `composer.json` → PHP project
 - `go.mod` → Go project
+- `pyproject.toml` → Python project
 
 ### 2. Version Analysis
 

@@ -312,10 +312,10 @@ For projects with multiple languages, start separate MCP servers:
 
 ```bash
 # Terminal 1: Rust project
-octocode mcp --path /path/to/rust/project --with-lsp "rust-analyzer" --port 3001
+octocode mcp --path /path/to/rust/project --with-lsp "rust-analyzer" --bind "127.0.0.1:3001"
 
 # Terminal 2: Python project
-octocode mcp --path /path/to/python/project --with-lsp "pylsp" --port 3002
+octocode mcp --path /path/to/python/project --with-lsp "pylsp" --bind "127.0.0.1:3002"
 ```
 
 ### Performance Optimization

@@ -6,7 +6,7 @@ We welcome contributions! This project is part of the larger Muvon ecosystem and
 
 ### Prerequisites
 
-- **Rust 1.70+** (install from [rustup.rs](https://rustup.rs/))
+- **Rust 1.95+** (install from [rustup.rs](https://rustup.rs/))
 - **Git** for version control
 - **Basic understanding** of Rust, embeddings, and vector databases
 
@@ -17,7 +17,7 @@ We welcome contributions! This project is part of the larger Muvon ecosystem and
 git clone https://github.com/muvon/octocode.git
 cd octocode
 
-# Build the project (MANDATORY: always use --no-default-features)
+# Build the project (use --no-default-features to skip local model compilation)
 cargo build --no-default-features
 
 # Run tests
@@ -44,22 +44,25 @@ The project uses several key dependencies:
 
 ## Project Structure
 
-```
 octocode/
 ├── src/
-│   ├── main.rs              # CLI entry point
-│   ├── config/              # Configuration management
+│   ├── main.rs              # CLI entry point and command dispatch
+│   ├── config.rs            # All config structs; values come from config-templates/default.toml
+│   ├── storage.rs           # Per-project database path resolution
+│   ├── store/               # LanceDB operations (block types, table ops, vector optimizer)
+│   ├── embedding/           # Thin wrapper over octolib embedding providers
+│   ├── llm/                 # Thin wrapper over octolib LLM providers
 │   ├── indexer/             # Code indexing and parsing
-│   │   ├── languages/       # Language-specific parsers
-│   │   └── embeddings/      # Embedding providers
-│   ├── search/              # Search engine implementation
-│   ├── graphrag/            # Knowledge graph functionality
-│   ├── git/                 # Git integration features
+│   │   ├── languages/       # Language-specific parsers (one file per language)
+│   │   ├── graphrag/        # GraphRAG builder and AI relationship discovery
+│   │   └── commits/         # Git commit history indexing
 │   ├── mcp/                 # MCP server implementation
-│   └── utils/               # Utility functions
-├── tests/                   # Integration tests
-├── docs/                    # Documentation
-└── examples/                # Usage examples
+│   ├── commands/            # One file per CLI subcommand
+│   ├── grep.rs              # Structural code search (ast-grep)
+│   ├── reranker.rs          # Search result reranking
+│   └── reasoning.rs         # LLM re-ranking fused with hybrid results
+├── doc/                     # Documentation
+└── benchmark/               # Retrieval-quality benchmark and ground truth
 ```
 
 ## Adding Language Support
@@ -76,59 +79,59 @@ tree-sitter-your-language = "0.x.x"
 ```
 
 ### 2. Language Implementation
-
-Create `src/indexer/languages/your_lang.rs`:
-
 ```rust
-use tree_sitter::{Language, Query};
-use crate::indexer::languages::{LanguageParser, ParsedSymbol, SymbolType};
+use tree_sitter::Node;
 
-pub struct YourLanguageParser;
+use super::{deduplicate_symbols, extract_symbols_by_kinds, CallTarget, Language};
 
-impl LanguageParser for YourLanguageParser {
-    fn language() -> Language {
-        tree_sitter_your_language::language()
+pub struct YourLanguage;
+
+impl Language for YourLanguage {
+    fn name(&self) -> &'static str {
+        "your_lang"
     }
 
-    fn file_extensions() -> &'static [&'static str] {
-        &[".your_ext"]
+    fn get_ts_language(&self) -> tree_sitter::Language {
+        tree_sitter_your_language::LANGUAGE.into()
     }
 
-    fn extract_symbols(&self, source: &str) -> Vec<ParsedSymbol> {
-        // Implementation for extracting functions, classes, etc.
-        vec![]
+    fn get_meaningful_kinds(&self) -> Vec<&'static str> {
+        vec!["function_definition", "class_definition"]
     }
 
-    fn extract_imports(&self, source: &str) -> Vec<String> {
-        // Implementation for extracting import statements
-        vec![]
+    fn extract_symbols(&self, node: Node, contents: &str) -> Vec<String> {
+        let mut symbols = extract_symbols_by_kinds(node, contents, self.get_meaningful_kinds());
+        deduplicate_symbols(&mut symbols);
+        symbols
     }
 
-    fn extract_exports(&self, source: &str) -> Vec<String> {
-        // Implementation for extracting export statements
-        vec![]
+    fn get_file_extensions(&self) -> Vec<&'static str> {
+        vec!["yourext"]
     }
+
+    // implement the remaining `Language` trait methods
 }
 ```
 
+The full trait lives in `src/indexer/languages/mod.rs`; `Language` requires `Send + Sync`.
+
 ### 3. Registration
-
-Add to `src/indexer/languages/mod.rs`:
-
 ```rust
 pub mod your_lang;
 
-// In the get_parser function:
-match extension {
-    // ... existing cases
-    ".your_ext" => Some(Box::new(your_lang::YourLanguageParser)),
+// In get_language():
+match name {
+    // ... existing arms
+    "your_lang" => Some(Box::new(YourLanguage {})),
     _ => None,
 }
 ```
 
+Language detection resolves through `crate::language::associated_language` first (project `[index.file_associations]` overrides), then falls back to the built-in extension map in `src/indexer/file_utils.rs::detect_language`. Add the new extension there so indexing and GraphRAG pick the language up, and to `src/grep.rs::language_from_extension` if structural search should support it too.
+
 ### 4. Testing
 
-Create tests in `tests/languages/test_your_lang.rs`:
+Tests live next to the implementation as a `#[cfg(test)] mod tests` block in the same file (e.g. `src/indexer/languages/your_lang.rs`), matching the rest of the crate.
 
 ```rust
 #[cfg(test)]
@@ -137,73 +140,33 @@ mod tests {
 
     #[test]
     fn test_your_language_parsing() {
-        let source = r#"
-            // Your language sample code
-        "#;
+        let source = "fn main() {}";
+        let language = YourLanguage {};
+        let mut parser = tree_sitter::Parser::new();
+        parser
+            .set_language(&language.get_ts_language())
+            .expect("loading grammar");
+        let tree = parser.parse(source, None).expect("parsing source");
 
-        let parser = YourLanguageParser;
-        let symbols = parser.extract_symbols(source);
-
+        let symbols = language.extract_symbols(tree.root_node(), source);
         assert!(!symbols.is_empty());
-        // Add specific assertions
     }
 }
 ```
 
 ## Adding Embedding Providers
 
-Embedding providers are in `src/embedding/provider/`. To add a new provider:
+Embedding providers live in the `octolib` crate, not here. To add one, implement it in `octolib` and re-export it from `src/embedding/mod.rs`. This repo only wraps octolib with retrying batch generation, mode-aware query embedding, and content hashing.
 
-1. Create provider file (e.g., `your_provider.rs`)
-2. Implement the `EmbeddingProvider` trait
-3. Add to module exports in `mod.rs`
-
-Supported providers: FastEmbed, Jina, Voyage, Google, HuggingFace (BERT/JinaBERT), OpenAI
+Providers currently reachable through `octolib`: Voyage, Jina, Google, OpenAI, OctoHub, Together, FastEmbed, HuggingFace.
 
 ### 1. Provider Implementation
 
-Create `src/indexer/embeddings/your_provider.rs`:
+Implement the provider inside `octolib` (its embedding module owns provider construction, model validation, and dimension lookup). `src/embedding/mod.rs` only re-exports octolib types and adds the retrying batch helpers, so nothing here needs a new provider file.
 
-```rust
-use async_trait::async_trait;
-use crate::indexer::embeddings::{EmbeddingProvider, EmbeddingResult};
+### 2. Provider Availability
 
-pub struct YourProvider {
-    api_key: String,
-    model: String,
-}
-
-#[async_trait]
-impl EmbeddingProvider for YourProvider {
-    async fn embed_texts(&self, texts: &[String]) -> EmbeddingResult<Vec<Vec<f32>>> {
-        // Implementation for generating embeddings
-        Ok(vec![])
-    }
-
-    fn model_name(&self) -> &str {
-        &self.model
-    }
-
-    fn dimensions(&self) -> usize {
-        // Return embedding dimensions
-        768
-    }
-}
-```
-
-### 2. Provider Registration
-
-Add to `src/indexer/embeddings/mod.rs`:
-
-```rust
-pub mod your_provider;
-
-// In the create_provider function:
-if model.starts_with("yourprovider:") {
-    let model_name = model.strip_prefix("yourprovider:").unwrap();
-    return Ok(Box::new(your_provider::YourProvider::new(api_key, model_name)?));
-}
-```
+Provider availability is gated by the `fastembed` and `huggingface` features declared in `Cargo.toml` and forwarded to `octolib`. A provider that is compiled out fails fast at construction rather than silently degrading.
 
 ## Code Style and Guidelines
 
@@ -216,14 +179,13 @@ if model.starts_with("yourprovider:") {
 
 ### Error Handling
 
-Use the project's error types:
+Use `anyhow` for fallible command and library code, adding context at the boundary that handles the failure:
 
 ```rust
-use crate::error::{OctocodeError, Result};
+use anyhow::{Context, Result};
 
 fn your_function() -> Result<String> {
-    // Use ? operator for error propagation
-    let result = some_operation()?;
+    let result = some_operation().context("loading project config")?;
     Ok(result)
 }
 ```
@@ -247,16 +209,16 @@ async fn read_file(path: &str) -> Result<String> {
 
 ```bash
 # Run all tests
-cargo test
+cargo test --no-default-features
 
 # Run specific test module
-cargo test test_rust_parser
+cargo test --no-default-features test_rust_parser
 
 # Run with output
-cargo test -- --nocapture
+cargo test --no-default-features -- --nocapture
 
-# Run integration tests
-cargo test --test integration
+# Clippy must pass clean
+cargo clippy --all-features --all-targets -- -D warnings
 ```
 
 ### Test Categories
@@ -296,25 +258,22 @@ mod tests {
 Use rustdoc comments for public APIs:
 
 ```rust
-/// Extracts symbols from source code using tree-sitter parsing.
+/// Deduplicates and sorts a symbol list in place.
 ///
 /// # Arguments
 ///
-/// * `source` - The source code to parse
-/// * `language` - The programming language
-///
-/// # Returns
-///
-/// A vector of parsed symbols including functions, classes, and variables.
+/// * `symbols` - Symbols collected from a tree-sitter walk
 ///
 /// # Examples
 ///
+/// ```ignore
+/// let mut symbols = vec!["b".to_string(), "a".to_string(), "a".to_string()];
+/// deduplicate_symbols(&mut symbols);
+/// assert_eq!(symbols, vec!["a".to_string(), "b".to_string()]);
 /// ```
-/// let symbols = extract_symbols("fn main() {}", Language::Rust);
-/// assert!(!symbols.is_empty());
-/// ```
-pub fn extract_symbols(source: &str, language: Language) -> Vec<ParsedSymbol> {
-    // Implementation
+pub fn deduplicate_symbols(symbols: &mut Vec<String>) {
+    symbols.sort();
+    symbols.dedup();
 }
 ```
 
@@ -323,9 +282,10 @@ pub fn extract_symbols(source: &str, language: Language) -> Vec<ParsedSymbol> {
 When adding features, update:
 
 1. **README.md**: If it affects the main workflow
-2. **doc/CONFIGURATION.md**: For new configuration options
-3. **doc/ADVANCED_USAGE.md**: For new advanced features
-4. **doc/ARCHITECTURE.md**: For architectural changes
+2. **doc/COMMANDS.md**: For new or changed CLI flags and subcommands
+3. **doc/CONFIGURATION.md**: For new configuration options (`config-templates/default.toml` is the source of truth)
+4. **doc/ADVANCED_USAGE.md**: For new advanced features
+5. **doc/ARCHITECTURE.md**: For architectural changes
 
 ## Submitting Changes
 

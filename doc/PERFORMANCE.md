@@ -27,29 +27,25 @@
 
 **How it works**:
 - **Smart Index Creation**: Skips indexing for small datasets (< 1K rows) where brute force is faster
-- **Optimal Parameters**: Automatically calculates partitions, sub-vectors, and search parameters
+- **Optimal Parameters**: Automatically calculates partitions and search parameters from the row count
 - **Growth-Aware**: Recreates indexes with better parameters as datasets grow
 - **Consistent Distance**: Always uses Cosine distance for semantic similarity
 
 **Performance Impact**:
 - **Small datasets (< 1K rows)**: Brute force search (fastest)
-- **Medium datasets (1K-100K rows)**: Optimized IVF_PQ index with intelligent parameters
+- **Medium datasets (1K-100K rows)**: IVF_RQ (32x compression) or IVF_HNSW_SQ (4x), chosen by `index.quantization`
 - **Large datasets (> 100K rows)**: Growth-aware optimization with enhanced recall
-- **Search queries**: Automatic nprobes (5-15% of partitions) + refine_factor for better accuracy
+- **Search queries**: LanceDB auto-tunes IVF_HNSW_SQ search; `ef` is the only tunable parameter
 
 **Technical Details**:
 ```rust
 // Automatic optimization - no configuration required
-let params = VectorOptimizer::calculate_index_params(row_count, vector_dimension);
-if params.should_create_index {
-    // Creates optimized index with calculated parameters
-    table.create_index(&["embedding"], Index::IvfPq(IvfPqIndexBuilder::default()
-        .num_partitions(params.num_partitions)
-        .num_sub_vectors(params.num_sub_vectors)
-        .num_bits(params.num_bits)
-        .distance_type(DistanceType::Cosine)
-    )).await?;
+let params = VectorOptimizer::calculate_index_params(row_count, vector_dimension, use_quantization);
+if !params.should_create_index {
+    return Ok(()); // brute force is faster below 1K rows
 }
+// Index type and parameters are carried by `params`
+table.create_index(&[column_name], Index::IvfRq(builder)).execute().await?;
 ```
 
 ### 3. File Discovery Optimization (v0.8.1+)
@@ -99,8 +95,7 @@ text_model = "fastembed:multilingual-e5-small"   # 384 dim, multilingual
 
 #### For Maximum Quality (Cloud)
 ```bash
-# High-quality cloud models (requires API keys)
-# Default models - no configuration needed
+# High-quality cloud models (requires API keys and explicit configuration)
 
 octocode config \
   --code-embedding-model "voyage:voyage-code-3" \
@@ -148,7 +143,7 @@ Octocode automatically optimizes vector indexes based on your dataset size and c
 
 **What happens automatically**:
 - Small datasets (< 1K rows): Uses brute force search (fastest)
-- Medium datasets (1K-100K rows): Creates optimized IVF_PQ indexes
+- Medium datasets (1K-100K rows): Creates optimized IVF_RQ or IVF_HNSW_SQ indexes
 - Large datasets (> 100K rows): Recreates indexes at growth milestones
 - Search parameters: Automatically calculated for best recall/latency balance
 
@@ -165,7 +160,7 @@ embeddings_batch_size = 16       # Batch size for embedding generation
 flush_frequency = 2              # How often to flush to disk
 ```
 
-**Note**: Vector index parameters (partitions, sub-vectors, etc.) are automatically calculated and cannot be manually configured.
+**Note**: Vector index parameters (partitions, index type, etc.) are automatically calculated and cannot be manually configured.
 
 ### 4. Hardware Optimization
 
@@ -190,7 +185,7 @@ max_results = 30                 # Reduce for lower memory usage
 #### Reduce API Calls
 ```bash
 # Use local models when possible
-octocode config --code-embedding-model "fastembed:all-MiniLM-L6-v2"
+octocode config --code-embedding-model "fastembed:sentence-transformers/all-MiniLM-L6-v2"
 
 # Batch operations
 octocode clear && octocode index  # Index all at once vs incremental
@@ -220,7 +215,7 @@ fallback_to_individual = true   # Reliability if batch processing fails
 RUST_LOG=debug octocode index
 
 # Monitor indexing progress
-octocode clear && octocode index 2>&1 | grep "Processed"
+octocode clear && octocode index 2>&1 | grep -i "processed"
 
 # Check database size
 ls -lh ~/.local/share/octocode/
@@ -269,22 +264,26 @@ echo "Memory usage during search:"
 ```bash
 # Quick fix for slow indexing
 octocode config --code-embedding-model "fastembed:BAAI/bge-small-en-v1.5"
-octocode config --contextual-descriptions false
+# Set in config.toml instead — there is no --contextual-descriptions flag:
+#   [index]
+#   contextual_descriptions = false
 octocode clear && octocode index
 ```
+
+### Slow Search
 
 **Symptoms**: Search queries take several seconds
 
 **Solutions**:
-1. **Increase similarity threshold**: `similarity_threshold = 0.3`
-2. **Reduce max results**: `max_results = 20`
+1. **Raise the similarity threshold**: `similarity_threshold = 0.8` (default is 0.65)
+2. **Reduce max results**: `max_results = 10` (default is 20)
 3. **Check database corruption**: `octocode clear && octocode index`
 4. **Optimize query**: Use more specific search terms
 
 ```bash
 # Quick fix for slow search
-octocode config --max-results 20
-octocode config --similarity-threshold 0.3
+octocode config --max-results 10
+octocode config --similarity-threshold 0.8
 ```
 
 ### High Memory Usage
@@ -294,13 +293,13 @@ octocode config --similarity-threshold 0.3
 **Solutions**:
 1. **Clear old data**: `octocode clear`
 2. **Use smaller embedding models**: Switch to 384-dim models
-3. **Limit search results**: `max_results = 20`
+3. **Limit search results**: `max_results = 10` (default is 20)
 
 ```bash
 # Quick fix for memory issues
-octocode config --max-results 20
+octocode config --max-results 10
 octocode clear
-octocode config --code-embedding-model "fastembed:all-MiniLM-L6-v2"
+octocode config --code-embedding-model "fastembed:sentence-transformers/all-MiniLM-L6-v2"
 ```
 
 ### API Rate Limiting
@@ -315,7 +314,7 @@ octocode config --code-embedding-model "fastembed:all-MiniLM-L6-v2"
 
 ```bash
 # Quick fix for rate limiting
-octocode config --code-embedding-model "fastembed:all-MiniLM-L6-v2"
+octocode config --code-embedding-model "fastembed:sentence-transformers/all-MiniLM-L6-v2"
 octocode config --text-embedding-model "fastembed:multilingual-e5-small"
 ```
 
@@ -358,6 +357,8 @@ du -sh ~/.local/share/octocode/
 
 ### Performance Comparison
 
+<!-- TODO(doc-custodian): verify — these comparison figures are not produced by any in-repo benchmark; benchmark/RESULTS.md holds the measured retrieval matrix -->
+
 | Configuration | Indexing (1000 files) | Search Latency | Memory Usage | Quality Score |
 |:--------------|---------------------:|---------------:|-------------:|-------------:|
 | **FastEmbed** | 45s | 50ms | 200MB | 7/10 |
@@ -365,7 +366,8 @@ du -sh ~/.local/share/octocode/
 | **Voyage (cloud)** | 75s | 90ms | 300MB | 9/10 |
 | **Google (cloud)** | 60s | 85ms | 280MB | 8.5/10 |
 
-**Note**: Cloud model times include API latency. FastEmbed runs locally but requires the `fastembed` feature flag.
+**Note**: Cloud model times include API latency.
+
 ## Best Practices
 
 ### Development Workflow

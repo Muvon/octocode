@@ -60,7 +60,7 @@ sudo mv octocode /usr/local/bin/
 #### Windows
 ```bash
 # In Git Bash, WSL, or MSYS2
-tar xzf octocode-VERSION-x86_64-pc-windows-gnu.zip
+tar xzf octocode-VERSION-x86_64-pc-windows-msvc.zip
 
 # Move to a directory in your PATH
 mv octocode.exe ~/.local/bin/
@@ -71,7 +71,7 @@ cp octocode.exe /c/Windows/System32/  # (requires admin)
 ## Install from Source
 
 ### Prerequisites
-- Rust 1.91.1 or later
+- Rust 1.95 or later
 - Protocol Buffers compiler (`protoc`)
 
 ### Install protoc
@@ -121,8 +121,7 @@ octocode --version
 
 ### Homebrew (macOS)
 ```bash
-# Coming soon
-brew install octocode
+brew install muvon/tap/octocode
 ```
 
 ### Chocolatey (Windows)

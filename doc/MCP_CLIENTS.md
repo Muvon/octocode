@@ -500,11 +500,11 @@ This logs all MCP requests and responses to help diagnose problems.
 Octocode respects these environment variables:
 
 ```bash
-# Required: Embedding provider API key
-export VOYAGE_API_KEY="your-key"        # Default provider
-export OPENAI_API_KEY="your-key"        # Alternative
-export JINA_API_KEY="your-key"          # Alternative
-export GOOGLE_API_KEY="your-key"        # Alternative
+# Optional: embedding provider API key — defaults use local FastEmbed models (no key needed)
+export VOYAGE_API_KEY="your-key"        # Voyage (cloud)
+export JINA_API_KEY="your-key"          # Jina (cloud)
+export OPENAI_API_KEY="your-key"        # OpenAI
+export GOOGLE_API_KEY="your-key"        # Google
 
 # Optional: LLM provider for advanced features
 export OPENROUTER_API_KEY="your-key"    # Multi-provider LLM

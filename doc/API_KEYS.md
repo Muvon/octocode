@@ -1,6 +1,6 @@
 # API Keys Setup Guide
 
-Octocode requires API keys for embedding generation and optional AI features. This guide covers all supported providers and setup methods.
+Octocode requires an embedding provider and optional API keys for AI features. Default builds embed locally via FastEmbed with no key required; this guide covers every supported provider and setup method.
 
 ## Required: Embedding Providers
 
@@ -107,7 +107,7 @@ octocode config \
 - `microsoft/codebert-base` - 768 dimensions, code-specialized
 - `jinaai/jina-embeddings-v2-base-code` - 768 dimensions, code-optimized
 
-**Note**: Local models require building with `--features fastembed,huggingface`. Default builds use cloud embeddings only.
+**Note**: Local models require the `fastembed` or `huggingface` feature. Both are enabled in default builds; only `--no-default-features` builds are cloud-only.
 
 ## Optional: LLM Provider
 
@@ -255,15 +255,14 @@ capabilities are not recognized.
 ## Platform Limitations
 
 ### Feature-Gated Providers
-- **FastEmbed**: Requires `fastembed` feature flag during compilation
-- **HuggingFace**: Requires `huggingface` feature flag during compilation
-- **Default builds**: Include only cloud providers (Jina, Voyage, Google, OpenAI)
-- **Full builds**: Use `cargo build --features fastembed,huggingface` for all providers
+- **FastEmbed**: Requires the `fastembed` feature
+- **HuggingFace**: Requires the `huggingface` feature
+- **Default builds**: Enable both local providers alongside every cloud provider (`default = ["fastembed", "huggingface"]`)
+- **Cloud-only builds**: `cargo build --no-default-features` drops the local providers
 
 ### Cross-Platform Support
 - **All platforms**: Cloud embeddings work everywhere
-- **Local models**: Available when built with appropriate features
-- **Default binaries**: Cloud-only for maximum compatibility
+- **Local models**: Available whenever the corresponding feature is compiled in (the default)
 
 ## Configuration Methods
 
@@ -354,7 +353,7 @@ export OPENROUTER_API_KEY="your-openrouter-api-key"
 octocode config --model "openrouter:openai/gpt-4o-mini"
 ```
 
-### Local-Only Setup (macOS)
+### Local-Only Setup
 
 ```bash
 # No API keys required
@@ -427,7 +426,7 @@ octocode config \
   --code-embedding-model "voyage:voyage-3.5-lite" \
   --text-embedding-model "voyage:voyage-3.5-lite"
 
-# Use local models when possible (macOS)
+# Use local models when possible
 octocode config \
   --code-embedding-model "fastembed:BAAI/bge-small-en-v1.5" \
   --text-embedding-model "fastembed:multilingual-e5-small"

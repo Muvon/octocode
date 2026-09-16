@@ -144,7 +144,7 @@ octocode release --changelog "HISTORY.md"
 
 **How it works:**
 
-1. **Project Detection**: Automatically detects project type (Rust, Node.js, PHP, Go)
+1. **Project Detection**: Automatically detects project type (Rust, Node.js, PHP, Go, Python)
 2. **Version Analysis**: Extracts current version from project files or git tags
 3. **Commit Analysis**: Analyzes commits since last release using conventional commit format
 4. **AI Calculation**: Uses LLM to determine appropriate semantic version bump
@@ -294,7 +294,7 @@ octocode mcp --path /path/to/your/project --with-lsp "typescript-language-server
 | **semantic_search** | Semantic code search across the codebase (supports multi-query) | `query` (string or array), `mode` (string: all/code/docs/text/commits), `detail_level` (string), `max_results` (integer) |
 | **view_signatures** | View file signatures and code structure | `files` (array of file paths or glob patterns) |
 | **graphrag** | Always-on live file/symbol graph: search, get-node, get-relationships, find-path, overview | `operation` (string), `query` (string), `node_id` (string), `source_id` (string), `target_id` (string), `max_depth` (integer), `format` (string) |
-| **structural_search** | AST-based structural code search using ast-grep patterns | `pattern` (string), `language` (string), `paths` (array), `context` (integer), `max_results` (integer) |
+| **structural_search** | AST-based structural code search using ast-grep patterns | `pattern`/`symbol`/`references` (exactly one), `language` (string, required), `paths` (array or string), `context` (integer), `max_results` (integer) |
 
 #### semantic_search Tool Details
 
@@ -319,8 +319,8 @@ octocode mcp --path /path/to/your/project --with-lsp "typescript-language-server
 ```
 
 **Parameters:**
-- `query`: String or array of strings (max 3 queries for optimal performance)
-- `mode`: Search scope - "all" (default), "code", "docs", or "text"
+- `query`: String or array of strings (max 5 queries via MCP)
+- `mode`: Search scope - "all" (default), "code", "docs", "text", or "commits"
 - `detail_level`: Content detail - "signatures", "partial" (default), or "full"
 - `max_results`: Maximum results to return (1-20, default: 3)
 
@@ -368,7 +368,7 @@ octocode search "mcp server" --mode commits --threshold 0.7
 
 ### Multi-Query Search (NEW!)
 
-Combine multiple search terms for comprehensive results. Maximum 3 queries supported for optimal performance.
+Combine multiple search terms for comprehensive results. Up to 10 queries on the CLI (5 through the MCP `semantic_search` tool).
 
 ```bash
 # Basic multi-query search
@@ -381,7 +381,7 @@ octocode search "api" "documentation" --mode docs
 
 # Multi-query with other options
 octocode search "database" "connection" --threshold 0.7 --expand
-octocode search "auth" "security" --json
+octocode search "auth" "security" --format json
 ```
 
 **How Multi-Query Works:**
@@ -394,7 +394,7 @@ octocode search "auth" "security" --json
 - Use related terms: `"jwt" "token"` instead of unrelated terms
 - Combine concepts: `"authentication" "middleware"` for auth middleware code
 - Use specific terms: `"database" "connection"` instead of vague terms
-- Limit to 3 queries: More queries don't necessarily improve results
+- More queries don't necessarily improve results; 2–3 specific terms usually beat a long list
 
 ### Structural Code Search
 
@@ -470,7 +470,7 @@ octocode grep 'console.log($ARG)' --lang javascript --rewrite 'logger.info($ARG)
 
 #### Supported Languages
 
-Rust, JavaScript, TypeScript, Python, Go, Java, C/C++, PHP, Ruby, Lua, Bash, CSS, JSON, Elixir
+Rust, JavaScript, TypeScript, Python, Go, Java, C/C++, PHP, Ruby, Swift, Lua, Bash, CSS, JSON, Elixir
 
 ### Similarity Thresholds
 
@@ -481,7 +481,7 @@ octocode search "error handling" --threshold 0.8
 # Broad results
 octocode search "API calls" --threshold 0.3
 
-# Default threshold (0.1)
+# Default threshold comes from config.search.similarity_threshold (0.65)
 octocode search "authentication"
 ```
 
@@ -499,12 +499,12 @@ octocode search "user authentication"
 
 ```bash
 # JSON output for programmatic use
-octocode search "API endpoints" --json
-octocode view "src/**/*.rs" --json
+octocode search "API endpoints" --format json
+octocode view "src/**/*.rs" --format json
 
 # Markdown for documentation
-octocode search "middleware" --md
-octocode view "src/**/*.rs" --md
+octocode search "middleware" --format md
+octocode view "src/**/*.rs" --format md
 ```
 
 ## Knowledge Graph Operations
@@ -541,13 +541,13 @@ octocode graphrag overview
 
 ```bash
 # Export graph structure to markdown
-octocode graphrag overview --md > project-structure.md
+octocode graphrag overview --format md > project-structure.md
 
 # Search with JSON output for processing
-octocode graphrag search --query "authentication" --json
+octocode graphrag search --query "authentication" --format json
 
 # Get node information in JSON format
-octocode graphrag get-node --node-id "src/main.rs" --json
+octocode graphrag get-node --node-id "src/main.rs" --format json
 ```
 
 ### Import Resolution Features
@@ -607,10 +607,10 @@ octocode view "src/**/*.rs"
 octocode view "**/*.py"
 octocode view "src/auth/*.ts"
 
-# Output formats
-octocode view --json                    # JSON format
-octocode view --md                      # Markdown format
-octocode view "src/**/*.rs" --md        # Specific files in markdown
+# Output formats: cli (default), json, md, text
+octocode view --format json                    # JSON format
+octocode view --format md                      # Markdown format
+octocode view "src/**/*.rs" --format md        # Specific files in markdown
 ```
 
 ### Use Cases for Signature Analysis
@@ -705,8 +705,8 @@ echo "Octocode ready for development"
 # Daily maintenance script
 octocode clear
 octocode index
-octocode graphrag overview --md > docs/project-structure.md
-octocode view "src/**/*.rs" --md > docs/api-reference.md
+octocode graphrag overview --format md > docs/project-structure.md
+octocode view "src/**/*.rs" --format md > docs/api-reference.md
 ```
 
 ### CI/CD Integration
@@ -717,8 +717,8 @@ octocode view "src/**/*.rs" --md > docs/api-reference.md
   run: |
     cargo build --release
     ./target/release/octocode index
-    ./target/release/octocode view "src/**/*.rs" --md > docs/api.md
-    ./target/release/octocode graphrag overview --md > docs/structure.md
+    ./target/release/octocode view "src/**/*.rs" --format md > docs/api.md
+    ./target/release/octocode graphrag overview --format md > docs/structure.md
 ```
 
 ## Debugging and Troubleshooting
@@ -727,7 +727,7 @@ octocode view "src/**/*.rs" --md > docs/api-reference.md
 
 ```bash
 # List all indexed files
-octocode debug --list-files
+octocode index --list-files
 
 # Check configuration
 octocode config --show
@@ -793,7 +793,7 @@ octocode clear
 octocode index
 
 # Use local embedding models to reduce API calls (requires features)
-octocode config --code-embedding-model "fastembed:all-MiniLM-L6-v2"
+octocode config --code-embedding-model "fastembed:sentence-transformers/all-MiniLM-L6-v2"
 
 # Limit search results
 octocode config --max-results 20

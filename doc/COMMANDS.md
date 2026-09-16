@@ -12,14 +12,17 @@ Index your codebase for semantic search.
 # Basic indexing
 octocode index
 
-# Verbose output
-octocode index --verbose
+# List all files currently indexed
+octocode index --list-files
 
-# Force reindex (ignore cache)
-octocode index --force
+# Show all chunks for one indexed file, with metadata
+octocode index --show-file src/main.rs
 
-# Index specific directory
-octocode index /path/to/project
+# Show GraphRAG connections for one file
+octocode index --graphrag src/main.rs
+
+# Skip the git repository requirement and git-based optimizations
+octocode index --no-git
 ```
 
 **What it does:**
@@ -55,12 +58,18 @@ octocode search "auth" --detail-level signatures  # Function signatures only
 octocode search "auth" --detail-level partial     # Smart truncation (default)
 octocode search "auth" --detail-level full        # Complete implementations
 
-# Adjust similarity and results
-octocode search "auth" --threshold 0.7 --max-results 10
+# Adjust similarity
+# --max-results is a config value, not a search flag:
+#   octocode config --max-results 10
+octocode search "auth" --threshold 0.7
 
-# Output formats
-octocode search "auth" --json     # JSON output
-octocode search "auth" --md       # Markdown output
+# Output formats: cli (default), json, md, text
+octocode search "auth" --format json
+# Markdown output
+octocode search "auth" --format md
+
+# Filter by programming language (only affects code blocks)
+octocode search "auth" --language rust
 
 # Symbol expansion
 octocode search "user authentication" --expand
@@ -86,10 +95,12 @@ octocode view "src/**/*.rs"
 octocode view "**/*.py"
 octocode view "src/auth/*.ts"
 
-# Output formats
-octocode view --json              # JSON format
-octocode view --md                # Markdown format
-octocode view "src/**/*.rs" --md  # Specific files in markdown
+# Output formats: cli (default), json, md, text
+octocode view --format json
+# Markdown format
+octocode view --format md
+# Specific files in markdown
+octocode view "src/**/*.rs" --format md
 ```
 
 ### `octocode grep`
@@ -140,7 +151,7 @@ octocode grep 'console.log($ARG)' --lang javascript --rewrite 'logger.info($ARG)
 - `--json` — Output as JSON
 
 **Supported languages:**
-Rust, JavaScript, TypeScript, Python, Go, Java, C/C++, PHP, Ruby, Lua, Bash, CSS, JSON, Elixir
+Rust, JavaScript, TypeScript, Python, Go, Java, C/C++, PHP, Ruby, Swift, Lua, Bash, CSS, JSON, Elixir
 
 ### `octocode config`
 
@@ -188,7 +199,7 @@ octocode models info openai:text-embedding-3-small
 octocode models info jina:jina-embeddings-v4
 
 # Validate model support and get dimensions
-octocode models info google:text-embedding-004
+octocode models info google:text-embedding-005
 ```
 
 **Output format:**
@@ -201,14 +212,17 @@ octocode models info google:text-embedding-004
 - `voyage` - Voyage AI models (voyage-code-3, voyage-3.5-lite, etc.)
 - `openai` - OpenAI embedding models (text-embedding-3-small, text-embedding-3-large, etc.)
 - `jina` - Jina AI models (jina-embeddings-v4, jina-clip-v2, etc.)
-- `google` - Google AI models (text-embedding-004, gemini-embedding-001, etc.)
+- `google` - Google AI models (gemini-embedding-001, text-embedding-005, etc.)
 - `octohub` - OctoHub models (dynamic discovery via API)
+- `openrouter` - OpenRouter models (dynamic discovery via API)
+- `local` - Any OpenAI-compatible embedding endpoint
+- `onnx` - Any HuggingFace repo with an `onnx/` export
 - `together` - Together AI models (intfloat/multilingual-e5-large-instruct, etc.)
-- `fastembed` - Local FastEmbed models (macOS only)
-- `huggingface` - HuggingFace models (macOS only)
+- `fastembed` - Local FastEmbed models (requires the `fastembed` feature, enabled in default builds)
+- `huggingface` - HuggingFace models (requires the `huggingface` feature, enabled in default builds)
 
 **Features:**
-- **Dynamic discovery**: No hardcoded model lists, real-time API validation
+- **Curated lists plus live lookup**: providers with a fixed catalog (Voyage, Jina, Google, OpenAI, Together, FastEmbed) are enumerated with dimensions; the rest resolve model names on demand
 - **Fail-fast validation**: Instantly verify if a model is supported
 - **Dimension detection**: Get exact embedding dimensions for each model
 - **Feature-gated**: Shows only available providers based on build features
@@ -313,6 +327,9 @@ octocode commit --all --yes
 # Skip pre-commit hooks
 octocode commit --no-verify
 
+# Rewrite the message of an existing commit by hash
+# (HEAD commits are amended in place; older commits are rewritten via rebase)
+octocode commit --commit abc1234
 ```
 
 **Pre-commit Integration:**
@@ -373,6 +390,7 @@ octocode release --changelog "HISTORY.md"
 - Node.js (package.json)
 - PHP (composer.json)
 - Go (go.mod)
+- Python (pyproject.toml)
 
 ## MCP Server Commands
 
@@ -392,8 +410,8 @@ octocode mcp --path /path/to/project --with-lsp "typescript-language-server --st
 # HTTP mode (instead of stdin/stdout)
 octocode mcp --bind "127.0.0.1:8080" --path /path/to/project
 
-# Custom port
-octocode mcp --path /path/to/project --port 3001
+# Custom port: HTTP mode is selected by --bind; there is no --port flag
+octocode mcp --bind "127.0.0.1:3001" --path /path/to/project
 
 # Debug mode with enhanced logging
 octocode mcp --path /path/to/project --debug
@@ -418,6 +436,16 @@ octocode mcp --multi --path /path/to/parent/directory
 
 # Multi-repo over HTTP
 octocode mcp --multi --bind "127.0.0.1:8080" --path /workspace --debug
+```
+
+### `octocode mcp --auto`
+
+Pick the mode from the target directory: single-repo when `--path` is itself a
+git repo root, multi-repo when it is not but git repositories exist one level
+under it. Conflicts with `--multi`.
+
+```bash
+octocode mcp --auto --path /workspace
 ```
 
 **How it works:**
@@ -457,9 +485,9 @@ octocode graphrag find-path \
 # Get graph overview
 octocode graphrag overview
 
-# Export formats
-octocode graphrag overview --md > project-structure.md
-octocode graphrag search --query "auth" --json
+# Export formats: cli (default), json, md, text
+octocode graphrag overview --format md > project-structure.md
+octocode graphrag search --query "auth" --format json
 ```
 
 ## Utility Commands
@@ -506,36 +534,6 @@ octocode logs --lines 50
 octocode logs --all
 ```
 
-### `octocode models`
-
-Model management and discovery commands.
-
-```bash
-# List all available models from all providers
-octocode models list
-
-# List models from specific provider
-octocode models list jina
-octocode models list voyage
-octocode models list google
-octocode models list octohub
-octocode models list together
-octocode models list fastembed
-octocode models list huggingface
-
-# Get detailed information about a specific model
-octocode models info voyage:voyage-code-3
-octocode models info jina:jina-embeddings-v4
-octocode models info google:gemini-embedding-001
-octocode models info fastembed:all-MiniLM-L6-v2
-octocode models info huggingface:microsoft/codebert-base
-```
-
-**Features:**
-- **Dynamic model discovery** - No hardcoded model lists
-- **Provider validation** - Checks if providers are available
-- **Model dimensions** - Shows embedding dimensions for each model
-- **Feature detection** - Indicates which providers are compiled in
 
 ### `octocode watch`
 
@@ -566,13 +564,15 @@ octocode watch --no-git
 Clear indexed database tables.
 
 ```bash
-# Clear all data
+# Clear all data (--mode takes: all, code, docs, text, commits, graphrag)
 octocode clear --mode all
 
 # Clear specific data types
 octocode clear --mode code
 octocode clear --mode docs
 octocode clear --mode text
+octocode clear --mode commits
+octocode clear --mode graphrag
 
 # Default mode (all)
 octocode clear
@@ -593,33 +593,75 @@ octocode completion fish > ~/.config/fish/completions/octocode.fish
 make install-completions
 ```
 
-## Global Options
+### `octocode branch`
 
-Most commands support these global options:
+Manage branch delta indexes.
 
 ```bash
-# Verbose output
-octocode <command> --verbose
+# List all indexed branch deltas
+octocode branch list
 
-# JSON output (where applicable)
-octocode <command> --json
+# Show info about a branch delta index (defaults to current branch)
+octocode branch info
+octocode branch info feature-branch
 
-# Markdown output (where applicable)
-octocode <command> --md
+# Delete a branch delta index
+octocode branch delete feature-branch
+
+# Remove indexes for branches that no longer exist in git or are merged
+octocode branch prune
+octocode branch prune --dry-run   # show what would be pruned
+```
+
+### `octocode export`
+
+Export the current project's dataset to a portable archive (`.tar.zst`). The full archive path is printed on success; transient state (lock and log files) is excluded.
+
+```bash
+# Write the archive to the current directory
+octocode export
+
+# Write the archive to a specific directory
+octocode export /path/to/destination
+```
+
+### `octocode import`
+
+Import a dataset archive produced by `octocode export`. Existing `storage/` and `branches/` are backed up and replaced atomically, with rollback on failure.
+
+```bash
+# Import into the current project
+octocode import octocode-dataset.tar.zst
+```
+
+## Output Formats
+
+Commands that render structured data take `--format` with `cli` (default), `json`, `md`, or `text`: `search`, `view`, `stats`, `diff`, `explain`, and `graphrag`. `search`, `stats`, `diff`, and `explain` also accept the `-f` short form; `view` and `graphrag` are long-form only.
+
+```bash
+# JSON output
+octocode search "auth" --format json
+
+# Markdown output
+octocode view "src/**/*.rs" --format md
+
+# Plain text output
+octocode stats --format text
 
 # Help for any command
 octocode <command> --help
 octocode help <command>
 ```
 
+`grep` and `review` use a standalone `--json` flag instead.
+
 ## Command Combinations
 
 ### Complete Reindex Workflow
 
-```bash
 # Clear old data and reindex
-octocode clear --all --yes
-octocode index --verbose
+octocode clear
+octocode index
 
 # Start MCP server
 octocode mcp --path . &
@@ -647,13 +689,12 @@ octocode review --focus security
 
 ### Documentation Generation
 
-```bash
 # Generate comprehensive documentation
-octocode view "src/**/*.rs" --md > docs/api-reference.md
-octocode graphrag overview --md > docs/architecture.md
+octocode view "src/**/*.rs" --format md > docs/api-reference.md
+octocode graphrag overview --format md > docs/architecture.md
 
 # Create project structure overview
-octocode search "main components" --md > docs/components.md
+octocode search "main components" --format md > docs/components.md
 ```
 
 For more detailed information about specific features, see:

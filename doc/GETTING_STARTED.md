@@ -24,8 +24,8 @@ cd /path/to/your/project
 # Index current directory
 octocode index
 
-# Watch for progress
-octocode index --verbose
+# List all files currently indexed
+octocode index --list-files
 ```
 
 **What happens during indexing:**
@@ -93,7 +93,7 @@ octocode config \
   --code-embedding-model "fastembed:BAAI/bge-small-en-v1.5" \
   --text-embedding-model "fastembed:multilingual-e5-small"
 
-# Or use current cloud defaults (recommended)
+# Or use cloud models (higher quality, requires API keys)
 octocode config \
   --code-embedding-model "voyage:voyage-code-3" \
   --text-embedding-model "voyage:voyage-3.5-lite"
@@ -146,8 +146,8 @@ octocode mcp --path /path/to/python/project --with-lsp "pylsp"
 
 ```bash
 # Understand new codebase
-octocode view "**/*.rs" --md > project-overview.md
-octocode graphrag overview --md > architecture.md
+octocode view "**/*.rs" --format md > project-overview.md
+octocode graphrag overview --format md > architecture.md
 
 # Find similar patterns
 octocode search "error handling" --expand
@@ -180,10 +180,10 @@ octocode review --severity high
 
 ```bash
 # Generate API documentation
-octocode view "src/**/*.rs" --json > api-docs.json
+octocode view "src/**/*.rs" --format json > api-docs.json
 
 # Create project structure overview
-octocode graphrag overview --md > STRUCTURE.md
+octocode graphrag overview --format md > STRUCTURE.md
 ```
 
 ## Troubleshooting
@@ -192,7 +192,7 @@ octocode graphrag overview --md > STRUCTURE.md
 
 ```bash
 # Use faster embedding models
-octocode config --code-embedding-model "fastembed:all-MiniLM-L6-v2"
+octocode config --code-embedding-model "fastembed:sentence-transformers/all-MiniLM-L6-v2"
 
 # Disable optional persisted GraphRAG enrichment
 # (the live MCP structural graph remains available)

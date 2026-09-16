@@ -10,18 +10,21 @@ The codebase is organized into the following core modules:
 
 - **`config`** - Configuration management with template-based defaults
 - **`constants`** - Application constants and shared values
-- **`embedding`** - Multi-provider embedding system with dynamic model discovery (via octolib v0.16.0)
+- **`embedding`** - Thin wrapper over octolib's embedding module: re-exports types, adds retrying batch generation and mode-aware query embedding
 - **`indexer`** - Tree-sitter based code parsing and semantic extraction
+- **`llm`** - Thin wrapper over octolib's LLM module: `LlmClient::from_config()` / `with_model()`
 - **`lock`** - Process synchronization and concurrent operation management
 - **`mcp`** - Model Context Protocol server implementation (rmcp SDK)
   - Server handles protocol framing; tool providers in `semantic_code.rs`, `graphrag.rs`, `lsp/`, `watcher.rs`
-- **`reranker`** - Search result ranking and optimization
+- **`reranker`** - Search result reranking (voyage, cohere, jina, fastembed)
 - **`state`** - Application state management
-- **`storage`** - Vector database operations and data persistence
-- **`store`** - High-level storage abstractions and batch operations
+- **`storage`** - Per-project database path resolution under `~/.local/share/octocode/<project-hash>/`
+- **`store`** - LanceDB operations: block types, table handles, batch conversion, vector index optimization
 - **`utils`** - Shared utilities and helper functions
 - **`grep`** - Structural code search using ast-grep patterns (AST-aware pattern matching)
 - **`watcher_config`** - File watching configuration and patterns
+- **`language`** - Project file-association overrides for language detection
+- **`reasoning`** - PageIndex-style LLM re-ranking fused with hybrid results
 
 ### 1. Indexer Engine (`src/indexer/`)
 - **Multi-language code parser** using Tree-sitter
@@ -30,16 +33,16 @@ The codebase is organized into the following core modules:
 - **Chunk-based processing** for large files
 - **Safe symlink handling** - Prevents infinite recursion by disabling symlink following
 - **Intelligent file discovery** with .gitignore and .noindex pattern support
-- **Language-specific parsers** for 10+ programming languages
+- **Language-specific parsers** for 17 programming and markup languages
 ### 2. Embedding System (`src/embedding/`)
-- **Multiple providers**: Jina AI, Voyage AI, Google, OpenAI, OpenRouter, Together (cloud)
+- **Multiple providers**: Jina AI, Voyage AI, Google, OpenAI, OpenRouter, OctoHub, Together (cloud)
 - **Feature-gated local providers**: FastEmbed, HuggingFace (require `fastembed`/`huggingface` features)
 - **Dynamic model discovery** - No hardcoded model-dimension mappings
 - **Provider validation** - Fail-fast during provider creation for invalid models
 - **Batch processing** for efficient embedding generation
 - **Provider auto-detection** from model string format (`provider:model`)
 - **Input type support** for query vs document optimization
-- **Thin wrapper** around octolib v0.16.0 embedding module
+- **Thin wrapper** around octolib's embedding module (all providers live there)
 
 ### 3. Vector Database (`src/storage.rs`, `src/store/`)
 - **Lance columnar database** for fast similarity search
@@ -83,7 +86,7 @@ The codebase is organized into the following core modules:
 - **Process management** to prevent concurrent indexing operations
 - **LSP integration** - Language Server Protocol for go-to-definition, hover, find references, completion
 - **Debug mode** with enhanced logging and performance monitoring
-- **MCP Proxy** for multi-repository management
+- **Multi-repository mode** (`--multi`) serving every git repo one level under `--path` from a single endpoint
 
 ### 7. Git Integration
 - **Smart commit message generation** using AI
@@ -93,7 +96,7 @@ The codebase is organized into the following core modules:
 - **AI code explanation** with architectural focus
 - **Release management** with AI-powered version calculation
 - **Codebase statistics** with index health monitoring
-- **Multiple LLM support** via OpenRouter
+- **Multiple LLM support** via octolib providers (OpenRouter, OpenAI, Anthropic, Google, DeepSeek, local)
 
 ### 8. Code Formatting (`src/commands/format/`)
 - **EditorConfig integration** for consistent formatting
@@ -161,7 +164,7 @@ The live graph detects repository metadata changes on the next graph request. Wh
 | **Go** | `.go` | Package/import analysis, function extraction |
 | **Java** | `.java` | Class, interface, method, inheritance, and implementation extraction |
 | **PHP** | `.php` | Class/function extraction, namespace support |
-| **C++** | `.cpp`, `.hpp`, `.h`, `.cc`, `.cxx`, `.c++`, `.hxx`, `.cppm`, `.ixx`, `.mxx`, `.ccm`, `.cxxm` | Include analysis, class/function extraction |
+| **C++** | `.cpp`, `.hpp`, `.h`, `.c`, `.cc`, `.cxx`, `.c++`, `.hxx`, `.cppm`, `.ixx`, `.mxx`, `.ccm`, `.cxxm` | Include analysis, class/function extraction |
 | **Ruby** | `.rb` | Class/module extraction, method definitions |
 | **Elixir** | `.ex`, `.exs` | Module, protocol, function, macro, and dependency extraction |
 | **JSON** | `.json` | Structure analysis, key extraction |
@@ -170,7 +173,7 @@ The live graph detects repository metadata changes on the next graph request. Wh
 | **Lua** | `.lua` | Function and module extraction |
 | **Swift** | `.swift` | Type, protocol, function, and method extraction |
 | **Svelte** | `.svelte` | Component structure, script/style extraction |
-| **Markdown** | `.md` | Document section indexing, header extraction |
+| **Markdown** | `.md`, `.markdown` | Document section indexing, header extraction |
 
 ## Performance Characteristics
 

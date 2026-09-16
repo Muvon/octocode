@@ -29,7 +29,7 @@ octocode config \
 ### Cloud Embedding Models (API Keys Required)
 
 ```bash
-# Use cloud providers for highest quality (current defaults)
+# Use cloud providers for highest quality
 octocode config \
   --code-embedding-model "voyage:voyage-code-3" \
   --text-embedding-model "voyage:voyage-3.5-lite"
@@ -53,7 +53,7 @@ octocode config \
 ## Configuration File Structure
 
 ```toml
-version = 2
+version = 3
 
 [llm]
 model = "openrouter:openai/gpt-4o-mini"
@@ -62,9 +62,12 @@ temperature = 0.7
 max_tokens = 4000
 
 [embedding]
-# Current defaults - provider auto-detected from prefix
-code_model = "voyage:voyage-code-3"
-text_model = "voyage:voyage-3.5-lite"
+# Local models (default) — no API key required
+code_model = "fastembed:jinaai/jina-embeddings-v2-base-code"
+text_model = "fastembed:nomic-ai/nomic-embed-text-v1.5"
+# Cloud alternatives (higher quality, require API keys):
+#   code_model = "voyage:voyage-code-3"
+#   text_model = "voyage:voyage-3.5-lite"
 
 [graphrag]
 enabled = false
@@ -88,6 +91,29 @@ output_format = "markdown"
 max_files = 10
 context_lines = 3
 search_block_max_characters = 400
+graph_expansion = false
+
+[search.reranker]
+enabled = true
+model = "fastembed:jina-reranker-v2-base-multilingual"
+top_k_candidates = 50
+final_top_k = 10
+
+[search.hybrid]
+enabled = true
+default_vector_weight = 0.6
+default_keyword_weight = 0.4
+rrf_k = 60.0
+auto_weight = false
+
+[search.reasoning]
+enabled = false
+model = "deepseek:deepseek-v4-flash"
+max_candidates = 25
+final_top_k = 10
+context_level = "full"
+reasoning_weight = 2.0
+reasoning_effort = "low"
 
 [index]
 chunk_size = 2000
@@ -96,6 +122,7 @@ embeddings_batch_size = 16
 embeddings_max_tokens_per_batch = 100000
 flush_frequency = 2
 require_git = true
+mcp_index = false                            # Run background indexing + watcher inside the MCP server
 quantization = true                          # RaBitQ quantization for ~32x vector compression
 contextual_descriptions = false              # Contextual Retrieval: enrich chunks with AI context
 contextual_model = "openrouter:openai/gpt-4o-mini"  # Model for contextual descriptions
@@ -103,6 +130,9 @@ contextual_batch_size = 10                   # Chunks per batch for contextual e
 
 [index.file_associations]
 # inc = "php"                                # Treat this project's .inc files as PHP
+
+[commits]
+use_llm = false
 ```
 
 ## Embedding Providers
@@ -118,7 +148,11 @@ contextual_batch_size = 10                   # Chunks per batch for contextual e
 | **Google** | `google:model-name` | ✅ Yes | ☁️ Cloud | ⭐⭐⭐⭐ | ⭐⭐⭐⭐ |
 | **OpenAI** | `openai:model-name` | ✅ Yes | ☁️ Cloud | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐ |
 | **OctoHub** | `octohub:model-name` | ✅ Yes | ☁️ Cloud | ⭐⭐⭐⭐ | ⭐⭐⭐⭐ |
+| **OpenRouter** | `openrouter:model-name` | ✅ Yes | ☁️ Cloud | ⭐⭐⭐⭐ | ⭐⭐⭐⭐ |
 | **Together** | `together:model-name` | ✅ Yes | ☁️ Cloud | ⭐⭐⭐⭐ | ⭐⭐⭐⭐ |
+| **ONNX** | `onnx:model-name` | ❌ No | 🖥️ Local | ⭐⭐⭐⭐ | ⭐⭐⭐ |
+| **Local** | `local:model-name` | ❌ No | 🖥️ Local | ⭐⭐⭐⭐ | ⭐⭐⭐⭐ |
+
 ### Model Recommendations
 
 #### For Code Understanding (code_model)
@@ -258,7 +292,7 @@ LLM-specific configuration for GraphRAG AI features.
 - `batch_timeout_seconds`: Timeout for batch AI requests in seconds (default: 60)
 - `fallback_to_individual`: Whether to fallback to individual AI calls if batch fails (default: true)
 - `max_sample_tokens`: Maximum content sample size sent to AI (default: 1500)
-- `confidence_threshold`: Confidence threshold for AI relationships (default: 0.8)
+- `confidence_threshold`: Confidence threshold for AI relationships (default: 0.6)
 - `architectural_weight`: Weight for AI-discovered relationships (default: 0.9)
 - `relationship_system_prompt`: System prompt for relationship discovery
 - `description_system_prompt`: System prompt for file descriptions
@@ -270,6 +304,42 @@ Search behavior configuration.
 
 - `max_results`: Maximum search results to return
 - `similarity_threshold`: Minimum similarity score for results
+- `output_format`: Default output format (`markdown`, `json`, `text`, `cli`)
+- `max_files`: Maximum number of files in results (default: 10)
+- `context_lines`: Context lines around each match (default: 3)
+- `search_block_max_characters`: Maximum characters per block in results; 0 shows full content (default: 400)
+- `graph_expansion`: Expand code results with GraphRAG-related files before reranking (requires `[graphrag] enabled`, default: false)
+
+### [search.reranker]
+
+Reranks retrieved candidates before they are returned.
+
+- `enabled`: Enable reranking (default: true)
+- `model`: Reranker in `provider:model` format (`voyage:`, `cohere:`, `jina:`, `fastembed:`)
+- `top_k_candidates`: Candidates fetched from vector search before reranking (default: 50)
+- `final_top_k`: Results returned after reranking (default: 10)
+
+### [search.hybrid]
+
+Combines vector similarity with BM25 keyword matching over the `content` column, fused with weighted RRF.
+
+- `enabled`: Enable hybrid search (default: true)
+- `default_vector_weight`: Vector-similarity weight in RRF fusion (default: 0.6)
+- `default_keyword_weight`: Keyword (BM25) weight in RRF fusion (default: 0.4)
+- `rrf_k`: RRF dampening constant; lower values let the top ranks dominate (default: 60.0)
+- `auto_weight`: Tilt vector/keyword weights per query with a deterministic shape heuristic (default: false)
+
+### [search.reasoning]
+
+PageIndex-style reasoning retrieval: an LLM reasons over the candidate pool and re-ranks by relevance, fused with the hybrid rank via RRF. Off by default; applies only to semantic search.
+
+- `enabled`: Enable the reasoning selection step (default: false)
+- `model`: Reasoning model in `provider:model` format (default: "deepseek:deepseek-v4-flash")
+- `max_candidates`: Candidates reasoned over (default: 25)
+- `final_top_k`: Results kept after reasoning (default: 10)
+- `context_level`: Per-candidate context sent to the LLM: `full`, `snippets`, or `signatures` (default: "full")
+- `reasoning_weight`: Weight of the reasoning rank vs the hybrid rank in RRF fusion (default: 2.0)
+- `reasoning_effort`: Thinking budget: `low`, `medium`, `high`, `xhigh`, `max` (default: "low")
 
 ### [index]
 Indexing behavior settings.
@@ -280,10 +350,15 @@ Indexing behavior settings.
 - `embeddings_max_tokens_per_batch`: Maximum tokens per embedding batch (default: 100000)
 - `flush_frequency`: How often to flush to disk during indexing (default: 2)
 - `require_git`: Require git repository for indexing (default: true)
+- `mcp_index`: Run background indexing and a file watcher inside the MCP server; when false the server serves the existing index read-only (default: false)
 - `quantization`: Enable RaBitQ quantization for vector indexes, ~32x compression with minimal quality loss (default: true)
 - `contextual_descriptions`: Enable Anthropic's Contextual Retrieval technique — enriches each chunk with AI-generated context before embedding for improved search quality (default: false)
 - `contextual_model`: LLM model used for generating contextual descriptions (default: "openrouter:openai/gpt-4o-mini")
 - `contextual_batch_size`: Number of chunks processed per batch during contextual enrichment (default: 10)
+
+### [commits]
+
+- `use_llm`: Generate rich AI descriptions of commit diffs during commit indexing (default: false)
 
 ## Command Line Configuration
 
@@ -292,7 +367,7 @@ Indexing behavior settings.
 octocode config --show
 
 # Set embedding models
-octocode config --code-embedding-model "fastembed:all-MiniLM-L6-v2"
+octocode config --code-embedding-model "fastembed:sentence-transformers/all-MiniLM-L6-v2"
 octocode config --text-embedding-model "fastembed:multilingual-e5-small"
 
 # Set LLM model (provider:model format)
@@ -315,8 +390,9 @@ octocode config --similarity-threshold 0.3
 # Start MCP server with default settings
 octocode mcp --path /path/to/project
 
-# Start with custom port
-octocode mcp --path /path/to/project --port 3001
+# Start with a custom HTTP bind address
+# (there is no --port flag; --bind selects HTTP mode)
+octocode mcp --path /path/to/project --bind "127.0.0.1:3001"
 
 # Start with debug logging
 octocode mcp --path /path/to/project --debug
@@ -344,7 +420,7 @@ The MCP server uses command-line arguments rather than configuration file settin
 
 ```toml
 # Octocode configuration (config-templates/default.toml)
-version = 1
+version = 3
 
 [llm]
 model = "openrouter:openai/gpt-4o-mini"
@@ -364,15 +440,15 @@ similarity_threshold = 0.65
 output_format = "markdown"
 
 [embedding]
-code_model = "voyage:voyage-code-3"
-text_model = "voyage:voyage-3.5-lite"
+code_model = "fastembed:jinaai/jina-embeddings-v2-base-code"
+text_model = "fastembed:nomic-ai/nomic-embed-text-v1.5"
 
 [graphrag]
 enabled = false
 use_llm = false
 ```
 
-**Note**: MCP server settings like port, debug mode, and LSP integration are controlled via command-line flags, not configuration file options.
+**Note**: MCP transport settings (bind address, debug mode, LSP integration) are controlled via command-line flags, not configuration file options.
 
 ### Claude Desktop Integration
 
@@ -403,15 +479,15 @@ Add to your Claude Desktop configuration file:
   "mcpServers": {
     "octocode-rust": {
       "command": "octocode",
-      "args": ["mcp", "--path", "/path/to/rust/project", "--with-lsp", "rust-analyzer", "--port", "3001"]
+      "args": ["mcp", "--path", "/path/to/rust/project", "--with-lsp", "rust-analyzer", "--bind", "127.0.0.1:3001"]
     },
     "octocode-python": {
       "command": "octocode",
-      "args": ["mcp", "--path", "/path/to/python/project", "--with-lsp", "pylsp", "--port", "3002"]
+      "args": ["mcp", "--path", "/path/to/python/project", "--with-lsp", "pylsp", "--bind", "127.0.0.1:3002"]
     },
     "octocode-typescript": {
       "command": "octocode",
-      "args": ["mcp", "--path", "/path/to/ts/project", "--with-lsp", "typescript-language-server --stdio", "--port", "3003"]
+      "args": ["mcp", "--path", "/path/to/ts/project", "--with-lsp", "typescript-language-server --stdio", "--bind", "127.0.0.1:3003"]
     }
   }
 }
@@ -422,7 +498,7 @@ Add to your Claude Desktop configuration file:
 ### For Speed
 ```toml
 [embedding]
-code_model = "fastembed:all-MiniLM-L6-v2"
+code_model = "fastembed:sentence-transformers/all-MiniLM-L6-v2"
 text_model = "fastembed:multilingual-e5-small"
 
 [index]

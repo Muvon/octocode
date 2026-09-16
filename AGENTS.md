@@ -1,6 +1,6 @@
 # Octocode — AI-Powered Code Intelligence
 
-Rust CLI tool (v0.14.x) that indexes codebases into LanceDB vector stores, builds knowledge graphs via GraphRAG, and exposes everything through an MCP server for AI assistant integration. Core stack: Rust + tokio + LanceDB + tree-sitter + octolib (embedding/LLM providers). Embedding providers and LLM are delegated entirely to `octolib`.
+Rust CLI tool (v0.26.x) that indexes codebases into LanceDB vector stores, builds knowledge graphs via GraphRAG, and exposes everything through an MCP server for AI assistant integration. Core stack: Rust + tokio + LanceDB + tree-sitter + octolib (embedding/LLM providers). Embedding providers and LLM are delegated entirely to `octolib`.
 
 ## Project Structure
 
@@ -31,7 +31,7 @@ src/
     semantic_code.rs         — SemanticCodeProvider tool impl
     graphrag.rs              — GraphRagProvider tool impl
     lsp/                     — LSP integration tools
-    proxy.rs                 — Multi-repo MCP proxy
+    multi.rs                 — Multi-repo MCP mode (--multi/--auto)
   commands/                  — One file per CLI subcommand
 config-templates/default.toml — Single source of truth for ALL config defaults
 ```

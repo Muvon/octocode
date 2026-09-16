@@ -156,7 +156,7 @@ See [Installation Guide](INSTALL.md) for platform-specific instructions.
 ### 2. Set Up API Keys
 
 ```bash
-# Required: Embedding provider (Voyage AI has a free tier)
+# Optional: embedding provider (defaults to local FastEmbed — no key needed)
 export VOYAGE_API_KEY="your-voyage-api-key"
 
 # Optional: LLM for commit messages, code review
@@ -205,7 +205,7 @@ octocode search "authentication middleware"
 octocode search "auth" "middleware" "session"
 
 # Filter by language
-octocode search "database connection pool" --lang rust
+octocode search "database connection pool" --language rust
 
 # Search commit history
 octocode search "authentication refactor" --mode commits
@@ -307,7 +307,7 @@ claude mcp add octocode -- octocode mcp --path /path/to/your/project
 
 ## 🌐 Supported Languages
 
-16 languages with full tree-sitter AST parsing:
+17 languages with full tree-sitter AST parsing:
 
 | Language | Extensions | Features |
 |----------|------------|----------|
@@ -323,10 +323,10 @@ claude mcp add octocode -- octocode mcp --path /path/to/your/project
 | **Swift** | `.swift` | Class/struct/protocol extraction, import analysis |
 | **Svelte** | `.svelte` | Component structure, script/style block extraction |
 | **Lua** | `.lua` | Function and table extraction |
-| **CSS** | `.css` | Rule and selector extraction |
+| **CSS** | `.css`, `.scss`, `.sass` | Rule and selector extraction |
 | **JSON** | `.json` | Structure analysis, key extraction |
 | **Bash** | `.sh`, `.bash` | Function and variable extraction |
-| **Markdown** | `.md` | Document section indexing, header extraction |
+| **Markdown** | `.md`, `.markdown` | Document section indexing, header extraction |
 
 ## 📚 Documentation
 
