@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.26.2] - 2026-09-18
+
+### 📋 Release Summary
+
+This release adds per-file and per-batch indexing progress when using verbose mode (9a358956). Indexing reliability is improved through checkpointing after stored batches, alongside refreshed usage guidance and repository documentation (5c7922ac, 8178cdd, 1cd286e2). Dependency updates keep the project current (51621b97, eeadb186).
+
+
+### ✨ New Features & Enhancements
+
+- **index**: print per-file and per-batch progress with -v `9a358956`
+
+### 🐛 Bug Fixes & Stability
+
+- **index**: checkpoint commit indexing after each stored batch `5c7922ac`
+
+### 📚 Documentation & Examples
+
+- **agents**: consolidate repository guidance `8178cdd8`
+- refresh current usage guidance `1cd286e2`
+
+### 🔄 Other Changes
+
+2 maintenance, dependency, and tooling updates not listed individually.
+
 ## [0.26.1] - 2026-09-15
 
 ### 📋 Release Summary
