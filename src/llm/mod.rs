@@ -239,6 +239,41 @@ impl LlmClient {
 		self.provider.supports_structured_output(&self.model)
 	}
 
+	/// Ask the model which claims in `text` the `source` does not support.
+	/// `rules` states what counts as unsupported for this kind of source. An
+	/// empty list means every claim is backed; the caller decides what to do.
+	pub async fn unsupported_claims(
+		&self,
+		rules: &str,
+		source: &str,
+		text: &str,
+	) -> Result<Vec<String>> {
+		let system = format!(
+			"You audit a text against the source material it describes. Respond with a single JSON object and nothing else: {{\"unsupported\": [string]}}\n\n\
+			List every claim in the text that the source does not support. For each, quote the claim, then state what the source actually shows. Judge only factual support: wording, style, format and completeness are not your concern. An empty array means every claim is supported.\n\n{}",
+			rules
+		);
+		let user = format!("SOURCE:\n{}\n\nTEXT TO AUDIT:\n{}", source, text);
+		let messages = vec![Message::system(&system), Message::user(&user)];
+		let schema = serde_json::json!({
+			"type": "object",
+			"properties": {"unsupported": {"type": "array", "items": {"type": "string"}}},
+			"required": ["unsupported"]
+		});
+		let value = self.chat_completion_json(messages, Some(schema)).await?;
+		let claims = value
+			.get("unsupported")
+			.and_then(|v| v.as_array())
+			.ok_or_else(|| anyhow::anyhow!("LLM returned no unsupported field: {}", value))?;
+		Ok(claims
+			.iter()
+			.filter_map(|c| c.as_str())
+			.map(str::trim)
+			.filter(|c| !c.is_empty())
+			.map(String::from)
+			.collect())
+	}
+
 	/// Chat completion with JSON output. Pass a schema to enforce structure via provider.
 	/// Schema must use only basic JSON Schema keywords: type, properties, required, items.
 	/// Includes retry with exponential backoff.

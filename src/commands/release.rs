@@ -820,6 +820,14 @@ fn extract_field_from_toml(content: &str, field: &str) -> Option<String> {
 
 /// Sampling temperature for the release summary; low keeps it factual.
 const LLM_TEMPERATURE: f32 = 0.1;
+/// Rounds of draft, audit, redraft-with-feedback before the release aborts.
+const MAX_AUDIT_ROUNDS: usize = 2;
+
+const SUMMARY_AUDIT_RULES: &str = "The source is the list of commit messages in this release, grouped by kind. A claim is unsupported when it:
+- describes a change, capability or fix that no listed commit states;
+- calls something new, added or introduced although no commit under NEW FEATURES says so;
+- states a benefit, motivation or improvement that no commit message gives;
+- names a component or area that no commit mentions.";
 
 const SUMMARY_SYSTEM_PROMPT: &str = "You write the summary paragraph of a software changelog entry. Respond with a single JSON object and nothing else: {\"summary\": string}
 
@@ -880,21 +888,50 @@ async fn generate_ai_changelog_summary(
 	}
 
 	let client = LlmClient::from_config(config)?.with_temperature(LLM_TEMPERATURE);
-	let messages = vec![
-		Message::system(SUMMARY_SYSTEM_PROMPT),
-		Message::user(&prompt),
-	];
 	let schema = serde_json::json!({
 		"type": "object",
 		"properties": {"summary": {"type": "string"}},
 		"required": ["summary"]
 	});
-	let value = client.chat_completion_json(messages, Some(schema)).await?;
-	let summary = value
-		.get("summary")
-		.and_then(|s| s.as_str())
-		.ok_or_else(|| anyhow::anyhow!("LLM returned no summary field: {}", value))?;
-	Ok(plain_line(summary))
+
+	// Draft, audit against the commit list, redraft with the rejections as
+	// feedback. The auditor only ever sees the commit list, never a rejected draft.
+	let mut draft_prompt = prompt.clone();
+	let mut rejected = Vec::new();
+	for _ in 0..MAX_AUDIT_ROUNDS {
+		let messages = vec![
+			Message::system(SUMMARY_SYSTEM_PROMPT),
+			Message::user(&draft_prompt),
+		];
+		let value = client
+			.chat_completion_json(messages, Some(schema.clone()))
+			.await?;
+		let summary = value
+			.get("summary")
+			.and_then(|s| s.as_str())
+			.map(plain_line)
+			.ok_or_else(|| anyhow::anyhow!("LLM returned no summary field: {}", value))?;
+		rejected = client
+			.unsupported_claims(SUMMARY_AUDIT_RULES, &prompt, &summary)
+			.await?;
+		if rejected.is_empty() {
+			return Ok(summary);
+		}
+		println!("🔍 Audit rejected the summary; redrafting without these claims:");
+		for claim in &rejected {
+			println!("  • {}", claim);
+		}
+		draft_prompt.push_str(&format!(
+			"\n\nA previous summary was rejected because the commits do not support these claims. Do not repeat them; state only what the commits say:\n- {}\n\nRejected summary:\n{}",
+			rejected.join("\n- "),
+			summary
+		));
+	}
+	Err(anyhow::anyhow!(
+		"Release summary still claims more than the commits say after {} drafts: {}",
+		MAX_AUDIT_ROUNDS,
+		rejected.join("; ")
+	))
 }
 
 async fn update_project_version(project_type: &ProjectType, new_version: &str) -> Result<()> {

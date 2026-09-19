@@ -106,7 +106,7 @@ index 111..222 100644
 		kind: &str,
 		scope: &str,
 		subject: &str,
-		why: &str,
+		effect: &str,
 		changes: &[&str],
 		breaking: &str,
 	) -> CommitDraft {
@@ -114,7 +114,7 @@ index 111..222 100644
 			kind: kind.to_string(),
 			scope: scope.to_string(),
 			subject: subject.to_string(),
-			why: why.to_string(),
+			effect: effect.to_string(),
 			changes: changes.iter().map(|c| c.to_string()).collect(),
 			breaking: breaking.to_string(),
 		}
@@ -146,7 +146,7 @@ index 111..222 100644
 	}
 
 	#[test]
-	fn a_multi_part_draft_renders_why_bullets_and_breaking_footer() {
+	fn a_multi_part_draft_renders_effect_bullets_and_breaking_footer() {
 		let message = render_commit_message(&draft(
 			"feat",
 			"",

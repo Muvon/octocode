@@ -147,7 +147,7 @@ The bump is derived deterministically from the conventional commit types since t
 ### 5. Changelog Generation
 
 Creates structured changelog with:
-- A short LLM-written summary, only when the release contains `feat`, `fix`, `perf` or breaking commits; it never carries commit hashes
+- A short LLM-written summary, only when the release contains `feat`, `fix`, `perf` or breaking commits; it never carries commit hashes, and is audited against the commit list: claims no commit supports are rejected and redrafted, and the release aborts if they persist
 - Categorized changes (Features, Bug Fixes, etc.) rendered from git, with exact commit hashes
 - Breaking change highlights
 - Release date

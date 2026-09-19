@@ -332,6 +332,11 @@ octocode commit --no-verify
 octocode commit --commit abc1234
 ```
 
+**How the message is produced:**
+- The model returns structured fields (type, scope, subject, effect, changes, breaking); octocode renders the text itself, so markup cannot leak in and the subject is capped at 72 characters
+- A second call audits the draft against the diff and lists every claim the diff does not support; the draft is rewritten without them, and the command fails rather than commit a message it could not verify
+- Large diffs are summarised chunk by chunk into a change list, then drafted and audited from that list
+
 **Pre-commit Integration:**
 - Automatically runs pre-commit hooks if available
 - Uses `--all-files` when `--all` flag is specified

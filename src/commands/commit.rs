@@ -21,6 +21,7 @@ use tokio::task::JoinSet;
 
 use octocode::config::Config;
 use octocode::indexer::git_utils::GitUtils;
+use octocode::llm::{LlmClient, Message};
 use octocode::utils::{diff_chunker, plain_line};
 
 /// Retry configuration for failed chunk processing
@@ -459,14 +460,14 @@ const COMMIT_TYPES: [&str; 10] = [
 ];
 
 const COMMIT_SYSTEM_PROMPT: &str = "You write git commit messages in the Conventional Commits format. Respond with a single JSON object and nothing else:
-{\"type\": string, \"scope\": string, \"subject\": string, \"why\": string, \"changes\": [string], \"breaking\": string}
+{\"type\": string, \"scope\": string, \"subject\": string, \"effect\": string, \"changes\": [string], \"breaking\": string}
 
 type: one of feat, fix, docs, style, refactor, test, chore, perf, ci, build.
   feat = a NEW user-visible capability. fix = corrects broken behavior. refactor = rework with no user-visible change. perf = speed or memory. docs = documentation files only. test = tests only. style = formatting only. chore = maintenance, dependencies, tooling. ci = pipelines. build = build system and manifests.
   Prefer fix or refactor over feat when unsure; feat only when the capability did not exist before.
 scope: the module or area touched, short and lowercase, no spaces; empty string when none fits.
 subject: imperative mood, lowercase first word, no trailing period, at most 50 characters. Name the behavior that changed; never a vague phrase such as \"update files\".
-why: at most two plain sentences giving the motivation or user-visible effect, only when the subject alone does not make it obvious. Empty string otherwise. Never restate the subject.
+effect: what now happens differently for a user or caller, stated only from the before/after code in the diff or from the author's description. At most two plain sentences. Empty string when the subject already says it or the diff does not show it. Never state motivation, goals or benefits the diff does not show.
 changes: one item per distinct change, only when the diff contains two or more distinct changes. Each item states a behavior or code change in at most 72 characters; never a file name, a line count, or a paraphrase of the subject. Empty array for a single-purpose change.
 breaking: one sentence describing an incompatible change to a public API, CLI, config format or data layout; empty string when none.
 
@@ -477,6 +478,15 @@ Accuracy:
 - Plain text in every field: no markdown, no code fences, no headings, no emoji.";
 
 const CHUNK_SYSTEM_PROMPT: &str = "You summarise one part of a git diff that was too large to read whole. Respond with plain text only: one line per distinct change, each starting with \"- \", stating what behavior or code changed and in which file. Use \"add\" only for files with status A or for entirely new functions and types; edits inside existing code are modifications. No commit message, no headings, no markdown, no commentary.";
+
+/// Rounds of draft, audit, redraft-with-feedback before the command gives up.
+const MAX_AUDIT_ROUNDS: usize = 2;
+
+const COMMIT_AUDIT_RULES: &str = "The source is a git diff (or a change list compiled from one) with a per-file status list and, optionally, the author's own description. A claim is unsupported when it:
+- describes behavior, a feature or a fix that no changed line shows;
+- says something was added, introduced or implemented although its file has status M and the diff only edits existing code;
+- names a component, option, file or symbol that appears nowhere in the diff;
+- states a motivation, benefit or effect that neither the diff nor the author's description gives.";
 
 const DIFF_SOURCE_LABEL: &str = "Git diff:";
 const CHANGE_LIST_SOURCE_LABEL: &str = "Change list compiled from every part of a diff too large to show whole. Each part was summarised separately; merge them into one message, do not concatenate:";
@@ -523,8 +533,7 @@ async fn generate_commit_message_from_diff(
 			&ctx.files_section,
 			DIFF_SOURCE_LABEL,
 		);
-		return call_llm_with_retry(|| draft_commit_message(&prompt, config), "Commit message")
-			.await;
+		return draft_commit_message(&prompt, config).await;
 	}
 
 	println!(
@@ -551,11 +560,7 @@ async fn generate_commit_message_from_diff(
 		&ctx.files_section,
 		CHANGE_LIST_SOURCE_LABEL,
 	);
-	call_llm_with_retry(
-		|| draft_commit_message(&prompt, config),
-		"Commit message synthesis",
-	)
-	.await
+	draft_commit_message(&prompt, config).await
 }
 
 /// Derive the diff-wide prompt context (totals, docs-type rule, author guidance,
@@ -692,7 +697,7 @@ struct CommitDraft {
 	scope: String,
 	subject: String,
 	#[serde(default)]
-	why: String,
+	effect: String,
 	#[serde(default)]
 	changes: Vec<String>,
 	#[serde(default)]
@@ -706,11 +711,11 @@ fn commit_draft_schema() -> serde_json::Value {
 			"type": {"type": "string"},
 			"scope": {"type": "string"},
 			"subject": {"type": "string"},
-			"why": {"type": "string"},
+			"effect": {"type": "string"},
 			"changes": {"type": "array", "items": {"type": "string"}},
 			"breaking": {"type": "string"}
 		},
-		"required": ["type", "scope", "subject", "why", "changes", "breaking"]
+		"required": ["type", "scope", "subject", "effect", "changes", "breaking"]
 	})
 }
 
@@ -757,10 +762,10 @@ fn render_commit_message(draft: &CommitDraft) -> Result<String> {
 		));
 	}
 
-	let why = plain_line(&draft.why);
-	if !why.is_empty() {
+	let effect = plain_line(&draft.effect);
+	if !effect.is_empty() {
 		message.push_str("\n\n");
-		message.push_str(&wrap_text(&why, BODY_WRAP_WIDTH, ""));
+		message.push_str(&wrap_text(&effect, BODY_WRAP_WIDTH, ""));
 	}
 
 	let changes: Vec<String> = draft
@@ -899,11 +904,41 @@ Added lines inside this chunk may belong to files marked M (modified); do not as
 	collect_ordered_responses(join_set, total_chunks).await
 }
 
-/// One LLM call that returns a validated, rendered commit message.
+/// Draft, audit the draft against the source, and redraft with the rejected
+/// claims as feedback. The auditor always sees the original prompt (diff,
+/// statuses, author guidance) and never a rejected draft, so it cannot be led.
+/// Transport retries live inside `chat_completion_json`.
 async fn draft_commit_message(prompt: &str, config: &Config) -> Result<String> {
-	use octocode::llm::{LlmClient, Message};
-
 	let client = LlmClient::from_config(config)?.with_temperature(LLM_TEMPERATURE);
+	let mut draft_prompt = prompt.to_string();
+	let mut rejected = Vec::new();
+	for _ in 0..MAX_AUDIT_ROUNDS {
+		let message = draft_once(&client, &draft_prompt).await?;
+		rejected = client
+			.unsupported_claims(COMMIT_AUDIT_RULES, prompt, &message)
+			.await?;
+		if rejected.is_empty() {
+			return Ok(message);
+		}
+		println!("🔍 Audit rejected the draft; redrafting without these claims:");
+		for claim in &rejected {
+			println!("  • {}", claim);
+		}
+		draft_prompt.push_str(&format!(
+			"\n\nA previous draft was rejected because the diff does not support these claims. Do not repeat them; describe only what the diff shows:\n- {}\n\nRejected draft:\n{}",
+			rejected.join("\n- "),
+			message
+		));
+	}
+	Err(anyhow::anyhow!(
+		"Commit message still claims more than the diff shows after {} drafts: {}",
+		MAX_AUDIT_ROUNDS,
+		rejected.join("; ")
+	))
+}
+
+/// One LLM call that returns a validated, rendered commit message.
+async fn draft_once(client: &LlmClient, prompt: &str) -> Result<String> {
 	let messages = vec![Message::system(COMMIT_SYSTEM_PROMPT), Message::user(prompt)];
 	let value = client
 		.chat_completion_json(messages, Some(commit_draft_schema()))
@@ -915,8 +950,6 @@ async fn draft_commit_message(prompt: &str, config: &Config) -> Result<String> {
 
 /// One LLM call that turns a diff chunk into a plain change list.
 async fn summarise_chunk(prompt: &str, config: &Config) -> Result<String> {
-	use octocode::llm::{LlmClient, Message};
-
 	let client = LlmClient::from_config(config)?;
 	let messages = vec![Message::system(CHUNK_SYSTEM_PROMPT), Message::user(prompt)];
 	client
