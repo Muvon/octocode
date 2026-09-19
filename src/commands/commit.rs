@@ -12,15 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::Args;
+use serde::Deserialize;
 use std::io::{self, Write};
 use std::process::Command;
 use tokio::task::JoinSet;
 
 use octocode::config::Config;
 use octocode::indexer::git_utils::GitUtils;
-use octocode::utils::diff_chunker;
+use octocode::utils::{diff_chunker, plain_line};
 
 /// Retry configuration for failed chunk processing
 const MAX_RETRIES: usize = 2;
@@ -447,12 +448,44 @@ async fn rewrite_commit_message(
 	Ok(())
 }
 
+/// Sampling temperature for commit drafting; low keeps output factual and stable.
+const LLM_TEMPERATURE: f32 = 0.1;
+/// Hard ceiling for the subject line. The prompt asks for 50; git convention tolerates 72.
+const SUBJECT_MAX_CHARS: usize = 72;
+/// Body lines are wrapped at the git convention width.
+const BODY_WRAP_WIDTH: usize = 72;
+const COMMIT_TYPES: [&str; 10] = [
+	"feat", "fix", "docs", "style", "refactor", "test", "chore", "perf", "ci", "build",
+];
+
+const COMMIT_SYSTEM_PROMPT: &str = "You write git commit messages in the Conventional Commits format. Respond with a single JSON object and nothing else:
+{\"type\": string, \"scope\": string, \"subject\": string, \"why\": string, \"changes\": [string], \"breaking\": string}
+
+type: one of feat, fix, docs, style, refactor, test, chore, perf, ci, build.
+  feat = a NEW user-visible capability. fix = corrects broken behavior. refactor = rework with no user-visible change. perf = speed or memory. docs = documentation files only. test = tests only. style = formatting only. chore = maintenance, dependencies, tooling. ci = pipelines. build = build system and manifests.
+  Prefer fix or refactor over feat when unsure; feat only when the capability did not exist before.
+scope: the module or area touched, short and lowercase, no spaces; empty string when none fits.
+subject: imperative mood, lowercase first word, no trailing period, at most 50 characters. Name the behavior that changed; never a vague phrase such as \"update files\".
+why: at most two plain sentences giving the motivation or user-visible effect, only when the subject alone does not make it obvious. Empty string otherwise. Never restate the subject.
+changes: one item per distinct change, only when the diff contains two or more distinct changes. Each item states a behavior or code change in at most 72 characters; never a file name, a line count, or a paraphrase of the subject. Empty array for a single-purpose change.
+breaking: one sentence describing an incompatible change to a public API, CLI, config format or data layout; empty string when none.
+
+Accuracy:
+- Describe only what the diff shows. Do not infer intent beyond the changed lines.
+- Use \"add\", \"introduce\" or \"implement\" only for files with status A or for entirely new functions and types. Edits inside existing code are modifications: extend, rework, fix, update.
+- A change to existing functionality is never presented as adding that functionality.
+- Plain text in every field: no markdown, no code fences, no headings, no emoji.";
+
+const CHUNK_SYSTEM_PROMPT: &str = "You summarise one part of a git diff that was too large to read whole. Respond with plain text only: one line per distinct change, each starting with \"- \", stating what behavior or code changed and in which file. Use \"add\" only for files with status A or for entirely new functions and types; edits inside existing code are modifications. No commit message, no headings, no markdown, no commentary.";
+
+const DIFF_SOURCE_LABEL: &str = "Git diff:";
+const CHANGE_LIST_SOURCE_LABEL: &str = "Change list compiled from every part of a diff too large to show whole. Each part was summarised separately; merge them into one message, do not concatenate:";
+
 async fn generate_commit_message_chunked(
 	repo_path: &std::path::Path,
 	config: &Config,
 	extra_context: Option<&str>,
 ) -> Result<String> {
-	// Get the diff of staged changes
 	let output = Command::new("git")
 		.args(["diff", "--cached"])
 		.current_dir(repo_path)
@@ -466,147 +499,77 @@ async fn generate_commit_message_chunked(
 	}
 
 	let diff = String::from_utf8(output.stdout)?;
-
 	if diff.trim().is_empty() {
 		return Err(anyhow::anyhow!("No staged changes found"));
 	}
 
-	// Get list of staged files to analyze extensions
-	let staged_files = GitUtils::get_staged_files(repo_path)?;
-	let changed_files = staged_files.join("\n");
-
-	// Analyze file extensions
-	let has_markdown_files = changed_files
-		.lines()
-		.any(|file| file.ends_with(".md") || file.ends_with(".markdown") || file.ends_with(".rst"));
-
-	let has_non_markdown_files = changed_files.lines().any(|file| {
-		!file.ends_with(".md")
-			&& !file.ends_with(".markdown")
-			&& !file.ends_with(".rst")
-			&& !file.trim().is_empty()
-	});
-
-	// Count files and changes
-	let file_count = diff.matches("diff --git").count();
-	let additions = diff
-		.matches("\n+")
-		.count()
-		.saturating_sub(diff.matches("\n+++").count());
-	let deletions = diff
-		.matches("\n-")
-		.count()
-		.saturating_sub(diff.matches("\n---").count());
-
-	// Build the guidance section
-	let mut guidance_section = String::new();
-	if let Some(context) = extra_context {
-		guidance_section = format!("\n\nIMPORTANT - USER'S DESCRIPTION OF CHANGES (incorporate this into your commit message):\n{}", context);
-	}
-
-	// Build docs type restriction based on file analysis
-	let docs_restriction = if has_non_markdown_files && !has_markdown_files {
-		// Only non-markdown files changed - explicitly forbid docs
-		"\n\nCRITICAL - DOCS TYPE RESTRICTION:\n\
-		- NEVER use 'docs(...)' when only non-markdown files are changed\n\
-		- Current changes include ONLY non-markdown files (.rs, .js, .py, .toml, etc.)\n\
-		- Use 'fix', 'feat', 'refactor', 'chore', etc. instead of 'docs'\n\
-		- 'docs' is ONLY for .md, .markdown, .rst files or documentation-only changes"
-	} else if has_non_markdown_files && has_markdown_files {
-		// Mixed files - provide guidance
-		"\n\nDOCS TYPE GUIDANCE:\n\
-		- Use 'docs(...)' ONLY if the primary change is documentation\n\
-		- If code changes are the main focus, use appropriate code type (fix, feat, refactor)\n\
-		- Mixed changes: prioritize the most significant change type"
-	} else {
-		// Only markdown files or no files detected - allow docs
-		""
-	};
-
-	let prompt_context = CommitPromptContext {
-		file_count,
-		additions,
-		deletions,
-		guidance_section,
-		docs_restriction: docs_restriction.to_string(),
-		files_section: file_status_section(&diff),
-	};
-
-	// Check if we need to chunk the diff
-	let chunks = diff_chunker::chunk_diff(&diff);
-
-	if chunks.len() == 1 {
-		// Single chunk - use existing logic
-		let prompt = create_commit_prompt(
-			&chunks[0].content,
-			&prompt_context,
-			&prompt_context.files_section,
-		);
-		return call_llm_with_retry(
-			|| call_llm_for_commit_message(&prompt, config),
-			"Single chunk commit message",
-		)
-		.await;
-	}
-
-	// Multiple chunks - process in parallel for better performance
-	println!(
-		"📝 Processing large diff in {} chunks in parallel...",
-		chunks.len()
-	);
-
-	let responses = process_commit_chunks_parallel(&chunks, &prompt_context, config).await;
-
-	if responses.is_empty() {
-		return Ok("chore: update files".to_string());
-	}
-
-	// Combine responses into final commit message
-	let combined = diff_chunker::combine_commit_messages(responses);
-
-	// Always apply AI refinement for chunked messages
-	println!("🎯 Refining commit message with AI...");
-	match refine_commit_message_with_ai(&combined, config).await {
-		Ok(refined) => Ok(refined),
-		Err(e) => {
-			eprintln!(
-				"Warning: AI refinement failed ({}), using combined message",
-				e
-			);
-			Ok(combined)
-		}
-	}
+	generate_commit_message_from_diff(&diff, config, extra_context).await
 }
 
-/// Generate a commit message from a pre-fetched diff string (used by -c/--commit rewrite mode).
-///
-/// Shares all prompt-building and chunking logic with `generate_commit_message_chunked`
-/// but accepts the diff directly instead of reading staged changes.
+/// Generate a commit message from a diff string. Serves both staged changes and
+/// -c/--commit rewrites, which pass the target commit's own diff.
 async fn generate_commit_message_from_diff(
 	diff: &str,
 	config: &Config,
 	extra_context: Option<&str>,
 ) -> Result<String> {
-	// Derive file list from the diff headers (no git staging involved)
-	let changed_files: String = diff
+	let ctx = build_prompt_context(diff, extra_context);
+	let chunks = diff_chunker::chunk_diff(diff);
+
+	if chunks.len() == 1 {
+		let prompt = create_commit_prompt(
+			&chunks[0].content,
+			&ctx,
+			&ctx.files_section,
+			DIFF_SOURCE_LABEL,
+		);
+		return call_llm_with_retry(|| draft_commit_message(&prompt, config), "Commit message")
+			.await;
+	}
+
+	println!(
+		"📝 Processing large diff in {} chunks in parallel...",
+		chunks.len()
+	);
+	let notes = process_commit_chunks_parallel(&chunks, &ctx, config).await;
+	if notes.len() != chunks.len() {
+		return Err(anyhow::anyhow!(
+			"{} of {} diff chunks could not be summarised; refusing to write a commit message that omits part of the change",
+			chunks.len() - notes.len(),
+			chunks.len()
+		));
+	}
+
+	println!(
+		"🎯 Synthesising commit message from {} chunk summaries...",
+		notes.len()
+	);
+	let change_list = diff_chunker::combine_commit_messages(notes);
+	let prompt = create_commit_prompt(
+		&change_list,
+		&ctx,
+		&ctx.files_section,
+		CHANGE_LIST_SOURCE_LABEL,
+	);
+	call_llm_with_retry(
+		|| draft_commit_message(&prompt, config),
+		"Commit message synthesis",
+	)
+	.await
+}
+
+/// Derive the diff-wide prompt context (totals, docs-type rule, author guidance,
+/// file statuses) from the diff headers alone, so staged and rewrite paths agree.
+fn build_prompt_context(diff: &str, extra_context: Option<&str>) -> CommitPromptContext {
+	let is_doc = |f: &str| f.ends_with(".md") || f.ends_with(".markdown") || f.ends_with(".rst");
+	let files: Vec<&str> = diff
 		.lines()
 		.filter(|l| l.starts_with("diff --git "))
 		.filter_map(|l| l.split(" b/").nth(1))
-		.collect::<Vec<_>>()
-		.join("\n");
+		.collect();
+	let has_docs = files.iter().any(|f| is_doc(f));
+	let has_code = files.iter().any(|f| !is_doc(f));
 
-	let has_markdown_files = changed_files
-		.lines()
-		.any(|f| f.ends_with(".md") || f.ends_with(".markdown") || f.ends_with(".rst"));
-
-	let has_non_markdown_files = changed_files.lines().any(|f| {
-		!f.ends_with(".md")
-			&& !f.ends_with(".markdown")
-			&& !f.ends_with(".rst")
-			&& !f.trim().is_empty()
-	});
-
-	let file_count = diff.matches("diff --git").count();
 	let additions = diff
 		.matches("\n+")
 		.count()
@@ -617,78 +580,35 @@ async fn generate_commit_message_from_diff(
 		.saturating_sub(diff.matches("\n---").count());
 
 	let guidance_section = extra_context
-		.map(|c| format!("\n\nIMPORTANT - USER'S DESCRIPTION OF CHANGES (incorporate this into your commit message):\n{}", c))
+		.map(|c| {
+			format!(
+				"Author's description of the change (guidance to verify against the diff, not text to copy):\n{}\n\n",
+				c
+			)
+		})
 		.unwrap_or_default();
 
-	let docs_restriction = if has_non_markdown_files && !has_markdown_files {
-		"\n\nCRITICAL - DOCS TYPE RESTRICTION:\n\
-		- NEVER use 'docs(...)' when only non-markdown files are changed\n\
-		- Current changes include ONLY non-markdown files (.rs, .js, .py, .toml, etc.)\n\
-		- Use 'fix', 'feat', 'refactor', 'chore', etc. instead of 'docs'\n\
-		- 'docs' is ONLY for .md, .markdown, .rst files or documentation-only changes"
-	} else if has_non_markdown_files && has_markdown_files {
-		"\n\nDOCS TYPE GUIDANCE:\n\
-		- Use 'docs(...)' ONLY if the primary change is documentation\n\
-		- If code changes are the main focus, use appropriate code type (fix, feat, refactor)\n\
-		- Mixed changes: prioritize the most significant change type"
+	let docs_restriction = if has_code && !has_docs {
+		"Type rule for this diff: no documentation files changed, so the type must not be docs.\n\n"
+	} else if has_code && has_docs {
+		"Type rule for this diff: use docs only if documentation is the primary change; otherwise use the type of the code change.\n\n"
 	} else {
 		""
-	};
+	}
+	.to_string();
 
-	let prompt_context = CommitPromptContext {
-		file_count,
+	CommitPromptContext {
+		file_count: files.len(),
 		additions,
 		deletions,
 		guidance_section,
-		docs_restriction: docs_restriction.to_string(),
+		docs_restriction,
 		files_section: file_status_section(diff),
-	};
-
-	let chunks = diff_chunker::chunk_diff(diff);
-
-	if chunks.len() == 1 {
-		let prompt = create_commit_prompt(
-			&chunks[0].content,
-			&prompt_context,
-			&prompt_context.files_section,
-		);
-		return call_llm_with_retry(
-			|| call_llm_for_commit_message(&prompt, config),
-			"Single chunk commit message",
-		)
-		.await;
-	}
-
-	println!(
-		"📝 Processing large diff in {} chunks in parallel...",
-		chunks.len()
-	);
-
-	let responses = process_commit_chunks_parallel(&chunks, &prompt_context, config).await;
-
-	if responses.is_empty() {
-		return Ok("chore: update files".to_string());
-	}
-
-	let combined = diff_chunker::combine_commit_messages(responses);
-
-	println!("🎯 Refining commit message with AI...");
-	match refine_commit_message_with_ai(&combined, config).await {
-		Ok(refined) => Ok(refined),
-		Err(e) => {
-			eprintln!(
-				"Warning: AI refinement failed ({}), using combined message",
-				e
-			);
-			Ok(combined)
-		}
 	}
 }
 
-/// Derive per-file change status (A/M/D/R) from raw diff headers.
-///
-/// Grounds the LLM in what actually happened to each file so it cannot
-/// claim "add X" for code that was merely modified.
+/// Build a "STATUS path" line per file from the diff headers so the model can
+/// distinguish new files from modified ones (the accuracy rules depend on it).
 fn file_status_section(diff: &str) -> String {
 	let mut lines = Vec::new();
 	let mut current: Option<(String, char)> = None;
@@ -736,80 +656,163 @@ struct CommitPromptContext {
 	files_section: String,
 }
 
-/// Create a standardized commit prompt for LLM processing
+/// Build the user message for one LLM call. The rules live in the system prompt;
+/// this carries only the facts: guidance, type rule, file statuses, totals, content.
 ///
 /// `files_section` stays a separate parameter because chunked processing
 /// substitutes it with a chunk-note-wrapped variant of `ctx.files_section`.
+/// `source_label` names what `content` is: a git diff or a merged change list.
 fn create_commit_prompt(
-	diff_content: &str,
+	content: &str,
 	ctx: &CommitPromptContext,
 	files_section: &str,
+	source_label: &str,
 ) -> String {
 	format!(
-		"STRICT FORMAT: Plain text commit message, NO markdown, NO backticks, NO code blocks.
-type(scope): description under 50 chars
-Types: feat, fix, docs, style, refactor, test, chore, perf, ci, build
-Use imperative mood (add not added, fix not fixed)
-Avoid vague subjects ('update files', 'various changes'); name the specific behavior that changed
-Focus on WHAT functionality changed, not implementation details
----
-ACCURACY RULES (CRITICAL):
-Describe ONLY what is visible in the diff; never infer intent or claim behavior beyond the changed lines
-Use 'add', 'implement', 'introduce' ONLY for new files (status A) or entirely new functions/types
-Changes inside existing code are modifications: use extend, rework, improve, update, or fix
-Never present a change to existing functionality as adding that functionality
----
-COMMIT TYPE GUIDE:
-feat: NEW user-visible capability (new files, new functions, new behavior)
-fix: CORRECTING bugs/errors/broken functionality
-refactor: IMPROVING or reworking code without changing user-visible behavior
-perf: OPTIMIZING performance
-docs: .md/.markdown/.rst files ONLY
-test: ADDING or fixing tests
-style: formatting/whitespace (no logic changes)
-chore: maintenance (dependencies, build, tooling)
-ci: workflows/pipelines
-build: Cargo.toml, package.json, Makefile{}
----
-FEAT vs FIX vs MODIFICATION: completely new capability = feat, correcting broken behavior = fix,
-reworking existing behavior = refactor (feat only if it adds a NEW user-visible capability)
-Examples: fix(auth): resolve token validation error, feat(auth): add OAuth2 support, refactor(auth): rework token refresh flow
-When in doubt: prefer fix or refactor over feat
----
-BREAKING CHANGES: Function/API signature changes, removed public methods, interface/trait changes
-Library code: mark any public interface changes as breaking
-Application code: internal changes dont need marker unless affects config/user-facing
-Use type! format and add BREAKING CHANGE footer if detected
----
-BODY NEEDED if: 4+ files OR 25+ lines OR multiple change types OR complex refactoring OR breaking changes
-Body format (plain text):
-- Blank line after subject
-- Each point starts with dash space: -
-- Focus on key changes and purpose
-- Keep bullets concise (1 line max)
-- For breaking: add BREAKING CHANGE: description
----
-OUTPUT FORMAT: Plain text only
-Subject: type(scope): description
-If body: blank line then dash bullets
-If breaking: BREAKING CHANGE: line
-NO code blocks, NO backticks, NO markdown
----{}
-{}Changes: {} files (+{} -{} lines)
-
-Git diff:
-{}
-
-Generate commit message:",
-		ctx.docs_restriction,
+		"{}{}{}Changes: {} files (+{} -{} lines)\n\n{}\n{}",
 		ctx.guidance_section,
+		ctx.docs_restriction,
 		files_section,
 		ctx.file_count,
 		ctx.additions,
 		ctx.deletions,
-		diff_content
+		source_label,
+		content
 	)
 }
+
+/// Structured commit drafted by the LLM; `render_commit_message` turns it into text.
+/// Empty strings mean "none": the JSON schema keeps every field required so strict
+/// providers accept it, and `default` tolerates lenient providers that omit fields.
+#[derive(Debug, Deserialize)]
+struct CommitDraft {
+	#[serde(rename = "type")]
+	kind: String,
+	#[serde(default)]
+	scope: String,
+	subject: String,
+	#[serde(default)]
+	why: String,
+	#[serde(default)]
+	changes: Vec<String>,
+	#[serde(default)]
+	breaking: String,
+}
+
+fn commit_draft_schema() -> serde_json::Value {
+	serde_json::json!({
+		"type": "object",
+		"properties": {
+			"type": {"type": "string"},
+			"scope": {"type": "string"},
+			"subject": {"type": "string"},
+			"why": {"type": "string"},
+			"changes": {"type": "array", "items": {"type": "string"}},
+			"breaking": {"type": "string"}
+		},
+		"required": ["type", "scope", "subject", "why", "changes", "breaking"]
+	})
+}
+
+/// Render a draft as a conventional commit message. Format is enforced here, not
+/// by the model: type whitelist, subject length, wrapping, plain text.
+fn render_commit_message(draft: &CommitDraft) -> Result<String> {
+	let kind = draft.kind.trim().to_lowercase();
+	if !COMMIT_TYPES.contains(&kind.as_str()) {
+		return Err(anyhow::anyhow!(
+			"LLM returned unknown commit type '{}'",
+			draft.kind
+		));
+	}
+
+	let mut subject = plain_line(&draft.subject).trim_end_matches('.').to_string();
+	if subject.is_empty() {
+		return Err(anyhow::anyhow!("LLM returned an empty commit subject"));
+	}
+	// Lowercase a capitalised first word but leave acronyms (ONNX, MCP) alone.
+	let mut chars = subject.chars();
+	if let (Some(first), Some(second)) = (chars.next(), chars.next()) {
+		if first.is_ascii_uppercase() && second.is_lowercase() {
+			subject.replace_range(..1, &first.to_ascii_lowercase().to_string());
+		}
+	}
+
+	let scope = plain_line(&draft.scope);
+	let breaking = plain_line(&draft.breaking);
+
+	let mut message = kind;
+	if !scope.is_empty() {
+		message.push_str(&format!("({})", scope));
+	}
+	if !breaking.is_empty() {
+		message.push('!');
+	}
+	message.push_str(": ");
+	message.push_str(&subject);
+	if message.chars().count() > SUBJECT_MAX_CHARS {
+		return Err(anyhow::anyhow!(
+			"Commit subject exceeds {} characters: {}",
+			SUBJECT_MAX_CHARS,
+			message
+		));
+	}
+
+	let why = plain_line(&draft.why);
+	if !why.is_empty() {
+		message.push_str("\n\n");
+		message.push_str(&wrap_text(&why, BODY_WRAP_WIDTH, ""));
+	}
+
+	let changes: Vec<String> = draft
+		.changes
+		.iter()
+		.map(|c| plain_line(c))
+		.filter(|c| !c.is_empty())
+		.collect();
+	if !changes.is_empty() {
+		message.push_str("\n\n");
+		let bullets: Vec<String> = changes
+			.iter()
+			.map(|c| wrap_text(&format!("- {}", c), BODY_WRAP_WIDTH, "  "))
+			.collect();
+		message.push_str(&bullets.join("\n"));
+	}
+
+	if !breaking.is_empty() {
+		message.push_str("\n\n");
+		message.push_str(&wrap_text(
+			&format!("BREAKING CHANGE: {}", breaking),
+			BODY_WRAP_WIDTH,
+			"",
+		));
+	}
+
+	Ok(message)
+}
+
+/// Greedy word wrap at `width`; continuation lines are prefixed with `indent`.
+fn wrap_text(text: &str, width: usize, indent: &str) -> String {
+	let mut lines: Vec<String> = Vec::new();
+	let mut current = String::new();
+	for word in text.split_whitespace() {
+		if !current.is_empty() && current.chars().count() + 1 + word.chars().count() > width {
+			lines.push(std::mem::take(&mut current));
+		}
+		if current.is_empty() {
+			if !lines.is_empty() {
+				current.push_str(indent);
+			}
+		} else {
+			current.push(' ');
+		}
+		current.push_str(word);
+	}
+	if !current.is_empty() {
+		lines.push(current);
+	}
+	lines.join("\n")
+}
+
 async fn collect_ordered_responses(
 	mut join_set: JoinSet<Result<(usize, String)>>,
 	expected_count: usize,
@@ -834,25 +837,16 @@ async fn collect_ordered_responses(
 	ordered_responses.into_iter().flatten().collect()
 }
 
-/// Process chunks in parallel with proper error handling and resource limits
+/// Summarise every chunk of a large diff concurrently, preserving chunk order.
 ///
-/// Processes multiple diff chunks concurrently using tokio tasks for improved performance.
-/// Implements resource limits to prevent system overload and maintains result ordering.
-///
-/// # Arguments
-/// * `chunks` - Array of diff chunks to process
-/// * `ctx` - Diff-wide prompt context (totals, guidance, docs restriction, file statuses)
-/// * `config` - Application configuration
-///
-/// # Returns
-/// Vector of successful LLM responses in original chunk order
+/// Each chunk yields a plain change list, not a commit message; the caller
+/// merges the lists and drafts the commit from them in one final call.
+/// The semaphore only bounds concurrency; every chunk is processed.
 async fn process_commit_chunks_parallel(
 	chunks: &[diff_chunker::DiffChunk],
 	ctx: &CommitPromptContext,
 	config: &Config,
 ) -> Vec<String> {
-	// Process ALL chunks; the semaphore only bounds concurrency so no part
-	// of the diff is silently dropped from the commit message.
 	let total_chunks = chunks.len();
 	let semaphore = std::sync::Arc::new(tokio::sync::Semaphore::new(
 		diff_chunker::MAX_PARALLEL_CHUNKS,
@@ -882,97 +876,52 @@ async fn process_commit_chunks_parallel(
 			let chunk_note = format!(
 				"NOTE: This is chunk {}/{} of a larger diff and shows only PART of the changes.\n\
 The file status list and totals below cover the WHOLE commit, not just this chunk.\n\
-Added lines inside this chunk may belong to files marked M (modified) - do not assume they are new functionality.\n\n{}",
+Added lines inside this chunk may belong to files marked M (modified); do not assume they are new functionality.\n\n{}",
 				i + 1,
 				total_chunks,
 				ctx.files_section
 			);
 
-			let chunk_prompt = create_commit_prompt(&chunk_content, &ctx, &chunk_note);
+			let chunk_prompt =
+				create_commit_prompt(&chunk_content, &ctx, &chunk_note, DIFF_SOURCE_LABEL);
+			let label = format!("Chunk {}", i + 1);
 
-			match call_llm_for_commit_message(&chunk_prompt, &config).await {
+			match call_llm_with_retry(|| summarise_chunk(&chunk_prompt, &config), &label).await {
 				Ok(response) => Ok((i, response)),
 				Err(e) => {
-					eprintln!("Warning: Chunk {} failed ({})", i + 1, e);
+					eprintln!("Warning: {}", e);
 					Err(e)
 				}
 			}
 		});
 	}
 
-	// Collect results maintaining order
 	collect_ordered_responses(join_set, total_chunks).await
 }
 
-async fn call_llm_for_commit_message(prompt: &str, config: &Config) -> Result<String> {
+/// One LLM call that returns a validated, rendered commit message.
+async fn draft_commit_message(prompt: &str, config: &Config) -> Result<String> {
 	use octocode::llm::{LlmClient, Message};
 
-	// Create LLM client from config
-	let client = LlmClient::from_config(config)?;
-
-	// Build messages
-	let messages = vec![Message::user(prompt)];
-
-	// Call LLM with low temperature for consistent commit messages
-	let response = client
-		.chat_completion_with_temperature(messages, 0.1)
+	let client = LlmClient::from_config(config)?.with_temperature(LLM_TEMPERATURE);
+	let messages = vec![Message::system(COMMIT_SYSTEM_PROMPT), Message::user(prompt)];
+	let value = client
+		.chat_completion_json(messages, Some(commit_draft_schema()))
 		.await?;
-
-	Ok(response)
+	let draft: CommitDraft =
+		serde_json::from_value(value).context("LLM returned malformed commit JSON")?;
+	render_commit_message(&draft)
 }
 
-/// Refine a verbose commit message using AI to create a concise, deduplicated version
-///
-/// Takes a combined commit message from multiple chunks and uses AI to:
-/// - Remove duplication and redundancy
-/// - Narrow many per-chunk bullets into a few themed ones (max 7)
-/// - Maintain proper conventional commit format
-/// - Preserve important technical details
-///
-/// # Arguments
-/// * `verbose_message` - The combined verbose commit message from chunks
-/// * `config` - Application configuration
-///
-/// # Returns
-/// A refined, concise commit message
-async fn refine_commit_message_with_ai(verbose_message: &str, config: &Config) -> Result<String> {
-	let refinement_prompt = format!(
-		"SYNTHESISE COMMIT MESSAGE - CRITICAL: Output must be PLAIN TEXT ONLY, NO MARKDOWN, NO backticks, NO code blocks.
+/// One LLM call that turns a diff chunk into a plain change list.
+async fn summarise_chunk(prompt: &str, config: &Config) -> Result<String> {
+	use octocode::llm::{LlmClient, Message};
 
-The diff was too large to process at once, so it was split into chunks and each chunk was summarised separately.
-Below are the per-chunk summaries. Your job is to synthesise them into ONE accurate commit message that covers ALL changes across ALL chunks.
-
-PER-CHUNK SUMMARIES:
-{}
-
-SYNTHESIS REQUIREMENTS:
-1. Read ALL chunk summaries before writing anything
-2. Choose a single conventional commit type that best represents the overall change set
-3. Subject line: type(scope): description — max 50 chars, imperative mood
-4. Body: AT MOST 7 dash-space bullets, one per line, max 72 chars each
-5. Synthesise, do not concatenate: group related changes into themed bullets covering multiple items
-6. When many minor changes share a theme, name the theme instead of listing every item
-7. Every chunk must be reflected in some bullet, but one bullet may cover several chunks; never drop a whole area of change
-8. Do NOT upgrade claims: if a summary says code was modified/reworked/improved, never restate it as added or implemented
-9. Describe something as new/added ONLY if a chunk summary explicitly says it is new
-10. Types: feat, fix, docs, style, refactor, test, chore, perf, ci, build
-
-OUTPUT FORMAT (PLAIN TEXT ONLY):
-feat(agents): add multi-jurisdiction lawyer specialists
-
-- Add Australian, Canadian, French, German, Indian, Singaporean, UK, US specialists
-- Include federal Acts knowledge base per jurisdiction
-- Enable legal query handling for each region
-
-Return ONLY the synthesised commit message as plain text, nothing else.",
-		verbose_message
-	);
-
-	call_llm_with_retry(
-		|| call_llm_for_commit_message(&refinement_prompt, config),
-		"AI commit message refinement",
-	)
-	.await
+	let client = LlmClient::from_config(config)?;
+	let messages = vec![Message::system(CHUNK_SYSTEM_PROMPT), Message::user(prompt)];
+	client
+		.chat_completion_with_temperature(messages, LLM_TEMPERATURE)
+		.await
 }
 
 /// Check if pre-commit binary is available in PATH

@@ -73,6 +73,12 @@ impl LlmClient {
 		self
 	}
 
+	/// Override the sampling temperature for every call this client makes.
+	pub fn with_temperature(mut self, temperature: f32) -> Self {
+		self.temperature = temperature;
+		self
+	}
+
 	/// Apply this client's thinking budget, if it has one.
 	fn with_effort(&self, params: ChatCompletionParams) -> ChatCompletionParams {
 		match self.reasoning_effort {

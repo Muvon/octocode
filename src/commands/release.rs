@@ -22,7 +22,8 @@ use std::process::Command;
 
 use octocode::config::Config;
 use octocode::indexer::git_utils::GitUtils;
-use octocode::llm::LlmClient;
+use octocode::llm::{LlmClient, Message};
+use octocode::utils::plain_line;
 
 #[cfg(test)]
 #[path = "release_tests.rs"]
@@ -42,7 +43,7 @@ pub struct ReleaseArgs {
 	#[arg(short, long)]
 	pub dry_run: bool,
 
-	/// Force a specific version instead of AI calculation
+	/// Force a specific version instead of the conventional-commit bump
 	#[arg(short, long)]
 	pub force_version: Option<String>,
 }
@@ -160,7 +161,7 @@ pub async fn execute(config: &Config, args: &ReleaseArgs) -> Result<()> {
 			reasoning: "First release: using current version without bump".to_string(),
 		}
 	} else {
-		calculate_version_with_ai(config, &current_version, &commit_analysis).await?
+		calculate_version(&current_version, &commit_analysis)?
 	};
 
 	println!("\n🎯 Version calculation:");
@@ -169,13 +170,11 @@ pub async fn execute(config: &Config, args: &ReleaseArgs) -> Result<()> {
 	println!("   Type:    {}", version_calculation.version_type);
 	println!("   Reason:  {}", version_calculation.reasoning);
 
-	// Generate changelog content with AI enhancement
-	let changelog_content = generate_enhanced_changelog_with_ai(
+	let changelog_content = generate_changelog_entry(
 		config,
 		&version_calculation,
 		&commit_analysis,
 		&project_type,
-		&commit_range,
 	)
 	.await?;
 
@@ -543,60 +542,11 @@ fn parse_conventional_commit(message: &str) -> (String, Option<String>, String, 
 	(commit_type.to_string(), None, message.to_string(), breaking)
 }
 
-async fn calculate_version_with_ai(
-	config: &Config,
-	current_version: &str,
-	analysis: &CommitAnalysis,
-) -> Result<VersionCalculation> {
-	let analysis_json = serde_json::to_string_pretty(analysis)?;
-
-	let prompt = format!(
-		"Analyze git commits and determine the next semantic version.\n\n\
-        CURRENT VERSION: {}\n\n\
-        COMMIT ANALYSIS:\n{}\n\n\
-        SEMANTIC VERSIONING RULES (STRICT):\n\
-        - MAJOR (x.0.0): Breaking changes, BREAKING CHANGE keyword, or commits with '!'\n\
-        - MINOR (0.x.0): New features (feat:) without breaking changes\n\
-        - PATCH (0.0.x): Bug fixes (fix:), docs, chore, style, refactor, test, perf, ci, build\\n\
-        - Follow semantic versioning 2.0.0 specification exactly\\n\\n\
-        DECISION GUIDELINES:\\n\
-        - If ANY commit has breaking changes → MAJOR version\\n\
-        - If NO breaking changes but ANY new features → MINOR version\\n\
-        - If ONLY fixes/improvements/docs/chores → PATCH version\\n\
-        - Consider cumulative impact: multiple features may warrant MINOR even if individual commits seem small\\n\
-        - When uncertain between MINOR/PATCH: choose PATCH for safety\\n\
-        - When uncertain between MAJOR/MINOR: choose MAJOR for safety\\n\\n\
-        IMPORTANT: Preserve all commit information exactly as provided. Do not modify or summarize commit messages.\n\n\
-        Respond with valid JSON only (no markdown, no additional text):\n\
-        {{\n\
-        \"current_version\": \"{}\",\n\
-        \"new_version\": \"X.Y.Z\",\n\
-        \"version_type\": \"major|minor|patch\",\n\
-        \"reasoning\": \"Clear explanation of version choice based on changes\"\n\
-        }}",
-		current_version, analysis_json, current_version
-	);
-
-	match call_llm_for_version_calculation(&prompt, config).await {
-		Ok(response) => {
-			// Try to parse JSON response; also guard against a malformed/hallucinated
-			// version string before it reaches `git tag` / Cargo.toml / package.json.
-			match serde_json::from_str::<VersionCalculation>(&response) {
-				Ok(calculation) if is_valid_semver(&calculation.new_version) => Ok(calculation),
-				_ => calculate_version_fallback(current_version, analysis),
-			}
-		}
-		Err(e) => {
-			eprintln!(
-				"Warning: LLM call failed ({}), using fallback calculation",
-				e
-			);
-			calculate_version_fallback(current_version, analysis)
-		}
-	}
-}
-
-fn calculate_version_fallback(
+/// Bump the version from the conventional-commit types since the last tag.
+/// Deterministic on purpose: semver is a rule, not a judgement call. While the
+/// major version is 0 a breaking change bumps minor, matching the pre-1.0
+/// convention of release-please (`bump-minor-pre-major`) and cargo.
+fn calculate_version(
 	current_version: &str,
 	analysis: &CommitAnalysis,
 ) -> Result<VersionCalculation> {
@@ -619,28 +569,30 @@ fn calculate_version_fallback(
 	let patch: u32 = parts[2].parse().context("Invalid patch version")?;
 
 	let (new_version, version_type, reasoning) = if !analysis.breaking_changes.is_empty() {
-		(
-			format!("{}.0.0", major + 1),
-			"major",
-			"Breaking changes detected",
-		)
+		if major == 0 {
+			(
+				format!("0.{}.0", minor + 1),
+				"minor",
+				"Breaking changes detected; minor bump while major version is 0",
+			)
+		} else {
+			(
+				format!("{}.0.0", major + 1),
+				"major",
+				"Breaking changes detected",
+			)
+		}
 	} else if !analysis.features.is_empty() {
 		(
 			format!("{}.{}.0", major, minor + 1),
 			"minor",
 			"New features added",
 		)
-	} else if !analysis.fixes.is_empty() || !analysis.other_changes.is_empty() {
-		(
-			format!("{}.{}.{}", major, minor, patch + 1),
-			"patch",
-			"Bug fixes and improvements",
-		)
 	} else {
 		(
 			format!("{}.{}.{}", major, minor, patch + 1),
 			"patch",
-			"Miscellaneous changes",
+			"Fixes and maintenance only",
 		)
 	};
 
@@ -652,118 +604,60 @@ fn calculate_version_fallback(
 	})
 }
 
-async fn call_llm_for_version_calculation(prompt: &str, config: &Config) -> Result<String> {
-	use octocode::llm::{LlmClient, Message};
-
-	// Create LLM client from config
-	let client = LlmClient::from_config(config)?;
-
-	// Build messages
-	let messages = vec![Message::user(prompt)];
-
-	// Call LLM with low temperature for consistent version calculation
-	let response = client
-		.chat_completion_with_temperature(messages, 0.1)
-		.await?;
-
-	Ok(response)
-}
-
-async fn generate_changelog_content(
-	version: &VersionCalculation,
-	analysis: &CommitAnalysis,
-) -> Result<String> {
-	let mut content = String::new();
-	let date = chrono::Utc::now().format("%Y-%m-%d").to_string();
-
-	content.push_str(&format!("## [{}] - {}\n\n", version.new_version, date));
-
-	// Enhanced categorization - group commits by impact and area
+/// Deterministic per-commit sections grouped by impact. Every line here comes
+/// from git, never from the model, so hashes and descriptions are exact.
+fn changelog_sections(analysis: &CommitAnalysis) -> String {
 	let mut breaking_commits = Vec::new();
 	let mut feature_commits = Vec::new();
 	let mut improvement_commits = Vec::new();
 	let mut fix_commits = Vec::new();
 	let mut docs_commits = Vec::new();
-	let mut other_commits = Vec::new();
+	let mut other_count = 0;
 
 	for commit in &analysis.commits {
 		if commit.breaking {
 			breaking_commits.push(commit);
-		} else {
-			let is_deps = commit.scope.as_deref() == Some("deps")
-				|| commit.description.to_lowercase().starts_with("bump ");
-			match commit.commit_type.as_str() {
-				"feat" => feature_commits.push(commit),
-				"fix" => fix_commits.push(commit),
-				// Meaningful refactors/improvements — but not pure dep bumps
-				"perf" | "refactor" | "style" => improvement_commits.push(commit),
-				// chore/ci/build/test with a real scope are improvements; deps/tooling noise goes to other
-				"chore" | "ci" | "build" | "test" if !is_deps && commit.scope.is_some() => {
-					improvement_commits.push(commit)
-				}
-				"docs" => docs_commits.push(commit),
-				_ => other_commits.push(commit),
+			continue;
+		}
+		let is_deps = commit.scope.as_deref() == Some("deps")
+			|| commit.description.to_lowercase().starts_with("bump ");
+		match commit.commit_type.as_str() {
+			"feat" => feature_commits.push(commit),
+			"fix" => fix_commits.push(commit),
+			// Meaningful refactors/improvements, but not pure dep bumps
+			"perf" | "refactor" | "style" => improvement_commits.push(commit),
+			// chore/ci/build/test with a real scope are improvements; deps/tooling noise is only counted
+			"chore" | "ci" | "build" | "test" if !is_deps && commit.scope.is_some() => {
+				improvement_commits.push(commit)
 			}
+			"docs" => docs_commits.push(commit),
+			_ => other_count += 1,
 		}
 	}
 
-	// Calculate counts
-	let total_commits = analysis.commits.len();
-	let breaking_count = breaking_commits.len();
-	let feature_count = feature_commits.len();
-	let improvement_count = improvement_commits.len();
-	let fix_count = fix_commits.len();
-	let docs_count = docs_commits.len();
-	let other_count = other_commits.len();
-
-	// Breaking Changes - Highest Priority
-	if !breaking_commits.is_empty() {
-		content.push_str("### 🚨 Breaking Changes\n\n");
-		content.push_str("⚠️ **Important**: This release contains breaking changes that may require code updates.\n\n");
-		for commit in &breaking_commits {
+	let mut content = String::new();
+	let sections = [
+		("### 🚨 Breaking Changes\n\n", &breaking_commits),
+		("### ✨ New Features & Enhancements\n\n", &feature_commits),
+		(
+			"### 🔧 Improvements & Optimizations\n\n",
+			&improvement_commits,
+		),
+		("### 🐛 Bug Fixes & Stability\n\n", &fix_commits),
+		("### 📚 Documentation & Examples\n\n", &docs_commits),
+	];
+	for (heading, commits) in sections {
+		if commits.is_empty() {
+			continue;
+		}
+		content.push_str(heading);
+		for commit in commits {
 			content.push_str(&format_enhanced_commit_entry(commit));
 		}
 		content.push('\n');
 	}
 
-	// New Features & Enhancements
-	if !feature_commits.is_empty() {
-		content.push_str("### ✨ New Features & Enhancements\n\n");
-		for commit in &feature_commits {
-			content.push_str(&format_enhanced_commit_entry(commit));
-		}
-		content.push('\n');
-	}
-
-	// Improvements & Optimizations
-	if !improvement_commits.is_empty() {
-		content.push_str("### 🔧 Improvements & Optimizations\n\n");
-		for commit in &improvement_commits {
-			content.push_str(&format_enhanced_commit_entry(commit));
-		}
-		content.push('\n');
-	}
-
-	// Bug Fixes & Stability
-	if !fix_commits.is_empty() {
-		content.push_str("### 🐛 Bug Fixes & Stability\n\n");
-		for commit in &fix_commits {
-			content.push_str(&format_enhanced_commit_entry(commit));
-		}
-		content.push('\n');
-	}
-
-	// Documentation & Examples
-	if !docs_commits.is_empty() {
-		content.push_str("### 📚 Documentation & Examples\n\n");
-		for commit in &docs_commits {
-			content.push_str(&format_enhanced_commit_entry(commit));
-		}
-		content.push('\n');
-	}
-
-	// Other Changes — just a count, no individual noise entries
-	if !other_commits.is_empty() {
+	if other_count > 0 {
 		content.push_str(&format!(
 			"### 🔄 Other Changes\n\n\
 			{} maintenance, dependency, and tooling update{} not listed individually.\n\n",
@@ -772,54 +666,7 @@ async fn generate_changelog_content(
 		));
 	}
 
-	// Stats summary — only shown when there's no AI summary (fallback path)
-	content.push_str("### 📊 Release Summary\n\n");
-	content.push_str(&format!("**Total commits**: {}\n\n", total_commits));
-	if breaking_count > 0 {
-		content.push_str(&format!(
-			"🚨 **{}** breaking change{} - *Review migration guide above*\n",
-			breaking_count,
-			if breaking_count == 1 { "" } else { "s" }
-		));
-	}
-	if feature_count > 0 {
-		content.push_str(&format!(
-			"✨ **{}** new feature{} - *Enhanced functionality*\n",
-			feature_count,
-			if feature_count == 1 { "" } else { "s" }
-		));
-	}
-	if improvement_count > 0 {
-		content.push_str(&format!(
-			"🔧 **{}** improvement{} - *Better performance & code quality*\n",
-			improvement_count,
-			if improvement_count == 1 { "" } else { "s" }
-		));
-	}
-	if fix_count > 0 {
-		content.push_str(&format!(
-			"🐛 **{}** bug fix{} - *Improved stability*\n",
-			fix_count,
-			if fix_count == 1 { "" } else { "es" }
-		));
-	}
-	if docs_count > 0 {
-		content.push_str(&format!(
-			"📚 **{}** documentation update{} - *Better developer experience*\n",
-			docs_count,
-			if docs_count == 1 { "" } else { "s" }
-		));
-	}
-	if other_count > 0 {
-		content.push_str(&format!(
-			"🔄 **{}** other change{} - *Maintenance & tooling*\n",
-			other_count,
-			if other_count == 1 { "" } else { "s" }
-		));
-	}
-	content.push('\n');
-
-	Ok(content)
+	content
 }
 
 fn format_enhanced_commit_entry(commit: &CommitInfo) -> String {
@@ -846,70 +693,37 @@ fn format_enhanced_commit_entry(commit: &CommitInfo) -> String {
 	entry
 }
 
-async fn generate_enhanced_changelog_with_ai(
+/// Build the changelog entry: header, an LLM summary when the release has
+/// user-facing changes, then the deterministic per-commit sections.
+async fn generate_changelog_entry(
 	config: &Config,
 	version: &VersionCalculation,
 	analysis: &CommitAnalysis,
 	project_type: &ProjectType,
-	commit_range: &str,
 ) -> Result<String> {
-	// First generate the standard changelog
-	let standard_changelog = generate_changelog_content(version, analysis).await?;
+	let date = chrono::Utc::now().format("%Y-%m-%d").to_string();
+	let mut entry = format!("## [{}] - {}\n\n", version.new_version, date);
 
-	// Try to enhance with AI summary if LLM client can be created
-	if let Ok(_client) = LlmClient::from_config(config) {
-		match generate_ai_changelog_summary(config, analysis, project_type, commit_range).await {
-			Ok(ai_summary) => {
-				let mut enhanced = String::new();
-				let date = chrono::Utc::now().format("%Y-%m-%d").to_string();
-
-				enhanced.push_str(&format!("## [{}] - {}\n\n", version.new_version, date));
-
-				if !ai_summary.trim().is_empty() {
-					enhanced.push_str("### 📋 Release Summary\n\n");
-					enhanced.push_str(&ai_summary);
-					enhanced.push_str("\n\n");
-				}
-
-				// Append detailed sections from standard changelog, skipping its header and
-				// the trailing stats block (AI summary already covers the high-level view).
-				let lines: Vec<&str> = standard_changelog.lines().collect();
-				let mut skip_header = true;
-				let mut skip_stats = false;
-				for line in &lines {
-					if skip_header && line.starts_with("## [") {
-						skip_header = false;
-						continue;
-					}
-					if skip_header {
-						continue;
-					}
-					// Drop the stats summary section — redundant when AI summary is present
-					if line.starts_with("### 📊 Release Summary") {
-						skip_stats = true;
-						continue;
-					}
-					if skip_stats {
-						continue;
-					}
-					if !line.trim().is_empty() {
-						enhanced.push_str(line);
-						enhanced.push('\n');
-					} else {
-						enhanced.push('\n');
-					}
-				}
-
-				Ok(enhanced)
-			}
-			Err(_) => {
-				// Fallback to standard changelog if AI enhancement fails
-				Ok(standard_changelog)
-			}
+	// Dependency bumps, CI and docs-only releases get no prose: the model can
+	// only produce filler ("keeps the project current") for them.
+	if has_user_facing_changes(analysis) {
+		let summary = generate_ai_changelog_summary(config, analysis, project_type).await?;
+		if !summary.is_empty() {
+			entry.push_str("### 📋 Release Summary\n\n");
+			entry.push_str(&summary);
+			entry.push_str("\n\n");
 		}
-	} else {
-		Ok(standard_changelog)
 	}
+
+	entry.push_str(&changelog_sections(analysis));
+	Ok(entry)
+}
+
+fn has_user_facing_changes(analysis: &CommitAnalysis) -> bool {
+	analysis
+		.commits
+		.iter()
+		.any(|c| c.breaking || matches!(c.commit_type.as_str(), "feat" | "fix" | "perf"))
 }
 
 async fn gather_project_context(project_type: &ProjectType) -> Result<(String, String)> {
@@ -1004,185 +818,83 @@ fn extract_field_from_toml(content: &str, field: &str) -> Option<String> {
 	None
 }
 
-async fn analyze_file_changes(commit_range: &str) -> Result<String> {
-	let output = Command::new("git")
-		.args(["diff", "--name-only", commit_range])
-		.output()?;
+/// Sampling temperature for the release summary; low keeps it factual.
+const LLM_TEMPERATURE: f32 = 0.1;
 
-	if !output.status.success() {
-		return Ok("Unable to analyze file changes".to_string());
-	}
+const SUMMARY_SYSTEM_PROMPT: &str = "You write the summary paragraph of a software changelog entry. Respond with a single JSON object and nothing else: {\"summary\": string}
 
-	let files = String::from_utf8(output.stdout).unwrap_or_default();
-	let file_list: Vec<&str> = files.lines().collect();
+Rules:
+- One to three plain sentences, at most 60 words. Written for people who use the project, not for its developers.
+- Cover only the commits listed. Never state a benefit, capability or motivation that a commit does not say.
+- Only commits under NEW FEATURES may be called new, added or introduced. Fixes and refactors are changes to existing behavior.
+- Group related commits into one clause instead of listing each.
+- Ignore dependency bumps, CI, formatting and release chores.
+- No commit hashes, file names, markdown, emoji, or opening filler such as \"This release\".
 
-	if file_list.is_empty() {
-		return Ok("No files changed".to_string());
-	}
+Example: \"Indexing now checkpoints after each stored batch, so an interrupted run resumes instead of restarting. Search results can be reranked with a configurable thinking budget.\"";
 
-	// Categorize files by type/area
-	let mut areas = Vec::new();
-	let mut has_src = false;
-	let mut has_docs = false;
-	let mut has_config = false;
-	let mut has_tests = false;
-
-	for file in &file_list {
-		if file.starts_with("src/")
-			|| file.ends_with(".rs")
-			|| file.ends_with(".js")
-			|| file.ends_with(".ts")
-			|| file.ends_with(".go")
-			|| file.ends_with(".php")
-		{
-			has_src = true;
-		} else if file.ends_with(".md") || file.starts_with("doc") {
-			has_docs = true;
-		} else if file.ends_with(".toml")
-			|| file.ends_with(".json")
-			|| file.ends_with(".yaml")
-			|| file.ends_with(".yml")
-		{
-			has_config = true;
-		} else if file.contains("test") || file.ends_with("_test.rs") || file.ends_with(".test.js")
-		{
-			has_tests = true;
-		}
-	}
-
-	if has_src {
-		areas.push("core functionality");
-	}
-	if has_docs {
-		areas.push("documentation");
-	}
-	if has_config {
-		areas.push("configuration");
-	}
-	if has_tests {
-		areas.push("tests");
-	}
-
-	let area_summary = if areas.is_empty() {
-		"miscellaneous files".to_string()
-	} else {
-		areas.join(", ")
-	};
-
-	Ok(format!(
-		"{} files changed affecting: {}",
-		file_list.len(),
-		area_summary
-	))
-}
-
+/// Ask the model for the prose summary. Commit hashes are deliberately left out
+/// of the prompt: the per-commit sections already carry exact hashes, and a
+/// model asked to repeat them shortens or invents them.
 async fn generate_ai_changelog_summary(
 	config: &Config,
 	analysis: &CommitAnalysis,
 	project_type: &ProjectType,
-	commit_range: &str,
 ) -> Result<String> {
-	// Gather enhanced context
 	let (project_name, project_description) = gather_project_context(project_type).await?;
-	let file_changes = analyze_file_changes(commit_range).await?;
 
-	// Group commits by type for better summary context
 	let mut breaking_msgs = Vec::new();
 	let mut feature_msgs = Vec::new();
 	let mut fix_msgs = Vec::new();
 	let mut other_msgs = Vec::new();
-
 	for commit in &analysis.commits {
-		let msg = &commit.message;
-		let short_hash = &commit.hash[..8];
-		let msg_with_hash = format!("{} ({})", msg, short_hash);
-
 		if commit.breaking {
-			breaking_msgs.push(msg_with_hash);
+			breaking_msgs.push(commit.message.as_str());
 		} else {
 			match commit.commit_type.as_str() {
-				"feat" => feature_msgs.push(msg_with_hash),
-				"fix" => fix_msgs.push(msg_with_hash),
-				_ => other_msgs.push(msg_with_hash),
+				"feat" => feature_msgs.push(commit.message.as_str()),
+				"fix" => fix_msgs.push(commit.message.as_str()),
+				_ => other_msgs.push(commit.message.as_str()),
 			}
 		}
 	}
 
-	let mut commits_context = String::new();
-
-	if !breaking_msgs.is_empty() {
-		commits_context.push_str("BREAKING CHANGES:\\n");
-		for msg in &breaking_msgs {
-			commits_context.push_str(&format!("- {}\\n", msg));
+	let mut prompt = format!("PROJECT: {} - {}\n\n", project_name, project_description);
+	for (heading, msgs) in [
+		("BREAKING CHANGES", &breaking_msgs),
+		("NEW FEATURES", &feature_msgs),
+		("BUG FIXES", &fix_msgs),
+		("OTHER CHANGES", &other_msgs),
+	] {
+		if msgs.is_empty() {
+			continue;
 		}
-		commits_context.push_str("\\n");
+		prompt.push_str(heading);
+		prompt.push_str(":\n");
+		for msg in msgs {
+			prompt.push_str("- ");
+			prompt.push_str(msg);
+			prompt.push('\n');
+		}
+		prompt.push('\n');
 	}
 
-	if !feature_msgs.is_empty() {
-		commits_context.push_str("NEW FEATURES:\\n");
-		for msg in &feature_msgs {
-			commits_context.push_str(&format!("- {}\\n", msg));
-		}
-		commits_context.push_str("\\n");
-	}
-
-	if !fix_msgs.is_empty() {
-		commits_context.push_str("BUG FIXES:\\n");
-		for msg in &fix_msgs {
-			commits_context.push_str(&format!("- {}\\n", msg));
-		}
-		commits_context.push_str("\\n");
-	}
-
-	if !other_msgs.is_empty() {
-		commits_context.push_str("OTHER CHANGES:\\n");
-		for msg in &other_msgs {
-			commits_context.push_str(&format!("- {}\\n", msg));
-		}
-		commits_context.push_str("\\n");
-	}
-
-	let prompt = format!(
-		"Generate a concise, professional release summary for {project_name}.\\n\\n\\
-        PROJECT: {project_name} - {project_description}\\n\\
-        SCOPE: {file_changes}\\n\\n\\
-        COMMITS:\\n{commits_context}\\n\\
-        REQUIREMENTS:\\n\\
-        - Write 2-3 sentences maximum\\n\\
-        - Focus on user-facing changes and improvements (not implementation details)\\n\\
-        - Use professional, clear language suitable for end users\\n\\
-
-        DEDUPLICATION & GROUPING RULES:\\n\\
-        - NEVER repeat similar commits - group them together instead\\n\\
-        - When multiple commits do similar things, combine them into ONE statement\\n\\
-        - Reference multiple commits like: 'Enhanced search functionality (abc123f, def456g, hij789k)'\\n\\
-        - Group by impact/feature, not by individual commit\\n\\
-        - If commits are nearly identical, mention the improvement once with all commit references\\n\\
-
-        MESSAGE REFINEMENT (ACCURACY FIRST):\\n\\
-        - Reword commit messages for clarity, but NEVER upgrade the claim: a fix stays a fix, a refactor stays an improvement\\n\\
-        - Only commits listed under NEW FEATURES may be described as new/introduced/added\\n\\
-        - Describe fixes and refactors as improvements to EXISTING behavior, never as new capabilities\\n\\
-        - Do not state benefits or capabilities that are not implied by a commit message\\n\\
-        - Focus on the RESULT for users, not the technical implementation\\n\\
-        - Combine multiple small changes into broader improvements\\n\\
-
-        FORMATTING:\\n\\
-        - Group similar changes together (e.g., 'Several bug fixes improve...')\\n\\
-        - Prioritize: breaking changes → new features → improvements → bug fixes\\n\\
-        - End with a period\\n\\
-        - Create only a high-level summary for users, not developers\\n\\n\\
-
-        Example: \\\"This release adds multi-query search support (a1b2c3d, e4f5g6h). Indexing was improved with better batch processing and reduced memory usage (i7j8k9l, m0n1o2p). Several bug fixes improve search relevance, error handling, and system stability (q3r4s5t, u6v7w8x, y9z0a1b).\\\"\\n\\n\\
-
-        Generate summary:",
-		project_name = project_name,
-		project_description = project_description,
-		file_changes = file_changes,
-		commits_context = commits_context
-	);
-
-	call_llm_for_version_calculation(&prompt, config).await
+	let client = LlmClient::from_config(config)?.with_temperature(LLM_TEMPERATURE);
+	let messages = vec![
+		Message::system(SUMMARY_SYSTEM_PROMPT),
+		Message::user(&prompt),
+	];
+	let schema = serde_json::json!({
+		"type": "object",
+		"properties": {"summary": {"type": "string"}},
+		"required": ["summary"]
+	});
+	let value = client.chat_completion_json(messages, Some(schema)).await?;
+	let summary = value
+		.get("summary")
+		.and_then(|s| s.as_str())
+		.ok_or_else(|| anyhow::anyhow!("LLM returned no summary field: {}", value))?;
+	Ok(plain_line(summary))
 }
 
 async fn update_project_version(project_type: &ProjectType, new_version: &str) -> Result<()> {

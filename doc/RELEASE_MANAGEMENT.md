@@ -8,7 +8,7 @@ Octocode provides intelligent release automation that analyzes your commit histo
 
 ## Key Features
 
-- **AI Version Calculation**: Analyzes commit history to determine semantic version bumps
+- **Deterministic Version Calculation**: Derives the semantic version bump from conventional commit types
 - **Automatic Changelog**: Generates structured changelogs from commit messages
 - **Multi-Project Support**: Works with Rust, Node.js, PHP, Go, and Python projects
 - **Git Integration**: Creates release commits and annotated tags automatically
@@ -36,7 +36,7 @@ git push origin main --tags
 # Skip confirmation prompt for automation
 octocode release --yes
 
-# Force a specific version (bypasses AI calculation)
+# Force a specific version (bypasses the conventional-commit bump)
 octocode release --force-version "2.0.0"
 
 # Use custom changelog file
@@ -137,19 +137,18 @@ Analyzes commits since the last release using:
 - Conventional commit format parsing
 - Commit message categorization
 
-### 4. AI Version Calculation
+### 4. Version Calculation
 
-Uses LLM to determine appropriate version bump based on:
-- Conventional commit types
-- Breaking change indicators
-- Commit message content
-- Project context
+The bump is derived deterministically from the conventional commit types since the last tag (no LLM involved):
+- Any breaking change (`!` or `BREAKING CHANGE`) bumps major, or minor while the major version is still 0
+- Any `feat:` bumps minor
+- Anything else bumps patch
 
 ### 5. Changelog Generation
 
 Creates structured changelog with:
-- Categorized changes (Features, Bug Fixes, etc.)
-- Commit references
+- A short LLM-written summary, only when the release contains `feat`, `fix`, `perf` or breaking commits; it never carries commit hashes
+- Categorized changes (Features, Bug Fixes, etc.) rendered from git, with exact commit hashes
 - Breaking change highlights
 - Release date
 
@@ -168,7 +167,7 @@ Creates structured changelog with:
 |-------------|--------------|---------|
 | `feat:` | Minor (0.1.0 → 0.2.0) | `feat: add user authentication` |
 | `fix:` | Patch (0.1.0 → 0.1.1) | `fix: resolve login timeout issue` |
-| `BREAKING CHANGE` | Major (0.1.0 → 1.0.0) | `feat!: redesign API endpoints` |
+| `BREAKING CHANGE` | Major (1.1.0 → 2.0.0), minor before 1.0 (0.1.0 → 0.2.0) | `feat!: redesign API endpoints` |
 | `chore:` | Patch | `chore: update dependencies` |
 | `docs:` | Patch | `docs: update API documentation` |
 | `style:` | Patch | `style: fix code formatting` |
@@ -178,7 +177,7 @@ Creates structured changelog with:
 
 ### Breaking Changes
 
-Breaking changes trigger major version bumps:
+Breaking changes trigger major version bumps (minor while the major version is 0):
 
 ```bash
 # Using exclamation mark
@@ -218,7 +217,7 @@ octocode release --yes
 ### Version Control
 
 ```bash
-# Force specific version (bypasses AI calculation)
+# Force specific version (bypasses the conventional-commit bump)
 octocode release --force-version "2.0.0"
 octocode release --force-version "1.5.0-beta.1"
 ```
@@ -275,7 +274,7 @@ git add .
 octocode commit  # AI generates "fix: critical security vulnerability"
 
 # Create patch release
-octocode release  # AI determines patch bump (e.g., 1.0.0 → 1.0.1)
+octocode release  # fix commits give a patch bump (e.g., 1.0.0 → 1.0.1)
 ```
 
 ### Feature Release Workflow

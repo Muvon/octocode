@@ -165,41 +165,44 @@ mod tests {
 	}
 
 	#[test]
-	fn the_fallback_bump_follows_semver_precedence() {
-		let major =
-			calculate_version_fallback("1.2.3", &analysis(&["b"], &["f"], &["x"], &[])).unwrap();
+	fn the_bump_follows_semver_precedence() {
+		let major = calculate_version("1.2.3", &analysis(&["b"], &["f"], &["x"], &[])).unwrap();
 		assert_eq!(major.new_version, "2.0.0");
 		assert_eq!(major.version_type, "major");
 
-		let minor =
-			calculate_version_fallback("1.2.3", &analysis(&[], &["f"], &["x"], &[])).unwrap();
+		let minor = calculate_version("1.2.3", &analysis(&[], &["f"], &["x"], &[])).unwrap();
 		assert_eq!(minor.new_version, "1.3.0");
 		assert_eq!(minor.version_type, "minor");
 
-		let patch = calculate_version_fallback("1.2.3", &analysis(&[], &[], &["x"], &[])).unwrap();
+		let patch = calculate_version("1.2.3", &analysis(&[], &[], &["x"], &[])).unwrap();
 		assert_eq!(patch.new_version, "1.2.4");
 		assert_eq!(patch.version_type, "patch");
 
-		let other = calculate_version_fallback("1.2.3", &analysis(&[], &[], &[], &["x"])).unwrap();
+		let other = calculate_version("1.2.3", &analysis(&[], &[], &[], &["x"])).unwrap();
 		assert_eq!(other.new_version, "1.2.4");
 
-		let nothing = calculate_version_fallback("1.2.3", &analysis(&[], &[], &[], &[])).unwrap();
+		let nothing = calculate_version("1.2.3", &analysis(&[], &[], &[], &[])).unwrap();
 		assert_eq!(nothing.new_version, "1.2.4");
-		assert_eq!(nothing.reasoning, "Miscellaneous changes");
 	}
 
 	#[test]
-	fn the_fallback_bumps_the_core_of_a_prerelease_version() {
-		let bumped =
-			calculate_version_fallback("1.2.3-beta.1", &analysis(&[], &["f"], &[], &[])).unwrap();
+	fn a_breaking_change_before_1_0_bumps_minor_not_major() {
+		let bumped = calculate_version("0.26.2", &analysis(&["b"], &["f"], &[], &[])).unwrap();
+		assert_eq!(bumped.new_version, "0.27.0");
+		assert_eq!(bumped.version_type, "minor");
+	}
+
+	#[test]
+	fn the_bump_keeps_only_the_core_of_a_prerelease_version() {
+		let bumped = calculate_version("1.2.3-beta.1", &analysis(&[], &["f"], &[], &[])).unwrap();
 		assert_eq!(bumped.new_version, "1.3.0");
 		assert_eq!(bumped.current_version, "1.2.3-beta.1");
 	}
 
 	#[test]
-	fn the_fallback_rejects_a_malformed_current_version() {
-		assert!(calculate_version_fallback("1.2", &analysis(&[], &[], &[], &[])).is_err());
-		assert!(calculate_version_fallback("a.b.c", &analysis(&[], &[], &[], &[])).is_err());
+	fn a_malformed_current_version_is_rejected() {
+		assert!(calculate_version("1.2", &analysis(&[], &[], &[], &[])).is_err());
+		assert!(calculate_version("a.b.c", &analysis(&[], &[], &[], &[])).is_err());
 	}
 
 	#[test]
@@ -316,5 +319,69 @@ mod tests {
 	fn a_plist_without_the_version_key_is_an_error() {
 		assert!(update_plist_version("<dict/>", "1.1.0").is_err());
 		assert!(update_plist_version("<key>CFBundleShortVersionString</key>", "1.1.0").is_err());
+	}
+
+	fn typed(
+		commit_type: &str,
+		message: &str,
+		scope: Option<&str>,
+		description: &str,
+	) -> CommitInfo {
+		let mut info = commit(message, scope, description);
+		info.commit_type = commit_type.to_string();
+		info
+	}
+
+	#[test]
+	fn changelog_sections_list_commits_by_impact_and_only_count_noise() {
+		let mut a = analysis(&[], &[], &[], &[]);
+		a.commits = vec![
+			typed("feat", "feat(api): add", Some("api"), "add"),
+			typed("fix", "fix(index): resume", Some("index"), "resume"),
+			typed(
+				"chore",
+				"chore(deps): bump serde",
+				Some("deps"),
+				"bump serde",
+			),
+		];
+		let sections = changelog_sections(&a);
+		assert!(
+			sections.contains("### ✨ New Features & Enhancements\n\n- **api**: add `01234567`\n"),
+			"{sections}"
+		);
+		assert!(
+			sections.contains("### 🐛 Bug Fixes & Stability\n\n- **index**: resume `01234567`\n"),
+			"{sections}"
+		);
+		assert!(
+			sections
+				.contains("1 maintenance, dependency, and tooling update not listed individually."),
+			"{sections}"
+		);
+		assert!(!sections.contains("Release Summary"), "{sections}");
+	}
+
+	#[test]
+	fn only_feat_fix_perf_or_breaking_commits_earn_a_prose_summary() {
+		let mut quiet = analysis(&[], &[], &[], &[]);
+		quiet.commits = vec![
+			typed(
+				"chore",
+				"chore(deps): bump serde",
+				Some("deps"),
+				"bump serde",
+			),
+			typed("docs", "docs: refresh", None, "refresh"),
+		];
+		assert!(!has_user_facing_changes(&quiet));
+
+		let mut loud = quiet.clone();
+		loud.commits[0].breaking = true;
+		assert!(has_user_facing_changes(&loud));
+
+		let mut fixed = quiet;
+		fixed.commits.push(typed("fix", "fix: x", None, "x"));
+		assert!(has_user_facing_changes(&fixed));
 	}
 }

@@ -1,4 +1,4 @@
-// Copyright 2025 Muvon Un Limited
+// Copyright 2026 Muvon Un Limited
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -28,6 +28,27 @@ pub fn truncate_at_char_boundary(s: &str, max_bytes: usize) -> &str {
 	&s[..end]
 }
 
+/// Flatten an LLM string to one plain line: drop code fences, list markers,
+/// heading markers and bold emphasis, and collapse whitespace. Backticks stay;
+/// they are ordinary text in git and this repo's history uses them.
+pub fn plain_line(text: &str) -> String {
+	let mut words: Vec<&str> = Vec::new();
+	for line in text.lines() {
+		let mut line = line.trim();
+		if line.starts_with("```") {
+			continue;
+		}
+		for marker in ["- ", "* ", "• ", "# ", "## ", "### "] {
+			if let Some(rest) = line.strip_prefix(marker) {
+				line = rest.trim_start();
+				break;
+			}
+		}
+		words.extend(line.split_whitespace());
+	}
+	words.join(" ").replace("**", "")
+}
+
 #[cfg(test)]
 mod tests {
 	#[test]
@@ -40,5 +61,15 @@ mod tests {
 		assert_eq!(super::truncate_at_char_boundary(s, 5), "aé");
 		assert_eq!(super::truncate_at_char_boundary(s, 6), s);
 		assert_eq!(super::truncate_at_char_boundary(s, 100), s);
+	}
+
+	#[test]
+	fn plain_line_strips_markup_but_keeps_words_and_backticks() {
+		let raw = "```\n# Heading\n- **bold** `code`  here\n* -v flag stays\n```";
+		assert_eq!(
+			super::plain_line(raw),
+			"Heading bold `code` here -v flag stays"
+		);
+		assert_eq!(super::plain_line("  \n "), "");
 	}
 }
