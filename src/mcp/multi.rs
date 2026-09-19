@@ -30,7 +30,7 @@ use rmcp::{
 	handler::server::ServerHandler,
 	model::{
 		CallToolRequestParams, CallToolResponse, Implementation, ListToolsResult,
-		PaginatedRequestParams, ProtocolVersion, ServerCapabilities, ServerInfo, Tool,
+		PaginatedRequestParams, ProtocolVersion, ServerCapabilities, ServerConfig, Tool,
 	},
 	service::RequestContext,
 	ErrorData, RoleServer, ServiceExt,
@@ -271,7 +271,7 @@ impl MultiServer {
 }
 
 impl ServerHandler for MultiServer {
-	fn get_info(&self) -> ServerInfo {
+	fn get_info(&self) -> ServerConfig {
 		let capabilities = ServerCapabilities::builder().enable_tools().build();
 		let instructions = format!(
 			"Multi-repository Octocode MCP server. {} repositories are available ({}); \
@@ -283,7 +283,7 @@ impl ServerHandler for MultiServer {
 			self.project_list()
 		);
 
-		ServerInfo::new(capabilities)
+		ServerConfig::new(capabilities)
 			.with_protocol_version(ProtocolVersion::V_2026_07_28)
 			.with_server_info(
 				Implementation::new("octocode-mcp", env!("CARGO_PKG_VERSION")).with_description(

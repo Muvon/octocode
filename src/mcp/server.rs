@@ -38,7 +38,7 @@ use rmcp::{
 	handler::server::{router::tool::ToolRouter, tool::ToolCallContext, wrapper::Parameters},
 	model::{
 		CallToolRequestParams, CallToolResponse, Implementation, ListToolsResult,
-		PaginatedRequestParams, ProtocolVersion, ServerCapabilities, ServerInfo, Tool,
+		PaginatedRequestParams, ProtocolVersion, ServerCapabilities, ServerConfig, Tool,
 	},
 	schemars,
 	service::RequestContext,
@@ -1051,7 +1051,7 @@ fn strip_null_variants(value: &mut serde_json::Value) {
 
 #[tool_handler(router = self.tool_router)]
 impl ServerHandler for McpServer {
-	fn get_info(&self) -> ServerInfo {
+	fn get_info(&self) -> ServerConfig {
 		let capabilities = ServerCapabilities::builder().enable_tools().build();
 
 		let instructions = if self.indexer_enabled {
@@ -1060,7 +1060,7 @@ impl ServerHandler for McpServer {
 			"NOTE: in-process indexing is disabled, so the semantic index may be empty or stale. 'structural_search', 'view_signatures', and 'graphrag' still read current source directly; use 'graphrag' for symbol relationships and paths. Use 'semantic_search' only for conceptual lookups where you do not know the symbol name."
 		};
 
-		ServerInfo::new(capabilities)
+		ServerConfig::new(capabilities)
 			.with_protocol_version(ProtocolVersion::V_2026_07_28)
 			.with_server_info(
 				Implementation::new("octocode-mcp", env!("CARGO_PKG_VERSION")).with_description(
