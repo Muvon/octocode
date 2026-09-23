@@ -297,18 +297,21 @@ impl GraphRagProvider {
 
 		let runtime_graph = self.runtime_cache.graph(&self.working_directory).await?;
 		let (graph, enrichment_active) = if let Some(builder) = &graph_builder {
-			match builder.get_graph().await {
-				Ok(enriched) => {
+			let merged = builder
+				.with_graph(|enriched| {
 					let active = !enriched.nodes.is_empty() || !enriched.relationships.is_empty();
 					(
-						std::sync::Arc::new(runtime::merge_enrichment(
+						runtime::merge_enrichment(
 							&runtime_graph,
 							enriched,
 							&self.working_directory,
-						)),
+						),
 						active,
 					)
-				}
+				})
+				.await;
+			match merged {
+				Ok((graph, active)) => (std::sync::Arc::new(graph), active),
 				Err(error) => {
 					tracing::warn!(%error, "Failed to load persisted GraphRAG; using live structural graph");
 					(runtime_graph, false)

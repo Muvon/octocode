@@ -112,14 +112,11 @@ impl Language for Markdown {
 		all_files: &super::resolution_utils::FileRegistry,
 	) -> Option<String> {
 		use super::resolution_utils::resolve_relative_path;
-		use crate::utils::path::PathNormalizer;
 
 		let resolved = resolve_relative_path(source_file, import_path)?;
-		PathNormalizer::find_path_in_collection(
-			&resolved.to_string_lossy(),
-			all_files.get_all_files(),
-		)
-		.map(str::to_string)
+		all_files
+			.find_normalized(&resolved.to_string_lossy())
+			.map(str::to_string)
 	}
 
 	fn get_file_extensions(&self) -> Vec<&'static str> {

@@ -211,6 +211,11 @@ pub async fn execute(
 						.await;
 				}
 
+				// Coalesce change notifications that queued up before this run
+				// (e.g. during the previous reindex): one reindex covers them all.
+				// Changes arriving after this point still trigger another run.
+				while rx.try_recv().is_ok() {}
+
 				if !args.quiet {
 					// Use regular indexing with progress in non-quiet mode
 					super::index::execute(

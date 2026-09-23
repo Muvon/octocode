@@ -272,11 +272,22 @@ pub fn should_process_batch<T>(
 		return true;
 	}
 
-	// Check token limit
-	let total_tokens: usize = batch
-		.iter()
-		.map(|item| count_tokens(get_content(item)))
-		.sum();
+	// Check token limit. This runs after every processed file, so avoid BPE work
+	// where possible: every token spans at least one byte, so a batch whose total
+	// byte length is under the limit cannot reach it in tokens either.
+	let limit = config.index.embeddings_max_tokens_per_batch;
+	let total_bytes: usize = batch.iter().map(|item| get_content(item).len()).sum();
+	if total_bytes < limit {
+		return false;
+	}
 
-	total_tokens >= config.index.embeddings_max_tokens_per_batch
+	// Exact count, stopping as soon as the limit is reached.
+	let mut total_tokens = 0usize;
+	for item in batch {
+		total_tokens += count_tokens(get_content(item));
+		if total_tokens >= limit {
+			return true;
+		}
+	}
+	false
 }

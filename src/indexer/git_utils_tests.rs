@@ -210,4 +210,37 @@ mod tests {
 			.expect_err("an unreachable commit must be an error");
 		assert!(err.to_string().contains("git diff"), "{err}");
 	}
+
+	#[test]
+	fn batched_changed_files_match_the_per_commit_lookup() {
+		// Root commit, plain commits, a merge commit and a multi-file commit:
+		// one `diff-tree --stdin` must report exactly what per-commit calls do.
+		let dir = repo();
+		let path = dir.path();
+		git(path, &["checkout", "-q", "main"]);
+		std::fs::write(path.join("fourth.txt"), "four\n").unwrap();
+		git(path, &["add", "."]);
+		git(path, &["commit", "-q", "-m", "fourth commit"]);
+		git(
+			path,
+			&["merge", "-q", "--no-ff", "-m", "merge feature", "feature"],
+		);
+		std::fs::create_dir_all(path.join("sub dir")).unwrap();
+		std::fs::write(path.join("sub dir/a.txt"), "a\n").unwrap();
+		std::fs::write(path.join("first.txt"), "changed\n").unwrap();
+		git(path, &["add", "."]);
+		git(path, &["commit", "-q", "-m", "multi-file commit"]);
+
+		let log = git(path, &["rev-list", "--reverse", "HEAD"]);
+		let hashes: Vec<&str> = log.lines().collect();
+		assert_eq!(hashes.len(), 6);
+
+		let mut batched = GitUtils::get_changed_files_for_commits(path, &hashes).unwrap();
+		for hash in &hashes {
+			let single = GitUtils::get_changed_files_for_commit(path, hash).unwrap();
+			let from_batch = batched.remove(*hash).unwrap_or_default();
+			assert_eq!(from_batch, single, "commit {hash}");
+		}
+		assert!(batched.is_empty());
+	}
 }

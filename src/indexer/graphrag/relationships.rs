@@ -218,17 +218,26 @@ impl RelationshipDiscovery {
 		all_nodes: &[CodeNode],
 		relationships: &mut Vec<CodeRelationship>,
 	) {
+		// Only mod/lib/main files produce edges; the source-derived prefixes are
+		// loop-invariant, so compute them once rather than per other file.
+		let is_mod = source_file.name == "mod";
+		let is_crate_root = source_file.name == "lib" || source_file.name == "main";
+		if !is_mod && !is_crate_root {
+			return;
+		}
+		let mod_prefix = source_file.path.replace("/mod.rs", "/");
+		let source_dir = Path::new(&source_file.path)
+			.parent()
+			.map(|p| p.to_string_lossy().to_string())
+			.unwrap_or_default();
+
 		for other_file in all_nodes {
 			if other_file.id == source_file.id || other_file.language != "rust" {
 				continue;
 			}
 
 			// Check for mod.rs patterns
-			if source_file.name == "mod"
-				&& other_file
-					.path
-					.starts_with(&source_file.path.replace("/mod.rs", "/"))
-			{
+			if is_mod && other_file.path.starts_with(&mod_prefix) {
 				relationships.push(CodeRelationship {
 					source: source_file.id.clone(),
 					target: other_file.id.clone(),
@@ -241,22 +250,16 @@ impl RelationshipDiscovery {
 			}
 
 			// Check for lib.rs patterns
-			if source_file.name == "lib" || source_file.name == "main" {
-				let source_dir = Path::new(&source_file.path)
-					.parent()
-					.map(|p| p.to_string_lossy().to_string())
-					.unwrap_or_default();
-				if other_file.path.starts_with(&source_dir) {
-					relationships.push(CodeRelationship {
-						source: source_file.id.clone(),
-						target: other_file.id.clone(),
-						relation_type: crate::indexer::graphrag::types::RelationType::ParentModule,
-						description: "Rust crate root relationship".to_string(),
-						confidence: 0.7,
-						weight: 0.6,
-						provenance: crate::indexer::graphrag::types::Provenance::Extracted,
-					});
-				}
+			if is_crate_root && other_file.path.starts_with(&source_dir) {
+				relationships.push(CodeRelationship {
+					source: source_file.id.clone(),
+					target: other_file.id.clone(),
+					relation_type: crate::indexer::graphrag::types::RelationType::ParentModule,
+					description: "Rust crate root relationship".to_string(),
+					confidence: 0.7,
+					weight: 0.6,
+					provenance: crate::indexer::graphrag::types::Provenance::Extracted,
+				});
 			}
 		}
 	}
@@ -267,6 +270,15 @@ impl RelationshipDiscovery {
 		all_nodes: &[CodeNode],
 		relationships: &mut Vec<CodeRelationship>,
 	) {
+		// Only index files produce edges; the source directory is loop-invariant.
+		if source_file.name != "index" {
+			return;
+		}
+		let source_dir = Path::new(&source_file.path)
+			.parent()
+			.map(|p| p.to_string_lossy().to_string())
+			.unwrap_or_default();
+
 		for other_file in all_nodes {
 			if other_file.id == source_file.id
 				|| !["javascript", "typescript"].contains(&other_file.language.as_str())
@@ -275,22 +287,16 @@ impl RelationshipDiscovery {
 			}
 
 			// Check for index.js patterns
-			if source_file.name == "index" {
-				let source_dir = Path::new(&source_file.path)
-					.parent()
-					.map(|p| p.to_string_lossy().to_string())
-					.unwrap_or_default();
-				if other_file.path.starts_with(&source_dir) && other_file.name != "index" {
-					relationships.push(CodeRelationship {
-						source: source_file.id.clone(),
-						target: other_file.id.clone(),
-						relation_type: crate::indexer::graphrag::types::RelationType::ParentModule,
-						description: "JavaScript index module relationship".to_string(),
-						confidence: 0.7,
-						weight: 0.6,
-						provenance: crate::indexer::graphrag::types::Provenance::Extracted,
-					});
-				}
+			if other_file.path.starts_with(&source_dir) && other_file.name != "index" {
+				relationships.push(CodeRelationship {
+					source: source_file.id.clone(),
+					target: other_file.id.clone(),
+					relation_type: crate::indexer::graphrag::types::RelationType::ParentModule,
+					description: "JavaScript index module relationship".to_string(),
+					confidence: 0.7,
+					weight: 0.6,
+					provenance: crate::indexer::graphrag::types::Provenance::Extracted,
+				});
 			}
 		}
 	}
@@ -301,28 +307,31 @@ impl RelationshipDiscovery {
 		all_nodes: &[CodeNode],
 		relationships: &mut Vec<CodeRelationship>,
 	) {
+		// Only __init__ files produce edges; the source directory is loop-invariant.
+		if source_file.name != "__init__" {
+			return;
+		}
+		let source_dir = Path::new(&source_file.path)
+			.parent()
+			.map(|p| p.to_string_lossy().to_string())
+			.unwrap_or_default();
+
 		for other_file in all_nodes {
 			if other_file.id == source_file.id || other_file.language != "python" {
 				continue;
 			}
 
 			// Check for __init__.py patterns
-			if source_file.name == "__init__" {
-				let source_dir = Path::new(&source_file.path)
-					.parent()
-					.map(|p| p.to_string_lossy().to_string())
-					.unwrap_or_default();
-				if other_file.path.starts_with(&source_dir) && other_file.name != "__init__" {
-					relationships.push(CodeRelationship {
-						source: source_file.id.clone(),
-						target: other_file.id.clone(),
-						relation_type: crate::indexer::graphrag::types::RelationType::ParentModule,
-						description: "Python package initialization".to_string(),
-						confidence: 0.8,
-						weight: 0.7,
-						provenance: crate::indexer::graphrag::types::Provenance::Extracted,
-					});
-				}
+			if other_file.path.starts_with(&source_dir) && other_file.name != "__init__" {
+				relationships.push(CodeRelationship {
+					source: source_file.id.clone(),
+					target: other_file.id.clone(),
+					relation_type: crate::indexer::graphrag::types::RelationType::ParentModule,
+					description: "Python package initialization".to_string(),
+					confidence: 0.8,
+					weight: 0.7,
+					provenance: crate::indexer::graphrag::types::Provenance::Extracted,
+				});
 			}
 		}
 	}
@@ -332,13 +341,18 @@ impl RelationshipDiscovery {
 		all_nodes: &[CodeNode],
 		relationships: &mut Vec<CodeRelationship>,
 	) {
+		// The source package is loop-invariant; an empty one never matches.
+		let source_package = Self::extract_go_package(&source_file.path);
+		if source_package.is_empty() {
+			return;
+		}
+
 		for other_file in all_nodes {
 			if other_file.id == source_file.id || other_file.language != "go" {
 				continue;
 			}
 
 			// Check for package relationships
-			let source_package = Self::extract_go_package(&source_file.path);
 			let other_package = Self::extract_go_package(&other_file.path);
 
 			if source_package == other_package && !source_package.is_empty() {
@@ -361,13 +375,18 @@ impl RelationshipDiscovery {
 		all_nodes: &[CodeNode],
 		relationships: &mut Vec<CodeRelationship>,
 	) {
+		// The source namespace is loop-invariant; an empty one never matches.
+		let source_namespace = Self::extract_php_namespace(&source_file.path);
+		if source_namespace.is_empty() {
+			return;
+		}
+
 		for other_file in all_nodes {
 			if other_file.id == source_file.id || other_file.language != "php" {
 				continue;
 			}
 
 			// Check for namespace relationships
-			let source_namespace = Self::extract_php_namespace(&source_file.path);
 			let other_namespace = Self::extract_php_namespace(&other_file.path);
 
 			if source_namespace == other_namespace && !source_namespace.is_empty() {

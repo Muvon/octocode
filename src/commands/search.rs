@@ -295,32 +295,23 @@ pub async fn execute(
 	// Apply reranker if enabled, then filter by similarity threshold
 	if config.search.reranker.enabled && !args.queries.is_empty() {
 		let query = args.queries.join(" ");
-		if !reasoning_on {
-			code_blocks = octocode::reranker::rerank_code_blocks_with_octolib(
-				&query,
-				code_blocks,
-				&config.search.reranker,
-			)
-			.await?;
-		}
-		doc_blocks = octocode::reranker::rerank_doc_blocks_with_octolib(
-			&query,
-			doc_blocks,
-			&config.search.reranker,
-		)
-		.await?;
-		text_blocks = octocode::reranker::rerank_text_blocks_with_octolib(
-			&query,
-			text_blocks,
-			&config.search.reranker,
-		)
-		.await?;
-		commit_blocks = octocode::reranker::rerank_commit_blocks_with_octolib(
-			&query,
-			commit_blocks,
-			&config.search.reranker,
-		)
-		.await?;
+		// The four rerank calls are independent (each short-circuits on an empty
+		// list), so run them concurrently instead of paying their latencies in series.
+		let rc = &config.search.reranker;
+		let code_input = std::mem::take(&mut code_blocks);
+		let code_fut = async {
+			if reasoning_on {
+				Ok(code_input)
+			} else {
+				octocode::reranker::rerank_code_blocks_with_octolib(&query, code_input, rc).await
+			}
+		};
+		(code_blocks, doc_blocks, text_blocks, commit_blocks) = tokio::try_join!(
+			code_fut,
+			octocode::reranker::rerank_doc_blocks_with_octolib(&query, doc_blocks, rc),
+			octocode::reranker::rerank_text_blocks_with_octolib(&query, text_blocks, rc),
+			octocode::reranker::rerank_commit_blocks_with_octolib(&query, commit_blocks, rc),
+		)?;
 	} else {
 		// Apply global result limits (reranker/reasoning already limit code).
 		if !reasoning_on {

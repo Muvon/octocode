@@ -1644,8 +1644,20 @@ pub async fn index_files_with_quiet(
 	} else {
 		// Normal mode: First do a fast count, then process files
 
-		// PERFORMANCE FIX: Do a fast count first without expensive operations
-		total_files_found = fast_count_indexable_files(&current_dir, None);
+		// PERFORMANCE FIX: Walk the tree once (gitignore/.noindex evaluation is the
+		// expensive part), keep the file entries, and count indexable ones from
+		// that list instead of walking a second time for processing.
+		let file_entries: Vec<ignore::DirEntry> = NoindexWalker::create_walker(&current_dir)
+			.build()
+			.filter_map(Result::ok)
+			.filter(|entry| entry.file_type().is_some_and(|ft| ft.is_file()))
+			.collect();
+		total_files_found = file_entries
+			.iter()
+			.filter(|entry| {
+				detect_language(entry.path()).is_some() || is_allowed_text_extension(entry.path())
+			})
+			.count();
 
 		// Update state with the total count immediately
 		{
@@ -1656,19 +1668,7 @@ pub async fn index_files_with_quiet(
 		}
 
 		// Now do the actual processing with proper language detection
-		let walker = NoindexWalker::create_walker(&current_dir).build();
-
-		for result in walker {
-			let entry = match result {
-				Ok(entry) => entry,
-				Err(_) => continue,
-			};
-
-			// Skip directories, only process files
-			if !entry.file_type().is_some_and(|ft| ft.is_file()) {
-				continue;
-			}
-
+		for entry in file_entries {
 			// Create relative path from the current directory using our utility
 			let file_path = path_utils::PathUtils::to_relative_string(entry.path(), &current_dir);
 
@@ -1960,11 +1960,7 @@ pub async fn index_files_with_quiet(
 				}
 			};
 			if needs_indexing {
-				let existing_blocks = store
-					.get_all_code_blocks_for_graphrag()
-					.await
-					.unwrap_or_default();
-				!existing_blocks.is_empty()
+				store.has_blocks_for_graphrag().await.unwrap_or(false)
 			} else {
 				false
 			}

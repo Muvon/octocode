@@ -45,6 +45,12 @@ pub fn extract_meaningful_regions(
 	regions: &mut Vec<CodeRegion>,
 ) {
 	let meaningful_kinds = lang_impl.get_meaningful_kinds();
+	// Resolved once per file rather than once per meaningful node.
+	let descend_first_kinds = lang_impl.descend_first_kinds();
+	let kinds = KindSets {
+		meaningful: &meaningful_kinds,
+		descend_first: &descend_first_kinds,
+	};
 	let mut candidate_regions = Vec::new();
 
 	// First pass: collect all meaningful regions without merging
@@ -52,13 +58,20 @@ pub fn extract_meaningful_regions(
 		node,
 		contents,
 		lang_impl,
-		&meaningful_kinds,
+		&kinds,
 		None,
 		&mut candidate_regions,
 	);
 
 	// Second pass: apply smart merging logic
 	apply_smart_merging(candidate_regions, regions, lang_impl);
+}
+
+/// Per-language node-kind lists, resolved once per file and threaded through
+/// the recursive walk.
+struct KindSets<'a> {
+	meaningful: &'a [&'a str],
+	descend_first: &'a [&'a str],
 }
 
 /// Recurses into a node's children, collecting meaningful regions from each.
@@ -68,7 +81,7 @@ fn descend_children(
 	node: Node,
 	contents: &str,
 	lang_impl: &dyn languages::Language,
-	meaningful_kinds: &[&str],
+	kinds: &KindSets<'_>,
 	regions: &mut Vec<CodeRegion>,
 ) {
 	let mut cursor = node.walk();
@@ -77,12 +90,7 @@ fn descend_children(
 		loop {
 			let current = cursor.node();
 			collect_meaningful_regions_recursive(
-				current,
-				contents,
-				lang_impl,
-				meaningful_kinds,
-				prev,
-				regions,
+				current, contents, lang_impl, kinds, prev, regions,
 			);
 			prev = Some(current);
 			if !cursor.goto_next_sibling() {
@@ -100,13 +108,13 @@ fn collect_meaningful_regions_recursive(
 	node: Node,
 	contents: &str,
 	lang_impl: &dyn languages::Language,
-	meaningful_kinds: &[&str],
+	kinds: &KindSets<'_>,
 	prev_sibling: Option<Node>,
 	regions: &mut Vec<CodeRegion>,
 ) {
 	let node_kind = node.kind();
 
-	if meaningful_kinds.contains(&node_kind) {
+	if kinds.meaningful.contains(&node_kind) {
 		// A language may replace this node outright with independently
 		// produced sub-regions (e.g. an embedded language's own extractor)
 		// instead of a single verbatim-text region.
@@ -116,13 +124,13 @@ fn collect_meaningful_regions_recursive(
 		}
 
 		let is_meaningful = lang_impl.is_meaningful_node(node, contents);
-		let descend_first = lang_impl.descend_first_kinds().contains(&node_kind);
+		let descend_first = kinds.descend_first.contains(&node_kind);
 
 		if descend_first {
 			// Look for smaller, independently-meaningful regions among the
 			// children before settling for this node as one big region.
 			let regions_before = regions.len();
-			descend_children(node, contents, lang_impl, meaningful_kinds, regions);
+			descend_children(node, contents, lang_impl, kinds, regions);
 			if regions.len() > regions_before {
 				return;
 			}
@@ -132,7 +140,7 @@ fn collect_meaningful_regions_recursive(
 			// plain wrapper element with no directives and no meaningful
 			// descendants).
 		} else if !is_meaningful {
-			descend_children(node, contents, lang_impl, meaningful_kinds, regions);
+			descend_children(node, contents, lang_impl, kinds, regions);
 			return;
 		}
 
@@ -162,7 +170,7 @@ fn collect_meaningful_regions_recursive(
 		return;
 	}
 
-	descend_children(node, contents, lang_impl, meaningful_kinds, regions);
+	descend_children(node, contents, lang_impl, kinds, regions);
 }
 
 /// Applies smart merging logic to consolidate single-line declarations
@@ -175,9 +183,17 @@ fn apply_smart_merging(
 		return;
 	}
 
+	// Regions are moved out as they are emitted (instead of cloned); the
+	// look-ahead only ever reads indices >= i, which are still present.
+	let mut candidate_regions: Vec<Option<CodeRegion>> =
+		candidate_regions.into_iter().map(Some).collect();
+
 	let mut i = 0;
 	while i < candidate_regions.len() {
-		let current = &candidate_regions[i];
+		let Some(current) = candidate_regions[i].as_ref() else {
+			i += 1;
+			continue;
+		};
 
 		// Check if this is a single-line block
 		if is_single_line_declaration(current) {
@@ -186,7 +202,9 @@ fn apply_smart_merging(
 			let mut j = i + 1;
 
 			while j < candidate_regions.len() {
-				let next = &candidate_regions[j];
+				let Some(next) = candidate_regions[j].as_ref() else {
+					break;
+				};
 				if is_single_line_declaration(next)
 					&& are_consecutive_or_related(
 						consecutive_single_lines.last().unwrap(),
@@ -206,12 +224,12 @@ fn apply_smart_merging(
 				i = j; // Skip the processed blocks
 			} else {
 				// Not enough to merge, add as-is
-				final_regions.push(current.clone());
+				final_regions.extend(candidate_regions[i].take());
 				i += 1;
 			}
 		} else {
 			// Multi-line block, add as-is
-			final_regions.push(current.clone());
+			final_regions.extend(candidate_regions[i].take());
 			i += 1;
 		}
 	}

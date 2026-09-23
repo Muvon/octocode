@@ -317,6 +317,73 @@ impl GitUtils {
 		Ok(entries)
 	}
 
+	/// Changed file paths for many commits with a single `git diff-tree --stdin`
+	/// process instead of one process per commit. Produces the same per-commit
+	/// lists as `get_changed_files_for_commit`; commits with no listed changes
+	/// (e.g. merges, which diff-tree does not diff by default) are simply absent
+	/// from the map. Errors if git fails, so callers can fall back per commit.
+	pub fn get_changed_files_for_commits(
+		repo_path: &Path,
+		hashes: &[&str],
+	) -> Result<std::collections::HashMap<String, Vec<String>>> {
+		use std::io::Write;
+		use std::process::Stdio;
+
+		let mut result: std::collections::HashMap<String, Vec<String>> =
+			std::collections::HashMap::new();
+		if hashes.is_empty() {
+			return Ok(result);
+		}
+
+		let mut child = Command::new("git")
+			.args(["diff-tree", "--stdin", "--name-only", "-r", "--root"])
+			.current_dir(repo_path)
+			.stdin(Stdio::piped())
+			.stdout(Stdio::piped())
+			.stderr(Stdio::null())
+			.spawn()?;
+
+		// Feed stdin from a separate thread so a large output can't deadlock
+		// against a full input pipe.
+		let mut stdin = child
+			.stdin
+			.take()
+			.ok_or_else(|| anyhow::anyhow!("Failed to open git diff-tree stdin"))?;
+		let input: String = hashes.iter().map(|h| format!("{h}\n")).collect();
+		let writer = std::thread::spawn(move || stdin.write_all(input.as_bytes()));
+
+		let output = child.wait_with_output()?;
+		writer
+			.join()
+			.map_err(|_| anyhow::anyhow!("git diff-tree stdin writer panicked"))??;
+		if !output.status.success() {
+			return Err(anyhow::anyhow!("git diff-tree --stdin failed"));
+		}
+
+		// Output is, per commit with changes: a line with the commit hash, then
+		// one line per changed path.
+		let wanted: std::collections::HashSet<&str> = hashes.iter().copied().collect();
+		let stdout = String::from_utf8(output.stdout)?;
+		let mut current: Option<&str> = None;
+		for line in stdout.lines() {
+			let line = line.trim();
+			if line.is_empty() {
+				continue;
+			}
+			if let Some(&hash) = wanted.get(line) {
+				current = Some(hash);
+				result.entry(hash.to_string()).or_default();
+				continue;
+			}
+			if let Some(hash) = current {
+				if let Some(files) = result.get_mut(hash) {
+					files.push(line.to_string());
+				}
+			}
+		}
+		Ok(result)
+	}
+
 	/// Get changed file paths for a specific commit
 	pub fn get_changed_files_for_commit(repo_path: &Path, hash: &str) -> Result<Vec<String>> {
 		let output = Command::new("git")

@@ -375,20 +375,8 @@ impl TypeScript {
 		let target_str = target_path.to_string_lossy().to_string();
 
 		// Try exact string match first (fastest) with cross-platform normalization
-		if let Some(exact_match) = crate::utils::path::PathNormalizer::find_path_in_collection(
-			&target_str,
-			registry.get_all_files(),
-		) {
+		if let Some(exact_match) = registry.find_normalized(&target_str) {
 			return Some(exact_match.to_string());
-		}
-
-		// Try cross-platform string comparison (normalize separators)
-		let normalized_target = target_str.replace('\\', "/");
-		for ts_file in registry.get_all_files() {
-			let normalized_ts = ts_file.replace('\\', "/");
-			if normalized_target == normalized_ts {
-				return Some(ts_file.clone());
-			}
 		}
 
 		// Try with TypeScript extensions (prioritize .ts over .js for TS projects)
@@ -399,10 +387,7 @@ impl TypeScript {
 			} else {
 				format!("{}.{}", target_str, ext)
 			};
-			if let Some(exact_match) = crate::utils::path::PathNormalizer::find_path_in_collection(
-				&with_ext,
-				registry.get_all_files(),
-			) {
+			if let Some(exact_match) = registry.find_normalized(&with_ext) {
 				return Some(exact_match.to_string());
 			}
 		}
@@ -421,10 +406,7 @@ impl TypeScript {
 			// import specifier and every stored path uses. Compare them normalized.
 			let index_path = target_path.join(index_file);
 			let index_str = index_path.to_string_lossy().to_string();
-			if let Some(found) = crate::utils::path::PathNormalizer::find_path_in_collection(
-				&index_str,
-				registry.get_all_files(),
-			) {
+			if let Some(found) = registry.find_normalized(&index_str) {
 				return Some(found.to_string());
 			}
 		}

@@ -318,29 +318,32 @@ fn build_graph(files: Vec<SourceFile>) -> CodeGraph {
 /// Runtime symbols remain authoritative and stale persisted symbol rows are
 /// ignored; enrichment contributes file descriptions and additional file-level
 /// relationships only while their endpoints still exist in current source.
-pub fn merge_enrichment(base: &CodeGraph, enriched: CodeGraph, root: &Path) -> CodeGraph {
+/// Borrows `enriched` and clones only the nodes, descriptions and edges it
+/// keeps, so callers need not copy the whole persisted graph (embeddings
+/// included) just to merge it.
+pub fn merge_enrichment(base: &CodeGraph, enriched: &CodeGraph, root: &Path) -> CodeGraph {
 	let mut graph = base.clone();
-	for (id, node) in enriched.nodes {
+	for (id, node) in &enriched.nodes {
 		if node.is_symbol_node() {
 			continue;
 		}
-		if let Some(current) = graph.nodes.get_mut(&id) {
+		if let Some(current) = graph.nodes.get_mut(id) {
 			if !node.description.is_empty() {
-				current.description = node.description;
+				current.description = node.description.clone();
 			}
 		} else if root.join(&node.path).is_file() {
-			graph.nodes.insert(id, node);
+			graph.nodes.insert(id.clone(), node.clone());
 		}
 	}
 
-	for relationship in enriched.relationships {
+	for relationship in &enriched.relationships {
 		if relationship.source.contains("::") || relationship.target.contains("::") {
 			continue;
 		}
 		if graph.nodes.contains_key(&relationship.source)
 			&& graph.nodes.contains_key(&relationship.target)
 		{
-			graph.relationships.push(relationship);
+			graph.relationships.push(relationship.clone());
 		}
 	}
 	graph.relationships.sort_unstable_by(|a, b| {
@@ -637,7 +640,7 @@ mod tests {
 			});
 		}
 
-		let graph = merge_enrichment(&base, enriched, Path::new("."));
+		let graph = merge_enrichment(&base, &enriched, Path::new("."));
 		assert_eq!(
 			graph.nodes["src/a.rs"].description,
 			"Enriched file description"

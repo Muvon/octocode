@@ -338,12 +338,13 @@ impl Language for Elixir {
 		let suffixes = [format!("/{module_path}.ex"), format!("/{module_path}.exs")];
 		let exact_names = [format!("{module_path}.ex"), format!("{module_path}.exs")];
 		let mut matches: Vec<String> = files
-			.into_iter()
+			.iter()
 			.filter(|file| {
 				let normalized = file.replace('\\', "/");
 				exact_names.contains(&normalized)
 					|| suffixes.iter().any(|suffix| normalized.ends_with(suffix))
 			})
+			.cloned()
 			.collect();
 		matches.sort_by_key(|file| {
 			let normalized = file.replace('\\', "/");

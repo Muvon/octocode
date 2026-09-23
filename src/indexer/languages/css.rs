@@ -203,10 +203,7 @@ impl Language for Css {
 				let relative_path_str =
 					PathNormalizer::normalize_separators(&relative_path.to_string_lossy());
 				// Check exact match first using cross-platform comparison
-				if let Some(found) = PathNormalizer::find_path_in_collection(
-					&relative_path_str,
-					registry.get_all_files(),
-				) {
+				if let Some(found) = registry.find_normalized(&relative_path_str) {
 					return Some(found.to_string());
 				}
 				// Try without extension and add CSS extensions
@@ -222,10 +219,7 @@ impl Language for Css {
 				let target_path_str =
 					PathNormalizer::normalize_separators(&target_path.to_string_lossy());
 				// Use cross-platform path comparison
-				if let Some(found) = PathNormalizer::find_path_in_collection(
-					&target_path_str,
-					registry.get_all_files(),
-				) {
+				if let Some(found) = registry.find_normalized(&target_path_str) {
 					return Some(found.to_string());
 				}
 			}

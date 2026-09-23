@@ -247,16 +247,20 @@ pub async fn expand_symbols(
 	// Store expanded blocks to sort them by symbol count later
 	let mut additional_blocks = Vec::new();
 
-	// For each symbol, find code blocks that contain it
-	for symbol in &symbol_refs {
-		// Use a reference to avoid moving symbol_refs
-		if let Some(block) = store.get_code_block_by_symbol(symbol).await? {
+	// For each symbol, find code blocks that contain it. Lookups run with
+	// bounded concurrency; `buffered` yields in input order, so the first-seen
+	// dedup below behaves exactly as the sequential loop did.
+	use futures::stream::{self, StreamExt};
+	let lookups: Vec<Result<Option<CodeBlock>>> = stream::iter(&symbol_refs)
+		.map(|symbol| store.get_code_block_by_symbol(symbol))
+		.buffered(8)
+		.collect()
+		.await;
+	let mut seen_hashes = original_hashes;
+	for lookup in lookups {
+		if let Some(block) = lookup? {
 			// Check if we already have this block (avoid duplicates)
-			if !original_hashes.contains(&block.hash)
-				&& !additional_blocks
-					.iter()
-					.any(|b: &CodeBlock| b.hash == block.hash)
-			{
+			if seen_hashes.insert(block.hash.clone()) {
 				// Add dependencies we haven't seen before
 				additional_blocks.push(block);
 			}
@@ -264,27 +268,29 @@ pub async fn expand_symbols(
 	}
 
 	// Sort additional blocks by symbol count (more symbols = more relevant)
-	// This is a heuristic to put more complex/relevant blocks first
-	additional_blocks.sort_by(|a, b| {
-		// First try to sort by number of matching symbols (more matches = more relevant)
-		let a_matches = a.symbols.iter().filter(|s| symbol_refs.contains(s)).count();
-		let b_matches = b.symbols.iter().filter(|s| symbol_refs.contains(s)).count();
-
-		// Primary sort by symbol match count (descending)
-		let match_cmp = b_matches.cmp(&a_matches);
-
-		if match_cmp == std::cmp::Ordering::Equal {
-			// Secondary sort by file path and line number when match counts are equal
-			let path_cmp = a.path.cmp(&b.path);
-			if path_cmp == std::cmp::Ordering::Equal {
-				a.start_line.cmp(&b.start_line)
-			} else {
-				path_cmp
-			}
-		} else {
-			match_cmp
-		}
+	// This is a heuristic to put more complex/relevant blocks first.
+	// Match counts are computed once per block (symbol_refs is sorted+deduped,
+	// so membership is a binary search) instead of inside the comparator.
+	let mut scored: Vec<(usize, CodeBlock)> = additional_blocks
+		.into_iter()
+		.map(|block| {
+			let matches = block
+				.symbols
+				.iter()
+				.filter(|s| symbol_refs.binary_search(s).is_ok())
+				.count();
+			(matches, block)
+		})
+		.collect();
+	scored.sort_by(|(a_matches, a), (b_matches, b)| {
+		// Primary sort by symbol match count (descending), then by file path
+		// and line number when match counts are equal
+		b_matches
+			.cmp(a_matches)
+			.then_with(|| a.path.cmp(&b.path))
+			.then_with(|| a.start_line.cmp(&b.start_line))
 	});
+	let additional_blocks = scored.into_iter().map(|(_, block)| block);
 
 	// Add the sorted additional blocks to our results
 	expanded_blocks.extend(additional_blocks);
@@ -877,12 +883,6 @@ pub async fn search_codebase_with_details_multi_query_text(
 		working_directory,
 	} = *options;
 
-	// Open the project's store by its known path (no current-directory dependency).
-	let store = Store::new_at(working_directory).await?;
-
-	// Detect branch context for branch-aware search
-	let branch_ctx = detect_branch_search_context(&store, working_directory).await;
-
 	// Validate queries (same as CLI)
 	if queries.is_empty() {
 		return Err(anyhow::anyhow!("At least one query is required"));
@@ -895,8 +895,21 @@ pub async fn search_codebase_with_details_multi_query_text(
 		));
 	}
 
+	// Opening the store + detecting branch context (disk/DB) and generating the
+	// query embeddings (network or model inference) are independent — overlap
+	// them instead of paying both latencies back to back.
+	let store_fut = async {
+		// Open the project's store by its known path (no current-directory dependency).
+		let store = Store::new_at(working_directory).await?;
+		// Detect branch context for branch-aware search
+		let branch_ctx = detect_branch_search_context(&store, working_directory).await;
+		Ok::<_, anyhow::Error>((store, branch_ctx))
+	};
 	// Generate batch embeddings for all queries
-	let embeddings = generate_batch_embeddings_for_queries(queries, mode, config).await?;
+	let embeddings_fut = generate_batch_embeddings_for_queries(queries, mode, config);
+	let (store_result, embeddings) = tokio::join!(store_fut, embeddings_fut);
+	let (store, branch_ctx) = store_result?;
+	let embeddings = embeddings?;
 
 	// Zip queries with embeddings
 	let query_embeddings: Vec<_> = queries.iter().cloned().zip(embeddings).collect();
@@ -954,32 +967,23 @@ pub async fn search_codebase_with_details_multi_query_text(
 	// Apply reranker if enabled, then filter by similarity threshold
 	if config.search.reranker.enabled && !queries.is_empty() {
 		let query = queries.join(" ");
-		if !reasoning_on {
-			code_blocks = crate::reranker::rerank_code_blocks_with_octolib(
-				&query,
-				code_blocks,
-				&config.search.reranker,
-			)
-			.await?;
-		}
-		doc_blocks = crate::reranker::rerank_doc_blocks_with_octolib(
-			&query,
-			doc_blocks,
-			&config.search.reranker,
-		)
-		.await?;
-		text_blocks = crate::reranker::rerank_text_blocks_with_octolib(
-			&query,
-			text_blocks,
-			&config.search.reranker,
-		)
-		.await?;
-		commit_blocks = crate::reranker::rerank_commit_blocks_with_octolib(
-			&query,
-			commit_blocks,
-			&config.search.reranker,
-		)
-		.await?;
+		// The four rerank calls are independent (each short-circuits on an empty
+		// list), so run them concurrently instead of paying their latencies in series.
+		let rc = &config.search.reranker;
+		let code_input = std::mem::take(&mut code_blocks);
+		let code_fut = async {
+			if reasoning_on {
+				Ok(code_input)
+			} else {
+				crate::reranker::rerank_code_blocks_with_octolib(&query, code_input, rc).await
+			}
+		};
+		(code_blocks, doc_blocks, text_blocks, commit_blocks) = tokio::try_join!(
+			code_fut,
+			crate::reranker::rerank_doc_blocks_with_octolib(&query, doc_blocks, rc),
+			crate::reranker::rerank_text_blocks_with_octolib(&query, text_blocks, rc),
+			crate::reranker::rerank_commit_blocks_with_octolib(&query, commit_blocks, rc),
+		)?;
 	} else {
 		// Apply global result limits (reranker/reasoning already limit code).
 		if !reasoning_on {
@@ -1465,76 +1469,90 @@ pub async fn execute_single_search_with_embeddings(
 			// quota is replaced by global ranking in `fuse_all_mode_results`
 			// after all three lists are gathered.
 			let per_type_limit = limit;
+			let code_embeddings = embeddings.code_embeddings;
+			let text_embeddings = embeddings.text_embeddings;
 
-			if let Some(code_emb) = embeddings.code_embeddings {
-				code_blocks = if use_hybrid {
-					let hq = crate::store::HybridSearchQuery {
-						vector_query: Some(code_emb),
-						keywords: keywords.clone(),
-						vector_weight: params.vector_weight,
-						keyword_weight: params.keyword_weight,
-						limit: per_type_limit,
-						min_relevance,
-						language_filter: language_filter.map(String::from),
-					};
-					store.hybrid_search::<crate::store::CodeBlock>(&hq).await?
+			// Code and text/doc lookups are independent; run all three tables
+			// concurrently instead of finishing code before starting the rest.
+			let code_fut = async {
+				if let Some(code_emb) = code_embeddings {
+					if use_hybrid {
+						let hq = crate::store::HybridSearchQuery {
+							vector_query: Some(code_emb),
+							keywords: keywords.clone(),
+							vector_weight: params.vector_weight,
+							keyword_weight: params.keyword_weight,
+							limit: per_type_limit,
+							min_relevance,
+							language_filter: language_filter.map(String::from),
+						};
+						store.hybrid_search::<crate::store::CodeBlock>(&hq).await
+					} else {
+						store
+							.get_code_blocks_with_language_filter(
+								code_emb,
+								Some(per_type_limit),
+								distance_threshold,
+								language_filter,
+							)
+							.await
+					}
 				} else {
-					store
-						.get_code_blocks_with_language_filter(
-							code_emb,
-							Some(per_type_limit),
-							distance_threshold,
-							language_filter,
-						)
-						.await?
-				};
-			}
-
-			if let Some(text_emb) = embeddings.text_embeddings {
-				let text_emb_clone = text_emb.clone();
-
-				if use_hybrid {
-					let hq_text = crate::store::HybridSearchQuery {
-						vector_query: Some(text_emb),
-						keywords: keywords.clone(),
-						vector_weight: params.vector_weight,
-						keyword_weight: params.keyword_weight,
-						limit: per_type_limit,
-						min_relevance,
-						language_filter: None,
-					};
-					let hq_doc = crate::store::HybridSearchQuery {
-						vector_query: Some(text_emb_clone),
-						keywords: keywords.clone(),
-						vector_weight: params.vector_weight,
-						keyword_weight: params.keyword_weight,
-						limit: per_type_limit,
-						min_relevance,
-						language_filter: None,
-					};
-					let (t, d) = tokio::try_join!(
-						store.hybrid_search::<crate::store::TextBlock>(&hq_text),
-						store.hybrid_search::<crate::store::DocumentBlock>(&hq_doc),
-					)?;
-					text_blocks = t;
-					doc_blocks = d;
-				} else {
-					let (text_result, doc_result) = tokio::try_join!(
-						store.get_text_blocks_with_config(
-							text_emb,
-							Some(per_type_limit),
-							distance_threshold,
-						),
-						store.get_document_blocks_with_config(
-							text_emb_clone,
-							Some(per_type_limit),
-							distance_threshold,
-						)
-					)?;
-					text_blocks = text_result;
-					doc_blocks = doc_result;
+					Ok(Vec::new())
 				}
-			}
+			};
+			let text_doc_fut = async {
+				if let Some(text_emb) = text_embeddings {
+					let text_emb_clone = text_emb.clone();
+
+					if use_hybrid {
+						let hq_text = crate::store::HybridSearchQuery {
+							vector_query: Some(text_emb),
+							keywords: keywords.clone(),
+							vector_weight: params.vector_weight,
+							keyword_weight: params.keyword_weight,
+							limit: per_type_limit,
+							min_relevance,
+							language_filter: None,
+						};
+						let hq_doc = crate::store::HybridSearchQuery {
+							vector_query: Some(text_emb_clone),
+							keywords: keywords.clone(),
+							vector_weight: params.vector_weight,
+							keyword_weight: params.keyword_weight,
+							limit: per_type_limit,
+							min_relevance,
+							language_filter: None,
+						};
+						let (t, d) = tokio::try_join!(
+							store.hybrid_search::<crate::store::TextBlock>(&hq_text),
+							store.hybrid_search::<crate::store::DocumentBlock>(&hq_doc),
+						)?;
+						Ok((t, d))
+					} else {
+						let (text_result, doc_result) = tokio::try_join!(
+							store.get_text_blocks_with_config(
+								text_emb,
+								Some(per_type_limit),
+								distance_threshold,
+							),
+							store.get_document_blocks_with_config(
+								text_emb_clone,
+								Some(per_type_limit),
+								distance_threshold,
+							)
+						)?;
+						Ok((text_result, doc_result))
+					}
+				} else {
+					Ok((Vec::new(), Vec::new()))
+				}
+			};
+			let (code_result, (text_result, doc_result)) =
+				tokio::try_join!(code_fut, text_doc_fut)?;
+			code_blocks = code_result;
+			text_blocks = text_result;
+			doc_blocks = doc_result;
 
 			fuse_all_mode_results(&mut code_blocks, &mut text_blocks, &mut doc_blocks, limit);
 		}
@@ -1613,14 +1631,12 @@ pub async fn execute_parallel_searches(
 		})
 		.collect();
 
-	let mut main_results = futures::future::try_join_all(main_futures).await?;
-
 	// If no branch context, return main results directly
 	let Some(branch) = params.branch_ctx else {
-		return Ok(main_results);
+		return futures::future::try_join_all(main_futures).await;
 	};
 
-	// Search branch store
+	// Search branch store (concurrently with the main store below)
 	let branch_futures: Vec<_> = query_embeddings
 		.iter()
 		.enumerate()
@@ -1654,7 +1670,10 @@ pub async fn execute_parallel_searches(
 		})
 		.collect();
 
-	let branch_results = futures::future::try_join_all(branch_futures).await?;
+	let (mut main_results, branch_results) = tokio::try_join!(
+		futures::future::try_join_all(main_futures),
+		futures::future::try_join_all(branch_futures),
+	)?;
 
 	// Merge: branch results take priority over main for overridden paths
 	let merged: Vec<QuerySearchResult> = main_results

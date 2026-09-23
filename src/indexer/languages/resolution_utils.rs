@@ -17,6 +17,7 @@
 //! This module provides common file-finding and path resolution utilities
 //! that can be used by language-specific import resolvers.
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -28,6 +29,12 @@ pub struct FileRegistry {
 	files_by_extension: HashMap<String, Vec<String>>,
 	/// All files for general searches
 	all_files: Vec<String>,
+	/// Separator-normalized path -> index into `all_files` (first occurrence
+	/// wins), so `find_exact_file` is a hash lookup instead of a linear scan
+	/// that re-normalizes every registry path on every `resolve_import` call.
+	normalized_index: HashMap<String, usize>,
+	/// Exact path -> index into `all_files` (first occurrence wins).
+	exact_index: HashMap<String, usize>,
 	/// Lazily-populated cache of each file's canonicalized path (or `None` if
 	/// canonicalize failed), keyed by the original path. Populated on first
 	/// use of `find_exact_file`'s canonicalize fallback rather than eagerly
@@ -55,22 +62,42 @@ impl FileRegistry {
 			}
 		}
 
+		let mut normalized_index = HashMap::with_capacity(all_files.len());
+		let mut exact_index = HashMap::with_capacity(all_files.len());
+		for (idx, file_path) in all_files.iter().enumerate() {
+			normalized_index
+				.entry(PathNormalizer::normalize_separators(file_path))
+				.or_insert(idx);
+			exact_index.entry(file_path.clone()).or_insert(idx);
+		}
+
 		Self {
 			files_by_extension,
 			all_files: all_files.to_vec(),
+			normalized_index,
+			exact_index,
 			canonical_cache: std::sync::OnceLock::new(),
 		}
 	}
 
-	/// Get all files with specific extensions
-	pub fn get_files_with_extensions(&self, extensions: &[&str]) -> Vec<String> {
+	/// Get all files with specific extensions.
+	///
+	/// Borrows the registry's list for the common single-extension case, so a
+	/// `resolve_import` call does not clone every same-language path.
+	pub fn get_files_with_extensions(&self, extensions: &[&str]) -> Cow<'_, [String]> {
+		if let [ext] = extensions {
+			return match self.files_by_extension.get(&ext.to_lowercase()) {
+				Some(files) => Cow::Borrowed(files.as_slice()),
+				None => Cow::Borrowed(&[]),
+			};
+		}
 		let mut result = Vec::new();
 		for ext in extensions {
 			if let Some(files) = self.files_by_extension.get(&ext.to_lowercase()) {
-				result.extend(files.clone());
+				result.extend(files.iter().cloned());
 			}
 		}
-		result
+		Cow::Owned(result)
 	}
 
 	/// Find a file with multiple possible extensions
@@ -93,10 +120,27 @@ impl FileRegistry {
 		None
 	}
 
+	/// First registry file equal to `target` after separator normalization.
+	/// Same result as `PathNormalizer::find_path_in_collection(target,
+	/// self.get_all_files())`, as a hash lookup.
+	pub fn find_normalized(&self, target: &str) -> Option<&str> {
+		self.normalized_index
+			.get(&PathNormalizer::normalize_separators(target))
+			.map(|&idx| self.all_files[idx].as_str())
+	}
+
+	/// First registry file byte-equal to `target`. Same result as
+	/// `self.get_all_files().iter().find(|f| *f == target)`, as a hash lookup.
+	pub fn find_verbatim(&self, target: &str) -> Option<&str> {
+		self.exact_index
+			.get(target)
+			.map(|&idx| self.all_files[idx].as_str())
+	}
+
 	/// Find exact file match with cross-platform path comparison
 	pub fn find_exact_file(&self, target_path: &str) -> Option<String> {
 		// Use cross-platform path comparison first (most reliable for tests)
-		if let Some(found) = PathNormalizer::find_path_in_collection(target_path, &self.all_files) {
+		if let Some(found) = self.find_normalized(target_path) {
 			return Some(found.to_string());
 		}
 
@@ -317,8 +361,9 @@ pub fn find_files_in_directory(
 	let dir_str = directory.to_string_lossy();
 	registry
 		.get_files_with_extensions(extensions)
-		.into_iter()
+		.iter()
 		.filter(|file| file.starts_with(&*dir_str))
+		.cloned()
 		.collect()
 }
 

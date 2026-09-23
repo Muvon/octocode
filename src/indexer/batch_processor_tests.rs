@@ -143,4 +143,15 @@ mod tests {
 		let batch: Vec<String> = (0..20).map(|_| "word".to_string()).collect();
 		assert!(should_process_batch(&batch, |s| s.as_str(), &config));
 	}
+
+	#[test]
+	fn byte_length_over_budget_still_uses_the_exact_token_count() {
+		let mut config = Config::default();
+		config.index.embeddings_batch_size = 10_000;
+		config.index.embeddings_max_tokens_per_batch = 10;
+
+		// 14 bytes (over the byte bound) but only a handful of tokens.
+		let batch = vec!["word word word".to_string()];
+		assert!(!should_process_batch(&batch, |s| s.as_str(), &config));
+	}
 }

@@ -93,7 +93,11 @@ impl VectorOptimizer {
 		table: &Table,
 		table_name: &str,
 	) -> Result<VectorQuery, lancedb::Error> {
-		// Get table statistics
+		// Table statistics are only used for debug logging; skip the two metadata
+		// round-trips (count_rows + list_indices) on every query otherwise.
+		if !tracing::enabled!(tracing::Level::DEBUG) {
+			return Ok(query);
+		}
 		let row_count = table.count_rows(None).await?;
 		let indices = table.list_indices().await?;
 		let has_index = indices.iter().any(|idx| idx.columns == ["embedding"]);

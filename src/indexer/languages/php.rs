@@ -402,10 +402,7 @@ impl Php {
 		let target_str = target_path.to_string_lossy().to_string();
 
 		// Try exact string match first (fastest) with cross-platform normalization
-		if let Some(exact_match) = crate::utils::path::PathNormalizer::find_path_in_collection(
-			&target_str,
-			registry.get_all_files(),
-		) {
+		if let Some(exact_match) = registry.find_normalized(&target_str) {
 			return Some(exact_match.to_string());
 		}
 
@@ -416,10 +413,7 @@ impl Php {
 			format!("{}.php", target_str)
 		};
 
-		if let Some(exact_match) = crate::utils::path::PathNormalizer::find_path_in_collection(
-			&with_php_ext,
-			registry.get_all_files(),
-		) {
+		if let Some(exact_match) = registry.find_normalized(&with_php_ext) {
 			return Some(exact_match.to_string());
 		}
 

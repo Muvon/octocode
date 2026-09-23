@@ -314,15 +314,12 @@ impl JavaScript {
 		let target_str = target_path.to_string_lossy().to_string();
 
 		// Try exact string match first (fastest)
-		if let Some(exact_match) = registry.get_all_files().iter().find(|f| *f == &target_str) {
-			return Some(exact_match.clone());
+		if let Some(exact_match) = registry.find_verbatim(&target_str) {
+			return Some(exact_match.to_string());
 		}
 
 		// Try cross-platform string comparison using PathNormalizer
-		if let Some(found) = crate::utils::path::PathNormalizer::find_path_in_collection(
-			&target_str,
-			registry.get_all_files(),
-		) {
+		if let Some(found) = registry.find_normalized(&target_str) {
 			return Some(found.to_string());
 		}
 
@@ -336,17 +333,13 @@ impl JavaScript {
 			};
 
 			// Try exact match with extension
-			if let Some(exact_match) = registry.get_all_files().iter().find(|f| *f == &with_ext) {
-				return Some(exact_match.clone());
+			if let Some(exact_match) = registry.find_verbatim(&with_ext) {
+				return Some(exact_match.to_string());
 			}
 
 			// Try cross-platform match with extension
-			let normalized_with_ext = with_ext.replace('\\', "/");
-			for js_file in registry.get_all_files() {
-				let normalized_js = js_file.replace('\\', "/");
-				if normalized_with_ext == normalized_js {
-					return Some(js_file.clone());
-				}
+			if let Some(found) = registry.find_normalized(&with_ext) {
+				return Some(found.to_string());
 			}
 		}
 
@@ -364,10 +357,7 @@ impl JavaScript {
 			// import specifier and every stored path uses. Compare them normalized.
 			let index_path = target_path.join(index_file);
 			let index_str = index_path.to_string_lossy().to_string();
-			if let Some(found) = crate::utils::path::PathNormalizer::find_path_in_collection(
-				&index_str,
-				registry.get_all_files(),
-			) {
+			if let Some(found) = registry.find_normalized(&index_str) {
 				return Some(found.to_string());
 			}
 		}

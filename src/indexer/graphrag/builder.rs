@@ -207,34 +207,36 @@ impl GraphBuilder {
 			}
 		}
 
+		// CRITICAL FIX: Also remove from in-memory graph to prevent duplicates.
+		// Path-based: covers the file node and cleans legacy persisted symbol rows.
+		// ("{path}::{symbol}") plus every edge touching them. Done in one pass for
+		// all changed files — per-file passes rescanned the whole graph each time.
+		{
+			let changed_paths: HashSet<&str> = relative_paths.iter().map(String::as_str).collect();
+			let mut graph = self.graph.write().await;
+			let stale_ids: HashSet<String> = graph
+				.nodes
+				.iter()
+				.filter(|(_, n)| changed_paths.contains(n.path.as_str()))
+				.map(|(id, _)| id.clone())
+				.collect();
+			if !stale_ids.is_empty() {
+				if !self.quiet {
+					eprintln!(
+						"🗑️  Removed {} stale in-memory node(s) for {} changed file(s)",
+						stale_ids.len(),
+						changed_paths.len()
+					);
+				}
+				graph.nodes.retain(|id, _| !stale_ids.contains(id));
+				graph.relationships.retain(|rel| {
+					!stale_ids.contains(&rel.source) && !stale_ids.contains(&rel.target)
+				});
+			}
+		}
+
 		// Process each file that is missing from the graph or has changed.
 		for (file_path, (relative_path, content_hash, file_blocks)) in files_to_process {
-			// CRITICAL FIX: Also remove from in-memory graph to prevent duplicates.
-			// Path-based: covers the file node and cleans legacy persisted symbol rows.
-			// ("{path}::{symbol}") plus every edge touching them.
-			{
-				let mut graph = self.graph.write().await;
-				let stale_ids: HashSet<String> = graph
-					.nodes
-					.iter()
-					.filter(|(_, n)| n.path == relative_path)
-					.map(|(id, _)| id.clone())
-					.collect();
-				if !stale_ids.is_empty() {
-					if !self.quiet {
-						eprintln!(
-							"🗑️  Removed {} stale in-memory node(s) for: {}",
-							stale_ids.len(),
-							relative_path
-						);
-					}
-					graph.nodes.retain(|id, _| !stale_ids.contains(id));
-					graph.relationships.retain(|rel| {
-						!stale_ids.contains(&rel.source) && !stale_ids.contains(&rel.target)
-					});
-				}
-			}
-
 			// Extract file information efficiently
 			let file_name = Path::new(&file_path)
 				.file_stem()
@@ -998,6 +1000,19 @@ impl GraphBuilder {
 	}
 
 	// Get the full graph
+	/// Run `f` against the graph (loading it from the database first when the
+	/// in-memory graph is empty, like `get_graph`) without cloning it.
+	pub async fn with_graph<R>(&self, f: impl FnOnce(&CodeGraph) -> R) -> Result<R> {
+		{
+			let graph = self.graph.read().await;
+			if !(graph.nodes.is_empty() && graph.relationships.is_empty()) {
+				return Ok(f(&graph));
+			}
+		}
+		let loaded = self.get_graph().await?;
+		Ok(f(&loaded))
+	}
+
 	pub async fn get_graph(&self) -> Result<CodeGraph> {
 		let graph = self.graph.read().await;
 

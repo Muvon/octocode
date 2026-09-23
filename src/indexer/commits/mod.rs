@@ -80,9 +80,18 @@ pub async fn index_commits(
 		std::collections::HashMap::new()
 	};
 
+	// One git process for every commit's file list; per-commit fallback if the
+	// batched call fails for any reason.
+	let hashes: Vec<&str> = commits.iter().map(|c| c.hash.as_str()).collect();
+	let mut batched_files = GitUtils::get_changed_files_for_commits(repo_path, &hashes).ok();
+
 	for entry in &commits {
-		let files =
-			GitUtils::get_changed_files_for_commit(repo_path, &entry.hash).unwrap_or_default();
+		let files = match batched_files.as_mut() {
+			Some(map) => map.remove(&entry.hash).unwrap_or_default(),
+			None => {
+				GitUtils::get_changed_files_for_commit(repo_path, &entry.hash).unwrap_or_default()
+			}
+		};
 		let files_json = serde_json::to_string(&files).unwrap_or_else(|_| "[]".to_string());
 
 		let description = descriptions.get(&entry.hash).cloned().unwrap_or_default();

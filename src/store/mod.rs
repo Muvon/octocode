@@ -249,10 +249,15 @@ impl Store {
 			crate::embedding::create_shared_provider(&config.embedding.code_model)
 				.await?
 				.get_dimension();
-		let text_vector_dim =
+		// Same model for code and text (a common setup): reuse the dimension
+		// rather than constructing the provider a second time.
+		let text_vector_dim = if config.embedding.text_model == config.embedding.code_model {
+			code_vector_dim
+		} else {
 			crate::embedding::create_shared_provider(&config.embedding.text_model)
 				.await?
-				.get_dimension();
+				.get_dimension()
+		};
 
 		// Connect to LanceDB
 		let db = connect(storage_path).execute().await?;
@@ -854,6 +859,9 @@ impl Store {
 						.write()
 						.await
 						.insert(B::TABLE_NAME.to_string(), true);
+					// A cached handle opened before the FTS build would not see the
+					// index; drop it so hybrid_search (which trusts this flag) reopens.
+					self.table_cache.write().await.remove(B::TABLE_NAME);
 				}
 			}
 		}
@@ -969,6 +977,30 @@ impl Store {
 		}
 		let table = self.db.open_table(table_name).execute().await?;
 		Ok(table.count_rows(None).await?)
+	}
+
+	/// Whether `get_all_code_blocks_for_graphrag` would return anything, answered
+	/// with row counts instead of loading both tables into memory: any code
+	/// block, or any markdown document block (the only document rows it keeps).
+	pub async fn has_blocks_for_graphrag(&self) -> Result<bool> {
+		if self.get_table_row_count(tables::CODE_BLOCKS).await? > 0 {
+			return Ok(true);
+		}
+		let table_ops = self.table_ops();
+		if !table_ops.table_exists(tables::DOCUMENT_BLOCKS).await? {
+			return Ok(false);
+		}
+		let table = self
+			.db
+			.open_table(tables::DOCUMENT_BLOCKS)
+			.execute()
+			.await?;
+		let markdown_rows = table
+			.count_rows(Some(
+				"path LIKE '%.md' OR path LIKE '%.markdown'".to_string(),
+			))
+			.await?;
+		Ok(markdown_rows > 0)
 	}
 
 	// Metadata operations
@@ -1203,18 +1235,32 @@ impl Store {
 		path: &str,
 		limit: usize,
 	) -> Result<Vec<CodeBlock>> {
+		self.query_code_blocks_by_path(path, Some(limit)).await
+	}
+
+	/// Every code block stored for a file path.
+	pub async fn get_all_code_blocks_by_path(&self, path: &str) -> Result<Vec<CodeBlock>> {
+		self.query_code_blocks_by_path(path, None).await
+	}
+
+	async fn query_code_blocks_by_path(
+		&self,
+		path: &str,
+		limit: Option<usize>,
+	) -> Result<Vec<CodeBlock>> {
 		let table_ops = self.table_ops();
 		if !table_ops.table_exists(tables::CODE_BLOCKS).await? {
 			return Ok(Vec::new());
 		}
 
 		let table = self.get_table(tables::CODE_BLOCKS).await?;
-		let mut results = table
+		let mut query = table
 			.query()
-			.only_if(format!("path = '{}'", escape_single_quotes(path)))
-			.limit(limit)
-			.execute()
-			.await?;
+			.only_if(format!("path = '{}'", escape_single_quotes(path)));
+		if let Some(limit) = limit {
+			query = query.limit(limit);
+		}
+		let mut results = query.execute().await?;
 
 		let mut blocks = Vec::new();
 		let converter = BatchConverter::new(self.code_vector_dim);
@@ -1282,11 +1328,21 @@ impl Store {
 		// When only one signal is present, use that signal alone.
 		match (&query.vector_query, &query.keywords) {
 			(Some(embedding), Some(kw_query)) => {
-				// Check FTS index, create if missing (lazy)
-				let indices = table.list_indices().await?;
-				let has_fts = indices
-					.iter()
-					.any(|idx| idx.index_type == lancedb::index::IndexType::FTS);
+				// Check FTS index, create if missing (lazy). A confirmed-present flag
+				// skips the list_indices round-trip on repeat queries.
+				let fts_cached = self
+					.fts_index_present
+					.read()
+					.await
+					.get(B::TABLE_NAME)
+					.copied()
+					.unwrap_or(false);
+				let has_fts = fts_cached || {
+					let indices = table.list_indices().await?;
+					indices
+						.iter()
+						.any(|idx| idx.index_type == lancedb::index::IndexType::FTS)
+				};
 
 				if !has_fts {
 					table_ops.create_fts_index(B::TABLE_NAME).await?;
@@ -1314,6 +1370,12 @@ impl Store {
 							)
 							.await;
 					}
+				}
+				if !fts_cached {
+					self.fts_index_present
+						.write()
+						.await
+						.insert(B::TABLE_NAME.to_string(), true);
 				}
 
 				// Native hybrid: LanceDB runs vector + FTS in parallel. We swap in our
