@@ -745,15 +745,15 @@ fn render_commit_message(draft: &CommitDraft) -> Result<String> {
 	let scope = plain_line(&draft.scope);
 	let breaking = plain_line(&draft.breaking);
 
-	let mut message = kind;
-	if !scope.is_empty() {
-		message.push_str(&format!("({})", scope));
-	}
-	if !breaking.is_empty() {
-		message.push('!');
-	}
-	message.push_str(": ");
-	message.push_str(&subject);
+	let bang = if breaking.is_empty() { "" } else { "!" };
+	let scoped = format!("{}({}){}: {}", kind, scope, bang, subject);
+	// The prompt bounds the subject but not the scope; a long scope is optional
+	// in Conventional Commits, so drop it rather than fail the whole commit.
+	let mut message = if !scope.is_empty() && scoped.chars().count() <= SUBJECT_MAX_CHARS {
+		scoped
+	} else {
+		format!("{}{}: {}", kind, bang, subject)
+	};
 	if message.chars().count() > SUBJECT_MAX_CHARS {
 		return Err(anyhow::anyhow!(
 			"Commit subject exceeds {} characters: {}",

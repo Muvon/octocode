@@ -167,6 +167,23 @@ index 111..222 100644
 	}
 
 	#[test]
+	fn a_scope_that_overflows_the_header_is_dropped() {
+		let message = render_commit_message(&draft(
+			"docs",
+			"commission-payout-dispatch",
+			"revise commission payout dispatch specification",
+			"",
+			&[],
+			"",
+		))
+		.unwrap();
+		assert_eq!(
+			message,
+			"docs: revise commission payout dispatch specification"
+		);
+	}
+
+	#[test]
 	fn an_unknown_type_an_empty_subject_and_an_overlong_subject_are_rejected() {
 		assert!(render_commit_message(&draft("feature", "", "add x", "", &[], "")).is_err());
 		assert!(render_commit_message(&draft("feat", "", "```", "", &[], "")).is_err());
