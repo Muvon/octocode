@@ -47,7 +47,7 @@ use tracing::{debug, warn};
 
 use crate::config::Config;
 use crate::mcp::logging::init_mcp_logging;
-use crate::mcp::server::{BackgroundServices, McpServer};
+use crate::mcp::server::{list_tools_result, BackgroundServices, McpServer};
 
 #[cfg(test)]
 #[path = "multi_tests.rs"]
@@ -296,9 +296,9 @@ impl ServerHandler for MultiServer {
 	async fn list_tools(
 		&self,
 		_request: Option<PaginatedRequestParams>,
-		_context: RequestContext<RoleServer>,
+		context: RequestContext<RoleServer>,
 	) -> Result<ListToolsResult, ErrorData> {
-		Ok(ListToolsResult::with_all_items((*self.tools).clone()))
+		Ok(list_tools_result((*self.tools).clone(), &context))
 	}
 
 	fn get_tool(&self, name: &str) -> Option<Tool> {

@@ -37,7 +37,7 @@ use anyhow::Result;
 use rmcp::{
 	handler::server::{router::tool::ToolRouter, tool::ToolCallContext, wrapper::Parameters},
 	model::{
-		CallToolRequestParams, CallToolResponse, Implementation, ListToolsResult,
+		CacheScope, CallToolRequestParams, CallToolResponse, Implementation, ListToolsResult,
 		PaginatedRequestParams, ProtocolVersion, ServerCapabilities, ServerConfig, Tool,
 	},
 	schemars,
@@ -1049,6 +1049,25 @@ fn strip_null_variants(value: &mut serde_json::Value) {
 	}
 }
 
+/// 2026-07-28 makes `ttlMs` and `cacheScope` required on list results; older
+/// protocol versions don't define them. rmcp's generated `list_tools` sets them,
+/// so the `list_tools` overrides must too — a strict 2026-07-28 client (Claude
+/// Code's `server/discover` runtime) rejects the result and loads no tools at all.
+pub(crate) fn list_tools_result(
+	tools: Vec<Tool>,
+	context: &RequestContext<RoleServer>,
+) -> ListToolsResult {
+	let result = ListToolsResult::with_all_items(tools);
+	let supports_cache_hints = context
+		.protocol_version()
+		.is_some_and(|version| version >= ProtocolVersion::V_2026_07_28);
+	if !supports_cache_hints {
+		return result;
+	}
+	// ttl 0 matches rmcp's generated handler; the list is identical for every caller.
+	result.with_ttl_ms(0).with_cache_scope(CacheScope::Public)
+}
+
 #[tool_handler(router = self.tool_router)]
 impl ServerHandler for McpServer {
 	fn get_info(&self) -> ServerConfig {
@@ -1073,9 +1092,9 @@ impl ServerHandler for McpServer {
 	async fn list_tools(
 		&self,
 		_request: Option<PaginatedRequestParams>,
-		_context: RequestContext<RoleServer>,
+		context: RequestContext<RoleServer>,
 	) -> Result<ListToolsResult, ErrorData> {
-		Ok(ListToolsResult::with_all_items(self.list_tool_defs()))
+		Ok(list_tools_result(self.list_tool_defs(), &context))
 	}
 }
 
