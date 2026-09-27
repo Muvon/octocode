@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.26.3] - 2026-09-27
+
+### 📋 Release Summary
+
+MCP tool listings now include cache hints and use the current server configuration type. Commit headers drop scopes that exceed the header limit, generated claims are audited against source material, and indexing, search, and commit/release flows have been changed.
+
+### 🔧 Improvements & Optimizations
+
+- **dependencies**: upgrade octolib dependency to 0.40.0 `d5a0dd3a`
+- optimize indexing and search performance `1ddae09a`
+- **commit**: unify commit and release flows `d09c4177`
+
+### 🐛 Bug Fixes & Stability
+
+- **mcp**: include cache hints in tool listings `a548b25e`
+- **commit**: drop scopes that exceed the header limit `c34a8c73`
+- **mcp**: use the current server configuration type `b6ebaf13`
+- **commands**: audit generated claims against source material `385c6f48`
+
 ## [0.26.2] - 2026-09-18
 
 ### 📋 Release Summary
