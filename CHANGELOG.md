@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.26.4] - 2026-09-30
+
+### 🔧 Improvements & Optimizations
+
+- **dependencies**: refresh locked dependencies `45133528`
+
 ## [0.26.3] - 2026-09-27
 
 ### 📋 Release Summary
