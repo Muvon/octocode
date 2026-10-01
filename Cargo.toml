@@ -29,6 +29,8 @@ doctest = false  # Disable doctests to avoid feature conflicts on Windows
 default = ["fastembed", "huggingface"]
 fastembed = ["octolib/fastembed"]
 huggingface = ["octolib/huggingface"]
+# Opt-in GPU acceleration on macOS; keep CPU builds as the default.
+metal = ["octolib/metal"]
 
 # Optimized release profile for static linking
 [profile.release]
