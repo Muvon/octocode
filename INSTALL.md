@@ -111,6 +111,26 @@ If you have Rust installed, you can install directly from crates.io:
 cargo install octocode
 ```
 
+### Metal acceleration (macOS)
+
+Metal acceleration is opt-in and requires Apple's Xcode command-line tools
+(`xcode-select --install`). To build from the cloned repository:
+
+```bash
+cargo install --path . --features metal
+```
+
+To enable Hugging Face embeddings without FastEmbed:
+
+```bash
+cargo install --path . --no-default-features --features huggingface,metal
+```
+
+The `metal` feature forwards to octolib's Metal support. Hugging Face models,
+including `huggingface:Qwen/Qwen3-Embedding-0.6B`, use Metal when available
+and otherwise fall back to CPU. Default builds remain unchanged; do not enable
+`metal` on Linux or Windows.
+
 ## Verify Installation
 
 ```bash
