@@ -80,7 +80,6 @@ async fn list_models(provider_filter: Option<String>) -> Result<()> {
 			EmbeddingProviderType::OpenRouter,
 			EmbeddingProviderType::OctoHub,
 			EmbeddingProviderType::Local,
-			EmbeddingProviderType::Together,
 		]
 	};
 
@@ -189,14 +188,6 @@ async fn list_models(provider_filter: Option<String>) -> Result<()> {
 				println!("  Local: Dynamic discovery via OpenAI-compatible API");
 				println!("  Use 'info' command with specific model names");
 			}
-			EmbeddingProviderType::Together => {
-				let together_models = [("intfloat/multilingual-e5-large-instruct", 1024)];
-				println!("Found {} models:", together_models.len());
-				for (i, (model, dim)) in together_models.iter().enumerate() {
-					println!("  {}. {} ({}d)", i + 1, model, dim);
-				}
-				println!("  Use 'info' command for real-time API validation");
-			}
 		}
 	}
 
@@ -269,9 +260,8 @@ fn parse_provider(provider_str: &str) -> Result<EmbeddingProviderType> {
 		"openrouter" => Ok(EmbeddingProviderType::OpenRouter),
 		"octohub" => Ok(EmbeddingProviderType::OctoHub),
 		"local" => Ok(EmbeddingProviderType::Local),
-		"together" => Ok(EmbeddingProviderType::Together),
 		_ => Err(anyhow::anyhow!(
-			"Unknown provider '{}'. Supported: fastembed, huggingface, onnx, jina, voyage, google, openai, openrouter, octohub, local, together",
+			"Unknown provider '{}'. Supported: fastembed, huggingface, onnx, jina, voyage, google, openai, openrouter, octohub, local",
 			provider_str
 		)),
 	}

@@ -47,7 +47,6 @@ mod tests {
 			"openrouter",
 			"octohub",
 			"local",
-			"together",
 		] {
 			parse_provider(name).unwrap_or_else(|e| panic!("{name} should resolve: {e}"));
 			// Matching is case-insensitive.
