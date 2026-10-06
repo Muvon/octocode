@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.26.5] - 2026-10-06
+
+### 📋 Release Summary
+
+Together provider support has been removed. Octolib and locked dependencies were updated.
+
+### 🔧 Improvements & Optimizations
+
+- **dependencies**: update octolib and locked dependencies `e694df06`
+
+### 🐛 Bug Fixes & Stability
+
+- **models**: remove Together provider support `228fc222`
+
 ## [0.26.4] - 2026-09-30
 
 ### 🔧 Improvements & Optimizations
