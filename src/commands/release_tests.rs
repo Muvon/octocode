@@ -321,6 +321,108 @@ mod tests {
 		assert!(update_plist_version("<key>CFBundleShortVersionString</key>", "1.1.0").is_err());
 	}
 
+	const EXTENSION_MANIFEST: &str =
+		"{\n  \"manifest_version\": 3,\n  \"name\": \"ext\",\n  \"version\": \"1.0.0\"\n}\n";
+
+	#[test]
+	fn a_chrome_extension_is_detected_but_a_web_app_manifest_is_not() {
+		let dir = TempDir::new().unwrap();
+		std::fs::write(
+			dir.path().join("manifest.json"),
+			"{\"name\": \"pwa\", \"start_url\": \"/\"}",
+		)
+		.unwrap();
+		assert!(matches!(
+			detect_project_type(dir.path()).unwrap(),
+			ProjectType::Unknown
+		));
+
+		std::fs::write(dir.path().join("manifest.json"), EXTENSION_MANIFEST).unwrap();
+		let detected = detect_project_type(dir.path()).unwrap();
+		assert_eq!(
+			format_project_type(&detected),
+			"Chrome extension (manifest.json)"
+		);
+	}
+
+	#[test]
+	fn extension_manifests_are_found_in_the_root_and_source_dirs_only() {
+		let dir = TempDir::new().unwrap();
+		std::fs::write(dir.path().join("manifest.json"), EXTENSION_MANIFEST).unwrap();
+		for sub in ["public", "dist", "node_modules"] {
+			std::fs::create_dir_all(dir.path().join(sub)).unwrap();
+			std::fs::write(
+				dir.path().join(sub).join("manifest.json"),
+				EXTENSION_MANIFEST,
+			)
+			.unwrap();
+		}
+		std::fs::create_dir_all(dir.path().join("web")).unwrap();
+		std::fs::write(dir.path().join("web/manifest.json"), "{\"name\": \"pwa\"}").unwrap();
+
+		let found = find_extension_manifests(dir.path());
+		assert_eq!(found.len(), 2, "got {found:?}");
+		assert!(found.iter().any(|p| p.ends_with("public/manifest.json")));
+	}
+
+	#[test]
+	fn chrome_extension_versions_must_be_plain_integers() {
+		for ok in ["1", "1.2", "1.2.3", "1.2.3.4", "0.10.0", "65535.0.0"] {
+			assert!(is_valid_extension_version(ok), "{ok}");
+		}
+		for bad in [
+			"",
+			"1.2.3-beta.1",
+			"1.2.3+build",
+			"1.2.3.4.5",
+			"1..2",
+			"01.2.3",
+			"65536.0.0",
+		] {
+			assert!(!is_valid_extension_version(bad), "{bad}");
+		}
+	}
+
+	#[tokio::test]
+	async fn a_release_bumps_package_json_and_the_extension_manifest_together() {
+		let dir = TempDir::new().unwrap();
+		let package = dir.path().join("package.json");
+		std::fs::write(&package, "{\"name\": \"ext\", \"version\": \"1.0.0\"}").unwrap();
+		std::fs::create_dir_all(dir.path().join("public")).unwrap();
+		let manifest = dir.path().join("public/manifest.json");
+		std::fs::write(&manifest, EXTENSION_MANIFEST).unwrap();
+
+		update_project_version(&ProjectType::Node(package.clone()), "1.1.0")
+			.await
+			.unwrap();
+
+		assert!(std::fs::read_to_string(&package)
+			.unwrap()
+			.contains("\"version\": \"1.1.0\""));
+		let updated = std::fs::read_to_string(&manifest).unwrap();
+		assert!(updated.contains("\"version\": \"1.1.0\""));
+		assert!(updated.contains("\"manifest_version\": 3"));
+	}
+
+	#[tokio::test]
+	async fn a_prerelease_version_is_rejected_before_any_file_is_written() {
+		let dir = TempDir::new().unwrap();
+		let manifest = dir.path().join("manifest.json");
+		std::fs::write(&manifest, EXTENSION_MANIFEST).unwrap();
+
+		let result = update_project_version(
+			&ProjectType::ChromeExtension(manifest.clone()),
+			"1.1.0-beta.1",
+		)
+		.await;
+
+		assert!(result.is_err());
+		assert_eq!(
+			std::fs::read_to_string(&manifest).unwrap(),
+			EXTENSION_MANIFEST
+		);
+	}
+
 	fn typed(
 		commit_type: &str,
 		message: &str,

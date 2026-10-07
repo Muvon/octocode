@@ -79,11 +79,12 @@ pub struct VersionCalculation {
 
 #[derive(Debug, Clone)]
 pub enum ProjectType {
-	Rust(PathBuf),   // Cargo.toml
-	Node(PathBuf),   // package.json
-	Php(PathBuf),    // composer.json
-	Go(PathBuf),     // go.mod
-	Python(PathBuf), // pyproject.toml
+	Rust(PathBuf),            // Cargo.toml
+	Node(PathBuf),            // package.json
+	Php(PathBuf),             // composer.json
+	Go(PathBuf),              // go.mod
+	Python(PathBuf),          // pyproject.toml
+	ChromeExtension(PathBuf), // manifest.json
 	Unknown,
 }
 
@@ -267,6 +268,8 @@ fn detect_project_type(dir: &Path) -> Result<ProjectType> {
 		Ok(ProjectType::Go(dir.join("go.mod")))
 	} else if dir.join("pyproject.toml").exists() {
 		Ok(ProjectType::Python(dir.join("pyproject.toml")))
+	} else if is_extension_manifest(&dir.join("manifest.json")) {
+		Ok(ProjectType::ChromeExtension(dir.join("manifest.json")))
 	} else {
 		Ok(ProjectType::Unknown)
 	}
@@ -279,6 +282,7 @@ fn format_project_type(project_type: &ProjectType) -> String {
 		ProjectType::Php(_) => "PHP (composer.json)".to_string(),
 		ProjectType::Go(_) => "Go (go.mod)".to_string(),
 		ProjectType::Python(_) => "Python (pyproject.toml)".to_string(),
+		ProjectType::ChromeExtension(_) => "Chrome extension (manifest.json)".to_string(),
 		ProjectType::Unknown => "Unknown (no project file detected)".to_string(),
 	}
 }
@@ -344,6 +348,13 @@ async fn get_current_version(project_type: &ProjectType) -> Result<String> {
 			// Try [project] version = "x.y.z" first, then [tool.poetry] version
 			if let Some(version) = extract_pyproject_version(&content) {
 				return Ok(version);
+			}
+		}
+		ProjectType::ChromeExtension(manifest_path) => {
+			let content = fs::read_to_string(manifest_path)?;
+			let manifest: serde_json::Value = serde_json::from_str(&content)?;
+			if let Some(version) = manifest.get("version").and_then(|v| v.as_str()) {
+				return Ok(version.to_string());
 			}
 		}
 		ProjectType::Unknown => {}
@@ -796,6 +807,27 @@ async fn gather_project_context(project_type: &ProjectType) -> Result<(String, S
 				.unwrap_or("Python project".to_string());
 			(name, description)
 		}
+		ProjectType::ChromeExtension(manifest_path) => {
+			let content = fs::read_to_string(manifest_path).unwrap_or_default();
+			if let Ok(manifest) = serde_json::from_str::<serde_json::Value>(&content) {
+				let name = manifest
+					.get("name")
+					.and_then(|v| v.as_str())
+					.unwrap_or("Unknown Project")
+					.to_string();
+				let description = manifest
+					.get("description")
+					.and_then(|v| v.as_str())
+					.unwrap_or("Chrome extension")
+					.to_string();
+				(name, description)
+			} else {
+				(
+					"Unknown Project".to_string(),
+					"Chrome extension".to_string(),
+				)
+			}
+		}
 		ProjectType::Unknown => (
 			"Unknown Project".to_string(),
 			"Software project".to_string(),
@@ -935,6 +967,26 @@ async fn generate_ai_changelog_summary(
 }
 
 async fn update_project_version(project_type: &ProjectType, new_version: &str) -> Result<()> {
+	let project_root = match project_type {
+		ProjectType::Rust(p)
+		| ProjectType::Node(p)
+		| ProjectType::Php(p)
+		| ProjectType::Go(p)
+		| ProjectType::Python(p)
+		| ProjectType::ChromeExtension(p) => p.parent().unwrap().to_path_buf(),
+		ProjectType::Unknown => std::env::current_dir()?,
+	};
+
+	// Validate before writing anything so a version Chrome rejects never leaves
+	// the project half-bumped.
+	let extension_manifests = find_extension_manifests(&project_root);
+	if !extension_manifests.is_empty() && !is_valid_extension_version(new_version) {
+		return Err(anyhow::anyhow!(
+			"❌ Version '{}' is not valid in a Chrome extension manifest: it must be 1-4 dot-separated integers (0-65535) with no pre-release or build suffix",
+			new_version
+		));
+	}
+
 	match project_type {
 		ProjectType::Rust(cargo_path) => {
 			let content = fs::read_to_string(cargo_path)?;
@@ -961,6 +1013,9 @@ async fn update_project_version(project_type: &ProjectType, new_version: &str) -
 			let updated_content = update_pyproject_version(&content, new_version)?;
 			fs::write(pyproject_path, updated_content)?;
 		}
+		ProjectType::ChromeExtension(_) => {
+			// The root manifest is rewritten below with any nested extension manifests
+		}
 		ProjectType::Unknown => {
 			// No project file to update
 		}
@@ -972,7 +1027,8 @@ async fn update_project_version(project_type: &ProjectType, new_version: &str) -
 		| ProjectType::Node(p)
 		| ProjectType::Php(p)
 		| ProjectType::Go(p)
-		| ProjectType::Python(p) => p.parent().unwrap().join("server.json"),
+		| ProjectType::Python(p)
+		| ProjectType::ChromeExtension(p) => p.parent().unwrap().join("server.json"),
 		ProjectType::Unknown => std::env::current_dir()?.join("server.json"),
 	};
 	if server_json_path.exists() {
@@ -981,15 +1037,21 @@ async fn update_project_version(project_type: &ProjectType, new_version: &str) -
 		fs::write(&server_json_path, updated)?;
 	}
 
+	// Update Chrome extension manifests (root, public/, src/, ...)
+	for manifest_path in extension_manifests {
+		let content = fs::read_to_string(&manifest_path)?;
+		let updated = update_json_version(&content, new_version, "version")?;
+		fs::write(&manifest_path, updated)?;
+		println!(
+			"🧩 Updated {}",
+			manifest_path
+				.strip_prefix(&project_root)
+				.unwrap_or(&manifest_path)
+				.display()
+		);
+	}
+
 	// Update Info.plist files if they exist (macOS/iOS apps)
-	let project_root = match project_type {
-		ProjectType::Rust(p)
-		| ProjectType::Node(p)
-		| ProjectType::Php(p)
-		| ProjectType::Go(p)
-		| ProjectType::Python(p) => p.parent().unwrap().to_path_buf(),
-		ProjectType::Unknown => std::env::current_dir()?,
-	};
 	for plist_path in find_info_plists(&project_root) {
 		let content = fs::read_to_string(&plist_path)?;
 		if let Ok(updated) = update_plist_version(&content, new_version) {
@@ -1105,7 +1167,7 @@ async fn update_lock_files(project_type: &ProjectType) -> Result<()> {
 				}
 			}
 		}
-		ProjectType::Unknown => {
+		ProjectType::ChromeExtension(_) | ProjectType::Unknown => {
 			// No lock file to update
 		}
 	}
@@ -1294,27 +1356,60 @@ fn update_json_version(content: &str, new_version: &str, field_name: &str) -> Re
 /// Find Info.plist files in the project directory (macOS/iOS apps).
 /// Searches common locations and skips build artifacts.
 fn find_info_plists(project_root: &Path) -> Vec<PathBuf> {
+	find_in_root_and_subdirs(project_root, "Info.plist")
+}
+
+/// Find Chrome extension manifests (manifest.json carrying `manifest_version`)
+/// in the project root and its immediate subdirectories (public/, src/, ...).
+/// The `manifest_version` check excludes PWA web app manifests.
+fn find_extension_manifests(project_root: &Path) -> Vec<PathBuf> {
+	find_in_root_and_subdirs(project_root, "manifest.json")
+		.into_iter()
+		.filter(|path| is_extension_manifest(path))
+		.collect()
+}
+
+fn is_extension_manifest(path: &Path) -> bool {
+	fs::read_to_string(path)
+		.ok()
+		.and_then(|content| serde_json::from_str::<serde_json::Value>(&content).ok())
+		.is_some_and(|manifest| manifest.get("manifest_version").is_some())
+}
+
+/// Chrome accepts 1-4 dot-separated integers in 0..=65535, without leading zeros.
+fn is_valid_extension_version(version: &str) -> bool {
+	let parts: Vec<&str> = version.split('.').collect();
+	(1..=4).contains(&parts.len())
+		&& parts.iter().all(|p| {
+			!p.is_empty()
+				&& p.chars().all(|c| c.is_ascii_digit())
+				&& (*p == "0" || !p.starts_with('0'))
+				&& p.parse::<u16>().is_ok()
+		})
+}
+
+/// Find `file_name` in the project root and its immediate subdirectories,
+/// skipping build artifacts, dependencies, and hidden directories.
+fn find_in_root_and_subdirs(project_root: &Path, file_name: &str) -> Vec<PathBuf> {
 	let mut results = Vec::new();
 
-	// Check root Info.plist first
-	let root_plist = project_root.join("Info.plist");
-	if root_plist.exists() {
-		results.push(root_plist);
+	let root_file = project_root.join(file_name);
+	if root_file.exists() {
+		results.push(root_file);
 	}
 
-	// Scan immediate subdirectories (e.g., <AppName>/Info.plist, Sources/Info.plist)
 	if let Ok(entries) = fs::read_dir(project_root) {
 		for entry in entries.flatten() {
 			let path = entry.path();
 			if !path.is_dir() {
 				continue;
 			}
-			// Skip build artifacts, dependencies, and hidden directories
 			let name = entry.file_name();
 			let name = name.to_string_lossy();
 			if name.starts_with('.')
 				|| name == "target"
 				|| name == "build"
+				|| name == "dist"
 				|| name == "node_modules"
 				|| name == "vendor"
 				|| name == "DerivedData"
@@ -1322,9 +1417,9 @@ fn find_info_plists(project_root: &Path) -> Vec<PathBuf> {
 			{
 				continue;
 			}
-			let plist = path.join("Info.plist");
-			if plist.exists() {
-				results.push(plist);
+			let file = path.join(file_name);
+			if file.exists() {
+				results.push(file);
 			}
 		}
 	}
@@ -1435,7 +1530,8 @@ async fn stage_release_files(changelog_path: &str, project_type: &ProjectType) -
 		| ProjectType::Node(p)
 		| ProjectType::Php(p)
 		| ProjectType::Go(p)
-		| ProjectType::Python(p) => p.parent().unwrap_or(Path::new(".")).to_path_buf(),
+		| ProjectType::Python(p)
+		| ProjectType::ChromeExtension(p) => p.parent().unwrap_or(Path::new(".")).to_path_buf(),
 		ProjectType::Unknown => std::env::current_dir()?,
 	};
 	match project_type {
@@ -1489,13 +1585,18 @@ async fn stage_release_files(changelog_path: &str, project_type: &ProjectType) -
 				files_to_stage.push(uv_lock.to_string_lossy().to_string());
 			}
 		}
-		ProjectType::Unknown => {}
+		ProjectType::ChromeExtension(_) | ProjectType::Unknown => {}
 	}
 
 	// Stage server.json if it exists
 	let server_json = current_dir.join("server.json");
 	if server_json.exists() {
 		files_to_stage.push(server_json.to_string_lossy().to_string());
+	}
+
+	// Stage Chrome extension manifests (the root one included for extension projects)
+	for manifest_path in find_extension_manifests(&current_dir) {
+		files_to_stage.push(manifest_path.to_string_lossy().to_string());
 	}
 
 	// Stage Info.plist files if they were updated (macOS/iOS apps)

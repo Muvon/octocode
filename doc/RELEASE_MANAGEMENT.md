@@ -112,6 +112,18 @@ The `version` key under `[project]` or `[tool.poetry]` is updated in place; form
 - `uv.lock` - Refreshed via `uv lock` when present
 - `CHANGELOG.md` - Release notes
 
+### Chrome Extensions (manifest.json)
+
+A `manifest.json` carrying `manifest_version` is treated as a Chrome extension manifest (PWA web manifests are ignored). Its `version` is rewritten in place; when it is the only project file, it is also the version source.
+
+Manifests in the project root and immediate subdirectories (`public/`, `src/`, …; not `dist/`, `build/`, `node_modules/`) are synced with any other project type, so a Vite/WXT/Plasmo extension with a `package.json` keeps both in step.
+
+Chrome accepts only 1-4 dot-separated integers, so a pre-release version (e.g. `1.2.0-beta.1`) aborts the release before any file is written.
+
+**Files updated:**
+- `manifest.json` - Extension version (each one found)
+- `CHANGELOG.md` - Release notes
+
 ## How It Works
 
 ### 1. Project Detection
@@ -122,6 +134,7 @@ Octocode automatically detects your project type by scanning for:
 - `composer.json` → PHP project
 - `go.mod` → Go project
 - `pyproject.toml` → Python project
+- `manifest.json` with `manifest_version` → Chrome extension
 
 ### 2. Version Analysis
 

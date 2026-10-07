@@ -396,6 +396,7 @@ octocode release --changelog "HISTORY.md"
 - PHP (composer.json)
 - Go (go.mod)
 - Python (pyproject.toml)
+- Chrome extension (manifest.json with `manifest_version`; also synced in root/`public/`/`src/` alongside any other project type)
 
 ## MCP Server Commands
 
