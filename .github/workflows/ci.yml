@@ -26,7 +26,7 @@ jobs:
     name: Rust CI
     uses: muvon/ci-workflow/.github/workflows/rust-ci.yml@master
     with:
-      feature-flags: '--features fastembed,huggingface'
+      feature-flags: '--all-features'
       setup-protoc: true
       # Test and coverage run in dedicated jobs below: need ONNX static libs + sccache
       test: false
@@ -116,15 +116,12 @@ jobs:
         # (esaxx-rs is also /MT via hardcoded static_crt(true); patched via
         # [patch.crates-io] in Cargo.toml to a vendored copy with /MD.)
         RUSTFLAGS: ${{ runner.os == 'Windows' && '-C target-feature=-crt-static' || '' }}
-      run: cargo test --verbose --features fastembed,huggingface
+      run: cargo test --verbose --all-features
 
-    # Metal is macOS-only; keep Linux/Windows on the portable features.
-    - name: Run tests (all features, macOS only)
+    - name: Check all targets (macOS)
       if: runner.os == 'macOS'
       shell: bash
-      run: |
-        cargo check --all-targets --all-features
-        cargo test --verbose --all-features
+      run: cargo check --all-targets --all-features
 
   coverage:
     name: Coverage Report
@@ -132,7 +129,7 @@ jobs:
       contents: write # push the badge JSON to the `badges` branch
     uses: muvon/ci-workflow/.github/workflows/rust-coverage.yml@master
     with:
-      feature-flags: '--features fastembed,huggingface'
+      feature-flags: '--all-features'
       ignore-filename-regex: '(_tests?\.rs|/tests\.rs)$'
       setup-protoc: true
       setup-script: |

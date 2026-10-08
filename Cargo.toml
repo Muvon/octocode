@@ -26,10 +26,10 @@ exclude = [
 doctest = false  # Disable doctests to avoid feature conflicts on Windows
 
 [features]
-default = ["fastembed", "huggingface"]
+default = ["fastembed", "huggingface", "metal"]
 fastembed = ["octolib/fastembed"]
 huggingface = ["octolib/huggingface"]
-# Opt-in GPU acceleration on macOS; keep CPU builds as the default.
+# Default GPU support on macOS; a no-op on other platforms.
 metal = ["octolib/metal"]
 
 # Optimized release profile for static linking
@@ -109,8 +109,8 @@ tar = "0.4"
 zstd = { version = "0.13", default-features = false, features = ["zstdmt"] }
 
 # Local dependency on octolib with embedding features
-# octolib = { path = "../octolib", default-features = false, features = ["llm", "embeddings", "reranker", "fastembed", "huggingface"] }
-octolib = { version = "0.41.1", default-features = false, features = ["llm", "embeddings", "reranker"] }
+octolib = { path = "../octolib", default-features = false, features = ["llm", "embeddings", "reranker", "fastembed", "huggingface"] }
+# octolib = { version = "0.41.4", path = "../octolib", default-features = false, features = ["llm", "embeddings", "reranker"] }
 
 # MCP SDK - official Rust implementation
 rmcp = { version = "3.0.0", features = ["server", "macros", "transport-io", "transport-streamable-http-server"] }
