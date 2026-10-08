@@ -116,14 +116,15 @@ jobs:
         # (esaxx-rs is also /MT via hardcoded static_crt(true); patched via
         # [patch.crates-io] in Cargo.toml to a vendored copy with /MD.)
         RUSTFLAGS: ${{ runner.os == 'Windows' && '-C target-feature=-crt-static' || '' }}
-      # Metal is macOS-only; keep Linux/Windows on the portable features.
-      run: |
-        cargo test --verbose --features fastembed,huggingface
-        if [[ "$RUNNER_OS" == "macOS" ]]; then
-          cargo check --all-targets --all-features
-          cargo test --verbose --all-features
-        fi
+      run: cargo test --verbose --features fastembed,huggingface
 
+    # Metal is macOS-only; keep Linux/Windows on the portable features.
+    - name: Run tests (all features, macOS only)
+      if: runner.os == 'macOS'
+      shell: bash
+      run: |
+        cargo check --all-targets --all-features
+        cargo test --verbose --all-features
 
   coverage:
     name: Coverage Report
