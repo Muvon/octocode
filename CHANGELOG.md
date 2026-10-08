@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.26.6] - 2026-10-08
+
+### 📋 Release Summary
+
+Metal acceleration is available through build features and is now enabled by default. Release projects can now support Chrome extensions.
+
+### ✨ New Features & Enhancements
+
+- **embedding**: expose opt-in Metal acceleration `d5875a24`
+- **release**: support Chrome extension release projects `558df349`
+
+### 🔧 Improvements & Optimizations
+
+- **dependencies**: update locked dependency versions `0749c232`
+- **workflows**: upgrade Rust toolchain to 1.99.0 `43d3ca35`
+- **dependencies**: use registry octolib dependency `fc02beb3`
+- **features**: enable metal by default `20874548`
+- **ci**: separate macOS all-features step `fee0279a`
+
 ## [0.26.5] - 2026-10-06
 
 ### 📋 Release Summary

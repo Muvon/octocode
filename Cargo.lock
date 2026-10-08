@@ -5667,7 +5667,7 @@ dependencies = [
 
 [[package]]
 name = "octocode"
-version = "0.26.5"
+version = "0.26.6"
 dependencies = [
  "anyhow",
  "arrow",
