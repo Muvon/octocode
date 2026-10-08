@@ -113,11 +113,11 @@ cargo install octocode
 
 ### Metal acceleration (macOS)
 
-Metal acceleration is opt-in and requires Apple's Xcode command-line tools
-(`xcode-select --install`). To build from the cloned repository:
+Metal support is enabled by default on macOS and requires Apple's Xcode
+command-line tools (`xcode-select --install`). To build from the cloned repository:
 
 ```bash
-cargo install --path . --features metal
+cargo install --path .
 ```
 
 To enable Hugging Face embeddings without FastEmbed:
@@ -126,10 +126,16 @@ To enable Hugging Face embeddings without FastEmbed:
 cargo install --path . --no-default-features --features huggingface,metal
 ```
 
-The `metal` feature forwards to octolib's Metal support. Hugging Face models,
-including `huggingface:Qwen/Qwen3-Embedding-0.6B`, use Metal when available
-and otherwise fall back to CPU. Default builds remain unchanged; do not enable
-`metal` on Linux or Windows.
+For a CPU-only build with both embedding providers:
+
+```bash
+cargo install --path . --no-default-features --features fastembed,huggingface
+```
+
+The `metal` feature forwards to octolib's platform-gated Metal support. Hugging
+Face models, including `huggingface:Qwen/Qwen3-Embedding-0.6B`, use Metal when
+available and otherwise fall back to CPU. On Linux and Windows the `metal`
+feature is a no-op, including when building with `--all-features`.
 
 ## Verify Installation
 
