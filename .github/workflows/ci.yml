@@ -39,7 +39,7 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        rust: [1.98.0]
+        rust: [1.99.0]
         include:
           - os: ubuntu-latest
             rust: beta
@@ -183,7 +183,7 @@ jobs:
           --user 0:0 \
           -v "$(pwd):/workspace" \
           -w /workspace \
-          rust:1.98.0-alpine3.22 \
+          rust:1.99.0-alpine3.22 \
           sh -c '
             set -eu
             apk add --no-cache \
