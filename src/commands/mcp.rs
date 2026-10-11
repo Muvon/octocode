@@ -17,7 +17,7 @@ use clap::Args;
 
 use octocode::config::Config;
 use octocode::indexer;
-use octocode::mcp::{has_child_repos, McpServer, MultiServer};
+use octocode::mcp::{has_child_repos, McpServer, MultiServer, Sessions};
 
 #[derive(Args, Clone)]
 pub struct McpArgs {
@@ -106,6 +106,14 @@ pub async fn run(args: McpArgs) -> Result<()> {
 		));
 	}
 
+	// Sessions in other directories (octomind shares one connection between its
+	// sessions) are routed to handlers for their own directories.
+	let sessions = Sessions::new(
+		config.clone(),
+		working_directory.clone(),
+		args.no_git,
+		args.debug,
+	);
 	let (server, bg) = McpServer::new(
 		config,
 		args.debug,
@@ -117,8 +125,8 @@ pub async fn run(args: McpArgs) -> Result<()> {
 
 	// Check if HTTP binding is requested
 	if let Some(bind_addr) = args.bind {
-		server.run_http(&bind_addr, bg).await
+		server.run_http(&bind_addr, bg, sessions).await
 	} else {
-		server.run_stdio(bg).await
+		server.run_stdio(bg, sessions).await
 	}
 }

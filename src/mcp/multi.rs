@@ -46,8 +46,10 @@ use tokio::time::{Duration, Instant};
 use tracing::{debug, warn};
 
 use crate::config::Config;
+use crate::indexer;
 use crate::mcp::logging::init_mcp_logging;
 use crate::mcp::server::{list_tools_result, BackgroundServices, McpServer};
+use crate::mcp::session::{SessionRouter, Sessions};
 
 #[cfg(test)]
 #[path = "multi_tests.rs"]
@@ -57,7 +59,7 @@ const INSTANCE_CLEANUP_INTERVAL_MS: u64 = 300_000; // 5 minutes
 const INSTANCE_IDLE_TIMEOUT_MS: u64 = 1_800_000; // 30 minutes
 
 // ---------------------------------------------------------------------------
-// Per-repo instance
+// Per-repo instances
 // ---------------------------------------------------------------------------
 
 /// A live per-repository handler plus its background services. Dropping this
@@ -68,99 +70,54 @@ struct RepoInstance {
 	_bg: BackgroundServices,
 }
 
-// ---------------------------------------------------------------------------
-// MultiServer
-// ---------------------------------------------------------------------------
-
-/// Multi-repository MCP server. Cloned per HTTP session; all clones share the
-/// discovered repo map and the lazily-built instance map.
+/// Per-repository handlers built on first use, keyed by repository path and
+/// dropped after `INSTANCE_IDLE_TIMEOUT_MS` idle. Multi mode and session routing
+/// share one pool, so a repository served both ways runs one watcher and indexer.
 #[derive(Clone)]
-pub struct MultiServer {
-	config: Config,
-	no_git: bool,
+pub(crate) struct RepoPool {
+	pub(crate) config: Config,
+	pub(crate) no_git: bool,
 	debug: bool,
-	/// project key (subdirectory name) -> absolute repo path
-	repos: Arc<HashMap<String, PathBuf>>,
-	/// Lazily-built per-repo instances, keyed by project.
-	instances: Arc<Mutex<HashMap<String, RepoInstance>>>,
-	/// Tool list with the `project` argument injected, computed once at startup.
-	tools: Arc<Vec<Tool>>,
+	instances: Arc<Mutex<HashMap<PathBuf, RepoInstance>>>,
 }
 
-impl MultiServer {
-	/// Discover repositories one level under `root_path`, build the injected
-	/// tool list, and prepare logging. Per-repo handlers are built on demand.
-	pub async fn new(
-		config: Config,
-		root_path: PathBuf,
-		no_git: bool,
-		debug: bool,
-	) -> Result<Self> {
-		init_mcp_logging(root_path.clone(), debug)?;
-
-		let repos = discover_repos(&root_path, no_git)?;
-		let mut keys: Vec<String> = repos.keys().cloned().collect();
-		keys.sort();
-
-		// Build the base tool set from a template handler over the root path,
-		// then inject the `project` argument into every tool.
-		let template = McpServer::new_repo_core(config.clone(), root_path.clone());
-		let tools = inject_project_arg(template.list_tool_defs(), &keys);
-
-		Ok(Self {
+impl RepoPool {
+	pub(crate) fn new(config: Config, no_git: bool, debug: bool) -> Self {
+		Self {
 			config,
 			no_git,
 			debug,
-			repos: Arc::new(repos),
 			instances: Arc::new(Mutex::new(HashMap::new())),
-			tools: Arc::new(tools),
-		})
-	}
-
-	/// Comma-separated sorted list of valid project keys, for error/help text.
-	fn project_list(&self) -> String {
-		let mut keys: Vec<&str> = self.repos.keys().map(String::as_str).collect();
-		keys.sort();
-		if keys.is_empty() {
-			"(none discovered)".to_string()
-		} else {
-			keys.join(", ")
 		}
 	}
 
-	/// Resolve (and lazily build) the per-repo handler for `project`.
-	async fn get_server(&self, project: &str) -> Result<McpServer, ErrorData> {
-		let repo_path = self.repos.get(project).cloned().ok_or_else(|| {
-			ErrorData::invalid_params(
-				format!(
-					"Unknown project '{}'. Available repositories: {}",
-					project,
-					self.project_list()
-				),
-				None,
-			)
-		})?;
-
+	/// Resolve (and lazily build) the handler for the repository at `repo_path`.
+	pub(crate) async fn get(&self, repo_path: &Path) -> Result<McpServer, ErrorData> {
 		// Fast path: already built.
 		{
 			let mut guard = self.instances.lock().await;
-			if let Some(inst) = guard.get_mut(project) {
+			if let Some(inst) = guard.get_mut(repo_path) {
 				inst.last_accessed = Instant::now();
 				return Ok(inst.server.clone());
 			}
 		}
 
 		// Build outside the lock (store creation + index bootstrap are async).
-		// A concurrent first-call for the same project may also build; `or_insert`
+		// A concurrent first-call for the same repo may also build; `or_insert`
 		// keeps the first and drops the loser's background services. The initial
 		// index is lock-guarded, so the rare double-build is harmless.
-		let server = McpServer::new_repo_core(self.config.clone(), repo_path.clone());
-		// Read-only unless the in-process indexer is enabled; otherwise serve the
-		// existing per-repo index without spawning a watcher/indexer.
-		let bg = if self.config.index.mcp_index {
+		let server = McpServer::new_repo_core(self.config.clone(), repo_path.to_path_buf());
+		// The single-repo server's gate: index in-process only when enabled, and
+		// outside a git repository root only with --no-git or require_git = false.
+		// Otherwise serve the existing per-repo index without a watcher/indexer.
+		let index = self.config.index.mcp_index
+			&& (self.no_git
+				|| !self.config.index.require_git
+				|| indexer::git::is_git_repo_root(repo_path));
+		let bg = if index {
 			McpServer::start_repo_services(
 				self.config.clone(),
-				repo_path,
+				repo_path.to_path_buf(),
 				self.no_git,
 				self.debug,
 				server.runtime_graph_cache(),
@@ -168,7 +125,11 @@ impl MultiServer {
 			.await
 			.map_err(|e| {
 				ErrorData::internal_error(
-					format!("Failed to start services for '{}': {}", project, e),
+					format!(
+						"Failed to start services for '{}': {}",
+						repo_path.display(),
+						e
+					),
 					None,
 				)
 			})?
@@ -177,17 +138,19 @@ impl MultiServer {
 		};
 
 		let mut guard = self.instances.lock().await;
-		let inst = guard.entry(project.to_string()).or_insert(RepoInstance {
-			server,
-			last_accessed: Instant::now(),
-			_bg: bg,
-		});
+		let inst = guard
+			.entry(repo_path.to_path_buf())
+			.or_insert(RepoInstance {
+				server,
+				last_accessed: Instant::now(),
+				_bg: bg,
+			});
 		inst.last_accessed = Instant::now();
 		Ok(inst.server.clone())
 	}
 
 	/// Periodically drop instances idle past the timeout, aborting their threads.
-	fn spawn_idle_cleanup(&self) {
+	pub(crate) fn spawn_idle_cleanup(&self) {
 		let instances = self.instances.clone();
 		tokio::spawn(async move {
 			let mut interval =
@@ -206,18 +169,140 @@ impl MultiServer {
 			}
 		});
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Projects under a directory
+// ---------------------------------------------------------------------------
+
+/// The repositories one level under a directory, and the tool list that routes
+/// to them through an injected `project` argument.
+pub(crate) struct Projects {
+	/// project key (subdirectory name) -> absolute repo path
+	repos: HashMap<String, PathBuf>,
+	tools: Vec<Tool>,
+}
+
+impl Projects {
+	/// Discover the repositories one level under `root` and inject the `project`
+	/// argument into `repo_tools`, the tool set of a per-repo handler.
+	pub(crate) fn discover(root: &Path, no_git: bool, repo_tools: Vec<Tool>) -> Result<Self> {
+		let repos = discover_repos(root, no_git)?;
+		let mut keys: Vec<String> = repos.keys().cloned().collect();
+		keys.sort();
+		let tools = inject_project_arg(repo_tools, &keys);
+		Ok(Self { repos, tools })
+	}
+
+	pub(crate) fn tools(&self) -> &[Tool] {
+		&self.tools
+	}
+
+	fn get_tool(&self, name: &str) -> Option<Tool> {
+		self.tools.iter().find(|t| t.name.as_ref() == name).cloned()
+	}
+
+	/// Comma-separated sorted list of valid project keys, for error/help text.
+	fn project_list(&self) -> String {
+		let mut keys: Vec<&str> = self.repos.keys().map(String::as_str).collect();
+		keys.sort();
+		if keys.is_empty() {
+			"(none discovered)".to_string()
+		} else {
+			keys.join(", ")
+		}
+	}
+
+	/// Take the `project` argument out of `request` — the per-repo tool sees only
+	/// its own parameters — and resolve it to the repository path.
+	pub(crate) fn route(&self, request: &mut CallToolRequestParams) -> Result<PathBuf, ErrorData> {
+		let project = request
+			.arguments
+			.as_ref()
+			.and_then(|args| args.get("project"))
+			.and_then(|v| v.as_str())
+			.map(str::to_string)
+			.ok_or_else(|| {
+				ErrorData::invalid_params(
+					format!(
+						"Missing required 'project' argument. Available repositories: {}",
+						self.project_list()
+					),
+					None,
+				)
+			})?;
+		if let Some(args) = request.arguments.as_mut() {
+			args.remove("project");
+		}
+		self.repos.get(&project).cloned().ok_or_else(|| {
+			ErrorData::invalid_params(
+				format!(
+					"Unknown project '{}'. Available repositories: {}",
+					project,
+					self.project_list()
+				),
+				None,
+			)
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// MultiServer
+// ---------------------------------------------------------------------------
+
+/// Multi-repository MCP server. Cloned per HTTP session; all clones share the
+/// discovered projects and the per-repo handler pool.
+#[derive(Clone)]
+pub struct MultiServer {
+	root: PathBuf,
+	projects: Arc<Projects>,
+	pool: RepoPool,
+}
+
+impl MultiServer {
+	/// Discover repositories one level under `root_path`, build the injected
+	/// tool list, and prepare logging. Per-repo handlers are built on demand.
+	pub async fn new(
+		config: Config,
+		root_path: PathBuf,
+		no_git: bool,
+		debug: bool,
+	) -> Result<Self> {
+		init_mcp_logging(root_path.clone(), debug)?;
+
+		// Build the base tool set from a template handler over the root path,
+		// then inject the `project` argument into every tool.
+		let template = McpServer::new_repo_core(config.clone(), root_path.clone());
+		let projects = Projects::discover(&root_path, no_git, template.list_tool_defs())?;
+
+		Ok(Self {
+			root: root_path,
+			projects: Arc::new(projects),
+			pool: RepoPool::new(config, no_git, debug),
+		})
+	}
+
+	/// This server behind session routing; sessions in other directories share
+	/// its repo pool.
+	fn routed(&self) -> SessionRouter<Self> {
+		SessionRouter::new(
+			self.clone(),
+			Sessions::with_pool(self.root.clone(), self.pool.clone()),
+		)
+	}
 
 	/// Serve over stdio (default MCP transport).
 	pub async fn run_stdio(self) -> Result<()> {
-		self.spawn_idle_cleanup();
+		self.pool.spawn_idle_cleanup();
 		let transport = rmcp::transport::io::stdio();
-		let service = self.serve(transport).await?;
+		let service = self.routed().serve(transport).await?;
 		service.waiting().await?;
 		Ok(())
 	}
 
 	/// Serve over Streamable HTTP. Each session clones the server, sharing the
-	/// discovered repos and instance map.
+	/// discovered projects and the repo pool.
 	pub async fn run_http(self, bind_addr: &str) -> Result<()> {
 		use hyper_util::rt::TokioIo;
 		use hyper_util::service::TowerToHyperService;
@@ -225,9 +310,9 @@ impl MultiServer {
 			session::local::LocalSessionManager, StreamableHttpService,
 		};
 
-		self.spawn_idle_cleanup();
+		self.pool.spawn_idle_cleanup();
 
-		let server = self.clone();
+		let server = self.routed();
 		let service = StreamableHttpService::new(
 			move || Ok(server.clone()),
 			Arc::new(LocalSessionManager::default()),
@@ -279,8 +364,8 @@ impl ServerHandler for MultiServer {
 			 Use 'semantic_search' for conceptual lookups, 'structural_search' for \
 			 syntax and occurrences, and the always-available 'graphrag' for symbol \
 			 relationships and dependency paths.",
-			self.repos.len(),
-			self.project_list()
+			self.projects.repos.len(),
+			self.projects.project_list()
 		);
 
 		ServerConfig::new(capabilities)
@@ -298,11 +383,11 @@ impl ServerHandler for MultiServer {
 		_request: Option<PaginatedRequestParams>,
 		context: RequestContext<RoleServer>,
 	) -> Result<ListToolsResult, ErrorData> {
-		Ok(list_tools_result((*self.tools).clone(), &context))
+		Ok(list_tools_result(self.projects.tools().to_vec(), &context))
 	}
 
 	fn get_tool(&self, name: &str) -> Option<Tool> {
-		self.tools.iter().find(|t| t.name.as_ref() == name).cloned()
+		self.projects.get_tool(name)
 	}
 
 	async fn call_tool(
@@ -310,29 +395,8 @@ impl ServerHandler for MultiServer {
 		mut request: CallToolRequestParams,
 		context: RequestContext<RoleServer>,
 	) -> Result<CallToolResponse, ErrorData> {
-		// Pull the routing key out of the arguments.
-		let project = request
-			.arguments
-			.as_ref()
-			.and_then(|args| args.get("project"))
-			.and_then(|v| v.as_str())
-			.map(str::to_string)
-			.ok_or_else(|| {
-				ErrorData::invalid_params(
-					format!(
-						"Missing required 'project' argument. Available repositories: {}",
-						self.project_list()
-					),
-					None,
-				)
-			})?;
-
-		// Strip it so the inner tool sees only its own parameters.
-		if let Some(args) = request.arguments.as_mut() {
-			args.remove("project");
-		}
-
-		let server = self.get_server(&project).await?;
+		let repo_path = self.projects.route(&mut request)?;
+		let server = self.pool.get(&repo_path).await?;
 		server.dispatch_tool(request, context).await
 	}
 }

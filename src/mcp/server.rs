@@ -26,6 +26,7 @@ use super::logging::{
 	init_mcp_logging, log_critical_anyhow_error, log_indexing_operation, log_watcher_event,
 };
 use super::semantic_code::SemanticCodeProvider;
+use super::session::{SessionRouter, Sessions};
 use super::watcher::run_watcher;
 use crate::config::Config;
 use crate::indexer;
@@ -1419,8 +1420,9 @@ impl McpServer {
 		Ok((server, bg))
 	}
 
-	/// Run the server using stdio transport (default MCP mode)
-	pub async fn run_stdio(self, bg: BackgroundServices) -> Result<()> {
+	/// Run the server using stdio transport (default MCP mode). Requests from
+	/// sessions in other directories are routed through `sessions`.
+	pub async fn run_stdio(self, bg: BackgroundServices, sessions: Sessions) -> Result<()> {
 		// Guard against panics in tool handlers crashing the whole server
 		let original_hook = std::panic::take_hook();
 		std::panic::set_hook(Box::new(move |info| {
@@ -1434,8 +1436,9 @@ impl McpServer {
 		info!("Starting MCP server in stdio mode");
 
 		let lsp_client = self.lsp_client.clone();
+		sessions.spawn_idle_cleanup();
 		let transport = rmcp::transport::io::stdio();
-		let service = match self.serve(transport).await {
+		let service = match SessionRouter::new(self, sessions).serve(transport).await {
 			Ok(service) => service,
 			Err(e) => {
 				bg.shutdown().await;
@@ -1464,8 +1467,14 @@ impl McpServer {
 	///
 	/// Uses rmcp's `StreamableHttpService` with `LocalSessionManager` for
 	/// proper session management. Supports both SSE and plain JSON responses
-	/// as required by the spec.
-	pub async fn run_http(self, bind_addr: &str, _bg: BackgroundServices) -> Result<()> {
+	/// as required by the spec. Requests from sessions in other directories are
+	/// routed through `sessions`.
+	pub async fn run_http(
+		self,
+		bind_addr: &str,
+		_bg: BackgroundServices,
+		sessions: Sessions,
+	) -> Result<()> {
 		use hyper_util::rt::TokioIo;
 		use hyper_util::service::TowerToHyperService;
 		use rmcp::transport::streamable_http_server::{
@@ -1474,7 +1483,8 @@ impl McpServer {
 
 		info!("Starting MCP server in HTTP mode on {}", bind_addr);
 
-		let server = self.clone();
+		sessions.spawn_idle_cleanup();
+		let server = SessionRouter::new(self, sessions);
 
 		// StreamableHttpService handles session lifecycle, SSE vs JSON content
 		// negotiation, and MCP protocol compliance automatically.

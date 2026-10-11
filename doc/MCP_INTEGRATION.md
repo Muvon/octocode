@@ -328,6 +328,28 @@ repositories exist one level under it.
 }
 ```
 
+## Session Routing
+
+Some clients share one connection between several sessions working in
+different directories (octomind does: its daemon, ACP and WebSocket modes run
+many sessions per process). Such a client names the calling session's
+directory on every request in `capabilities.experimental.session.workdir`, and
+octocode serves each request for that directory, in either mode:
+
+- The served directory (`--path`), and in single-repo mode its subdirectories,
+  reach the started server unchanged.
+- Any other directory is served the way `--auto` would serve it: a git
+  repository root as one repository, a directory with repositories one level
+  under it with the `project` argument, anything else as a plain directory.
+  These handlers come from the same lazily-built, idle-reaped pool as
+  multi-repo mode, with the same per-project storage and the same
+  `index.mcp_index` / git rules. LSP tools stay with the started server.
+- `tools/list` for a session is marked `cacheScope: private` (2026-07-28), so
+  the client keeps one list per session.
+
+Clients that send no session context (Claude Code and most hosts) see no
+change.
+
 ## Usage Examples
 
 ### Code Exploration

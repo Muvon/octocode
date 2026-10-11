@@ -31,6 +31,7 @@ pub mod semantic_code;
 #[cfg(test)]
 mod semantic_code_tests;
 pub mod server;
+pub mod session;
 pub mod structural;
 #[cfg(test)]
 #[path = "structural_tests.rs"]
@@ -40,3 +41,4 @@ pub mod watcher;
 
 pub use multi::{has_child_repos, MultiServer};
 pub use server::McpServer;
+pub use session::Sessions;

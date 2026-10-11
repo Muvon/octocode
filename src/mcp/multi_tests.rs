@@ -171,7 +171,7 @@ mod tests {
 	}
 
 	/// A `MultiServer` over `keys`, wired like `MultiServer::new` but without
-	/// initializing logging. `mcp_index` is pinned off so `get_server` builds a
+	/// initializing logging. `mcp_index` is pinned off so the pool builds a
 	/// handler without a store or background threads.
 	fn multi_server(root: &TempDir, keys: &[&str]) -> MultiServer {
 		let repos: HashMap<String, PathBuf> = keys
@@ -194,27 +194,33 @@ mod tests {
 		config.index.mcp_index = false;
 
 		MultiServer {
-			config,
-			no_git: true,
-			debug: false,
-			repos: Arc::new(repos),
-			instances: Arc::new(Mutex::new(HashMap::new())),
-			tools: Arc::new(tools),
+			root: root.path().to_path_buf(),
+			projects: Arc::new(Projects { repos, tools }),
+			pool: RepoPool::new(config, true, false),
 		}
+	}
+
+	fn call(project: &str) -> CallToolRequestParams {
+		CallToolRequestParams::new("semantic_search").with_arguments(
+			json!({"project": project, "query": "q"})
+				.as_object()
+				.unwrap()
+				.clone(),
+		)
 	}
 
 	#[test]
 	fn the_project_list_is_sorted_and_comma_separated() {
 		let dir = TempDir::new().unwrap();
 		let server = multi_server(&dir, &["zeta", "alpha", "mid"]);
-		assert_eq!(server.project_list(), "alpha, mid, zeta");
+		assert_eq!(server.projects.project_list(), "alpha, mid, zeta");
 	}
 
 	#[test]
 	fn a_root_without_projects_reports_a_placeholder_list() {
 		let dir = TempDir::new().unwrap();
 		let server = multi_server(&dir, &[]);
-		assert_eq!(server.project_list(), "(none discovered)");
+		assert_eq!(server.projects.project_list(), "(none discovered)");
 	}
 
 	#[test]
@@ -273,8 +279,8 @@ mod tests {
 		let dir = TempDir::new().unwrap();
 		let server = multi_server(&dir, &["alpha", "beta"]);
 
-		let Err(err) = server.get_server("gamma").await else {
-			panic!("an unknown project must not resolve to a handler");
+		let Err(err) = server.projects.route(&mut call("gamma")) else {
+			panic!("an unknown project must not resolve to a repository");
 		};
 		assert_eq!(err.code, rmcp::model::ErrorCode::INVALID_PARAMS);
 		assert!(
@@ -287,32 +293,50 @@ mod tests {
 			"{}",
 			err.message
 		);
+
+		let mut missing = CallToolRequestParams::new("semantic_search");
+		let Err(err) = server.projects.route(&mut missing) else {
+			panic!("a call without a project must not resolve");
+		};
 		assert!(
-			server.instances.lock().await.is_empty(),
-			"a failed lookup must not create an instance"
+			err.message.contains("Missing required 'project' argument"),
+			"{}",
+			err.message
 		);
 	}
 
+	#[test]
+	fn routing_strips_the_project_argument() {
+		let dir = TempDir::new().unwrap();
+		let server = multi_server(&dir, &["alpha"]);
+
+		let mut request = call("alpha");
+		let path = server.projects.route(&mut request).unwrap();
+		assert_eq!(path, dir.path().join("alpha"));
+		let arguments = request.arguments.unwrap();
+		assert!(!arguments.contains_key("project"));
+		assert_eq!(arguments["query"], json!("q"));
+	}
+
 	#[tokio::test]
-	async fn a_repo_handler_is_built_once_per_project_and_reused() {
+	async fn a_repo_handler_is_built_once_per_repository_and_reused() {
 		let dir = TempDir::new().unwrap();
 		let server = multi_server(&dir, &["alpha", "beta"]);
+		let alpha = dir.path().join("alpha");
 
-		server.get_server("alpha").await.unwrap();
-		let first_seen = server.instances.lock().await["alpha"].last_accessed;
+		server.pool.get(&alpha).await.unwrap();
+		let first_seen = server.pool.instances.lock().await[&alpha].last_accessed;
 
 		// Instant has nanosecond resolution; a real pause makes the refreshed
 		// timestamp strictly greater.
 		tokio::time::sleep(Duration::from_millis(5)).await;
-		server.get_server("alpha").await.unwrap();
-		server.get_server("beta").await.unwrap();
+		server.pool.get(&alpha).await.unwrap();
+		server.pool.get(&dir.path().join("beta")).await.unwrap();
 
-		let guard = server.instances.lock().await;
-		let mut keys: Vec<&str> = guard.keys().map(String::as_str).collect();
-		keys.sort();
-		assert_eq!(keys, vec!["alpha", "beta"]);
+		let guard = server.pool.instances.lock().await;
+		assert_eq!(guard.len(), 2);
 		assert!(
-			guard["alpha"].last_accessed > first_seen,
+			guard[&alpha].last_accessed > first_seen,
 			"serving a cached instance must refresh its idle timer"
 		);
 	}

@@ -18,7 +18,7 @@ Rust CLI (v0.26.x) that indexes codebases into LanceDB vector stores, builds Gra
 | Add CLI command | `src/commands/{cmd}.rs` + `mod`/`pub use` in `src/commands/mod.rs` + variant in `main.rs`; dispatch lives in TWO places — early return before `Store::new()` if the command needs no store, else the final `match` (storeless arms there are `unreachable!()`) |
 | Add/change config | `config-templates/default.toml` (single source of truth; embedded) + struct in `src/config.rs` + `src/config/migrations.rs` for versioned migrations |
 | Add language | `src/indexer/languages/{lang}.rs` + sibling `{lang}_test.rs` + register in `get_language()` in `languages/mod.rs` + tree-sitter crate in `Cargo.toml` |
-| Add MCP tool | `src/mcp/server.rs` (router) — existing providers: `semantic_code.rs`, `structural.rs`, `graphrag.rs`, `lsp/provider.rs`, `multi.rs` |
+| Add MCP tool | `src/mcp/server.rs` (router) — existing providers: `semantic_code.rs`, `structural.rs`, `graphrag.rs`, `lsp/provider.rs`, `multi.rs`; per-session directory routing (`experimental.session.workdir`) wraps both modes in `session.rs` |
 | Search relevance | `src/indexer/search.rs` pipeline → `src/reranker.rs` → `src/reasoning.rs` (LLM re-rank) → `src/store/weighted_rrf.rs` (fusion) |
 | Structural search | engine: `src/grep.rs` (ast-grep) · CLI: `src/commands/grep.rs` |
 | GraphRAG | `src/indexer/graphrag/` (`builder.rs`, `symbols.rs`, `ai.rs`, `relationships.rs`, `runtime.rs`) · storage: `src/store/graphrag.rs` · CLI: `src/commands/graphrag.rs` |
