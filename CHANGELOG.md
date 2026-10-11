@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.26.7] - 2026-10-11
+
+### 📋 Release Summary
+
+MCP requests are now routed according to the session directory.
+
+### ✨ New Features & Enhancements
+
+- **mcp**: route MCP requests by session directory `4874176f`
+
+### 🔄 Other Changes
+
+1 maintenance, dependency, and tooling update not listed individually.
+
 ## [0.26.6] - 2026-10-08
 
 ### 📋 Release Summary
