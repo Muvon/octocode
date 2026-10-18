@@ -325,6 +325,7 @@ jobs:
     name: Create Release
     needs: [build, publish-crate]
     uses: muvon/ci-workflow/.github/workflows/release.yml@master
+    secrets: inherit
     with:
       tag: ${{ inputs.tag }}
       artifacts: 'release-*'
