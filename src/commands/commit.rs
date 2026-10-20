@@ -95,6 +95,25 @@ pub struct CommitArgs {
 	pub commit: Option<String>,
 }
 
+/// Append `Co-authored-by:` trailers from config to a commit message.
+///
+/// Returns the message unchanged when no co-authors are configured. Existing
+/// trailer lines are not duplicated, so amend/reword paths stay idempotent.
+fn apply_co_author_trailers(message: &str, co_authors: &[String]) -> String {
+	let trailers: Vec<String> = co_authors
+		.iter()
+		.map(|a| a.trim())
+		.filter(|a| !a.is_empty())
+		.map(|a| format!("Co-authored-by: {a}"))
+		.filter(|t| !message.lines().any(|l| l == t))
+		.collect();
+	if trailers.is_empty() {
+		return message.to_string();
+	}
+	let separator = if message.ends_with('\n') { "\n" } else { "\n\n" };
+	format!("{message}{separator}{}", trailers.join("\n"))
+}
+
 /// Execute the commit command with intelligent pre-commit hook integration.
 ///
 /// Pre-commit hooks are automatically detected and run if:
@@ -199,7 +218,10 @@ pub async fn execute(config: &Config, args: &CommitArgs) -> Result<()> {
 
 	// Generate commit message using AI with intelligent chunking for large diffs
 	println!("\n🤖 Generating commit message...");
-	let commit_message = generate_commit_message_chunked(&current_dir, config, args.message.as_deref()).await?;
+	let commit_message = apply_co_author_trailers(
+		&generate_commit_message_chunked(&current_dir, config, args.message.as_deref()).await?,
+		&config.commits.co_authored_by,
+	);
 
 	println!("\n📝 Generated commit message:");
 	println!("═══════════════════════════════════");
@@ -327,7 +349,10 @@ async fn rewrite_commit_message(
 
 	// Generate new commit message from the commit's own diff
 	println!("\n🤖 Generating commit message...");
-	let commit_message = generate_commit_message_from_diff(&diff, config, extra_context).await?;
+	let commit_message = apply_co_author_trailers(
+		&generate_commit_message_from_diff(&diff, config, extra_context).await?,
+		&config.commits.co_authored_by,
+	);
 
 	println!("\n📝 Generated commit message:");
 	println!("═══════════════════════════════════");
