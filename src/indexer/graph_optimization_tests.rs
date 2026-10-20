@@ -15,9 +15,7 @@
 #[cfg(test)]
 mod tests {
 	use crate::indexer::graph_optimization::*;
-	use crate::indexer::graphrag::types::{
-		CodeGraph, CodeNode, CodeRelationship, Provenance, RelationType,
-	};
+	use crate::indexer::graphrag::types::{CodeGraph, CodeNode, CodeRelationship, Provenance, RelationType};
 	use crate::store::CodeBlock;
 	use std::collections::HashMap;
 
@@ -169,10 +167,7 @@ mod tests {
 		);
 		// Only the leaf name is rendered, not the whole path.
 		assert!(md.contains("- `a0.rs` → `b0.rs`"), "{md}");
-		assert!(
-			md.contains("- *(and 2 more imports relationships)*"),
-			"{md}"
-		);
+		assert!(md.contains("- *(and 2 more imports relationships)*"), "{md}");
 	}
 
 	#[tokio::test]
@@ -183,11 +178,7 @@ mod tests {
 				node("src/miss.rs", "file", vec![0.0, 1.0]),
 				node("src/neighbour.rs", "file", vec![0.0, 1.0]),
 			],
-			vec![relationship(
-				"src/hit.rs",
-				"src/neighbour.rs",
-				RelationType::Imports,
-			)],
+			vec![relationship("src/hit.rs", "src/neighbour.rs", RelationType::Imports)],
 		);
 		let optimizer = GraphOptimizer::new(100_000);
 		let subgraph = optimizer
@@ -238,10 +229,7 @@ mod tests {
 	#[tokio::test]
 	async fn long_snippets_are_elided_in_the_middle() {
 		let full = graph(vec![node("src/hit.rs", "file", vec![1.0, 0.0])], vec![]);
-		let content: String = (1..=40)
-			.map(|i| format!("line_{i}();"))
-			.collect::<Vec<_>>()
-			.join("\n");
+		let content: String = (1..=40).map(|i| format!("line_{i}();")).collect::<Vec<_>>().join("\n");
 		let blocks = vec![code_block("src/hit.rs", &content, vec!["handler"])];
 		let view = GraphOptimizer::new(100_000)
 			.generate_task_focused_view("task", &[1.0, 0.0], &full, &blocks)

@@ -21,9 +21,7 @@ use tree_sitter::{Parser, Tree};
 /// gives a usable root node.
 fn tree() -> Tree {
 	let mut parser = Parser::new();
-	parser
-		.set_language(&Markdown.get_ts_language())
-		.expect("json grammar");
+	parser.set_language(&Markdown.get_ts_language()).expect("json grammar");
 	parser.parse("{}", None).expect("parse")
 }
 
@@ -32,10 +30,7 @@ fn the_language_identifies_itself_and_the_extensions_it_owns() {
 	let md = Markdown;
 	assert_eq!(md.name(), "markdown");
 	assert_eq!(md.get_file_extensions(), vec!["md", "markdown"]);
-	assert_eq!(
-		md.get_node_type_description("anything"),
-		"markdown headings"
-	);
+	assert_eq!(md.get_node_type_description("anything"), "markdown headings");
 }
 
 #[test]

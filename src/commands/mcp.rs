@@ -108,20 +108,8 @@ pub async fn run(args: McpArgs) -> Result<()> {
 
 	// Sessions in other directories (octomind shares one connection between its
 	// sessions) are routed to handlers for their own directories.
-	let sessions = Sessions::new(
-		config.clone(),
-		working_directory.clone(),
-		args.no_git,
-		args.debug,
-	);
-	let (server, bg) = McpServer::new(
-		config,
-		args.debug,
-		working_directory,
-		args.no_git,
-		args.with_lsp,
-	)
-	.await?;
+	let sessions = Sessions::new(config.clone(), working_directory.clone(), args.no_git, args.debug);
+	let (server, bg) = McpServer::new(config, args.debug, working_directory, args.no_git, args.with_lsp).await?;
 
 	// Check if HTTP binding is requested
 	if let Some(bind_addr) = args.bind {

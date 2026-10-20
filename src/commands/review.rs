@@ -49,8 +49,8 @@ pub async fn execute(config: &Config, args: &ReviewArgs) -> Result<()> {
 	let current_dir = std::env::current_dir()?;
 
 	// Find git repository root
-	let git_root = GitUtils::find_git_root(&current_dir)
-		.ok_or_else(|| anyhow::anyhow!("❌ Not in a git repository!"))?;
+	let git_root =
+		GitUtils::find_git_root(&current_dir).ok_or_else(|| anyhow::anyhow!("❌ Not in a git repository!"))?;
 
 	// Use git root as working directory for all operations
 	let current_dir = git_root;
@@ -396,17 +396,11 @@ fn create_review_prompt(
 	)
 }
 
-fn parse_review_response(
-	response: &serde_json::Value,
-	file_count: usize,
-	files: &[String],
-) -> Result<ReviewResult> {
+fn parse_review_response(response: &serde_json::Value, file_count: usize, files: &[String]) -> Result<ReviewResult> {
 	// First validate that response has required fields
 	let has_summary = response.get("summary").is_some_and(|s| s.is_object());
 	let has_issues = response.get("issues").is_some_and(|i| i.is_array());
-	let has_recommendations = response
-		.get("recommendations")
-		.is_some_and(|r| r.is_array());
+	let has_recommendations = response.get("recommendations").is_some_and(|r| r.is_array());
 
 	if !has_summary || !has_issues || !has_recommendations {
 		eprintln!(
@@ -465,9 +459,7 @@ fn create_fallback_review(
 			severity: "MEDIUM".to_string(),
 			category: "System".to_string(),
 			title: "Review Analysis Incomplete".to_string(),
-			description:
-				"The automated review could not complete fully. Manual review recommended."
-					.to_string(),
+			description: "The automated review could not complete fully. Manual review recommended.".to_string(),
 			file_path: None,
 			line_number: None,
 		}],

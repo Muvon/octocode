@@ -176,10 +176,7 @@ mod tests {
 	#[test]
 	fn branch_context_is_empty_on_the_default_branch() {
 		let dir = repo();
-		assert_eq!(
-			detect_branch_context(dir.path()).as_deref(),
-			Some("feature")
-		);
+		assert_eq!(detect_branch_context(dir.path()).as_deref(), Some("feature"));
 
 		git(dir.path(), &["checkout", "-q", "main"]);
 		assert_eq!(detect_branch_context(dir.path()), None);
@@ -271,10 +268,7 @@ mod tests {
 		std::fs::write(dir.path().join("keep.txt"), "changed again\n").unwrap();
 
 		let (changed, _) = compute_branch_delta(dir.path(), "main").unwrap();
-		assert!(
-			changed.contains(&"untracked.txt".to_string()),
-			"{changed:?}"
-		);
+		assert!(changed.contains(&"untracked.txt".to_string()), "{changed:?}");
 	}
 
 	#[test]
@@ -296,10 +290,7 @@ mod tests {
 	fn merged_branches_are_listed_without_the_default() {
 		let dir = repo();
 		git(dir.path(), &["checkout", "-q", "main"]);
-		git(
-			dir.path(),
-			&["merge", "-q", "--no-ff", "-m", "merge", "feature"],
-		);
+		git(dir.path(), &["merge", "-q", "--no-ff", "-m", "merge", "feature"]);
 
 		let merged = get_merged_branches(dir.path(), "main").unwrap();
 		assert!(merged.contains(&"feature".to_string()), "{merged:?}");
@@ -309,10 +300,7 @@ mod tests {
 	#[test]
 	fn an_unmerged_branch_is_not_listed_as_merged() {
 		let dir = repo();
-		assert_eq!(
-			get_merged_branches(dir.path(), "main").unwrap(),
-			Vec::<String>::new()
-		);
+		assert_eq!(get_merged_branches(dir.path(), "main").unwrap(), Vec::<String>::new());
 	}
 
 	#[test]
@@ -384,10 +372,7 @@ mod tests {
 	fn pruning_reports_merged_and_vanished_branches() {
 		let dir = repo();
 		git(dir.path(), &["checkout", "-q", "main"]);
-		git(
-			dir.path(),
-			&["merge", "-q", "--no-ff", "-m", "merge", "feature"],
-		);
+		git(dir.path(), &["merge", "-q", "--no-ff", "-m", "merge", "feature"]);
 
 		let project = TempDir::new().unwrap();
 		let branches_dir = crate::storage::get_branches_dir(project.path()).unwrap();
@@ -419,9 +404,7 @@ mod tests {
 		m.branch_name = "feature".to_string();
 		save_manifest(&branches_dir.join("feature"), &m).unwrap();
 
-		assert!(prune_branches(project.path(), dir.path(), false)
-			.unwrap()
-			.is_empty());
+		assert!(prune_branches(project.path(), dir.path(), false).unwrap().is_empty());
 		assert_eq!(list_indexed_branches(project.path()).unwrap().len(), 1);
 
 		std::fs::remove_dir_all(&branches_dir).ok();
@@ -463,15 +446,11 @@ mod tests {
 			git(dir.path(), &["init", "-q", "-b", "main"]);
 
 			// A repository with no commits has no branch to diff against.
-			assert!(reconcile_master_state(
-				&store,
-				state_at(dir.path()),
-				&Config::default(),
-				dir.path(),
-				true,
-			)
-			.await
-			.is_err());
+			assert!(
+				reconcile_master_state(&store, state_at(dir.path()), &Config::default(), dir.path(), true,)
+					.await
+					.is_err()
+			);
 		}
 
 		#[tokio::test]
@@ -482,15 +461,9 @@ mod tests {
 			let head = git(dir.path(), &["rev-parse", "HEAD"]);
 			store.store_git_metadata(&head).await.unwrap();
 
-			let master = reconcile_master_state(
-				&store,
-				state_at(dir.path()),
-				&Config::default(),
-				dir.path(),
-				true,
-			)
-			.await
-			.unwrap();
+			let master = reconcile_master_state(&store, state_at(dir.path()), &Config::default(), dir.path(), true)
+				.await
+				.unwrap();
 
 			assert_eq!(master.branch_name, "main");
 			assert_eq!(master.db_commit.as_deref(), Some(head.as_str()));
@@ -514,15 +487,9 @@ mod tests {
 			// baseline stays offline.
 			store.store_commits_last_commit_hash(&head).await.unwrap();
 
-			let master = reconcile_master_state(
-				&store,
-				state_at(dir.path()),
-				&Config::default(),
-				dir.path(),
-				true,
-			)
-			.await
-			.unwrap();
+			let master = reconcile_master_state(&store, state_at(dir.path()), &Config::default(), dir.path(), true)
+				.await
+				.unwrap();
 
 			assert_eq!(master.db_commit, None, "the DB was empty before the run");
 			assert_eq!(
@@ -543,12 +510,7 @@ mod tests {
 			let clone = workspace.path().join("clone");
 			git(
 				origin.path(),
-				&[
-					"clone",
-					"-q",
-					origin.path().to_str().unwrap(),
-					clone.to_str().unwrap(),
-				],
+				&["clone", "-q", origin.path().to_str().unwrap(), clone.to_str().unwrap()],
 			);
 			git(&clone, &["config", "user.email", "test@example.com"]);
 			git(&clone, &["config", "user.name", "Test"]);
@@ -561,17 +523,13 @@ mod tests {
 			let origin_head = git(origin.path(), &["rev-parse", "HEAD"]);
 			git(&clone, &["fetch", "-q", "origin"]);
 
-			let master =
-				reconcile_master_state(&store, state_at(&clone), &Config::default(), &clone, true)
-					.await
-					.unwrap();
+			let master = reconcile_master_state(&store, state_at(&clone), &Config::default(), &clone, true)
+				.await
+				.unwrap();
 
 			assert_eq!(master.branch_name, "main");
 			assert_eq!(master.local_ref_commit, cloned_head);
-			assert_eq!(
-				master.remote_ref_commit.as_deref(),
-				Some(origin_head.as_str())
-			);
+			assert_eq!(master.remote_ref_commit.as_deref(), Some(origin_head.as_str()));
 			assert!(
 				master.local_behind_remote,
 				"a stale local default branch must be surfaced"

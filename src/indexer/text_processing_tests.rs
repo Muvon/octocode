@@ -33,19 +33,14 @@ mod tests {
 
 	#[test]
 	fn chunks_cover_every_line_without_gaps() {
-		let content: String = (1..=50)
-			.map(|i| format!("line {i}"))
-			.collect::<Vec<_>>()
-			.join("\n");
+		let content: String = (1..=50).map(|i| format!("line {i}")).collect::<Vec<_>>().join("\n");
 		let chunks = TextProcessor::chunk_text(&content, 10, 2);
 		assert!(!chunks.is_empty());
 		// Every source line must appear in at least one chunk.
 		for i in 1..=50 {
 			let needle = format!("line {i}");
 			assert!(
-				chunks
-					.iter()
-					.any(|c| c.content.lines().any(|l| l == needle)),
+				chunks.iter().any(|c| c.content.lines().any(|l| l == needle)),
 				"line {i} missing from all chunks"
 			);
 		}
@@ -53,10 +48,7 @@ mod tests {
 
 	#[test]
 	fn line_numbers_do_not_drift_with_overlap() {
-		let content: String = (1..=30)
-			.map(|i| format!("l{i}"))
-			.collect::<Vec<_>>()
-			.join("\n");
+		let content: String = (1..=30).map(|i| format!("l{i}")).collect::<Vec<_>>().join("\n");
 		let chunks = TextProcessor::chunk_text(&content, 5, 2);
 		for chunk in &chunks {
 			let first = chunk.content.lines().next().unwrap();
@@ -73,10 +65,7 @@ mod tests {
 
 	#[test]
 	fn overlap_larger_than_chunk_still_makes_forward_progress() {
-		let content: String = (1..=20)
-			.map(|i| format!("row{i}"))
-			.collect::<Vec<_>>()
-			.join("\n");
+		let content: String = (1..=20).map(|i| format!("row{i}")).collect::<Vec<_>>().join("\n");
 		// overlap >= chunk_size would otherwise stall the cursor forever.
 		let chunks = TextProcessor::chunk_text(&content, 3, 10);
 		assert!(!chunks.is_empty());

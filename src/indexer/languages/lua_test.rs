@@ -8,11 +8,7 @@ use tree_sitter::{Node, Parser, Tree};
 /// and GraphRAG's `walk_ast` perform: call `extract_imports_exports` on every
 /// node in the tree independently, without relying on any self-recursion inside
 /// the language implementation.
-fn collect_all_imports_via_full_tree_walk(
-	source: &str,
-	lang: &dyn Language,
-	root: Node,
-) -> Vec<String> {
+fn collect_all_imports_via_full_tree_walk(source: &str, lang: &dyn Language, root: Node) -> Vec<String> {
 	let mut imports = Vec::new();
 	let mut stack = vec![root];
 	while let Some(n) = stack.pop() {
@@ -111,11 +107,7 @@ fn the_chunking_kinds_list_a_kind_this_grammar_never_produces() {
 	let lua = Lua {};
 	assert_eq!(
 		lua.get_meaningful_kinds(),
-		vec![
-			"function_declaration",
-			"function_definition",
-			"local_function"
-		]
+		vec!["function_declaration", "function_definition", "local_function"]
 	);
 
 	// tree-sitter-lua 0.5 aliases `local function f()` to `function_declaration`,
@@ -146,10 +138,7 @@ fn every_node_type_description_arm_is_reachable() {
 		lua.get_node_type_description("function_definition"),
 		"Function Definition"
 	);
-	assert_eq!(
-		lua.get_node_type_description("local_function"),
-		"Local Function"
-	);
+	assert_eq!(lua.get_node_type_description("local_function"), "Local Function");
 	assert_eq!(
 		lua.get_node_type_description("assignment_statement"),
 		"Variable Assignment"
@@ -158,29 +147,14 @@ fn every_node_type_description_arm_is_reachable() {
 		lua.get_node_type_description("local_declaration"),
 		"Local Variable Declaration"
 	);
-	assert_eq!(
-		lua.get_node_type_description("table_constructor"),
-		"Table Constructor"
-	);
+	assert_eq!(lua.get_node_type_description("table_constructor"), "Table Constructor");
 	assert_eq!(lua.get_node_type_description("field"), "Table Field");
-	assert_eq!(
-		lua.get_node_type_description("return_statement"),
-		"Return Statement"
-	);
-	assert_eq!(
-		lua.get_node_type_description("function_call"),
-		"Function Call"
-	);
+	assert_eq!(lua.get_node_type_description("return_statement"), "Return Statement");
+	assert_eq!(lua.get_node_type_description("function_call"), "Function Call");
 	assert_eq!(lua.get_node_type_description("identifier"), "Identifier");
 	assert_eq!(lua.get_node_type_description("block"), "Code Block");
-	assert_eq!(
-		lua.get_node_type_description("variable_list"),
-		"Variable List"
-	);
-	assert_eq!(
-		lua.get_node_type_description("expression_list"),
-		"Expression List"
-	);
+	assert_eq!(lua.get_node_type_description("variable_list"), "Variable List");
+	assert_eq!(lua.get_node_type_description("expression_list"), "Expression List");
 	assert_eq!(lua.get_node_type_description("chunk"), "Unknown Node Type");
 }
 
@@ -265,10 +239,7 @@ fn a_qualified_declaration_splits_into_a_name_and_an_owner() {
 	] {
 		let tree = parse_tree(source);
 		let node = first_node(&tree, "function_declaration");
-		assert_eq!(
-			lua.extract_declaration_name(node, source),
-			Some(name.to_string())
-		);
+		assert_eq!(lua.extract_declaration_name(node, source), Some(name.to_string()));
 		assert_eq!(lua.extract_symbol_owner(node, source), owner);
 	}
 }
@@ -287,12 +258,10 @@ fn identifier_extraction_keeps_every_occurrence() {
 #[test]
 fn every_require_spelling_is_recorded_as_an_import() {
 	let lua = Lua {};
-	let source =
-		"local a = require('json')\nlocal b = require \"pkg.sub\"\nlocal c = require(\"utils\")\n";
+	let source = "local a = require('json')\nlocal b = require \"pkg.sub\"\nlocal c = require(\"utils\")\n";
 	let tree = parse_tree(source);
 	for (index, expected) in ["json", "pkg.sub", "utils"].into_iter().enumerate() {
-		let (imports, exports) =
-			lua.extract_imports_exports(nth_node(&tree, "function_call", index), source);
+		let (imports, exports) = lua.extract_imports_exports(nth_node(&tree, "function_call", index), source);
 		assert_eq!(imports, vec![expected.to_string()]);
 		assert!(exports.is_empty());
 	}
@@ -427,10 +396,7 @@ fn a_bare_module_name_resolves_to_a_sibling_file_or_its_init_lua() {
 #[test]
 fn an_unknown_module_resolves_to_nothing() {
 	let files = registry(&["src/main.lua", "src/json.lua"]);
-	assert_eq!(
-		Lua {}.resolve_import("nonexistent", "src/main.lua", &files),
-		None
-	);
+	assert_eq!(Lua {}.resolve_import("nonexistent", "src/main.lua", &files), None);
 }
 
 #[test]
@@ -438,45 +404,27 @@ fn each_top_level_function_becomes_its_own_region() {
 	let source = "local function first()\n\tlocal a\n\ta = 1\n\ta = a + 1\n\treturn a\nend\n\nlocal function second()\n\tlocal b\n\tb = 2\n\tb = b + 2\n\treturn b\nend\n";
 	let regions = parse_regions(source);
 	assert_eq!(
-		regions
-			.iter()
-			.map(|r| r.node_kind.as_str())
-			.collect::<Vec<_>>(),
+		regions.iter().map(|r| r.node_kind.as_str()).collect::<Vec<_>>(),
 		vec!["function_declaration", "function_declaration"]
 	);
-	assert_eq!(
-		regions[0].symbols,
-		vec!["a".to_string(), "first".to_string()]
-	);
-	assert_eq!(
-		regions[1].symbols,
-		vec!["b".to_string(), "second".to_string()]
-	);
+	assert_eq!(regions[0].symbols, vec!["a".to_string(), "first".to_string()]);
+	assert_eq!(regions[1].symbols, vec!["b".to_string(), "second".to_string()]);
 }
 
 #[test]
 fn a_nested_function_stays_inside_its_parent_region() {
 	let source = "local function outer()\n\tlocal total\n\ttotal = 1\n\tlocal function inner()\n\t\tlocal x\n\t\tx = 2\n\t\treturn x\n\tend\n\treturn inner\nend\n";
 	let regions = parse_regions(source);
-	assert_eq!(
-		regions.len(),
-		1,
-		"nested functions must not split the parent"
-	);
+	assert_eq!(regions.len(), 1, "nested functions must not split the parent");
 	assert_eq!(
 		regions[0].symbols,
-		vec![
-			"inner".to_string(),
-			"outer".to_string(),
-			"total".to_string()
-		]
+		vec!["inner".to_string(), "outer".to_string(), "total".to_string()]
 	);
 }
 
 #[test]
 fn an_anonymous_function_expression_is_still_a_region() {
-	let source =
-		"local handler = function(event)\n\tlocal out\n\tout = event\n\tout = out\n\treturn out\nend\n";
+	let source = "local handler = function(event)\n\tlocal out\n\tout = event\n\tout = out\n\treturn out\nend\n";
 	let regions = parse_regions(source);
 	assert_eq!(regions.len(), 1);
 	assert_eq!(regions[0].node_kind, "function_definition");

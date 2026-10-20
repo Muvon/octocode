@@ -48,9 +48,7 @@ mod tests {
 		assert!(!ops.table_exists("blocks").await.unwrap());
 		assert!(!ops.tables_exist(&["blocks", "other"]).await.unwrap());
 
-		ops.create_table_with_schema("blocks", schema())
-			.await
-			.unwrap();
+		ops.create_table_with_schema("blocks", schema()).await.unwrap();
 		assert!(ops.table_exists("blocks").await.unwrap());
 		assert!(ops.tables_exist(&["blocks"]).await.unwrap());
 		// One missing table is enough to answer false.
@@ -64,9 +62,7 @@ mod tests {
 		let (_dir, db) = test_connection().await;
 		let ops = TableOperations::new(&db);
 
-		ops.store_batch("blocks", batch(&[("src/a.rs", "h1")]))
-			.await
-			.unwrap();
+		ops.store_batch("blocks", batch(&[("src/a.rs", "h1")])).await.unwrap();
 		assert!(ops.table_exists("blocks").await.unwrap());
 		assert!(ops.content_exists("h1", "blocks").await.unwrap());
 	}
@@ -102,10 +98,7 @@ mod tests {
 		.await
 		.unwrap();
 
-		let mut hashes = ops
-			.get_file_blocks_metadata("src/a.rs", "blocks")
-			.await
-			.unwrap();
+		let mut hashes = ops.get_file_blocks_metadata("src/a.rs", "blocks").await.unwrap();
 		hashes.sort();
 		assert_eq!(hashes, vec!["h1".to_string(), "h2".to_string()]);
 	}
@@ -117,9 +110,7 @@ mod tests {
 		ops.store_batch("code", batch(&[("src/a.rs", "h1"), ("src/a.rs", "h2")]))
 			.await
 			.unwrap();
-		ops.store_batch("text", batch(&[("notes.txt", "h3")]))
-			.await
-			.unwrap();
+		ops.store_batch("text", batch(&[("notes.txt", "h3")])).await.unwrap();
 
 		let paths = ops
 			.get_all_indexed_file_paths(&["code", "text", "missing"])
@@ -141,9 +132,7 @@ mod tests {
 		.await
 		.unwrap();
 
-		ops.remove_blocks_by_path("src/a.rs", "blocks")
-			.await
-			.unwrap();
+		ops.remove_blocks_by_path("src/a.rs", "blocks").await.unwrap();
 		assert!(!ops.content_exists("h1", "blocks").await.unwrap());
 		assert!(ops.content_exists("h2", "blocks").await.unwrap());
 
@@ -161,9 +150,7 @@ mod tests {
 
 		ops.remove_blocks_by_paths(&[], "blocks").await.unwrap();
 		ops.remove_blocks_by_hashes(&[], "blocks").await.unwrap();
-		ops.remove_blocks_by_path("src/a.rs", "blocks")
-			.await
-			.unwrap();
+		ops.remove_blocks_by_path("src/a.rs", "blocks").await.unwrap();
 		ops.remove_blocks_by_hashes(&["h1".to_string()], "blocks")
 			.await
 			.unwrap();
@@ -173,12 +160,8 @@ mod tests {
 	async fn clearing_drops_the_named_tables_and_leaves_the_rest() {
 		let (_dir, db) = test_connection().await;
 		let ops = TableOperations::new(&db);
-		ops.store_batch("code", batch(&[("src/a.rs", "h1")]))
-			.await
-			.unwrap();
-		ops.store_batch("text", batch(&[("notes.txt", "h2")]))
-			.await
-			.unwrap();
+		ops.store_batch("code", batch(&[("src/a.rs", "h1")])).await.unwrap();
+		ops.store_batch("text", batch(&[("notes.txt", "h2")])).await.unwrap();
 
 		ops.clear_table("code").await.unwrap();
 		assert!(!ops.table_exists("code").await.unwrap());
@@ -195,12 +178,8 @@ mod tests {
 	async fn clearing_everything_leaves_no_tables_behind() {
 		let (_dir, db) = test_connection().await;
 		let ops = TableOperations::new(&db);
-		ops.store_batch("code", batch(&[("src/a.rs", "h1")]))
-			.await
-			.unwrap();
-		ops.store_batch("text", batch(&[("notes.txt", "h2")]))
-			.await
-			.unwrap();
+		ops.store_batch("code", batch(&[("src/a.rs", "h1")])).await.unwrap();
+		ops.store_batch("text", batch(&[("notes.txt", "h2")])).await.unwrap();
 
 		ops.clear_all_tables().await.unwrap();
 		assert!(db.table_names().execute().await.unwrap().is_empty());

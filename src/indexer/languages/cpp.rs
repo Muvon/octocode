@@ -98,10 +98,8 @@ impl Language for Cpp {
 		// Bodyless specifiers are type REFERENCES (`struct stat st;`) or forward
 		// declarations, not definitions — naming them would mint a bogus symbol
 		// at every usage site.
-		if matches!(
-			node.kind(),
-			"class_specifier" | "struct_specifier" | "enum_specifier"
-		) && node.child_by_field_name("body").is_none()
+		if matches!(node.kind(), "class_specifier" | "struct_specifier" | "enum_specifier")
+			&& node.child_by_field_name("body").is_none()
 		{
 			return None;
 		}
@@ -122,9 +120,7 @@ impl Language for Cpp {
 			if let Some(declarator) = node.child_by_field_name("declarator") {
 				if let Ok(text) = declarator.utf8_text(contents.as_bytes()) {
 					let callable = text.split('(').next().unwrap_or(text);
-					if let Some(owner) =
-						super::extract_call_target(callable).and_then(|target| target.qualifier)
-					{
+					if let Some(owner) = super::extract_call_target(callable).and_then(|target| target.qualifier) {
 						return super::simple_type_name(&owner);
 					}
 				}
@@ -308,9 +304,7 @@ impl Language for Cpp {
 			"namespace_definition" => "namespace declarations",
 			"template_declaration" => "template declarations",
 			"declaration" => "variable declarations",
-			"preproc_include" | "preproc_def" | "preproc_function_def" | "preproc_ifdef" => {
-				"preprocessor directives"
-			}
+			"preproc_include" | "preproc_def" | "preproc_function_def" | "preproc_ifdef" => "preprocessor directives",
 			_ => "declarations",
 		}
 	}
@@ -341,8 +335,7 @@ impl Language for Cpp {
 					for child in node.children(&mut node.walk()) {
 						if child.kind() == "function_declarator" {
 							is_function_declaration = true;
-							if let Some(function_name) = self.extract_function_name(node, contents)
-							{
+							if let Some(function_name) = self.extract_function_name(node, contents) {
 								exports.push(function_name);
 							}
 							break;
@@ -377,8 +370,7 @@ impl Language for Cpp {
 				for child in node.children(&mut node.walk()) {
 					match child.kind() {
 						"function_definition" | "class_specifier" | "struct_specifier" => {
-							if let Some(template_name) = self.extract_template_name(child, contents)
-							{
+							if let Some(template_name) = self.extract_template_name(child, contents) {
 								exports.push(format!("template<{}>", template_name));
 							}
 						}
@@ -419,11 +411,7 @@ impl Language for Cpp {
 		Vec::new()
 	}
 
-	fn extract_type_relations(
-		&self,
-		node: Node,
-		contents: &str,
-	) -> Vec<(super::TypeRelationKind, String)> {
+	fn extract_type_relations(&self, node: Node, contents: &str) -> Vec<(super::TypeRelationKind, String)> {
 		// `class Foo : public Bar, private Baz { }` and `struct Foo : Bar { }`.
 		// C++ does not distinguish extends/implements; emit all base types as Extends.
 		let mut out = Vec::new();
@@ -435,9 +423,7 @@ impl Language for Cpp {
 					for base in child.children(&mut bcursor) {
 						if matches!(
 							base.kind(),
-							"type_identifier"
-								| "qualified_identifier" | "template_type"
-								| "scoped_type_identifier"
+							"type_identifier" | "qualified_identifier" | "template_type" | "scoped_type_identifier"
 						) {
 							if let Ok(text) = base.utf8_text(contents.as_bytes()) {
 								if let Some(name) = super::simple_type_name(text) {
@@ -464,18 +450,13 @@ impl Language for Cpp {
 			// Local include: #include "header.h"
 			let header_name = &import_path[1..import_path.len() - 1];
 			self.resolve_local_include(header_name, source_file, registry)
-		} else if import_path.len() >= 2
-			&& import_path.starts_with('<')
-			&& import_path.ends_with('>')
-		{
+		} else if import_path.len() >= 2 && import_path.starts_with('<') && import_path.ends_with('>') {
 			// System include: #include <header.h> - try to find in project
 			let header_name = &import_path[1..import_path.len() - 1];
 			registry.find_exact_file(header_name)
 		} else {
 			// Direct path or unquoted header - try local resolution first, then search common directories
-			if let Some(local_result) =
-				self.resolve_local_include(import_path, source_file, registry)
-			{
+			if let Some(local_result) = self.resolve_local_include(import_path, source_file, registry) {
 				Some(local_result)
 			} else if let Some(exact_result) = registry.find_exact_file(import_path) {
 				Some(exact_result)
@@ -517,9 +498,7 @@ impl Cpp {
 						// Handle variable declarations (bare, initialized, pointer/
 						// reference/array, and comma-separated multi-declarators)
 						let mut decl_cursor = child.walk();
-						for declarator in
-							child.children_by_field_name("declarator", &mut decl_cursor)
-						{
+						for declarator in child.children_by_field_name("declarator", &mut decl_cursor) {
 							if let Some(name) = find_cpp_declarator_name(declarator, contents) {
 								if !symbols.iter().any(|s| s.as_str() == name) {
 									symbols.push(name.to_string());
@@ -577,9 +556,7 @@ impl Cpp {
 						// and prototype-only methods (`void foo();`, `virtual ... = 0;`),
 						// whose declarator is `function_declarator`, not a bare identifier.
 						let mut field_cursor = child.walk();
-						for declarator in
-							child.children_by_field_name("declarator", &mut field_cursor)
-						{
+						for declarator in child.children_by_field_name("declarator", &mut field_cursor) {
 							if let Some(name) = find_cpp_declarator_name(declarator, contents) {
 								if !symbols.iter().any(|s| s.as_str() == name) {
 									symbols.push(name.to_string());
@@ -621,13 +598,9 @@ impl Cpp {
 							if enum_child.kind() == "enumerator_list" {
 								for enum_list_child in enum_child.children(&mut enum_child.walk()) {
 									if enum_list_child.kind() == "enumerator" {
-										for enumerator_child in
-											enum_list_child.children(&mut enum_list_child.walk())
-										{
+										for enumerator_child in enum_list_child.children(&mut enum_list_child.walk()) {
 											if enumerator_child.kind() == "identifier" {
-												if let Ok(name) =
-													enumerator_child.utf8_text(contents.as_bytes())
-												{
+												if let Ok(name) = enumerator_child.utf8_text(contents.as_bytes()) {
 													if !symbols.iter().any(|s| s.as_str() == name) {
 														symbols.push(name.to_string());
 													}
@@ -777,8 +750,7 @@ impl Cpp {
 		let header_path = source_dir.join(header_name);
 
 		// Try to normalize the path to handle .. components
-		let normalized_path =
-			crate::utils::path::PathNormalizer::normalize_path(&header_path.to_string_lossy());
+		let normalized_path = crate::utils::path::PathNormalizer::normalize_path(&header_path.to_string_lossy());
 
 		registry.find_exact_file(&normalized_path)
 	}

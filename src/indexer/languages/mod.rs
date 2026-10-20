@@ -214,11 +214,7 @@ pub trait Language: Send + Sync {
 	/// Returns (kind, target_name) pairs — e.g. for `class Foo extends Bar implements Baz`,
 	/// the class declaration node should yield `[(Extends, "Bar"), (Implements, "Baz")]`.
 	/// The recursive walk is handled by the caller.
-	fn extract_type_relations(
-		&self,
-		node: Node,
-		contents: &str,
-	) -> Vec<(TypeRelationKind, String)> {
+	fn extract_type_relations(&self, node: Node, contents: &str) -> Vec<(TypeRelationKind, String)> {
 		let _ = (node, contents);
 		Vec::new()
 	}
@@ -347,21 +343,14 @@ pub fn deduplicate_symbols(symbols: &mut Vec<String>) {
 ///     kind.contains("identifier") && !text.starts_with("_")
 /// });
 /// ```
-pub fn extract_identifiers_default<F>(
-	node: Node,
-	contents: &str,
-	symbols: &mut Vec<String>,
-	should_include: F,
-) where
+pub fn extract_identifiers_default<F>(node: Node, contents: &str, symbols: &mut Vec<String>, should_include: F)
+where
 	F: Fn(&str, &str) -> bool + Copy,
 {
 	let kind = node.kind();
 	if let Ok(text) = node.utf8_text(contents.as_bytes()) {
 		let trimmed = text.trim();
-		if !trimmed.is_empty()
-			&& should_include(kind, trimmed)
-			&& !symbols.iter().any(|s| s.as_str() == trimmed)
-		{
+		if !trimmed.is_empty() && should_include(kind, trimmed) && !symbols.iter().any(|s| s.as_str() == trimmed) {
 			symbols.push(trimmed.to_string());
 		}
 	}
@@ -447,10 +436,7 @@ pub fn simple_type_name(text: &str) -> Option<String> {
 	let stripped = text.split(['<', '[', '(']).next().unwrap_or(text);
 	let after_colons = stripped.rsplit("::").next().unwrap_or(stripped);
 	let after_backslash = after_colons.rsplit('\\').next().unwrap_or(after_colons);
-	let after_dots = after_backslash
-		.rsplit('.')
-		.next()
-		.unwrap_or(after_backslash);
+	let after_dots = after_backslash.rsplit('.').next().unwrap_or(after_backslash);
 	let trimmed = after_dots
 		.trim()
 		.trim_matches(|character: char| !character.is_alphanumeric() && character != '_');
@@ -490,8 +476,7 @@ pub fn extract_call_target(text: &str) -> Option<CallTarget> {
 		.filter(|segment| !segment.is_empty())
 		.collect();
 	let (name, qualifier_segments) = segments.split_last()?;
-	let name =
-		name.trim_matches(|character: char| !character.is_alphanumeric() && character != '_');
+	let name = name.trim_matches(|character: char| !character.is_alphanumeric() && character != '_');
 	if name.is_empty()
 		|| !name
 			.chars()
@@ -503,9 +488,9 @@ pub fn extract_call_target(text: &str) -> Option<CallTarget> {
 		None
 	} else {
 		if qualifier_segments.iter().any(|segment| {
-			!segment.chars().all(|character| {
-				character.is_alphanumeric() || matches!(character, '_' | '$' | '@' | '#')
-			})
+			!segment
+				.chars()
+				.all(|character| character.is_alphanumeric() || matches!(character, '_' | '$' | '@' | '#'))
 		}) {
 			return None;
 		}
@@ -541,12 +526,8 @@ pub fn find_graph_symbol_owner(node: Node, contents: &str) -> Option<String> {
 					}
 				}
 			}
-			return extract_symbol_by_kinds(
-				parent,
-				contents,
-				&["identifier", "name", "type_identifier", "constant"],
-			)
-			.and_then(|name| simple_type_name(&name));
+			return extract_symbol_by_kinds(parent, contents, &["identifier", "name", "type_identifier", "constant"])
+				.and_then(|name| simple_type_name(&name));
 		}
 		current = parent.parent();
 	}
@@ -563,15 +544,9 @@ pub fn find_graph_symbol_owner(node: Node, contents: &str) -> Option<String> {
 ///
 /// # Returns
 /// The first matching symbol text, or None if not found
-pub fn extract_symbol_by_kinds(
-	node: Node,
-	contents: &str,
-	target_kinds: &[&str],
-) -> Option<String> {
+pub fn extract_symbol_by_kinds(node: Node, contents: &str, target_kinds: &[&str]) -> Option<String> {
 	for child in node.children(&mut node.walk()) {
-		if target_kinds.contains(&child.kind())
-			|| target_kinds.iter().any(|k| child.kind().contains(k))
-		{
+		if target_kinds.contains(&child.kind()) || target_kinds.iter().any(|k| child.kind().contains(k)) {
 			if let Ok(text) = child.utf8_text(contents.as_bytes()) {
 				return Some(text.to_string());
 			}

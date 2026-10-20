@@ -88,10 +88,7 @@ fn main() {
 	fn a_glob_pattern_selects_matching_files_only() {
 		let dir = workspace();
 		let files = collect_files(dir.path(), &["src/*.rs".to_string()], None).unwrap();
-		assert_eq!(
-			names(&files),
-			vec!["lib.rs".to_string(), "main.rs".to_string()]
-		);
+		assert_eq!(names(&files), vec!["lib.rs".to_string(), "main.rs".to_string()]);
 
 		let filtered = collect_files(dir.path(), &["src/*".to_string()], Some("python")).unwrap();
 		assert_eq!(names(&filtered), vec!["app.py".to_string()]);
@@ -197,10 +194,7 @@ fn main() {
 			dir.path(),
 			&[
 				dir.path().join("notes.bin").to_string_lossy().to_string(),
-				dir.path()
-					.join("src/missing.rs")
-					.to_string_lossy()
-					.to_string(),
+				dir.path().join("src/missing.rs").to_string_lossy().to_string(),
 			],
 			"$X.expect(\"reason\")",
 		)

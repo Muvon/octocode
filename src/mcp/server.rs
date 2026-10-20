@@ -22,9 +22,7 @@
 //! - Structured logging, graceful shutdown
 
 use super::graphrag::GraphRagProvider;
-use super::logging::{
-	init_mcp_logging, log_critical_anyhow_error, log_indexing_operation, log_watcher_event,
-};
+use super::logging::{init_mcp_logging, log_critical_anyhow_error, log_indexing_operation, log_watcher_event};
 use super::semantic_code::SemanticCodeProvider;
 use super::session::{SessionRouter, Sessions};
 use super::watcher::run_watcher;
@@ -38,8 +36,8 @@ use anyhow::Result;
 use rmcp::{
 	handler::server::{router::tool::ToolRouter, tool::ToolCallContext, wrapper::Parameters},
 	model::{
-		CacheScope, CallToolRequestParams, CallToolResponse, Implementation, ListToolsResult,
-		PaginatedRequestParams, ProtocolVersion, ServerCapabilities, ServerConfig, Tool,
+		CacheScope, CallToolRequestParams, CallToolResponse, Implementation, ListToolsResult, PaginatedRequestParams,
+		ProtocolVersion, ServerCapabilities, ServerConfig, Tool,
 	},
 	schemars,
 	service::RequestContext,
@@ -321,11 +319,8 @@ mod parameter_tests {
 		use schemars::JsonSchema;
 
 		let mut gen = schemars::SchemaGenerator::default();
-		let schema =
-			serde_json::to_value(SemanticSearchParams::json_schema(&mut gen)).expect("schema");
-		let query = schema["properties"]["query"]
-			.as_object()
-			.expect("query schema");
+		let schema = serde_json::to_value(SemanticSearchParams::json_schema(&mut gen)).expect("schema");
+		let query = schema["properties"]["query"].as_object().expect("query schema");
 		let branches = query["anyOf"].as_array().expect("anyOf branches");
 		assert!(
 			branches.iter().any(|b| b["type"] == "string"),
@@ -478,10 +473,7 @@ impl McpServer {
 			open_world_hint = true
 		)
 	)]
-	async fn semantic_search(
-		&self,
-		Parameters(params): Parameters<SemanticSearchParams>,
-	) -> Result<String, String> {
+	async fn semantic_search(&self, Parameters(params): Parameters<SemanticSearchParams>) -> Result<String, String> {
 		debug!("Executing semantic_search with query: {:?}", params.query);
 
 		let mut arguments = match serde_json::to_value(&params) {
@@ -509,10 +501,7 @@ impl McpServer {
 			open_world_hint = false
 		)
 	)]
-	async fn view_signatures(
-		&self,
-		Parameters(params): Parameters<ViewSignaturesParams>,
-	) -> Result<String, String> {
+	async fn view_signatures(&self, Parameters(params): Parameters<ViewSignaturesParams>) -> Result<String, String> {
 		debug!("Executing view_signatures for {} files", params.files.len());
 
 		let arguments = match serde_json::to_value(&params) {
@@ -535,10 +524,7 @@ impl McpServer {
 			open_world_hint = true
 		)
 	)]
-	async fn graphrag(
-		&self,
-		Parameters(params): Parameters<GraphRagParams>,
-	) -> Result<String, String> {
+	async fn graphrag(&self, Parameters(params): Parameters<GraphRagParams>) -> Result<String, String> {
 		debug!("Executing graphrag with operation: {}", params.operation);
 
 		let arguments = match serde_json::to_value(&params) {
@@ -563,12 +549,12 @@ impl McpServer {
 			open_world_hint = false
 		)
 	)]
-	async fn lsp_goto_definition(
-		&self,
-		Parameters(params): Parameters<LspPositionParams>,
-	) -> Result<String, String> {
+	async fn lsp_goto_definition(&self, Parameters(params): Parameters<LspPositionParams>) -> Result<String, String> {
 		let Some(ref provider) = self.lsp else {
-			return Err("LSP server is not available. Start MCP server with --with-lsp=\"<command>\" to enable LSP features.".to_string());
+			return Err(
+				"LSP server is not available. Start MCP server with --with-lsp=\"<command>\" to enable LSP features."
+					.to_string(),
+			);
 		};
 		let args = serde_json::to_value(&params).unwrap_or_default();
 		provider
@@ -588,12 +574,12 @@ impl McpServer {
 			open_world_hint = false
 		)
 	)]
-	async fn lsp_hover(
-		&self,
-		Parameters(params): Parameters<LspPositionParams>,
-	) -> Result<String, String> {
+	async fn lsp_hover(&self, Parameters(params): Parameters<LspPositionParams>) -> Result<String, String> {
 		let Some(ref provider) = self.lsp else {
-			return Err("LSP server is not available. Start MCP server with --with-lsp=\"<command>\" to enable LSP features.".to_string());
+			return Err(
+				"LSP server is not available. Start MCP server with --with-lsp=\"<command>\" to enable LSP features."
+					.to_string(),
+			);
 		};
 		let args = serde_json::to_value(&params).unwrap_or_default();
 		provider
@@ -618,7 +604,10 @@ impl McpServer {
 		Parameters(params): Parameters<LspFindReferencesParams>,
 	) -> Result<String, String> {
 		let Some(ref provider) = self.lsp else {
-			return Err("LSP server is not available. Start MCP server with --with-lsp=\"<command>\" to enable LSP features.".to_string());
+			return Err(
+				"LSP server is not available. Start MCP server with --with-lsp=\"<command>\" to enable LSP features."
+					.to_string(),
+			);
 		};
 		let args = serde_json::to_value(&params).unwrap_or_default();
 		provider
@@ -643,7 +632,10 @@ impl McpServer {
 		Parameters(params): Parameters<LspDocumentSymbolsParams>,
 	) -> Result<String, String> {
 		let Some(ref provider) = self.lsp else {
-			return Err("LSP server is not available. Start MCP server with --with-lsp=\"<command>\" to enable LSP features.".to_string());
+			return Err(
+				"LSP server is not available. Start MCP server with --with-lsp=\"<command>\" to enable LSP features."
+					.to_string(),
+			);
 		};
 		let args = serde_json::to_value(&params).unwrap_or_default();
 		provider
@@ -668,7 +660,10 @@ impl McpServer {
 		Parameters(params): Parameters<LspWorkspaceSymbolsParams>,
 	) -> Result<String, String> {
 		let Some(ref provider) = self.lsp else {
-			return Err("LSP server is not available. Start MCP server with --with-lsp=\"<command>\" to enable LSP features.".to_string());
+			return Err(
+				"LSP server is not available. Start MCP server with --with-lsp=\"<command>\" to enable LSP features."
+					.to_string(),
+			);
 		};
 		let args = serde_json::to_value(&params).unwrap_or_default();
 		provider
@@ -688,12 +683,12 @@ impl McpServer {
 			open_world_hint = false
 		)
 	)]
-	async fn lsp_completion(
-		&self,
-		Parameters(params): Parameters<LspPositionParams>,
-	) -> Result<String, String> {
+	async fn lsp_completion(&self, Parameters(params): Parameters<LspPositionParams>) -> Result<String, String> {
 		let Some(ref provider) = self.lsp else {
-			return Err("LSP server is not available. Start MCP server with --with-lsp=\"<command>\" to enable LSP features.".to_string());
+			return Err(
+				"LSP server is not available. Start MCP server with --with-lsp=\"<command>\" to enable LSP features."
+					.to_string(),
+			);
 		};
 		let args = serde_json::to_value(&params).unwrap_or_default();
 		provider
@@ -773,8 +768,7 @@ impl McpServer {
 		let mut constraints: Vec<crate::grep::MetavarConstraint> = Vec::new();
 		if let Some(map) = &params.constraints {
 			for (var, re_src) in map {
-				let re = regex::Regex::new(re_src)
-					.map_err(|e| format!("Invalid regex for ${}: {}", var, e))?;
+				let re = regex::Regex::new(re_src).map_err(|e| format!("Invalid regex for ${}: {}", var, e))?;
 				constraints.push((var.trim_start_matches('$').to_string(), re));
 			}
 			constraints.sort_by(|a, b| a.0.cmp(&b.0));
@@ -785,11 +779,7 @@ impl McpServer {
 		let prefilter_tokens: Vec<String> = if let Some(p) = &params.pattern {
 			crate::grep::literal_tokens(p)
 		} else {
-			let name = params
-				.symbol
-				.as_deref()
-				.or(params.references.as_deref())
-				.unwrap_or("");
+			let name = params.symbol.as_deref().or(params.references.as_deref()).unwrap_or("");
 			name.split('*')
 				.filter(|t| t.len() >= 2)
 				.max_by_key(|t| t.len())
@@ -929,14 +919,10 @@ fn format_structural_response(
 	}
 	let total = matches.len();
 	if offset >= total {
-		return format!(
-			"Offset {} is beyond the result set ({} total matches).",
-			offset, total
-		);
+		return format!("Offset {} is beyond the result set ({} total matches).", offset, total);
 	}
 	let file_count = {
-		let files_hit: std::collections::HashSet<&str> =
-			matches.iter().map(|m| m.file.as_str()).collect();
+		let files_hit: std::collections::HashSet<&str> = matches.iter().map(|m| m.file.as_str()).collect();
 		files_hit.len()
 	};
 	let end = (offset + max_results).min(total);
@@ -945,8 +931,7 @@ fn format_structural_response(
 	let body = if context > 0 {
 		// Collect the set of files actually on this page once, then scan `files`
 		// a single time — avoids the O(files × page) membership re-scan per file.
-		let needed: std::collections::HashSet<&str> =
-			page.iter().map(|m| m.file.as_str()).collect();
+		let needed: std::collections::HashSet<&str> = page.iter().map(|m| m.file.as_str()).collect();
 		let mut source_map = std::collections::HashMap::with_capacity(needed.len());
 		for fd in files {
 			if needed.contains(fd.display.as_str()) {
@@ -1012,25 +997,19 @@ fn strip_null_variants(value: &mut serde_json::Value) {
 				strip_null_variants(nested);
 			}
 
-			let collapsed_type =
-				obj.get_mut("type")
-					.and_then(|t| t.as_array_mut())
-					.and_then(|types| {
-						types.retain(|t| t.as_str() != Some("null"));
-						(types.len() == 1).then(|| types[0].clone())
-					});
+			let collapsed_type = obj.get_mut("type").and_then(|t| t.as_array_mut()).and_then(|types| {
+				types.retain(|t| t.as_str() != Some("null"));
+				(types.len() == 1).then(|| types[0].clone())
+			});
 			if let Some(single) = collapsed_type {
 				obj.insert("type".to_string(), single);
 			}
 
 			for key in ["anyOf", "oneOf"] {
-				let only = obj
-					.get_mut(key)
-					.and_then(|v| v.as_array_mut())
-					.and_then(|variants| {
-						variants.retain(|v| v.get("type").and_then(|t| t.as_str()) != Some("null"));
-						(variants.len() == 1).then(|| variants[0].clone())
-					});
+				let only = obj.get_mut(key).and_then(|v| v.as_array_mut()).and_then(|variants| {
+					variants.retain(|v| v.get("type").and_then(|t| t.as_str()) != Some("null"));
+					(variants.len() == 1).then(|| variants[0].clone())
+				});
 				// Merge the surviving variant into the parent; sibling keys
 				// (the field-level description) take precedence.
 				if let Some(serde_json::Value::Object(only)) = only {
@@ -1054,10 +1033,7 @@ fn strip_null_variants(value: &mut serde_json::Value) {
 /// protocol versions don't define them. rmcp's generated `list_tools` sets them,
 /// so the `list_tools` overrides must too — a strict 2026-07-28 client (Claude
 /// Code's `server/discover` runtime) rejects the result and loads no tools at all.
-pub(crate) fn list_tools_result(
-	tools: Vec<Tool>,
-	context: &RequestContext<RoleServer>,
-) -> ListToolsResult {
+pub(crate) fn list_tools_result(tools: Vec<Tool>, context: &RequestContext<RoleServer>) -> ListToolsResult {
 	let result = ListToolsResult::with_all_items(tools);
 	let supports_cache_hints = context
 		.protocol_version()
@@ -1083,9 +1059,8 @@ impl ServerHandler for McpServer {
 		ServerConfig::new(capabilities)
 			.with_protocol_version(ProtocolVersion::V_2026_07_28)
 			.with_server_info(
-				Implementation::new("octocode-mcp", env!("CARGO_PKG_VERSION")).with_description(
-					"Semantic and structural code intelligence with an always-available code graph",
-				),
+				Implementation::new("octocode-mcp", env!("CARGO_PKG_VERSION"))
+					.with_description("Semantic and structural code intelligence with an always-available code graph"),
 			)
 			.with_instructions(instructions)
 	}
@@ -1114,13 +1089,7 @@ impl McpServer {
 		// Prefilter-missed files cannot contain the pattern's literal tokens,
 		// so they cannot match — skip without parsing.
 		for fd in files.iter().filter(|f| f.prefilter_hit) {
-			match crate::grep::rewrite_file(
-				&fd.display,
-				&fd.content,
-				pattern,
-				rewrite_template,
-				language,
-			) {
+			match crate::grep::rewrite_file(&fd.display, &fd.content, pattern, rewrite_template, language) {
 				Ok(Some(result)) => {
 					total_replacements += result.replacements;
 					results.push((fd.path.clone(), result));
@@ -1216,9 +1185,7 @@ impl McpServer {
 			.collect()
 	}
 
-	pub(crate) fn runtime_graph_cache(
-		&self,
-	) -> crate::indexer::graphrag::runtime::RuntimeGraphCache {
+	pub(crate) fn runtime_graph_cache(&self) -> crate::indexer::graphrag::runtime::RuntimeGraphCache {
 		self.graphrag.runtime_cache()
 	}
 
@@ -1256,13 +1223,8 @@ impl McpServer {
 			let config = config.clone();
 			let working_directory = working_directory.clone();
 			tokio::spawn(async move {
-				if let Err(e) = perform_indexing(&store, &config, &working_directory, no_git).await
-				{
-					warn!(
-						"Initial index failed for {}: {}",
-						working_directory.display(),
-						e
-					);
+				if let Err(e) = perform_indexing(&store, &config, &working_directory, no_git).await {
+					warn!("Initial index failed for {}: {}", working_directory.display(), e);
 				}
 			});
 		}
@@ -1311,12 +1273,8 @@ impl McpServer {
 
 		// Initialize LSP provider if command is provided (lazy initialization)
 		let (lsp, lsp_client, mut lsp_init_handle) = if let Some(command) = lsp_command {
-			info!(
-				"LSP provider will be initialized lazily with command: {}",
-				command
-			);
-			let provider_value =
-				crate::mcp::lsp::LspProvider::new(working_directory.clone(), command);
+			info!("LSP provider will be initialized lazily with command: {}", command);
+			let provider_value = crate::mcp::lsp::LspProvider::new(working_directory.clone(), command);
 			let client = provider_value.client.clone();
 			let provider = Arc::new(Mutex::new(provider_value));
 
@@ -1338,9 +1296,7 @@ impl McpServer {
 		// MCP serves the existing index read-only; when enabled, the usual git gate
 		// still applies.
 		let should_start_indexer = config.index.mcp_index
-			&& (no_git
-				|| !config.index.require_git
-				|| indexer::git::is_git_repo_root(&working_directory));
+			&& (no_git || !config.index.require_git || indexer::git::is_git_repo_root(&working_directory));
 
 		if !config.index.mcp_index {
 			warn!(
@@ -1426,10 +1382,7 @@ impl McpServer {
 		// Guard against panics in tool handlers crashing the whole server
 		let original_hook = std::panic::take_hook();
 		std::panic::set_hook(Box::new(move |info| {
-			super::logging::log_critical_anyhow_error(
-				"Panic in MCP server",
-				&anyhow::anyhow!("{}", info),
-			);
+			super::logging::log_critical_anyhow_error("Panic in MCP server", &anyhow::anyhow!("{}", info));
 			original_hook(info);
 		}));
 
@@ -1469,17 +1422,10 @@ impl McpServer {
 	/// proper session management. Supports both SSE and plain JSON responses
 	/// as required by the spec. Requests from sessions in other directories are
 	/// routed through `sessions`.
-	pub async fn run_http(
-		self,
-		bind_addr: &str,
-		_bg: BackgroundServices,
-		sessions: Sessions,
-	) -> Result<()> {
+	pub async fn run_http(self, bind_addr: &str, _bg: BackgroundServices, sessions: Sessions) -> Result<()> {
 		use hyper_util::rt::TokioIo;
 		use hyper_util::service::TowerToHyperService;
-		use rmcp::transport::streamable_http_server::{
-			session::local::LocalSessionManager, StreamableHttpService,
-		};
+		use rmcp::transport::streamable_http_server::{session::local::LocalSessionManager, StreamableHttpService};
 
 		info!("Starting MCP server in HTTP mode on {}", bind_addr);
 
@@ -1646,10 +1592,7 @@ pub(crate) async fn start_background_services(
 							// Update LSP with changed files if LSP is enabled
 							if let Some(ref lsp_provider) = lsp {
 								let mut lsp_guard = lsp_provider.lock().await;
-								if let Err(e) =
-									update_lsp_after_indexing(&mut lsp_guard, &working_directory)
-										.await
-								{
+								if let Err(e) = update_lsp_after_indexing(&mut lsp_guard, &working_directory).await {
 									debug!("LSP update after indexing failed: {}", e);
 								}
 							}
@@ -1660,10 +1603,7 @@ pub(crate) async fn start_background_services(
 						Err(_) => {
 							log_critical_anyhow_error(
 								"Background reindex timeout",
-								&anyhow::anyhow!(
-									"Background reindex timed out after {}ms",
-									MCP_INDEX_TIMEOUT_MS
-								),
+								&anyhow::anyhow!("Background reindex timed out after {}ms", MCP_INDEX_TIMEOUT_MS),
 							);
 						}
 					}
@@ -1727,8 +1667,7 @@ pub(crate) async fn perform_indexing(
 	let indexing_result = match branch_context {
 		Some(branch_name) => {
 			async {
-				let branch_store =
-					Store::new_for_branch_at(working_directory, &branch_name).await?;
+				let branch_store = Store::new_for_branch_at(working_directory, &branch_name).await?;
 				branch_store.initialize_collections().await?;
 				indexer::index_branch_delta(
 					store,
@@ -1744,16 +1683,7 @@ pub(crate) async fn perform_indexing(
 			}
 			.await
 		}
-		None => {
-			indexer::index_files_with_quiet(
-				store,
-				state.clone(),
-				config,
-				git_repo_root.as_deref(),
-				true,
-			)
-			.await
-		}
+		None => indexer::index_files_with_quiet(store, state.clone(), config, git_repo_root.as_deref(), true).await,
 	};
 
 	lock.release()?;

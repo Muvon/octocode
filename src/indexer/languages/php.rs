@@ -136,11 +136,7 @@ impl Language for Php {
 			// Functions and methods
 			&["function_definition", "method_declaration"] as &[&str],
 			// Class-related declarations
-			&[
-				"class_declaration",
-				"trait_declaration",
-				"interface_declaration",
-			],
+			&["class_declaration", "trait_declaration", "interface_declaration"],
 			// Properties and constants
 			&["property_declaration", "const_declaration"],
 			// Namespace and use statements
@@ -226,11 +222,7 @@ impl Language for Php {
 		}
 	}
 
-	fn extract_type_relations(
-		&self,
-		node: Node,
-		contents: &str,
-	) -> Vec<(super::TypeRelationKind, String)> {
+	fn extract_type_relations(&self, node: Node, contents: &str) -> Vec<(super::TypeRelationKind, String)> {
 		// `class Foo extends Bar implements I, J { }`
 		// `interface A extends B, C { }`
 		let mut out = Vec::new();
@@ -240,20 +232,10 @@ impl Language for Php {
 				for child in node.children(&mut cursor) {
 					match child.kind() {
 						"base_clause" => {
-							collect_php_clause_names(
-								child,
-								contents,
-								super::TypeRelationKind::Extends,
-								&mut out,
-							);
+							collect_php_clause_names(child, contents, super::TypeRelationKind::Extends, &mut out);
 						}
 						"class_interface_clause" => {
-							collect_php_clause_names(
-								child,
-								contents,
-								super::TypeRelationKind::Implements,
-								&mut out,
-							);
+							collect_php_clause_names(child, contents, super::TypeRelationKind::Implements, &mut out);
 						}
 						_ => {}
 					}
@@ -263,12 +245,7 @@ impl Language for Php {
 				let mut cursor = node.walk();
 				for child in node.children(&mut cursor) {
 					if child.kind() == "base_clause" {
-						collect_php_clause_names(
-							child,
-							contents,
-							super::TypeRelationKind::Extends,
-							&mut out,
-						);
+						collect_php_clause_names(child, contents, super::TypeRelationKind::Extends, &mut out);
 					}
 				}
 			}
@@ -277,12 +254,7 @@ impl Language for Php {
 				let mut cursor = node.walk();
 				for child in node.children(&mut cursor) {
 					if child.kind() == "class_interface_clause" {
-						collect_php_clause_names(
-							child,
-							contents,
-							super::TypeRelationKind::Implements,
-							&mut out,
-						);
+						collect_php_clause_names(child, contents, super::TypeRelationKind::Implements, &mut out);
 					}
 				}
 			}

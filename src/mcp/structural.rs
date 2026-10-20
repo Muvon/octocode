@@ -178,10 +178,8 @@ pub fn collect_file_data(
 				Ok(c) => c,
 				Err(_) => return ignore::WalkState::Continue,
 			};
-			let prefilter_hit = prefilter_tokens.is_empty()
-				|| prefilter_tokens
-					.iter()
-					.all(|t| content.contains(t.as_str()));
+			let prefilter_hit =
+				prefilter_tokens.is_empty() || prefilter_tokens.iter().all(|t| content.contains(t.as_str()));
 
 			let mut guard = acc_ref.lock();
 			guard.1.file_count += 1;
@@ -271,15 +269,11 @@ fn build_spec_set(
 		specs.push(spec);
 	}
 	let inside_idx = inside.map(|s| {
-		specs.push(grep::SearchSpec::KindOrPattern {
-			spec: s.to_string(),
-		});
+		specs.push(grep::SearchSpec::KindOrPattern { spec: s.to_string() });
 		specs.len() - 1
 	});
 	let has_idx = has.map(|s| {
-		specs.push(grep::SearchSpec::KindOrPattern {
-			spec: s.to_string(),
-		});
+		specs.push(grep::SearchSpec::KindOrPattern { spec: s.to_string() });
 		specs.len() - 1
 	});
 	SpecSet {
@@ -304,18 +298,12 @@ fn filter_by_containment(
 		.filter(|m| {
 			let mr = (m.start_byte, m.end_byte);
 			if let Some(ranges) = inside_ranges {
-				if !ranges
-					.iter()
-					.any(|r| r.0 <= mr.0 && mr.1 <= r.1 && *r != mr)
-				{
+				if !ranges.iter().any(|r| r.0 <= mr.0 && mr.1 <= r.1 && *r != mr) {
 					return false;
 				}
 			}
 			if let Some(ranges) = has_ranges {
-				if !ranges
-					.iter()
-					.any(|r| mr.0 <= r.0 && r.1 <= mr.1 && *r != mr)
-				{
+				if !ranges.iter().any(|r| mr.0 <= r.0 && r.1 <= mr.1 && *r != mr) {
 					return false;
 				}
 			}
@@ -334,9 +322,7 @@ fn run_specs_over_files(
 	constraints: &[MetavarConstraint],
 ) -> Vec<Vec<GrepMatch>> {
 	let per_file = parallel_file_map(files, only_prefilter_hits, |fd| {
-		let buckets =
-			grep::search_file_multi(&fd.display, &fd.content, language, &set.specs, constraints)
-				.ok()?;
+		let buckets = grep::search_file_multi(&fd.display, &fd.content, language, &set.specs, constraints).ok()?;
 		if buckets.iter().take(set.n_strategies).all(|b| b.is_empty()) {
 			return None;
 		}
@@ -402,19 +388,13 @@ fn rerank_matches(matches: &mut [GrepMatch], metavars: &[String]) {
 	// `sort_by_key`), so the per-element lowercase + file clone happen only once.
 	matches.sort_by_cached_key(|m| {
 		let path_lower = m.file.to_ascii_lowercase();
-		let hit = needles
-			.iter()
-			.any(|n| !n.is_empty() && path_lower.contains(n));
+		let hit = needles.iter().any(|n| !n.is_empty() && path_lower.contains(n));
 		// Lower key sorts first — boost (0) goes ahead of non-boost (1).
 		(if hit { 0u8 } else { 1u8 }, m.file.clone(), m.line)
 	});
 }
 
-fn finalize(
-	mut matches: Vec<GrepMatch>,
-	note: Option<String>,
-	metavars: &[String],
-) -> SmartSearchOutcome {
+fn finalize(mut matches: Vec<GrepMatch>, note: Option<String>, metavars: &[String]) -> SmartSearchOutcome {
 	sort_matches(&mut matches);
 	rerank_matches(&mut matches, metavars);
 	SmartSearchOutcome {
@@ -451,10 +431,7 @@ pub fn smart_search(
 ) -> SmartSearchOutcome {
 	// Parse the pattern once — needed for diagnostics and to gate Relaxed.
 	let info = grep::pattern_info(pattern, language).ok();
-	let metavars: Vec<String> = info
-		.as_ref()
-		.map(|i| i.defined_vars.clone())
-		.unwrap_or_default();
+	let metavars: Vec<String> = info.as_ref().map(|i| i.defined_vars.clone()).unwrap_or_default();
 
 	// --- Pass A: pattern strategies on prefiltered files ---
 	let relaxed_safe = info
@@ -496,9 +473,7 @@ pub fn smart_search(
 				pattern.trim(),
 				desc
 			)),
-			grep::SearchSpec::Kind {
-				kind: kind.to_string(),
-			},
+			grep::SearchSpec::Kind { kind: kind.to_string() },
 		));
 	}
 	strategies.push((
@@ -545,12 +520,7 @@ pub fn smart_search(
 			if lex.len() >= LEXICAL_TOTAL {
 				break;
 			}
-			lex.extend(grep::lexical_scan(
-				&fd.display,
-				&fd.content,
-				token,
-				LEXICAL_PER_FILE,
-			));
+			lex.extend(grep::lexical_scan(&fd.display, &fd.content, token, LEXICAL_PER_FILE));
 		}
 		lex.truncate(LEXICAL_TOTAL);
 		if !lex.is_empty() {
@@ -576,12 +546,7 @@ pub fn smart_search(
 
 /// Symbol-mode search: find definitions of (or references to) a named symbol
 /// without writing an AST pattern. Supports `*` wildcards in the name.
-pub fn symbol_search(
-	files: &[FileData],
-	symbol: &str,
-	language: &str,
-	references: bool,
-) -> SmartSearchOutcome {
+pub fn symbol_search(files: &[FileData], symbol: &str, language: &str, references: bool) -> SmartSearchOutcome {
 	let name = match grep::NameMatcher::new(symbol) {
 		Ok(n) => n,
 		Err(e) => {
@@ -620,11 +585,7 @@ pub fn symbol_search(
 
 	if !matches.is_empty() {
 		sort_matches(&mut matches);
-		let mode = if references {
-			"references"
-		} else {
-			"definitions"
-		};
+		let mode = if references { "references" } else { "definitions" };
 		return SmartSearchOutcome {
 			matches,
 			note: Some(format!("[symbol {}: {}]", mode, symbol)),
@@ -640,12 +601,7 @@ pub fn symbol_search(
 			if lex.len() >= LEXICAL_TOTAL {
 				break;
 			}
-			lex.extend(grep::lexical_scan(
-				&fd.display,
-				&fd.content,
-				&token,
-				LEXICAL_PER_FILE,
-			));
+			lex.extend(grep::lexical_scan(&fd.display, &fd.content, &token, LEXICAL_PER_FILE));
 		}
 		lex.truncate(LEXICAL_TOTAL);
 		if !lex.is_empty() {
@@ -670,11 +626,7 @@ pub fn symbol_search(
 			"No symbol {} for `{}` ({} files scanned, language: {}). \
 			 Hints: wildcards widen the match (`*{}*`); use `references` to find usages \
 			 or `symbol` for definitions; verify the `language` matches the file extensions.",
-			if references {
-				"references"
-			} else {
-				"definitions"
-			},
+			if references { "references" } else { "definitions" },
 			symbol,
 			files.len(),
 			language,
@@ -729,11 +681,7 @@ fn auto_contexts(language: &str, pattern: &str) -> Vec<(&'static str, &'static s
 				format!("class _ {{ {} }}", pattern),
 			),
 		],
-		"json" => vec![(
-			"object body, pair selector",
-			"pair",
-			format!("{{ {} }}", pattern),
-		)],
+		"json" => vec![("object body, pair selector", "pair", format!("{{ {} }}", pattern))],
 		_ => Vec::new(),
 	}
 }
@@ -955,14 +903,7 @@ mod tests {
 		let all = smart_search(&files, "$X.unwrap()", "rust", &[], None, None);
 		assert_eq!(all.matches.len(), 2);
 		// With inside=function_item: only the one inside fn main.
-		let inside = smart_search(
-			&files,
-			"$X.unwrap()",
-			"rust",
-			&[],
-			Some("function_item"),
-			None,
-		);
+		let inside = smart_search(&files, "$X.unwrap()", "rust", &[], Some("function_item"), None);
 		assert_eq!(inside.matches.len(), 1);
 		assert_eq!(inside.matches[0].line, 2);
 	}
@@ -975,14 +916,7 @@ mod tests {
 			true,
 		)];
 		// Kind search for functions, keeping only those containing unwrap.
-		let out = smart_search(
-			&files,
-			"function_item",
-			"rust",
-			&[],
-			None,
-			Some("$X.unwrap()"),
-		);
+		let out = smart_search(&files, "function_item", "rust", &[], None, Some("$X.unwrap()"));
 		assert_eq!(out.matches.len(), 1);
 		assert!(out.matches[0].text.contains("with"));
 	}
@@ -996,14 +930,7 @@ mod tests {
 		)];
 		let re = regex::Regex::new("^handle_").unwrap();
 		let constraints = vec![("NAME".to_string(), re)];
-		let out = smart_search(
-			&files,
-			"fn $NAME($$$) { $$$ }",
-			"rust",
-			&constraints,
-			None,
-			None,
-		);
+		let out = smart_search(&files, "fn $NAME($$$) { $$$ }", "rust", &constraints, None, None);
 		assert_eq!(out.matches.len(), 1);
 		assert!(out.matches[0].text.contains("handle_request"));
 	}
@@ -1012,11 +939,7 @@ mod tests {
 	fn test_smart_search_lexical_fallback() {
 		// Structurally absent (no such call), but the token appears in a
 		// comment — lexical fallback must surface it, labeled, with diagnostic.
-		let files = vec![fd(
-			"a.rs",
-			"// TODO: call frobnicate_widget here\nfn main() {}\n",
-			true,
-		)];
+		let files = vec![fd("a.rs", "// TODO: call frobnicate_widget here\nfn main() {}\n", true)];
 		let out = smart_search(&files, "frobnicate_widget($$$)", "rust", &[], None, None);
 		assert_eq!(out.matches.len(), 1);
 		let note = out.note.expect("lexical fallback note expected");
@@ -1063,19 +986,11 @@ mod tests {
 
 	#[test]
 	fn test_symbol_search_references() {
-		let files = vec![fd(
-			"a.rs",
-			"fn flush() {}\nfn main() { flush(); flush(); }\n",
-			true,
-		)];
+		let files = vec![fd("a.rs", "fn flush() {}\nfn main() { flush(); flush(); }\n", true)];
 		let out = symbol_search(&files, "flush", "rust", true);
 		// 1 definition site + 2 call sites.
 		assert_eq!(out.matches.len(), 3);
-		let defs: Vec<_> = out
-			.matches
-			.iter()
-			.filter(|m| m.text.starts_with("[def]"))
-			.collect();
+		let defs: Vec<_> = out.matches.iter().filter(|m| m.text.starts_with("[def]")).collect();
 		assert_eq!(defs.len(), 1);
 		assert_eq!(defs[0].line, 1);
 	}
@@ -1157,24 +1072,12 @@ mod tests {
 		// truncation happens BEFORE the O(n*m) containment scan (bounding it
 		// to 500*500 instead of 1000*1000) while still returning correct,
 		// capped results rather than a corrupted or empty subset.
-		let content: String = (0..1000)
-			.map(|i| format!("fn f{}() {{ x.unwrap(); }}\n", i))
-			.collect();
+		let content: String = (0..1000).map(|i| format!("fn f{}() {{ x.unwrap(); }}\n", i)).collect();
 		let files = vec![fd("many.rs", &content, true)];
-		let out = smart_search(
-			&files,
-			"$X.unwrap()",
-			"rust",
-			&[],
-			Some("function_item"),
-			None,
-		);
+		let out = smart_search(&files, "$X.unwrap()", "rust", &[], Some("function_item"), None);
 		assert_eq!(out.matches.len(), MAX_PER_FILE_MATCHES);
 		assert_eq!(out.matches[0].line, 1);
-		assert_eq!(
-			out.matches[MAX_PER_FILE_MATCHES - 1].line,
-			MAX_PER_FILE_MATCHES
-		);
+		assert_eq!(out.matches[MAX_PER_FILE_MATCHES - 1].line, MAX_PER_FILE_MATCHES);
 		assert!(out.matches.iter().all(|m| m.text.contains("unwrap")));
 	}
 

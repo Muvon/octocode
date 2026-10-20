@@ -23,11 +23,7 @@ mod tests {
 		std::fs::create_dir_all(dir.path().join("storage/code_blocks.lance")).unwrap();
 		std::fs::write(dir.path().join("storage/code_blocks.lance/data"), "rows").unwrap();
 		std::fs::create_dir_all(dir.path().join("branches/feature")).unwrap();
-		std::fs::write(
-			dir.path().join("branches/feature/manifest.json"),
-			"{\"version\":2}",
-		)
-		.unwrap();
+		std::fs::write(dir.path().join("branches/feature/manifest.json"), "{\"version\":2}").unwrap();
 		dir
 	}
 
@@ -46,14 +42,8 @@ mod tests {
 		tar::Archive::new(decoder).unpack(extracted.path()).unwrap();
 
 		assert!(extracted.path().join(MARKER_FILE).is_file());
-		assert!(extracted
-			.path()
-			.join("storage/code_blocks.lance/data")
-			.is_file());
-		assert!(extracted
-			.path()
-			.join("branches/feature/manifest.json")
-			.is_file());
+		assert!(extracted.path().join("storage/code_blocks.lance/data").is_file());
+		assert!(extracted.path().join("branches/feature/manifest.json").is_file());
 	}
 
 	#[test]
@@ -76,8 +66,6 @@ mod tests {
 	#[test]
 	fn an_unwritable_destination_is_an_error() {
 		let src = project_storage();
-		assert!(
-			write_archive(src.path(), std::path::Path::new("/no/such/dir/out.tar.zst")).is_err()
-		);
+		assert!(write_archive(src.path(), std::path::Path::new("/no/such/dir/out.tar.zst")).is_err());
 	}
 }

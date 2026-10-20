@@ -48,8 +48,8 @@ pub struct FormatArgs {
 }
 
 pub async fn execute(format_args: &FormatArgs) -> Result<()> {
-	let git_root = find_git_root()
-		.context("Failed to find git repository root. Make sure you're in a git repository.")?;
+	let git_root =
+		find_git_root().context("Failed to find git repository root. Make sure you're in a git repository.")?;
 
 	let editorconfig_path = git_root.join(".editorconfig");
 
@@ -72,13 +72,7 @@ pub async fn execute(format_args: &FormatArgs) -> Result<()> {
 		format_args
 			.files
 			.iter()
-			.map(|f| {
-				if f.is_absolute() {
-					f.clone()
-				} else {
-					git_root.join(f)
-				}
-			})
+			.map(|f| if f.is_absolute() { f.clone() } else { git_root.join(f) })
 			.filter(|f| f.exists())
 			.collect()
 	};

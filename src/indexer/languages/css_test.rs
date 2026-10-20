@@ -50,10 +50,7 @@ mod css_tests {
 "#;
 		let regions = parse_regions(source);
 
-		let media_regions: Vec<_> = regions
-			.iter()
-			.filter(|r| r.node_kind == "media_statement")
-			.collect();
+		let media_regions: Vec<_> = regions.iter().filter(|r| r.node_kind == "media_statement").collect();
 		assert_eq!(
 			media_regions.len(),
 			0,
@@ -61,10 +58,7 @@ mod css_tests {
 			regions.iter().map(|r| &r.node_kind).collect::<Vec<_>>()
 		);
 
-		let rule_regions: Vec<_> = regions
-			.iter()
-			.filter(|r| r.node_kind == "rule_set")
-			.collect();
+		let rule_regions: Vec<_> = regions.iter().filter(|r| r.node_kind == "rule_set").collect();
 		assert_eq!(
 			rule_regions.len(),
 			2,
@@ -82,10 +76,7 @@ mod css_tests {
 "#;
 		let regions = parse_regions(source);
 
-		let at_rule_regions: Vec<_> = regions
-			.iter()
-			.filter(|r| r.node_kind == "at_rule")
-			.collect();
+		let at_rule_regions: Vec<_> = regions.iter().filter(|r| r.node_kind == "at_rule").collect();
 		assert_eq!(
 			at_rule_regions.len(),
 			1,
@@ -96,9 +87,7 @@ mod css_tests {
 
 	fn parse(source: &str) -> Tree {
 		let mut parser = Parser::new();
-		parser
-			.set_language(&Css {}.get_ts_language())
-			.expect("css grammar");
+		parser.set_language(&Css {}.get_ts_language()).expect("css grammar");
 		parser.parse(source, None).expect("parse")
 	}
 
@@ -116,9 +105,7 @@ mod css_tests {
 	fn first_node<'a>(tree: &'a Tree, kind: &str) -> Node<'a> {
 		let mut found = Vec::new();
 		nodes_of_kind(tree.root_node(), kind, &mut found);
-		*found
-			.first()
-			.unwrap_or_else(|| panic!("no {kind} node in source"))
+		*found.first().unwrap_or_else(|| panic!("no {kind} node in source"))
 	}
 
 	fn registry(files: &[&str]) -> FileRegistry {
@@ -163,10 +150,7 @@ mod css_tests {
 		);
 		// CSS does not override get_symbol_kinds, so both tiers are identical.
 		assert_eq!(lang.get_symbol_kinds(), kinds);
-		assert_eq!(
-			lang.descend_first_kinds(),
-			vec!["at_rule", "media_statement"]
-		);
+		assert_eq!(lang.descend_first_kinds(), vec!["at_rule", "media_statement"]);
 		assert!(!lang.descend_first_kinds().contains(&"keyframes_statement"));
 	}
 
@@ -220,11 +204,7 @@ mod css_tests {
 		] {
 			let tree = parse(source);
 			let node = first_node(&tree, "rule_set");
-			assert_eq!(
-				Css {}.extract_symbols(node, source),
-				expected,
-				"symbols for {source:?}"
-			);
+			assert_eq!(Css {}.extract_symbols(node, source), expected, "symbols for {source:?}");
 		}
 	}
 
@@ -249,20 +229,12 @@ mod css_tests {
 				vec!["slide"],
 			),
 			("@font-face { font-family: \"X\"; }\n", "at_rule", vec![]),
-			(
-				"@media screen { .a { color: red; } }\n",
-				"media_statement",
-				vec![],
-			),
+			("@media screen { .a { color: red; } }\n", "media_statement", vec![]),
 			("@import \"base.css\";\n", "import_statement", vec![]),
 		] {
 			let tree = parse(source);
 			let node = first_node(&tree, kind);
-			assert_eq!(
-				Css {}.extract_symbols(node, source),
-				expected,
-				"symbols for {source:?}"
-			);
+			assert_eq!(Css {}.extract_symbols(node, source), expected, "symbols for {source:?}");
 		}
 	}
 
@@ -345,10 +317,7 @@ mod css_tests {
 			lang.resolve_import("./missing.css", "demo/styles/main.css", &files),
 			None
 		);
-		assert_eq!(
-			lang.resolve_import("missing.css", "demo/styles/main.css", &files),
-			None
-		);
+		assert_eq!(lang.resolve_import("missing.css", "demo/styles/main.css", &files), None);
 	}
 
 	#[test]
@@ -416,11 +385,7 @@ mod css_tests {
 		// one per region from the node kind and start line.
 		assert_eq!(
 			regions[0].symbols,
-			vec![
-				"import_statement_0",
-				"import_statement_1",
-				"import_statement_2",
-			]
+			vec!["import_statement_0", "import_statement_1", "import_statement_2",]
 		);
 	}
 }

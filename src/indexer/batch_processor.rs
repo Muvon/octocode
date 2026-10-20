@@ -19,9 +19,7 @@
 
 use crate::config::Config;
 use crate::embedding::count_tokens;
-use crate::indexer::contextual::{
-	build_enriched_embedding_input, generate_contextual_descriptions, FileContextMap,
-};
+use crate::indexer::contextual::{build_enriched_embedding_input, generate_contextual_descriptions, FileContextMap};
 use crate::mcp::logging::log_performance_metrics;
 use crate::store::{CodeBlock, DocumentBlock, Store, TextBlock};
 use anyhow::Result;
@@ -101,9 +99,7 @@ pub async fn process_code_blocks_batch(
 	let contents: Vec<String> = blocks
 		.iter()
 		.enumerate()
-		.map(|(i, block)| {
-			build_enriched_embedding_input(block, descriptions.get(&i).map(|s| s.as_str()))
-		})
+		.map(|(i, block)| build_enriched_embedding_input(block, descriptions.get(&i).map(|s| s.as_str())))
 		.collect();
 
 	// Generate embeddings with Document input type for indexing (asymmetric retrieval)
@@ -134,9 +130,7 @@ pub async fn process_code_blocks_batch(
 			distance: b.distance,
 		})
 		.collect();
-	store
-		.store_code_blocks(&enriched_blocks, &embeddings)
-		.await?;
+	store.store_code_blocks(&enriched_blocks, &embeddings).await?;
 
 	// CRITICAL: Store file metadata AFTER successful block storage
 	// This ensures atomicity - if blocks are stored, metadata is stored
@@ -184,9 +178,7 @@ pub async fn process_text_blocks_batch(
 			distance: b.distance,
 		})
 		.collect();
-	store
-		.store_text_blocks(&enriched_blocks, &embeddings)
-		.await?;
+	store.store_text_blocks(&enriched_blocks, &embeddings).await?;
 
 	// CRITICAL: Store file metadata AFTER successful block storage
 	file_metadata.persist(store).await?;
@@ -244,9 +236,7 @@ pub async fn process_document_blocks_batch(
 			distance: b.distance,
 		})
 		.collect();
-	store
-		.store_document_blocks(&enriched_blocks, &embeddings)
-		.await?;
+	store.store_document_blocks(&enriched_blocks, &embeddings).await?;
 
 	// CRITICAL: Store file metadata AFTER successful block storage
 	file_metadata.persist(store).await?;
@@ -258,11 +248,7 @@ pub async fn process_document_blocks_batch(
 }
 
 /// Check if a batch should be processed based on size and token limits
-pub fn should_process_batch<T>(
-	batch: &[T],
-	get_content: impl Fn(&T) -> &str,
-	config: &Config,
-) -> bool {
+pub fn should_process_batch<T>(batch: &[T], get_content: impl Fn(&T) -> &str, config: &Config) -> bool {
 	if batch.is_empty() {
 		return false;
 	}

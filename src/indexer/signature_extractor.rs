@@ -92,8 +92,7 @@ pub fn extract_file_signatures(files: &[PathBuf], base_dir: &Path) -> Result<Vec
 						.unwrap_or_else(|| parser.parse("", None).unwrap());
 
 					// Extract signatures from the file
-					let signatures =
-						extract_signatures(tree.root_node(), &contents, lang_impl.as_ref());
+					let signatures = extract_signatures(tree.root_node(), &contents, lang_impl.as_ref());
 
 					// Extract file-level comment if present
 					let file_comment = extract_file_comment(tree.root_node(), &contents);
@@ -114,11 +113,7 @@ pub fn extract_file_signatures(files: &[PathBuf], base_dir: &Path) -> Result<Vec
 }
 
 /// Extract signatures from a parsed file
-pub fn extract_signatures(
-	node: Node,
-	contents: &str,
-	lang_impl: &dyn languages::Language,
-) -> Vec<SignatureItem> {
+pub fn extract_signatures(node: Node, contents: &str, lang_impl: &dyn languages::Language) -> Vec<SignatureItem> {
 	let mut signatures = Vec::new();
 	let meaningful_kinds = lang_impl.get_meaningful_kinds();
 
@@ -169,13 +164,7 @@ pub fn extract_signatures(
 		let mut cursor = node.walk();
 		if cursor.goto_first_child() {
 			loop {
-				visit_node(
-					cursor.node(),
-					contents,
-					lang_impl,
-					meaningful_kinds,
-					signatures,
-				);
+				visit_node(cursor.node(), contents, lang_impl, meaningful_kinds, signatures);
 				if !cursor.goto_next_sibling() {
 					break;
 				}
@@ -184,13 +173,7 @@ pub fn extract_signatures(
 	}
 
 	// Start traversal from the root
-	visit_node(
-		node,
-		contents,
-		lang_impl,
-		&meaningful_kinds,
-		&mut signatures,
-	);
+	visit_node(node, contents, lang_impl, &meaningful_kinds, &mut signatures);
 
 	// Sort by line number for a consistent order
 	signatures.sort_by_key(|sig| sig.start_line);
@@ -206,10 +189,7 @@ fn extract_name(node: Node, contents: &str, lang_impl: &dyn languages::Language)
 
 	// Look for identifier nodes
 	for child in node.children(&mut node.walk()) {
-		if child.kind() == "identifier"
-			|| child.kind().contains("name")
-			|| child.kind().contains("function_name")
-		{
+		if child.kind() == "identifier" || child.kind().contains("name") || child.kind().contains("function_name") {
 			if let Ok(name) = child.utf8_text(contents.as_bytes()) {
 				if !name.is_empty() {
 					return Some(name.to_string());
@@ -655,10 +635,7 @@ mod tests {
 		let (tree, lang_impl) = parse("rust", source);
 		let sigs = extract_signatures(tree.root_node(), source, lang_impl.as_ref());
 		let baz = sigs.iter().find(|s| s.name == "baz").unwrap();
-		assert_eq!(
-			baz.description.as_deref(),
-			Some("This is a function.\nIt does X.")
-		);
+		assert_eq!(baz.description.as_deref(), Some("This is a function.\nIt does X."));
 	}
 
 	#[test]

@@ -67,11 +67,7 @@ pub enum GraphRAGOperation {
 }
 
 /// Execute a GraphRAG command
-pub async fn execute(
-	store: &Store,
-	args: &GraphRAGArgs,
-	config: &Config,
-) -> Result<(), anyhow::Error> {
+pub async fn execute(store: &Store, args: &GraphRAGArgs, config: &Config) -> Result<(), anyhow::Error> {
 	// Check if GraphRAG is enabled in the config
 	if !config.graphrag.enabled {
 		eprintln!("Error: GraphRAG is not enabled in your configuration.");
@@ -102,9 +98,7 @@ pub async fn execute(
 				if indexer::branch::manifest_is_coherent_with(&manifest, main_commit.as_deref()) {
 					let overridden = manifest.overridden_paths();
 					graph_builder.apply_branch_filter(&overridden).await;
-					if let Ok(branch_store) =
-						octocode::store::Store::new_for_branch(&branch_name).await
-					{
+					if let Ok(branch_store) = octocode::store::Store::new_for_branch(&branch_name).await {
 						if let Err(e) = graph_builder.merge_branch_graph(&branch_store).await {
 							eprintln!("Warning: Failed to merge branch GraphRAG data: {}", e);
 						}
@@ -222,9 +216,7 @@ pub async fn execute(
 			let node_id = match &args.node_id {
 				Some(id) => id,
 				None => {
-					eprintln!(
-						"Error: 'node_id' parameter is required for get_relationships operation."
-					);
+					eprintln!("Error: 'node_id' parameter is required for get_relationships operation.");
 					eprintln!("Example: octocode graphrag get-relationships --node_id \"src/main.rs/main\"");
 					return Ok(());
 				}
@@ -259,10 +251,7 @@ pub async fn execute(
 				);
 
 				// Outgoing relationships
-				let outgoing: Vec<_> = relationships
-					.iter()
-					.filter(|rel| rel.source == resolved_id)
-					.collect();
+				let outgoing: Vec<_> = relationships.iter().filter(|rel| rel.source == resolved_id).collect();
 
 				if !outgoing.is_empty() {
 					println!("Outgoing Relationships:");
@@ -282,10 +271,7 @@ pub async fn execute(
 				}
 
 				// Incoming relationships
-				let incoming: Vec<_> = relationships
-					.iter()
-					.filter(|rel| rel.target == resolved_id)
-					.collect();
+				let incoming: Vec<_> = relationships.iter().filter(|rel| rel.target == resolved_id).collect();
 
 				if !incoming.is_empty() {
 					println!("Incoming Relationships:");

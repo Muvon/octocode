@@ -111,10 +111,7 @@ mod tests {
 				.starts_with("LLM required for GraphRAG but unavailable:"),
 			"{err}"
 		);
-		assert!(
-			err.to_string().contains("Disable graphrag.use_llm"),
-			"{err}"
-		);
+		assert!(err.to_string().contains("Disable graphrag.use_llm"), "{err}");
 	}
 
 	#[test]
@@ -133,12 +130,7 @@ mod tests {
 		let ai = offline();
 
 		assert!(!ai.should_use_ai_for_relationships(&node("src/empty.rs", &[], &[], 0)));
-		assert!(!ai.should_use_ai_for_relationships(&node(
-			"src/thin.rs",
-			&["one"],
-			&["a", "b"],
-			49
-		)));
+		assert!(!ai.should_use_ai_for_relationships(&node("src/thin.rs", &["one"], &["a", "b"], 49)));
 
 		// Any single qualifying signal is enough.
 		assert!(ai.should_use_ai_for_relationships(&node("src/e.rs", &["a", "b"], &[], 0)));
@@ -181,10 +173,7 @@ mod tests {
 		let big = block(&format!("{head}{middle}{tail}"), &["big"]);
 
 		let sample = ai.build_content_sample_for_ai(&[&big]);
-		assert_eq!(
-			sample,
-			format!("// Block: 1 symbols\n{head}\n...\n{tail}\n\n")
-		);
+		assert_eq!(sample, format!("// Block: 1 symbols\n{head}\n...\n{tail}\n\n"));
 		assert!(!sample.contains('M'));
 	}
 
@@ -230,16 +219,11 @@ mod tests {
 		]);
 
 		assert!(
-			message.starts_with(
-				"Analyze the following 2 files and provide architectural descriptions:\n\n"
-			),
+			message.starts_with("Analyze the following 2 files and provide architectural descriptions:\n\n"),
 			"{message}"
 		);
 		assert!(message.contains("=== FILE 1 ===\nID: src/a.rs\nLanguage: rust\nStats: 2 functions, 1 classes/structs\nKey symbols: s1, s2, s3, s4, s5\nCode sample:\nfn sample() {}\n\n"), "{message}");
-		assert!(
-			message.contains("=== FILE 2 ===\nID: src/b.rs\n"),
-			"{message}"
-		);
+		assert!(message.contains("=== FILE 2 ===\nID: src/b.rs\n"), "{message}");
 		// The sixth symbol is dropped by the take(5) cap.
 		assert!(!message.contains("s6"), "{message}");
 		assert!(
@@ -276,10 +260,7 @@ mod tests {
 	#[test]
 	fn the_batch_response_keeps_known_ids_and_drops_unknown_ones() {
 		let ai = offline();
-		let files = [
-			file_for_ai("src/a.rs", &["a"]),
-			file_for_ai("src/b.rs", &["b"]),
-		];
+		let files = [file_for_ai("src/a.rs", &["a"]), file_for_ai("src/b.rs", &["b"])];
 		let response = json!({
 			"descriptions": [
 				{"file_id": "src/a.rs", "description": "The A layer."},
@@ -289,10 +270,7 @@ mod tests {
 
 		let parsed = ai.parse_batch_response(&response, &files).unwrap();
 		assert_eq!(parsed.len(), 1);
-		assert_eq!(
-			parsed.get("src/a.rs").map(String::as_str),
-			Some("The A layer.")
-		);
+		assert_eq!(parsed.get("src/a.rs").map(String::as_str), Some("The A layer."));
 		assert!(!parsed.contains_key("src/ghost.rs"));
 		// A file the model skipped is simply absent — not an error.
 		assert!(!parsed.contains_key("src/b.rs"));
@@ -339,11 +317,7 @@ mod tests {
 				.parse_batch_response(&response, &files)
 				.err()
 				.unwrap_or_else(|| panic!("{response} must not parse"));
-			assert!(
-				err.to_string()
-					.starts_with("Failed to parse batch response:"),
-				"{err}"
-			);
+			assert!(err.to_string().starts_with("Failed to parse batch response:"), "{err}");
 		}
 	}
 
@@ -415,9 +389,7 @@ mod tests {
 			json!("plain text"),
 		] {
 			assert!(
-				ai.parse_ai_architectural_relationships(&response)
-					.unwrap()
-					.is_empty(),
+				ai.parse_ai_architectural_relationships(&response).unwrap().is_empty(),
 				"{response}"
 			);
 		}
@@ -426,11 +398,7 @@ mod tests {
 	#[tokio::test]
 	async fn an_empty_batch_request_never_reaches_the_llm() {
 		let ai = with_llm();
-		assert!(ai
-			.extract_ai_descriptions_batch(&[])
-			.await
-			.unwrap()
-			.is_empty());
+		assert!(ai.extract_ai_descriptions_batch(&[]).await.unwrap().is_empty());
 	}
 
 	#[tokio::test]

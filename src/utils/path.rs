@@ -73,10 +73,7 @@ impl PathNormalizer {
 	///     Some("src/main.rs")
 	/// );
 	/// ```
-	pub fn find_path_in_collection<'a>(
-		target: &str,
-		paths: &'a [impl AsRef<str>],
-	) -> Option<&'a str> {
+	pub fn find_path_in_collection<'a>(target: &str, paths: &'a [impl AsRef<str>]) -> Option<&'a str> {
 		let normalized_target = Self::normalize_separators(target);
 
 		for path in paths {
@@ -177,20 +174,14 @@ mod tests {
 	#[test]
 	fn test_normalize_separators() {
 		// Test Windows to Unix normalization
-		assert_eq!(
-			PathNormalizer::normalize_separators("src\\main.rs"),
-			"src/main.rs"
-		);
+		assert_eq!(PathNormalizer::normalize_separators("src\\main.rs"), "src/main.rs");
 		assert_eq!(
 			PathNormalizer::normalize_separators("src\\utils\\helper.rs"),
 			"src/utils/helper.rs"
 		);
 
 		// Test Unix paths remain unchanged
-		assert_eq!(
-			PathNormalizer::normalize_separators("src/main.rs"),
-			"src/main.rs"
-		);
+		assert_eq!(PathNormalizer::normalize_separators("src/main.rs"), "src/main.rs");
 		assert_eq!(
 			PathNormalizer::normalize_separators("src/utils/helper.rs"),
 			"src/utils/helper.rs"
@@ -242,19 +233,13 @@ mod tests {
 		);
 
 		// Test not found
-		assert_eq!(
-			PathNormalizer::find_path_in_collection("nonexistent.rs", &files),
-			None
-		);
+		assert_eq!(PathNormalizer::find_path_in_collection("nonexistent.rs", &files), None);
 	}
 
 	#[test]
 	fn test_normalize_path() {
 		// Test basic separator normalization
-		assert_eq!(
-			PathNormalizer::normalize_path("src\\main.rs"),
-			"src/main.rs"
-		);
+		assert_eq!(PathNormalizer::normalize_path("src\\main.rs"), "src/main.rs");
 
 		// Test that it handles various path formats
 		let result = PathNormalizer::normalize_path("src/utils/../main.rs");
@@ -264,10 +249,7 @@ mod tests {
 		assert_eq!(result, "src/main.rs");
 
 		// Test Windows-style paths
-		assert_eq!(
-			PathNormalizer::normalize_path("src\\utils\\..\\main.rs"),
-			"src/main.rs"
-		);
+		assert_eq!(PathNormalizer::normalize_path("src\\utils\\..\\main.rs"), "src/main.rs");
 	}
 
 	#[test]
@@ -278,9 +260,6 @@ mod tests {
 		assert_eq!(PathNormalizer::normalize_path("../config.h"), "../config.h");
 		assert_eq!(PathNormalizer::normalize_path("../../foo.h"), "../../foo.h");
 		// One ".." cancels "src", the second has nothing left to cancel.
-		assert_eq!(
-			PathNormalizer::normalize_path("src/../../main.rs"),
-			"../main.rs"
-		);
+		assert_eq!(PathNormalizer::normalize_path("src/../../main.rs"), "../main.rs");
 	}
 }

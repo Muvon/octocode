@@ -20,8 +20,8 @@ use octocode::lock::IndexLock;
 use octocode::state;
 use octocode::store::Store;
 use octocode::watcher_config::{
-	IgnorePatterns, DEFAULT_ADDITIONAL_DELAY_MS, MAX_ADDITIONAL_DELAY_MS,
-	WATCH_DEFAULT_DEBOUNCE_SECS, WATCH_MAX_DEBOUNCE_SECS, WATCH_MIN_DEBOUNCE_SECS,
+	IgnorePatterns, DEFAULT_ADDITIONAL_DELAY_MS, MAX_ADDITIONAL_DELAY_MS, WATCH_DEFAULT_DEBOUNCE_SECS,
+	WATCH_MAX_DEBOUNCE_SECS, WATCH_MIN_DEBOUNCE_SECS,
 };
 
 use super::index::IndexArgs;
@@ -45,11 +45,7 @@ pub struct WatchArgs {
 	pub no_git: bool,
 }
 
-pub async fn execute(
-	store: &Store,
-	config: &Config,
-	args: &WatchArgs,
-) -> Result<(), anyhow::Error> {
+pub async fn execute(store: &Store, config: &Config, args: &WatchArgs) -> Result<(), anyhow::Error> {
 	let current_dir = std::env::current_dir()?;
 
 	// Get the debounce time from args or use default, with bounds checking
@@ -64,10 +60,7 @@ pub async fn execute(
 
 	// Only show verbose output if not in quiet mode
 	if !args.quiet {
-		println!(
-			"Starting watch mode for current directory: {}",
-			current_dir.display()
-		);
+		println!("Starting watch mode for current directory: {}", current_dir.display());
 		println!(
 			"Configuration: debounce={}s, additional_delay={}ms",
 			debounce_secs, additional_delay_ms
@@ -179,9 +172,7 @@ pub async fn execute(
 	)?;
 
 	// Add the current directory to the watcher
-	debouncer
-		.watcher()
-		.watch(&current_dir, RecursiveMode::Recursive)?;
+	debouncer.watcher().watch(&current_dir, RecursiveMode::Recursive)?;
 
 	// Create shared state for reindexing
 	let state = state::create_shared_state();
@@ -207,8 +198,7 @@ pub async fn execute(
 
 				// Additional delay to ensure all file operations are complete
 				if additional_delay_ms > 0 {
-					tokio::time::sleep(tokio::time::Duration::from_millis(additional_delay_ms))
-						.await;
+					tokio::time::sleep(tokio::time::Duration::from_millis(additional_delay_ms)).await;
 				}
 
 				// Coalesce change notifications that queued up before this run
@@ -263,13 +253,7 @@ pub async fn execute(
 						.await?;
 						branch_store.flush().await?;
 					} else {
-						indexer::index_files(
-							store,
-							state.clone(),
-							&config,
-							git_repo_root.as_deref(),
-						)
-						.await?;
+						indexer::index_files(store, state.clone(), &config, git_repo_root.as_deref()).await?;
 					}
 
 					// Release lock after re-indexing

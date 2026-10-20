@@ -102,14 +102,7 @@ index 111..222 100644
 		let _ = is_precommit_available();
 	}
 
-	fn draft(
-		kind: &str,
-		scope: &str,
-		subject: &str,
-		effect: &str,
-		changes: &[&str],
-		breaking: &str,
-	) -> CommitDraft {
+	fn draft(kind: &str, scope: &str, subject: &str, effect: &str, changes: &[&str], breaking: &str) -> CommitDraft {
 		CommitDraft {
 			kind: kind.to_string(),
 			scope: scope.to_string(),
@@ -131,17 +124,12 @@ index 111..222 100644
 			"",
 		))
 		.unwrap();
-		assert_eq!(
-			message,
-			"fix(index): checkpoint commit indexing after each batch"
-		);
+		assert_eq!(message, "fix(index): checkpoint commit indexing after each batch");
 	}
 
 	#[test]
 	fn an_acronym_at_the_start_of_the_subject_keeps_its_case() {
-		let message =
-			render_commit_message(&draft("feat", "", "ONNX providers are listed", "", &[], ""))
-				.unwrap();
+		let message = render_commit_message(&draft("feat", "", "ONNX providers are listed", "", &[], "")).unwrap();
 		assert_eq!(message, "feat: ONNX providers are listed");
 	}
 
@@ -177,10 +165,7 @@ index 111..222 100644
 			"",
 		))
 		.unwrap();
-		assert_eq!(
-			message,
-			"docs: revise commission payout dispatch specification"
-		);
+		assert_eq!(message, "docs: revise commission payout dispatch specification");
 	}
 
 	#[test]
@@ -197,10 +182,7 @@ index 111..222 100644
 		let wrapped = wrap_text(&format!("- {}", words), 72, "  ");
 		let lines: Vec<&str> = wrapped.lines().collect();
 		assert_eq!(lines.len(), 2, "{wrapped}");
-		assert!(
-			lines[0].len() <= 72 && lines[0].starts_with("- word"),
-			"{wrapped}"
-		);
+		assert!(lines[0].len() <= 72 && lines[0].starts_with("- word"), "{wrapped}");
 		assert!(lines[1].starts_with("  word"), "{wrapped}");
 		assert_eq!(wrap_text("short", 72, "  "), "short");
 	}

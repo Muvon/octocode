@@ -159,9 +159,6 @@ mod tests {
 		execute(&a, Config::default()).expect("reset must succeed");
 
 		let saved: Config = toml::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
-		assert_eq!(
-			saved.search.max_results,
-			Config::default().search.max_results
-		);
+		assert_eq!(saved.search.max_results, Config::default().search.max_results);
 	}
 }

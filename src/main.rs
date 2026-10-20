@@ -191,39 +191,27 @@ async fn main() -> Result<(), anyhow::Error> {
 
 	// Execute the appropriate command
 	match &args.command {
-		Commands::Index(index_args) => {
-			commands::index::execute(&store, &config, index_args).await?
-		}
-		Commands::Search(search_args) => {
-			commands::search::execute(&store, search_args, &config).await?
-		}
+		Commands::Index(index_args) => commands::index::execute(&store, &config, index_args).await?,
+		Commands::Search(search_args) => commands::search::execute(&store, search_args, &config).await?,
 		Commands::View(view_args) => commands::view::execute(view_args).await?,
-		Commands::Watch(watch_args) => {
-			commands::watch::execute(&store, &config, watch_args).await?
-		}
-		Commands::GraphRAG(graphrag_args) => {
-			commands::graphrag::execute(&store, graphrag_args, &config).await?
-		}
-		Commands::Stats(stats_args) => {
-			commands::stats::execute(&store, stats_args, &config).await?
-		}
-		Commands::Explain(explain_args) => {
-			commands::explain::execute(&store, explain_args, &config).await?
-		}
+		Commands::Watch(watch_args) => commands::watch::execute(&store, &config, watch_args).await?,
+		Commands::GraphRAG(graphrag_args) => commands::graphrag::execute(&store, graphrag_args, &config).await?,
+		Commands::Stats(stats_args) => commands::stats::execute(&store, stats_args, &config).await?,
+		Commands::Explain(explain_args) => commands::explain::execute(&store, explain_args, &config).await?,
 		Commands::Diff(diff_args) => commands::diff::execute(&store, diff_args, &config).await?,
 		Commands::Clear(clear_args) => commands::clear::execute(&store, clear_args).await?,
-		Commands::Branch(_) => unreachable!(), // Already handled above
-		Commands::Config(_) => unreachable!(), // Already handled above
-		Commands::Mcp(_) => unreachable!(),    // Already handled above
-		Commands::Commit(_) => unreachable!(), // Already handled above
-		Commands::Review(_) => unreachable!(), // Already handled above
-		Commands::Release(_) => unreachable!(), // Already handled above
-		Commands::Grep(_) => unreachable!(),   // Already handled above
-		Commands::Format(_) => unreachable!(), // Already handled above
-		Commands::Logs(_) => unreachable!(),   // Already handled above
-		Commands::Models { .. } => unreachable!(), // Already handled above
-		Commands::Export(_) => unreachable!(), // Already handled above
-		Commands::Import(_) => unreachable!(), // Already handled above
+		Commands::Branch(_) => unreachable!(),         // Already handled above
+		Commands::Config(_) => unreachable!(),         // Already handled above
+		Commands::Mcp(_) => unreachable!(),            // Already handled above
+		Commands::Commit(_) => unreachable!(),         // Already handled above
+		Commands::Review(_) => unreachable!(),         // Already handled above
+		Commands::Release(_) => unreachable!(),        // Already handled above
+		Commands::Grep(_) => unreachable!(),           // Already handled above
+		Commands::Format(_) => unreachable!(),         // Already handled above
+		Commands::Logs(_) => unreachable!(),           // Already handled above
+		Commands::Models { .. } => unreachable!(),     // Already handled above
+		Commands::Export(_) => unreachable!(),         // Already handled above
+		Commands::Import(_) => unreachable!(),         // Already handled above
 		Commands::Completion { .. } => unreachable!(), // Already handled above
 	};
 

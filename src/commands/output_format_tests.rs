@@ -29,12 +29,7 @@ mod tests {
 	#[test]
 	fn every_variant_reports_exactly_one_kind() {
 		for format in OutputFormat::value_variants() {
-			let flags = [
-				format.is_cli(),
-				format.is_json(),
-				format.is_md(),
-				format.is_text(),
-			];
+			let flags = [format.is_cli(), format.is_json(), format.is_md(), format.is_text()];
 			assert_eq!(
 				flags.iter().filter(|f| **f).count(),
 				1,

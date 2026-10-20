@@ -68,12 +68,7 @@ mod tests {
 		data.import_bindings
 			.iter()
 			.find(|b| b.local_name == local_name)
-			.unwrap_or_else(|| {
-				panic!(
-					"no binding named {local_name} in {:?}",
-					data.import_bindings
-				)
-			})
+			.unwrap_or_else(|| panic!("no binding named {local_name} in {:?}", data.import_bindings))
 	}
 
 	#[test]
@@ -86,11 +81,7 @@ mod tests {
 
 	#[test]
 	fn a_python_from_import_binds_each_name_with_its_alias() {
-		let (_dir, data) = extract(
-			"mod.py",
-			"python",
-			"from package.helpers import helper as h, other\n",
-		);
+		let (_dir, data) = extract("mod.py", "python", "from package.helpers import helper as h, other\n");
 		assert_eq!(data.import_bindings.len(), 2, "{:?}", data.import_bindings);
 
 		let aliased = binding(&data, "h");
@@ -104,11 +95,7 @@ mod tests {
 
 	#[test]
 	fn a_javascript_namespace_import_binds_the_whole_module() {
-		let (_dir, data) = extract(
-			"app.js",
-			"javascript",
-			"import * as utils from './utils';\n",
-		);
+		let (_dir, data) = extract("app.js", "javascript", "import * as utils from './utils';\n");
 		let namespace = binding(&data, "utils");
 		assert_eq!(namespace.imported_name, None);
 		assert_eq!(namespace.import_path, "./utils");
@@ -123,20 +110,13 @@ mod tests {
 		);
 		assert_eq!(data.import_bindings.len(), 2, "{:?}", data.import_bindings);
 		assert_eq!(binding(&data, "h").imported_name.as_deref(), Some("helper"));
-		assert_eq!(
-			binding(&data, "other").imported_name.as_deref(),
-			Some("other")
-		);
+		assert_eq!(binding(&data, "other").imported_name.as_deref(), Some("other"));
 		assert_eq!(binding(&data, "h").import_path, "./utils");
 	}
 
 	#[test]
 	fn a_rust_use_alias_binds_the_original_item_name() {
-		let (_dir, data) = extract(
-			"lib.rs",
-			"rust",
-			"use crate::helpers::helper as h;\n\nfn main() {}\n",
-		);
+		let (_dir, data) = extract("lib.rs", "rust", "use crate::helpers::helper as h;\n\nfn main() {}\n");
 		let alias = binding(&data, "h");
 		assert_eq!(alias.imported_name.as_deref(), Some("helper"));
 		assert_eq!(alias.import_path, "crate::helpers::helper");
@@ -159,16 +139,8 @@ mod tests {
 		// The Rust arm only fires on `use ... as ...`; a plain import is left to
 		// path-based resolution.
 		let (_dir, data) = extract("lib.rs", "rust", "use std::fmt;\n\nfn main() {}\n");
-		assert!(
-			data.imports.contains(&"std::fmt".to_string()),
-			"{:?}",
-			data.imports
-		);
-		assert!(
-			data.import_bindings.is_empty(),
-			"{:?}",
-			data.import_bindings
-		);
+		assert!(data.imports.contains(&"std::fmt".to_string()), "{:?}", data.imports);
+		assert!(data.import_bindings.is_empty(), "{:?}", data.import_bindings);
 	}
 
 	#[test]
@@ -178,30 +150,20 @@ mod tests {
 		std::fs::write(&path, "fn main() {}").unwrap();
 
 		let err = extract_symbols_from_file(path.to_str().unwrap(), "klingon").unwrap_err();
-		assert_eq!(
-			err.to_string(),
-			"Failed to get language implementation for: klingon"
-		);
+		assert_eq!(err.to_string(), "Failed to get language implementation for: klingon");
 
 		let missing = dir.path().join("gone.rs");
 		let err = extract_symbols_from_file(missing.to_str().unwrap(), "rust").unwrap_err();
 		assert!(
-			err.to_string()
-				.starts_with("Failed to read file for AST extraction:"),
+			err.to_string().starts_with("Failed to read file for AST extraction:"),
 			"{err}"
 		);
 	}
 
 	#[test]
 	fn node_kinds_map_to_coarse_symbol_kinds() {
-		assert_eq!(
-			symbol_kind_from_node_kind("procedure_declaration"),
-			"function"
-		);
-		assert_eq!(
-			symbol_kind_from_node_kind("constructor_declaration"),
-			"function"
-		);
+		assert_eq!(symbol_kind_from_node_kind("procedure_declaration"), "function");
+		assert_eq!(symbol_kind_from_node_kind("constructor_declaration"), "function");
 		assert_eq!(symbol_kind_from_node_kind("init_declaration"), "function");
 		assert_eq!(symbol_kind_from_node_kind("namespace_definition"), "module");
 		assert_eq!(symbol_kind_from_node_kind("package_clause"), "module");
@@ -210,10 +172,7 @@ mod tests {
 		// must not be classified as a function.
 		assert_eq!(symbol_kind_from_node_kind("definition"), "symbol");
 		// "interface" is tested before "class", so a hybrid kind reads as an interface.
-		assert_eq!(
-			symbol_kind_from_node_kind("interface_class_body"),
-			"interface"
-		);
+		assert_eq!(symbol_kind_from_node_kind("interface_class_body"), "interface");
 	}
 
 	#[test]
@@ -255,8 +214,7 @@ mod tests {
 			symbols: vec![declaration("main", "function", 0, 5)],
 		};
 
-		let data =
-			SymbolFileData::from_ast("src/app.js".to_string(), "javascript".to_string(), &ast);
+		let data = SymbolFileData::from_ast("src/app.js".to_string(), "javascript".to_string(), &ast);
 		assert_eq!(data.path, "src/app.js");
 		assert_eq!(data.language, "javascript");
 		assert_eq!(data.imports, ast.imports);
@@ -315,10 +273,7 @@ mod tests {
 		other.symbols = vec![declaration("helper", "function", 0, 1)];
 
 		let edges = discover_symbol_relationships(&[main, utils, other]);
-		let resolved: Vec<_> = edges
-			.iter()
-			.filter(|edge| edge.source == "src/main.js::main")
-			.collect();
+		let resolved: Vec<_> = edges.iter().filter(|edge| edge.source == "src/main.js::main").collect();
 		assert_eq!(resolved.len(), 1, "{resolved:?}");
 		assert_eq!(resolved[0].target, "src/utils.js::helper");
 		assert_eq!(resolved[0].provenance, Provenance::Extracted);

@@ -66,10 +66,7 @@ mod tests {
 	#[test]
 	fn plain_line_strips_markup_but_keeps_words_and_backticks() {
 		let raw = "```\n# Heading\n- **bold** `code`  here\n* -v flag stays\n```";
-		assert_eq!(
-			super::plain_line(raw),
-			"Heading bold `code` here -v flag stays"
-		);
+		assert_eq!(super::plain_line(raw), "Heading bold `code` here -v flag stays");
 		assert_eq!(super::plain_line("  \n "), "");
 	}
 }

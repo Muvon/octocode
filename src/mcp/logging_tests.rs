@@ -81,11 +81,7 @@ mod tests {
 	#[test]
 	fn request_and_response_logging_covers_every_method_shape() {
 		let id = json!(7);
-		log_mcp_request(
-			"tools/call",
-			Some(&json!({"name": "semantic_search"})),
-			Some(&id),
-		);
+		log_mcp_request("tools/call", Some(&json!({"name": "semantic_search"})), Some(&id));
 		log_mcp_request("tools/call", Some(&json!({})), None);
 		log_mcp_request("initialize", None, Some(&id));
 		log_mcp_request("tools/list", None, None);

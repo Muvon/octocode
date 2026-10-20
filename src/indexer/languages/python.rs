@@ -32,11 +32,7 @@ impl Language for Python {
 		// `class_definition` is intentionally excluded so large classes don't collapse
 		// into a single huge chunk. Methods inside classes are captured individually
 		// as `function_definition` via recursion into the class body.
-		vec![
-			"function_definition",
-			"import_statement",
-			"import_from_statement",
-		]
+		vec!["function_definition", "import_statement", "import_from_statement"]
 	}
 
 	fn get_symbol_kinds(&self) -> Vec<&'static str> {
@@ -57,12 +53,9 @@ impl Language for Python {
 
 				// If this function_definition is a method declared inside a class,
 				// add the class name so "Foo.bar" queries can hit via BM25/dense.
-				if let Some(owner) = super::find_enclosing_container_name(
-					node,
-					contents,
-					&["class_definition"],
-					&["identifier"],
-				) {
+				if let Some(owner) =
+					super::find_enclosing_container_name(node, contents, &["class_definition"], &["identifier"])
+				{
 					symbols.push(owner);
 				}
 
@@ -120,9 +113,7 @@ impl Language for Python {
 				// Handle: import module
 				// Handle: import module as alias
 				if let Ok(import_text) = node.utf8_text(contents.as_bytes()) {
-					if let Some(imported_paths) =
-						parse_python_import_statement_full_path(import_text)
-					{
+					if let Some(imported_paths) = parse_python_import_statement_full_path(import_text) {
 						imports.extend(imported_paths);
 					}
 				}
@@ -131,9 +122,7 @@ impl Language for Python {
 				// Handle: from module import item1, item2
 				// Handle: from module import *
 				if let Ok(import_text) = node.utf8_text(contents.as_bytes()) {
-					if let Some(imported_paths) =
-						parse_python_from_import_statement_full_path(import_text)
-					{
+					if let Some(imported_paths) = parse_python_from_import_statement_full_path(import_text) {
 						imports.extend(imported_paths);
 					}
 				}
@@ -178,11 +167,7 @@ impl Language for Python {
 		Vec::new()
 	}
 
-	fn extract_type_relations(
-		&self,
-		node: Node,
-		contents: &str,
-	) -> Vec<(super::TypeRelationKind, String)> {
+	fn extract_type_relations(&self, node: Node, contents: &str) -> Vec<(super::TypeRelationKind, String)> {
 		// Python has no `implements`; bases in `class Foo(Bar, Baz):` are all Extends.
 		// `argument_list` (or `superclasses`, depending on grammar version) holds the bases.
 		let mut out = Vec::new();
@@ -192,10 +177,7 @@ impl Language for Python {
 				if matches!(child.kind(), "argument_list" | "superclasses") {
 					let mut bcursor = child.walk();
 					for base in child.children(&mut bcursor) {
-						if matches!(
-							base.kind(),
-							"identifier" | "attribute" | "subscript" | "call"
-						) {
+						if matches!(base.kind(), "identifier" | "attribute" | "subscript" | "call") {
 							if let Ok(text) = base.utf8_text(contents.as_bytes()) {
 								if let Some(name) = super::simple_type_name(text) {
 									out.push((super::TypeRelationKind::Extends, name));
@@ -250,9 +232,7 @@ impl Python {
 							let target = child_cursor.node();
 							if target.kind() == "identifier" {
 								if let Ok(name) = target.utf8_text(contents.as_bytes()) {
-									if !name.starts_with("_")
-										&& !symbols.iter().any(|s| s.as_str() == name)
-									{
+									if !name.starts_with("_") && !symbols.iter().any(|s| s.as_str() == name) {
 										symbols.push(name.to_string());
 									}
 								}
@@ -271,9 +251,7 @@ impl Python {
 									let target = aug_cursor.node();
 									if target.kind() == "identifier" {
 										if let Ok(name) = target.utf8_text(contents.as_bytes()) {
-											if !name.starts_with("_")
-												&& !symbols.iter().any(|s| s.as_str() == name)
-											{
+											if !name.starts_with("_") && !symbols.iter().any(|s| s.as_str() == name) {
 												symbols.push(name.to_string());
 											}
 										}
@@ -282,8 +260,7 @@ impl Python {
 							}
 						}
 					}
-					"for_statement" | "while_statement" | "if_statement" | "try_statement"
-					| "with_statement" => {
+					"for_statement" | "while_statement" | "if_statement" | "try_statement" | "with_statement" => {
 						// Recursive search in nested blocks, including elif/else/except/
 						// finally clauses, whose own body lives in a further-nested
 						// "block" child (they aren't "block" nodes themselves).
@@ -297,14 +274,9 @@ impl Python {
 								| "except_clause"
 								| "except_group_clause"
 								| "finally_clause" => {
-									for clause_child in stmt_child.children(&mut stmt_child.walk())
-									{
+									for clause_child in stmt_child.children(&mut stmt_child.walk()) {
 										if clause_child.kind() == "block" {
-											self.extract_python_variables(
-												clause_child,
-												contents,
-												symbols,
-											);
+											self.extract_python_variables(clause_child, contents, symbols);
 										}
 									}
 								}

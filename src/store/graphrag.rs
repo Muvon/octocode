@@ -146,19 +146,12 @@ impl<'a> GraphRagOperations<'a> {
 
 	/// Get cache statistics
 	pub fn get_cache_stats(&self) -> CacheStats {
-		self.cache_stats
-			.read()
-			.map(|stats| stats.clone())
-			.unwrap_or_default()
+		self.cache_stats.read().map(|stats| stats.clone()).unwrap_or_default()
 	}
 
 	/// Get adjacent nodes from cache (outgoing relationships only)
 	/// Returns None if not in cache, Some(Vec) if cached (may be empty)
-	fn get_adjacent_nodes_cached(
-		&self,
-		node_id: &str,
-		relation_type: &RelationType,
-	) -> Option<Vec<String>> {
+	fn get_adjacent_nodes_cached(&self, node_id: &str, relation_type: &RelationType) -> Option<Vec<String>> {
 		let cache = self.adjacency_cache.read().ok()?;
 		let result = cache
 			.get(node_id)
@@ -195,11 +188,7 @@ impl<'a> GraphRagOperations<'a> {
 		self.clear_cache();
 
 		// Check if relationships table exists
-		if !self
-			.table_ops
-			.table_exists(tables::GRAPHRAG_RELATIONSHIPS)
-			.await?
-		{
+		if !self.table_ops.table_exists(tables::GRAPHRAG_RELATIONSHIPS).await? {
 			return Ok(());
 		}
 
@@ -234,20 +223,13 @@ impl<'a> GraphRagOperations<'a> {
 			for i in 0..batch.num_rows() {
 				// Parse relation type; only `target_id` needs an owned String.
 				if let Ok(rel_type) = RelationType::from_str(relation_types.value(i)) {
-					self.update_cache(
-						source_ids.value(i),
-						rel_type,
-						target_ids.value(i).to_string(),
-					);
+					self.update_cache(source_ids.value(i), rel_type, target_ids.value(i).to_string());
 					total_relationships += 1;
 				}
 			}
 		}
 
-		tracing::info!(
-			"Built adjacency cache with {} relationships",
-			total_relationships
-		);
+		tracing::info!("Built adjacency cache with {} relationships", total_relationships);
 
 		Ok(())
 	}
@@ -258,11 +240,7 @@ impl<'a> GraphRagOperations<'a> {
 
 	/// Get neighbors of a node using cache (outgoing relationships only)
 	/// Falls back to database query if not in cache
-	pub async fn get_neighbors_cached(
-		&self,
-		node_id: &str,
-		relation_type: &RelationType,
-	) -> Result<Vec<String>> {
+	pub async fn get_neighbors_cached(&self, node_id: &str, relation_type: &RelationType) -> Result<Vec<String>> {
 		// Try cache first
 		if let Some(neighbors) = self.get_adjacent_nodes_cached(node_id, relation_type) {
 			return Ok(neighbors);
@@ -343,10 +321,7 @@ impl<'a> GraphRagOperations<'a> {
 
 	/// Find connected components using cache
 	/// Returns groups of nodes that are connected through the specified relation types
-	pub async fn find_connected_components_cached(
-		&self,
-		relation_types: &[RelationType],
-	) -> Result<Vec<Vec<String>>> {
+	pub async fn find_connected_components_cached(&self, relation_types: &[RelationType]) -> Result<Vec<Vec<String>>> {
 		use std::collections::{HashSet, VecDeque};
 
 		// Get all node IDs
@@ -469,17 +444,13 @@ impl<'a> GraphRagOperations<'a> {
 			while let Some(batch) = results.try_next().await? {
 				if batch.num_rows() > 0 {
 					// Convert batch to CodeBlocks
-					let converter =
-						crate::store::batch_converter::BatchConverter::new(self.code_vector_dim);
+					let converter = crate::store::batch_converter::BatchConverter::new(self.code_vector_dim);
 					let mut code_blocks = converter.batch_to_code_blocks(&batch, None)?;
 					all_blocks.append(&mut code_blocks);
 
 					// Log progress for large datasets
 					if cfg!(debug_assertions) && all_blocks.len() % 1000 == 0 {
-						tracing::debug!(
-							"Loaded {} code blocks for GraphRAG processing...",
-							all_blocks.len()
-						);
+						tracing::debug!("Loaded {} code blocks for GraphRAG processing...", all_blocks.len());
 					}
 				}
 			}
@@ -498,12 +469,10 @@ impl<'a> GraphRagOperations<'a> {
 
 			while let Some(batch) = doc_results.try_next().await? {
 				if batch.num_rows() > 0 {
-					let converter =
-						crate::store::batch_converter::BatchConverter::new(self.code_vector_dim);
+					let converter = crate::store::batch_converter::BatchConverter::new(self.code_vector_dim);
 					let doc_blocks = converter.batch_to_document_blocks(&batch, None)?;
 					for doc in doc_blocks {
-						let is_markdown =
-							doc.path.ends_with(".md") || doc.path.ends_with(".markdown");
+						let is_markdown = doc.path.ends_with(".md") || doc.path.ends_with(".markdown");
 						if is_markdown && !code_block_paths.contains(&doc.path) {
 							markdown_paths.insert(doc.path.clone());
 							// Preserve every document chunk. GraphBuilder groups them by
@@ -536,9 +505,7 @@ impl<'a> GraphRagOperations<'a> {
 	/// Store graph nodes in the database
 	pub async fn store_graph_nodes(&self, node_batch: RecordBatch) -> Result<()> {
 		// Use the same proven pattern as code_blocks, text_blocks, document_blocks
-		self.table_ops
-			.store_batch(tables::GRAPHRAG_NODES, node_batch)
-			.await?;
+		self.table_ops.store_batch(tables::GRAPHRAG_NODES, node_batch).await?;
 
 		// Create the vector index once the table is large enough to benefit (the
 		// optimizer skips indexing small datasets where brute-force is faster).
@@ -562,10 +529,7 @@ impl<'a> GraphRagOperations<'a> {
 					)
 					.await
 				{
-					tracing::warn!(
-						"Failed to create optimized vector index on graphrag_nodes: {}",
-						e
-					);
+					tracing::warn!("Failed to create optimized vector index on graphrag_nodes: {}", e);
 				}
 			}
 		}
@@ -578,11 +542,7 @@ impl<'a> GraphRagOperations<'a> {
 		// LanceDB append requires matching schemas; it does not add nullable
 		// columns automatically. Upgrade pre-provenance derived graph tables in
 		// place before appending the new batch.
-		if self
-			.table_ops
-			.table_exists(tables::GRAPHRAG_RELATIONSHIPS)
-			.await?
-		{
+		if self.table_ops.table_exists(tables::GRAPHRAG_RELATIONSHIPS).await? {
 			let table = self.get_table(tables::GRAPHRAG_RELATIONSHIPS).await?;
 			let schema = table.schema().await?;
 			if schema.field_with_name("provenance").is_err() {
@@ -636,11 +596,7 @@ impl<'a> GraphRagOperations<'a> {
 		for i in 0..rel_batch.num_rows() {
 			// Parse relation type; only `target_id` needs an owned String.
 			if let Ok(rel_type) = RelationType::from_str(relation_types.value(i)) {
-				self.update_cache(
-					source_ids.value(i),
-					rel_type,
-					target_ids.value(i).to_string(),
-				);
+				self.update_cache(source_ids.value(i), rel_type, target_ids.value(i).to_string());
 			}
 		}
 
@@ -658,11 +614,8 @@ impl<'a> GraphRagOperations<'a> {
 
 	/// Clear all graph relationships from the database
 	pub async fn clear_graph_relationships(&self) -> Result<()> {
-		self.table_ops
-			.clear_table(tables::GRAPHRAG_RELATIONSHIPS)
-			.await?;
-		self.invalidate_table_handle(tables::GRAPHRAG_RELATIONSHIPS)
-			.await;
+		self.table_ops.clear_table(tables::GRAPHRAG_RELATIONSHIPS).await?;
+		self.invalidate_table_handle(tables::GRAPHRAG_RELATIONSHIPS).await;
 		// Clear cache when clearing relationships
 		self.clear_cache();
 		Ok(())
@@ -712,11 +665,7 @@ impl<'a> GraphRagOperations<'a> {
 
 	/// Remove GraphRAG relationships associated with multiple file paths.
 	pub async fn remove_graph_relationships_by_paths(&self, paths: &[String]) -> Result<usize> {
-		if !self
-			.table_ops
-			.table_exists(tables::GRAPHRAG_RELATIONSHIPS)
-			.await?
-		{
+		if !self.table_ops.table_exists(tables::GRAPHRAG_RELATIONSHIPS).await? {
 			return Ok(0);
 		}
 
@@ -733,9 +682,10 @@ impl<'a> GraphRagOperations<'a> {
 				in_list_predicate("source", chunk),
 				in_list_predicate("target", chunk)
 			);
-			table.delete(&filter).await.map_err(|e| {
-				anyhow::anyhow!("Failed to delete from graphrag_relationships: {}", e)
-			})?;
+			table
+				.delete(&filter)
+				.await
+				.map_err(|e| anyhow::anyhow!("Failed to delete from graphrag_relationships: {}", e))?;
 		}
 
 		// Invalidate cache for affected nodes
@@ -771,9 +721,7 @@ impl<'a> GraphRagOperations<'a> {
 			while let Some(batch) = results.try_next().await? {
 				if batch.num_rows() > 0 {
 					if let Some(column) = batch.column_by_name("id") {
-						if let Some(id_array) =
-							column.as_any().downcast_ref::<arrow::array::StringArray>()
-						{
+						if let Some(id_array) = column.as_any().downcast_ref::<arrow::array::StringArray>() {
 							for i in 0..id_array.len() {
 								node_ids.push(id_array.value(i).to_string());
 							}
@@ -837,10 +785,7 @@ impl<'a> GraphRagOperations<'a> {
 		} else if all_batches.len() == 1 {
 			Ok(all_batches.into_iter().next().unwrap())
 		} else {
-			Ok(arrow::compute::concat_batches(
-				&all_batches[0].schema(),
-				&all_batches,
-			)?)
+			Ok(arrow::compute::concat_batches(&all_batches[0].schema(), &all_batches)?)
 		}
 	}
 
@@ -869,13 +814,10 @@ impl<'a> GraphRagOperations<'a> {
 			.limit(limit);
 
 		// Apply intelligent search optimization
-		let optimized_query = crate::store::vector_optimizer::VectorOptimizer::optimize_query(
-			query,
-			&table,
-			tables::GRAPHRAG_NODES,
-		)
-		.await
-		.map_err(|e| anyhow::anyhow!("Failed to optimize query: {}", e))?;
+		let optimized_query =
+			crate::store::vector_optimizer::VectorOptimizer::optimize_query(query, &table, tables::GRAPHRAG_NODES)
+				.await
+				.map_err(|e| anyhow::anyhow!("Failed to optimize query: {}", e))?;
 
 		let mut results = optimized_query.execute().await?;
 
@@ -896,20 +838,13 @@ impl<'a> GraphRagOperations<'a> {
 		} else {
 			// Concatenate multiple batches, preserving every column's real type
 			// (the schema includes UInt32 and FixedSizeList columns, not just strings).
-			Ok(arrow::compute::concat_batches(
-				&all_batches[0].schema(),
-				&all_batches,
-			)?)
+			Ok(arrow::compute::concat_batches(&all_batches[0].schema(), &all_batches)?)
 		}
 	}
 
 	/// Get all graph relationships
 	pub async fn get_graph_relationships(&self) -> Result<RecordBatch> {
-		if !self
-			.table_ops
-			.table_exists(tables::GRAPHRAG_RELATIONSHIPS)
-			.await?
-		{
+		if !self.table_ops.table_exists(tables::GRAPHRAG_RELATIONSHIPS).await? {
 			// Return empty batch with expected schema that matches the actual storage schema
 			let schema = Arc::new(Schema::new(vec![
 				Field::new("id", DataType::Utf8, false),
@@ -969,11 +904,7 @@ impl<'a> GraphRagOperations<'a> {
 	) -> Result<Vec<crate::indexer::graphrag::types::CodeRelationship>> {
 		use crate::indexer::graphrag::types::RelationshipDirection;
 
-		if !self
-			.table_ops
-			.table_exists(tables::GRAPHRAG_RELATIONSHIPS)
-			.await?
-		{
+		if !self.table_ops.table_exists(tables::GRAPHRAG_RELATIONSHIPS).await? {
 			return Ok(Vec::new());
 		}
 
@@ -1059,14 +990,10 @@ impl<'a> GraphRagOperations<'a> {
 					description: desc_array.value(i).to_string(),
 					confidence: conf_array.value(i),
 					weight: weight_array.value(i),
-					provenance: provenance_array.map_or(
-						crate::indexer::graphrag::types::Provenance::Extracted,
-						|arr| {
-							crate::indexer::graphrag::types::Provenance::parse_or_default(
-								arr.value(i),
-							)
-						},
-					),
+					provenance: provenance_array
+						.map_or(crate::indexer::graphrag::types::Provenance::Extracted, |arr| {
+							crate::indexer::graphrag::types::Provenance::parse_or_default(arr.value(i))
+						}),
 				};
 				relationships.push(relationship);
 			}
@@ -1080,11 +1007,7 @@ impl<'a> GraphRagOperations<'a> {
 		&self,
 		relation_type: &crate::indexer::graphrag::types::RelationType,
 	) -> Result<Vec<crate::indexer::graphrag::types::CodeRelationship>> {
-		if !self
-			.table_ops
-			.table_exists(tables::GRAPHRAG_RELATIONSHIPS)
-			.await?
-		{
+		if !self.table_ops.table_exists(tables::GRAPHRAG_RELATIONSHIPS).await? {
 			return Ok(Vec::new());
 		}
 
@@ -1160,14 +1083,10 @@ impl<'a> GraphRagOperations<'a> {
 					description: desc_array.value(i).to_string(),
 					confidence: conf_array.value(i),
 					weight: weight_array.value(i),
-					provenance: provenance_array.map_or(
-						crate::indexer::graphrag::types::Provenance::Extracted,
-						|arr| {
-							crate::indexer::graphrag::types::Provenance::parse_or_default(
-								arr.value(i),
-							)
-						},
-					),
+					provenance: provenance_array
+						.map_or(crate::indexer::graphrag::types::Provenance::Extracted, |arr| {
+							crate::indexer::graphrag::types::Provenance::parse_or_default(arr.value(i))
+						}),
 				};
 				relationships.push(relationship);
 			}
@@ -1343,11 +1262,7 @@ impl<'a> GraphRagOperations<'a> {
 		&self,
 	) -> Result<Vec<crate::indexer::graphrag::types::CodeRelationship>> {
 		// Reuse get_node_relationships logic but without filter
-		if !self
-			.table_ops
-			.table_exists(tables::GRAPHRAG_RELATIONSHIPS)
-			.await?
-		{
+		if !self.table_ops.table_exists(tables::GRAPHRAG_RELATIONSHIPS).await? {
 			return Ok(Vec::new());
 		}
 
@@ -1420,14 +1335,10 @@ impl<'a> GraphRagOperations<'a> {
 					description: desc_array.value(i).to_string(),
 					confidence: conf_array.value(i),
 					weight: weight_array.value(i),
-					provenance: provenance_array.map_or(
-						crate::indexer::graphrag::types::Provenance::Extracted,
-						|arr| {
-							crate::indexer::graphrag::types::Provenance::parse_or_default(
-								arr.value(i),
-							)
-						},
-					),
+					provenance: provenance_array
+						.map_or(crate::indexer::graphrag::types::Provenance::Extracted, |arr| {
+							crate::indexer::graphrag::types::Provenance::parse_or_default(arr.value(i))
+						}),
 				};
 				relationships.push(relationship);
 			}
@@ -1457,10 +1368,7 @@ mod tests {
 		assert_eq!(incoming_filter, "target = 'src/main.rs'");
 
 		let both_filter = format!("source = '{}' OR target = '{}'", node_id, node_id);
-		assert_eq!(
-			both_filter,
-			"source = 'src/main.rs' OR target = 'src/main.rs'"
-		);
+		assert_eq!(both_filter, "source = 'src/main.rs' OR target = 'src/main.rs'");
 	}
 
 	#[test]
@@ -1518,16 +1426,10 @@ mod tests {
 		let stats = CacheStats { hits: 7, misses: 3 };
 		assert_eq!(stats.hit_rate(), 0.7);
 
-		let stats = CacheStats {
-			hits: 0,
-			misses: 10,
-		};
+		let stats = CacheStats { hits: 0, misses: 10 };
 		assert_eq!(stats.hit_rate(), 0.0);
 
-		let stats = CacheStats {
-			hits: 10,
-			misses: 0,
-		};
+		let stats = CacheStats { hits: 10, misses: 0 };
 		assert_eq!(stats.hit_rate(), 1.0);
 	}
 

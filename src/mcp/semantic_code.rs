@@ -18,8 +18,7 @@ use tracing::debug;
 
 use crate::config::Config;
 use crate::indexer::search::{
-	search_codebase_with_details_multi_query_text, search_codebase_with_details_text,
-	DetailSearchOptions,
+	search_codebase_with_details_multi_query_text, search_codebase_with_details_text, DetailSearchOptions,
 };
 use crate::indexer::{extract_file_signatures, render_signatures_text, NoindexWalker, PathUtils};
 use crate::mcp::types::McpError;
@@ -47,8 +46,12 @@ impl SemanticCodeProvider {
 		// Validate queries
 		if queries.len() > MAX_QUERIES {
 			return Err(McpError::invalid_params(
-				format!("Too many queries: maximum {} queries allowed, got {}. Use fewer, more specific terms.", MAX_QUERIES, queries.len()),
-				"semantic_search"
+				format!(
+					"Too many queries: maximum {} queries allowed, got {}. Use fewer, more specific terms.",
+					MAX_QUERIES,
+					queries.len()
+				),
+				"semantic_search",
 			));
 		}
 
@@ -58,37 +61,25 @@ impl SemanticCodeProvider {
 
 			if query.len() < 3 {
 				return Err(McpError::invalid_params(
-					format!(
-						"Invalid query {}: must be at least 3 characters long",
-						i + 1
-					),
+					format!("Invalid query {}: must be at least 3 characters long", i + 1),
 					"semantic_search",
 				));
 			}
 			if query.len() > 500 {
 				return Err(McpError::invalid_params(
-					format!(
-						"Invalid query {}: must be no more than 500 characters long",
-						i + 1
-					),
+					format!("Invalid query {}: must be no more than 500 characters long", i + 1),
 					"semantic_search",
 				));
 			}
 			if query.is_empty() {
 				return Err(McpError::invalid_params(
-					format!(
-						"Invalid query {}: cannot be empty or whitespace only",
-						i + 1
-					),
+					format!("Invalid query {}: cannot be empty or whitespace only", i + 1),
 					"semantic_search",
 				));
 			}
 		}
 
-		let mode = arguments
-			.get("mode")
-			.and_then(|v| v.as_str())
-			.unwrap_or("all");
+		let mode = arguments.get("mode").and_then(|v| v.as_str()).unwrap_or("all");
 
 		// Validate mode
 		if !["code", "text", "docs", "commits", "all"].contains(&mode) {
@@ -117,18 +108,12 @@ impl SemanticCodeProvider {
 			));
 		}
 
-		let max_results = arguments
-			.get("max_results")
-			.and_then(|v| v.as_u64())
-			.unwrap_or(3) as usize;
+		let max_results = arguments.get("max_results").and_then(|v| v.as_u64()).unwrap_or(3) as usize;
 
 		// Validate max_results
 		if !(1..=20).contains(&max_results) {
 			return Err(McpError::invalid_params(
-				format!(
-					"Invalid max_results '{}': must be between 1 and 20",
-					max_results
-				),
+				format!("Invalid max_results '{}': must be between 1 and 20", max_results),
 				"semantic_search",
 			));
 		}
@@ -151,14 +136,9 @@ impl SemanticCodeProvider {
 		}
 
 		// Parse and validate language filter if provided
-		let language_filter = if let Some(language_value) =
-			arguments.get("language").filter(|v| !v.is_null())
-		{
+		let language_filter = if let Some(language_value) = arguments.get("language").filter(|v| !v.is_null()) {
 			let language = language_value.as_str().ok_or_else(|| {
-				McpError::invalid_params(
-					"Invalid language parameter: must be a string",
-					"semantic_search",
-				)
+				McpError::invalid_params("Invalid language parameter: must be a string", "semantic_search")
 			})?;
 
 			// Validate language using existing language registry
@@ -245,10 +225,12 @@ impl SemanticCodeProvider {
 
 	/// Execute the view_signatures tool
 	pub async fn execute_view_signatures(&self, arguments: &Value) -> Result<String, McpError> {
-		let files_array = arguments
-			.get("files")
-			.and_then(|v| v.as_array())
-			.ok_or_else(|| McpError::invalid_params("Missing required parameter 'files': must be an array of file paths or glob patterns", "view_signatures"))?;
+		let files_array = arguments.get("files").and_then(|v| v.as_array()).ok_or_else(|| {
+			McpError::invalid_params(
+				"Missing required parameter 'files': must be an array of file paths or glob patterns",
+				"view_signatures",
+			)
+		})?;
 
 		// Validate files array
 		if files_array.is_empty() {
@@ -323,9 +305,7 @@ impl SemanticCodeProvider {
 			if pattern_path.is_file() {
 				// Direct file path — confirm it stays within the working directory
 				// before using it, so absolute paths / ".." can't read arbitrary files.
-				let canonical_pattern_path = pattern_path
-					.canonicalize()
-					.unwrap_or_else(|_| pattern_path.clone());
+				let canonical_pattern_path = pattern_path.canonicalize().unwrap_or_else(|_| pattern_path.clone());
 				if !canonical_pattern_path.starts_with(&canonical_working_directory) {
 					return Err(McpError::invalid_params(
 						format!(
@@ -365,8 +345,7 @@ impl SemanticCodeProvider {
 					continue;
 				}
 
-				let relative_path =
-					PathUtils::to_relative_string(entry.path(), &self.working_directory);
+				let relative_path = PathUtils::to_relative_string(entry.path(), &self.working_directory);
 
 				for glob_pattern in &glob_patterns {
 					if glob_pattern.is_match(&relative_path) {
@@ -413,10 +392,7 @@ fn parse_query_arg(value: Option<&Value>) -> Result<Vec<String>, McpError> {
 			_ => Ok(vec![s.clone()]),
 		},
 		Some(Value::Array(arr)) => {
-			let queries: Vec<String> = arr
-				.iter()
-				.filter_map(|v| v.as_str().map(String::from))
-				.collect();
+			let queries: Vec<String> = arr.iter().filter_map(|v| v.as_str().map(String::from)).collect();
 
 			if queries.is_empty() {
 				return Err(McpError::invalid_params(

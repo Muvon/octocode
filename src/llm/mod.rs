@@ -24,8 +24,8 @@ use std::time::Duration;
 
 // Re-export octolib types for convenience
 pub use octolib::llm::{
-	AiProvider, ChatCompletionParams, Message, MessageBuilder, ProviderFactory, ProviderResponse,
-	ReasoningEffort, StructuredOutputRequest, TokenUsage,
+	AiProvider, ChatCompletionParams, Message, MessageBuilder, ProviderFactory, ProviderResponse, ReasoningEffort,
+	StructuredOutputRequest, TokenUsage,
 };
 
 /// LLM client wrapper that integrates octolib with octocode configuration
@@ -143,10 +143,7 @@ impl LlmClient {
 	}
 
 	/// Chat completion with structured JSON output
-	pub async fn chat_completion_structured<T: DeserializeOwned>(
-		&self,
-		messages: Vec<Message>,
-	) -> Result<T> {
+	pub async fn chat_completion_structured<T: DeserializeOwned>(&self, messages: Vec<Message>) -> Result<T> {
 		// Check if provider supports structured output
 		if !self.provider.supports_structured_output(&self.model) {
 			return Err(anyhow::anyhow!(
@@ -196,11 +193,7 @@ impl LlmClient {
 	}
 
 	/// Chat completion with custom temperature
-	pub async fn chat_completion_with_temperature(
-		&self,
-		messages: Vec<Message>,
-		temperature: f32,
-	) -> Result<String> {
+	pub async fn chat_completion_with_temperature(&self, messages: Vec<Message>, temperature: f32) -> Result<String> {
 		let params = self.with_effort(ChatCompletionParams::new(
 			&messages,
 			&self.model,
@@ -242,12 +235,7 @@ impl LlmClient {
 	/// Ask the model which claims in `text` the `source` does not support.
 	/// `rules` states what counts as unsupported for this kind of source. An
 	/// empty list means every claim is backed; the caller decides what to do.
-	pub async fn unsupported_claims(
-		&self,
-		rules: &str,
-		source: &str,
-		text: &str,
-	) -> Result<Vec<String>> {
+	pub async fn unsupported_claims(&self, rules: &str, source: &str, text: &str) -> Result<Vec<String>> {
 		let system = format!(
 			"You audit a text against the source material it describes. Respond with a single JSON object and nothing else: {{\"unsupported\": [string]}}\n\n\
 			List every claim in the text that the source does not support. For each, quote the claim, then state what the source actually shows. Judge only factual support: wording, style, format and completeness are not your concern. An empty array means every claim is supported.\n\n{}",
@@ -346,9 +334,7 @@ impl LlmClient {
 				}
 			}
 
-			return Err(
-				last_error.unwrap_or_else(|| anyhow::anyhow!("LLM JSON call failed after retries"))
-			);
+			return Err(last_error.unwrap_or_else(|| anyhow::anyhow!("LLM JSON call failed after retries")));
 		}
 
 		// Provider doesn't support structured output — use regular completion with markdown stripping

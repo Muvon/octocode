@@ -44,16 +44,11 @@ Be concise and architectural — explain WHAT it does, WHY it exists, and HOW it
 Do NOT explain line by line. Focus on purpose, design decisions, and relationships.
 If you're uncertain about something, say so explicitly.";
 
-pub async fn execute(
-	store: &Store,
-	args: &ExplainArgs,
-	config: &Config,
-) -> Result<(), anyhow::Error> {
+pub async fn execute(store: &Store, args: &ExplainArgs, config: &Config) -> Result<(), anyhow::Error> {
 	let current_dir = std::env::current_dir()?;
 
 	// Step 1: Resolve target to code content + context
-	let (target_label, code_content, context) =
-		resolve_target(store, &args.target, &current_dir, config).await?;
+	let (target_label, code_content, context) = resolve_target(store, &args.target, &current_dir, config).await?;
 
 	// Step 2: Build LLM prompt
 	let mut user_prompt = format!("Target: {}\n\n", target_label);
@@ -84,10 +79,7 @@ pub async fn execute(
 
 	// Step 3: Call LLM
 	let client = LlmClient::from_config(config)?;
-	let messages = vec![
-		Message::system(EXPLAIN_SYSTEM_PROMPT),
-		Message::user(&user_prompt),
-	];
+	let messages = vec![Message::system(EXPLAIN_SYSTEM_PROMPT), Message::user(&user_prompt)];
 
 	let explanation = client.chat_completion(messages).await?;
 
@@ -201,12 +193,7 @@ fn extract_symbol_from_content(content: &str, symbol: &str) -> Option<String> {
 }
 
 /// Gather context from the index for a file/symbol
-async fn gather_context(
-	store: &Store,
-	file_path: &str,
-	symbol: Option<&str>,
-	config: &Config,
-) -> String {
+async fn gather_context(store: &Store, file_path: &str, symbol: Option<&str>, config: &Config) -> String {
 	let mut context = String::new();
 
 	// Try semantic search for related code

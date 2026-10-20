@@ -42,12 +42,7 @@ impl TextProcessor {
 			let mut char_count = 0;
 
 			// Build chunk content and track character count
-			for (idx, line) in lines
-				.iter()
-				.skip(start_idx)
-				.take(end_idx - start_idx)
-				.enumerate()
-			{
+			for (idx, line) in lines.iter().skip(start_idx).take(end_idx - start_idx).enumerate() {
 				if char_count + line.len() + 1 > chunk_size && !current_content.is_empty() {
 					end_idx = start_idx + idx;
 					break;

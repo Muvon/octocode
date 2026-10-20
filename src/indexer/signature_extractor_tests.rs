@@ -20,9 +20,7 @@ mod tests {
 	fn parse(lang: &str, source: &str) -> (tree_sitter::Tree, Box<dyn languages::Language>) {
 		let lang_impl = languages::get_language(lang).expect("language");
 		let mut parser = Parser::new();
-		parser
-			.set_language(&lang_impl.get_ts_language())
-			.expect("grammar");
+		parser.set_language(&lang_impl.get_ts_language()).expect("grammar");
 		let tree = parser.parse(source, None).expect("parse");
 		(tree, lang_impl)
 	}
@@ -84,10 +82,7 @@ mod tests {
 		let (tree, _) = parse("cpp", source);
 		let namespace = tree.root_node().child(0).expect("namespace node");
 		assert_eq!(namespace.kind(), "namespace_definition");
-		assert_eq!(
-			map_node_kind_to_simple_with_context(namespace, source),
-			"namespace"
-		);
+		assert_eq!(map_node_kind_to_simple_with_context(namespace, source), "namespace");
 	}
 
 	// --- clean_comment_text ----------------------------------------------
@@ -144,10 +139,7 @@ mod tests {
 		let source = "struct Point { x: u8 }\n";
 		let (tree, lang_impl) = parse("rust", source);
 		let item = tree.root_node().child(0).expect("struct");
-		assert_eq!(
-			extract_name(item, source, lang_impl.as_ref()).as_deref(),
-			Some("Point")
-		);
+		assert_eq!(extract_name(item, source, lang_impl.as_ref()).as_deref(), Some("Point"));
 	}
 
 	// --- extract_preceding_comment / extract_file_comment -----------------
@@ -228,10 +220,7 @@ mod tests {
 	#[test]
 	fn a_tilde_fence_hides_its_hash_lines_just_like_a_backtick_fence() {
 		let markdown = "# Heading\n\n~~~\n# not a heading\n~~~\n\n## After\n";
-		assert_eq!(
-			names(&extract_markdown_signatures(markdown)),
-			["Heading", "After"]
-		);
+		assert_eq!(names(&extract_markdown_signatures(markdown)), ["Heading", "After"]);
 	}
 
 	#[test]
@@ -292,8 +281,7 @@ mod tests {
 		let nested = dir.path().join("src/inner");
 		std::fs::create_dir_all(&nested).expect("mkdir");
 		let file = nested.join("lib.rs");
-		std::fs::write(&file, "//! Crate docs\n\npub fn helper() -> u8 {\n\t1\n}\n")
-			.expect("write");
+		std::fs::write(&file, "//! Crate docs\n\npub fn helper() -> u8 {\n\t1\n}\n").expect("write");
 
 		let out = extract_file_signatures(&[file], dir.path()).expect("extract");
 		assert_eq!(out.len(), 1);

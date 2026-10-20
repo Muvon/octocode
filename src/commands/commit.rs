@@ -111,22 +111,15 @@ pub async fn execute(config: &Config, args: &CommitArgs) -> Result<()> {
 	let current_dir = std::env::current_dir()?;
 
 	// Find git repository root
-	let git_root = GitUtils::find_git_root(&current_dir)
-		.ok_or_else(|| anyhow::anyhow!("❌ Not in a git repository!"))?;
+	let git_root =
+		GitUtils::find_git_root(&current_dir).ok_or_else(|| anyhow::anyhow!("❌ Not in a git repository!"))?;
 
 	// Use git root as working directory for all operations
 	let current_dir = git_root;
 
 	// -c/--commit mode: rewrite an existing commit's message
 	if let Some(ref hash) = args.commit {
-		return rewrite_commit_message(
-			&current_dir,
-			config,
-			hash,
-			args.message.as_deref(),
-			args.yes,
-		)
-		.await;
+		return rewrite_commit_message(&current_dir, config, hash, args.message.as_deref(), args.yes).await;
 	}
 
 	// Add all files if requested
@@ -172,8 +165,7 @@ pub async fn execute(config: &Config, args: &CommitArgs) -> Result<()> {
 
 	// Run pre-commit hooks if available and not skipped
 	if !args.no_verify {
-		let originally_staged_files: Vec<String> =
-			staged_files.lines().map(|s| s.to_string()).collect();
+		let originally_staged_files: Vec<String> = staged_files.lines().map(|s| s.to_string()).collect();
 		run_precommit_hooks(&current_dir, args.all, &originally_staged_files).await?;
 	}
 
@@ -207,8 +199,7 @@ pub async fn execute(config: &Config, args: &CommitArgs) -> Result<()> {
 
 	// Generate commit message using AI with intelligent chunking for large diffs
 	println!("\n🤖 Generating commit message...");
-	let commit_message =
-		generate_commit_message_chunked(&current_dir, config, args.message.as_deref()).await?;
+	let commit_message = generate_commit_message_chunked(&current_dir, config, args.message.as_deref()).await?;
 
 	println!("\n📝 Generated commit message:");
 	println!("═══════════════════════════════════");
@@ -235,10 +226,7 @@ pub async fn execute(config: &Config, args: &CommitArgs) -> Result<()> {
 	if args.no_verify {
 		git_args.push("--no-verify");
 	}
-	let output = Command::new("git")
-		.args(&git_args)
-		.current_dir(&current_dir)
-		.output()?;
+	let output = Command::new("git").args(&git_args).current_dir(&current_dir).output()?;
 
 	if !output.status.success() {
 		return Err(anyhow::anyhow!(
@@ -398,8 +386,7 @@ async fn rewrite_commit_message(
 		// The trailing-boundary group is required: without it, `^pick abcd` also
 		// matches OTHER commits whose abbreviated hash merely starts with those 4
 		// chars, flipping them to reword and corrupting the rebase.
-		let hash_alternatives: Vec<&str> =
-			(4..=full_hash.len()).map(|len| &full_hash[..len]).collect();
+		let hash_alternatives: Vec<&str> = (4..=full_hash.len()).map(|len| &full_hash[..len]).collect();
 		let hash_pattern = hash_alternatives.join("|");
 		let seq_script = format!(
 			"#!/bin/sh\nsed -E -i.bak 's/^pick ({})([[:space:]]|$)/reword \\1\\2/' \"$1\"\nif ! grep -q '^reword ' \"$1\"; then\n  echo \"octocode: failed to mark {} for reword\" >&2\n  exit 1\nfi",
@@ -518,28 +505,16 @@ async fn generate_commit_message_chunked(
 
 /// Generate a commit message from a diff string. Serves both staged changes and
 /// -c/--commit rewrites, which pass the target commit's own diff.
-async fn generate_commit_message_from_diff(
-	diff: &str,
-	config: &Config,
-	extra_context: Option<&str>,
-) -> Result<String> {
+async fn generate_commit_message_from_diff(diff: &str, config: &Config, extra_context: Option<&str>) -> Result<String> {
 	let ctx = build_prompt_context(diff, extra_context);
 	let chunks = diff_chunker::chunk_diff(diff);
 
 	if chunks.len() == 1 {
-		let prompt = create_commit_prompt(
-			&chunks[0].content,
-			&ctx,
-			&ctx.files_section,
-			DIFF_SOURCE_LABEL,
-		);
+		let prompt = create_commit_prompt(&chunks[0].content, &ctx, &ctx.files_section, DIFF_SOURCE_LABEL);
 		return draft_commit_message(&prompt, config).await;
 	}
 
-	println!(
-		"📝 Processing large diff in {} chunks in parallel...",
-		chunks.len()
-	);
+	println!("📝 Processing large diff in {} chunks in parallel...", chunks.len());
 	let notes = process_commit_chunks_parallel(&chunks, &ctx, config).await;
 	if notes.len() != chunks.len() {
 		return Err(anyhow::anyhow!(
@@ -549,17 +524,9 @@ async fn generate_commit_message_from_diff(
 		));
 	}
 
-	println!(
-		"🎯 Synthesising commit message from {} chunk summaries...",
-		notes.len()
-	);
+	println!("🎯 Synthesising commit message from {} chunk summaries...", notes.len());
 	let change_list = diff_chunker::combine_commit_messages(notes);
-	let prompt = create_commit_prompt(
-		&change_list,
-		&ctx,
-		&ctx.files_section,
-		CHANGE_LIST_SOURCE_LABEL,
-	);
+	let prompt = create_commit_prompt(&change_list, &ctx, &ctx.files_section, CHANGE_LIST_SOURCE_LABEL);
 	draft_commit_message(&prompt, config).await
 }
 
@@ -667,12 +634,7 @@ struct CommitPromptContext {
 /// `files_section` stays a separate parameter because chunked processing
 /// substitutes it with a chunk-note-wrapped variant of `ctx.files_section`.
 /// `source_label` names what `content` is: a git diff or a merged change list.
-fn create_commit_prompt(
-	content: &str,
-	ctx: &CommitPromptContext,
-	files_section: &str,
-	source_label: &str,
-) -> String {
+fn create_commit_prompt(content: &str, ctx: &CommitPromptContext, files_section: &str, source_label: &str) -> String {
 	format!(
 		"{}{}{}Changes: {} files (+{} -{} lines)\n\n{}\n{}",
 		ctx.guidance_section,
@@ -724,10 +686,7 @@ fn commit_draft_schema() -> serde_json::Value {
 fn render_commit_message(draft: &CommitDraft) -> Result<String> {
 	let kind = draft.kind.trim().to_lowercase();
 	if !COMMIT_TYPES.contains(&kind.as_str()) {
-		return Err(anyhow::anyhow!(
-			"LLM returned unknown commit type '{}'",
-			draft.kind
-		));
+		return Err(anyhow::anyhow!("LLM returned unknown commit type '{}'", draft.kind));
 	}
 
 	let mut subject = plain_line(&draft.subject).trim_end_matches('.').to_string();
@@ -853,9 +812,7 @@ async fn process_commit_chunks_parallel(
 	config: &Config,
 ) -> Vec<String> {
 	let total_chunks = chunks.len();
-	let semaphore = std::sync::Arc::new(tokio::sync::Semaphore::new(
-		diff_chunker::MAX_PARALLEL_CHUNKS,
-	));
+	let semaphore = std::sync::Arc::new(tokio::sync::Semaphore::new(diff_chunker::MAX_PARALLEL_CHUNKS));
 	let mut join_set = JoinSet::new();
 
 	for (i, chunk) in chunks.iter().enumerate() {
@@ -866,17 +823,9 @@ async fn process_commit_chunks_parallel(
 		let semaphore = semaphore.clone();
 
 		join_set.spawn(async move {
-			let _permit = semaphore
-				.acquire_owned()
-				.await
-				.expect("semaphore never closed");
+			let _permit = semaphore.acquire_owned().await.expect("semaphore never closed");
 
-			println!(
-				"  Processing chunk {}/{}: {}",
-				i + 1,
-				total_chunks,
-				chunk_summary
-			);
+			println!("  Processing chunk {}/{}: {}", i + 1, total_chunks, chunk_summary);
 
 			let chunk_note = format!(
 				"NOTE: This is chunk {}/{} of a larger diff and shows only PART of the changes.\n\
@@ -887,8 +836,7 @@ Added lines inside this chunk may belong to files marked M (modified); do not as
 				ctx.files_section
 			);
 
-			let chunk_prompt =
-				create_commit_prompt(&chunk_content, &ctx, &chunk_note, DIFF_SOURCE_LABEL);
+			let chunk_prompt = create_commit_prompt(&chunk_content, &ctx, &chunk_note, DIFF_SOURCE_LABEL);
 			let label = format!("Chunk {}", i + 1);
 
 			match call_llm_with_retry(|| summarise_chunk(&chunk_prompt, &config), &label).await {
@@ -914,9 +862,7 @@ async fn draft_commit_message(prompt: &str, config: &Config) -> Result<String> {
 	let mut rejected = Vec::new();
 	for _ in 0..MAX_AUDIT_ROUNDS {
 		let message = draft_once(&client, &draft_prompt).await?;
-		rejected = client
-			.unsupported_claims(COMMIT_AUDIT_RULES, prompt, &message)
-			.await?;
+		rejected = client.unsupported_claims(COMMIT_AUDIT_RULES, prompt, &message).await?;
 		if rejected.is_empty() {
 			return Ok(message);
 		}
@@ -943,8 +889,7 @@ async fn draft_once(client: &LlmClient, prompt: &str) -> Result<String> {
 	let value = client
 		.chat_completion_json(messages, Some(commit_draft_schema()))
 		.await?;
-	let draft: CommitDraft =
-		serde_json::from_value(value).context("LLM returned malformed commit JSON")?;
+	let draft: CommitDraft = serde_json::from_value(value).context("LLM returned malformed commit JSON")?;
 	render_commit_message(&draft)
 }
 
@@ -952,9 +897,7 @@ async fn draft_once(client: &LlmClient, prompt: &str) -> Result<String> {
 async fn summarise_chunk(prompt: &str, config: &Config) -> Result<String> {
 	let client = LlmClient::from_config(config)?;
 	let messages = vec![Message::system(CHUNK_SYSTEM_PROMPT), Message::user(prompt)];
-	client
-		.chat_completion_with_temperature(messages, LLM_TEMPERATURE)
-		.await
+	client.chat_completion_with_temperature(messages, LLM_TEMPERATURE).await
 }
 
 /// Check if pre-commit binary is available in PATH
@@ -968,8 +911,7 @@ fn is_precommit_available() -> bool {
 
 /// Check if pre-commit is configured in the repository
 fn has_precommit_config(repo_path: &std::path::Path) -> bool {
-	repo_path.join(".pre-commit-config.yaml").exists()
-		|| repo_path.join(".pre-commit-config.yml").exists()
+	repo_path.join(".pre-commit-config.yaml").exists() || repo_path.join(".pre-commit-config.yml").exists()
 }
 
 /// Run pre-commit hooks intelligently based on the situation
@@ -1030,8 +972,7 @@ async fn run_precommit_hooks(
 
 			if modified_output.status.success() {
 				let all_modified_files = String::from_utf8_lossy(&modified_output.stdout);
-				let all_modified_set: std::collections::HashSet<&str> =
-					all_modified_files.lines().collect();
+				let all_modified_set: std::collections::HashSet<&str> = all_modified_files.lines().collect();
 
 				// Only consider files that were originally staged AND were modified by pre-commit
 				let staged_and_modified: Vec<&String> = originally_staged_files

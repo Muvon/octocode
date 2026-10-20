@@ -53,11 +53,7 @@ fn test_plain_redirect_produces_exactly_one_region() {
 /// and GraphRAG's `walk_ast` perform: call `extract_imports_exports` on every
 /// node in the tree independently, without relying on any self-recursion inside
 /// the language implementation.
-fn collect_all_imports_via_full_tree_walk(
-	source: &str,
-	lang: &dyn Language,
-	root: Node,
-) -> Vec<String> {
+fn collect_all_imports_via_full_tree_walk(source: &str, lang: &dyn Language, root: Node) -> Vec<String> {
 	let mut imports = Vec::new();
 	let mut stack = vec![root];
 	while let Some(n) = stack.pop() {
@@ -87,20 +83,14 @@ fn test_nested_function_source_detected_exactly_once() {
 
 	let imports = collect_all_imports_via_full_tree_walk(source, &bash_lang, tree.root_node());
 
-	let inner_count = imports
-		.iter()
-		.filter(|s| s.as_str() == "inner_lib.sh")
-		.count();
+	let inner_count = imports.iter().filter(|s| s.as_str() == "inner_lib.sh").count();
 	assert_eq!(
 		inner_count, 1,
 		"nested function's own source statement should be detected exactly once, got {} in {:?}",
 		inner_count, imports
 	);
 
-	let outer_count = imports
-		.iter()
-		.filter(|s| s.as_str() == "outer_lib.sh")
-		.count();
+	let outer_count = imports.iter().filter(|s| s.as_str() == "outer_lib.sh").count();
 	assert_eq!(
 		outer_count, 1,
 		"outer function's source statement should be detected exactly once, got {} in {:?}",
@@ -127,9 +117,7 @@ fn nodes_of_kind<'a>(node: Node<'a>, kind: &str, out: &mut Vec<Node<'a>>) {
 fn first_of_kind<'a>(tree: &'a tree_sitter::Tree, kind: &str) -> Node<'a> {
 	let mut found = Vec::new();
 	nodes_of_kind(tree.root_node(), kind, &mut found);
-	*found
-		.first()
-		.unwrap_or_else(|| panic!("no {kind} node in source"))
+	*found.first().unwrap_or_else(|| panic!("no {kind} node in source"))
 }
 
 fn registry(files: &[&str]) -> crate::indexer::languages::resolution_utils::FileRegistry {
@@ -142,9 +130,7 @@ fn language_metadata_is_wired_up() {
 	let bash = Bash {};
 	assert_eq!(bash.name(), "bash");
 	assert_eq!(bash.get_file_extensions(), vec!["sh", "bash"]);
-	assert!(bash
-		.get_meaningful_kinds()
-		.contains(&"redirected_statement"));
+	assert!(bash.get_meaningful_kinds().contains(&"redirected_statement"));
 	// Only functions declare a symbol; a bare command declares nothing.
 	assert_eq!(bash.get_symbol_kinds(), vec!["function_definition"]);
 }
@@ -160,14 +146,8 @@ fn node_type_descriptions_cover_every_arm() {
 		bash.get_node_type_description("variable_assignment"),
 		"variable assignments"
 	);
-	assert_eq!(
-		bash.get_node_type_description("command"),
-		"command declarations"
-	);
-	assert_eq!(
-		bash.get_node_type_description("simple_command"),
-		"command declarations"
-	);
+	assert_eq!(bash.get_node_type_description("command"), "command declarations");
+	assert_eq!(bash.get_node_type_description("simple_command"), "command declarations");
 	assert_eq!(bash.get_node_type_description("whatever"), "declarations");
 }
 
@@ -233,16 +213,9 @@ fn source_statements_inside_a_function_become_imports() {
 }
 ";
 	let tree = parse_tree(source);
-	let (imports, exports) =
-		Bash {}.extract_imports_exports(first_of_kind(&tree, "function_definition"), source);
-	assert!(
-		imports.contains(&"./lib/helpers.sh".to_string()),
-		"{imports:?}"
-	);
-	assert!(
-		imports.contains(&"./lib/other.sh".to_string()),
-		"{imports:?}"
-	);
+	let (imports, exports) = Bash {}.extract_imports_exports(first_of_kind(&tree, "function_definition"), source);
+	assert!(imports.contains(&"./lib/helpers.sh".to_string()), "{imports:?}");
+	assert!(imports.contains(&"./lib/other.sh".to_string()), "{imports:?}");
 	assert!(exports.is_empty(), "bash has no explicit exports");
 }
 
@@ -308,8 +281,5 @@ fn relative_and_absolute_sources_resolve_against_the_registry() {
 			.as_deref(),
 		Some("scripts/lib/helpers.sh")
 	);
-	assert_eq!(
-		bash.resolve_import("./nowhere.sh", "scripts/build.sh", &files),
-		None
-	);
+	assert_eq!(bash.resolve_import("./nowhere.sh", "scripts/build.sh", &files), None);
 }

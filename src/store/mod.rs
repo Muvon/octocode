@@ -33,9 +33,9 @@ use tokio::sync::RwLock;
 
 // Import modular components
 use self::{
-	batch_converter::BatchConverter, block_trait::BlockType, debug::DebugOperations,
-	graphrag::GraphRagOperations, metadata::MetadataOperations, sql::escape_single_quotes,
-	table_ops::TableOperations, vector_optimizer::VectorOptimizer,
+	batch_converter::BatchConverter, block_trait::BlockType, debug::DebugOperations, graphrag::GraphRagOperations,
+	metadata::MetadataOperations, sql::escape_single_quotes, table_ops::TableOperations,
+	vector_optimizer::VectorOptimizer,
 };
 
 pub mod batch_converter;
@@ -219,10 +219,7 @@ impl Store {
 
 	/// Open a branch delta store for an explicit working directory — no
 	/// dependency on the process current directory.
-	pub async fn new_for_branch_at(
-		working_directory: &std::path::Path,
-		branch_name: &str,
-	) -> Result<Self> {
+	pub async fn new_for_branch_at(working_directory: &std::path::Path, branch_name: &str) -> Result<Self> {
 		let index_path = crate::storage::get_branch_database_path(working_directory, branch_name)?;
 		Self::new_with_path(index_path).await
 	}
@@ -245,10 +242,9 @@ impl Store {
 		// Get vector dimensions from both code and text model configurations.
 		// Routed through the shared provider so local models resolve their
 		// dimension without loading weights in this process.
-		let code_vector_dim =
-			crate::embedding::create_shared_provider(&config.embedding.code_model)
-				.await?
-				.get_dimension();
+		let code_vector_dim = crate::embedding::create_shared_provider(&config.embedding.code_model)
+			.await?
+			.get_dimension();
 		// Same model for code and text (a common setup): reuse the dimension
 		// rather than constructing the provider a second time.
 		let text_vector_dim = if config.embedding.text_model == config.embedding.code_model {
@@ -397,11 +393,7 @@ impl Store {
 	/// Build a `GraphRagOperations` sharing this Store's table cache. Centralises
 	/// the three-argument construction that every GraphRAG delegate needs.
 	fn graphrag_ops(&self) -> GraphRagOperations<'_> {
-		GraphRagOperations::new(
-			&self.db,
-			self.code_vector_dim,
-			Arc::clone(&self.table_cache),
-		)
+		GraphRagOperations::new(&self.db, self.code_vector_dim, Arc::clone(&self.table_cache))
 	}
 
 	pub async fn initialize_collections(&self) -> Result<()> {
@@ -522,46 +514,25 @@ impl Store {
 		Ok(false)
 	}
 
-	pub async fn store_code_blocks(
-		&self,
-		blocks: &[CodeBlock],
-		embeddings: &[Vec<f32>],
-	) -> Result<()> {
-		self.store_blocks(blocks, embeddings, self.code_vector_dim)
-			.await
+	pub async fn store_code_blocks(&self, blocks: &[CodeBlock], embeddings: &[Vec<f32>]) -> Result<()> {
+		self.store_blocks(blocks, embeddings, self.code_vector_dim).await
 	}
 
-	pub async fn store_text_blocks(
-		&self,
-		blocks: &[TextBlock],
-		embeddings: &[Vec<f32>],
-	) -> Result<()> {
-		self.store_blocks(blocks, embeddings, self.text_vector_dim)
-			.await
+	pub async fn store_text_blocks(&self, blocks: &[TextBlock], embeddings: &[Vec<f32>]) -> Result<()> {
+		self.store_blocks(blocks, embeddings, self.text_vector_dim).await
 	}
 
-	pub async fn store_document_blocks(
-		&self,
-		blocks: &[DocumentBlock],
-		embeddings: &[Vec<f32>],
-	) -> Result<()> {
-		self.store_blocks(blocks, embeddings, self.text_vector_dim)
-			.await
+	pub async fn store_document_blocks(&self, blocks: &[DocumentBlock], embeddings: &[Vec<f32>]) -> Result<()> {
+		self.store_blocks(blocks, embeddings, self.text_vector_dim).await
 	}
 
-	pub async fn store_commit_blocks(
-		&self,
-		blocks: &[CommitBlock],
-		embeddings: &[Vec<f32>],
-	) -> Result<()> {
-		self.store_blocks(blocks, embeddings, self.text_vector_dim)
-			.await
+	pub async fn store_commit_blocks(&self, blocks: &[CommitBlock], embeddings: &[Vec<f32>]) -> Result<()> {
+		self.store_blocks(blocks, embeddings, self.text_vector_dim).await
 	}
 
 	// Search operations with distance conversion
 	pub async fn get_code_blocks(&self, embedding: Vec<f32>) -> Result<Vec<CodeBlock>> {
-		self.get_code_blocks_with_config(embedding, None, None)
-			.await
+		self.get_code_blocks_with_config(embedding, None, None).await
 	}
 
 	pub async fn get_code_blocks_with_config(
@@ -593,8 +564,7 @@ impl Store {
 
 	// Similar implementations for text and document blocks...
 	pub async fn get_text_blocks(&self, embedding: Vec<f32>) -> Result<Vec<TextBlock>> {
-		self.get_text_blocks_with_config(embedding, None, None)
-			.await
+		self.get_text_blocks_with_config(embedding, None, None).await
 	}
 
 	pub async fn get_text_blocks_with_config(
@@ -603,19 +573,12 @@ impl Store {
 		limit: Option<usize>,
 		distance_threshold: Option<f32>,
 	) -> Result<Vec<TextBlock>> {
-		self.get_blocks_with_config(
-			embedding,
-			limit,
-			distance_threshold,
-			None,
-			self.text_vector_dim,
-		)
-		.await
+		self.get_blocks_with_config(embedding, limit, distance_threshold, None, self.text_vector_dim)
+			.await
 	}
 
 	pub async fn get_document_blocks(&self, embedding: Vec<f32>) -> Result<Vec<DocumentBlock>> {
-		self.get_document_blocks_with_config(embedding, None, None)
-			.await
+		self.get_document_blocks_with_config(embedding, None, None).await
 	}
 
 	pub async fn get_document_blocks_with_config(
@@ -624,14 +587,8 @@ impl Store {
 		limit: Option<usize>,
 		distance_threshold: Option<f32>,
 	) -> Result<Vec<DocumentBlock>> {
-		self.get_blocks_with_config(
-			embedding,
-			limit,
-			distance_threshold,
-			None,
-			self.text_vector_dim,
-		)
-		.await
+		self.get_blocks_with_config(embedding, limit, distance_threshold, None, self.text_vector_dim)
+			.await
 	}
 
 	pub async fn get_commit_blocks_with_config(
@@ -640,14 +597,8 @@ impl Store {
 		limit: Option<usize>,
 		distance_threshold: Option<f32>,
 	) -> Result<Vec<CommitBlock>> {
-		self.get_blocks_with_config(
-			embedding,
-			limit,
-			distance_threshold,
-			None,
-			self.text_vector_dim,
-		)
-		.await
+		self.get_blocks_with_config(embedding, limit, distance_threshold, None, self.text_vector_dim)
+			.await
 	}
 
 	// Delegate other operations to modular components
@@ -662,27 +613,15 @@ impl Store {
 		}
 
 		let graphrag_ops = self.graphrag_ops();
-		graphrag_ops
-			.remove_graph_relationships_by_paths(paths)
-			.await?;
+		graphrag_ops.remove_graph_relationships_by_paths(paths).await?;
 
 		let table_ops = self.table_ops();
-		table_ops
-			.remove_blocks_by_paths(paths, tables::GRAPHRAG_NODES)
-			.await?;
-		table_ops
-			.remove_blocks_by_paths(paths, tables::CODE_BLOCKS)
-			.await?;
-		table_ops
-			.remove_blocks_by_paths(paths, tables::TEXT_BLOCKS)
-			.await?;
-		table_ops
-			.remove_blocks_by_paths(paths, tables::DOCUMENT_BLOCKS)
-			.await?;
+		table_ops.remove_blocks_by_paths(paths, tables::GRAPHRAG_NODES).await?;
+		table_ops.remove_blocks_by_paths(paths, tables::CODE_BLOCKS).await?;
+		table_ops.remove_blocks_by_paths(paths, tables::TEXT_BLOCKS).await?;
+		table_ops.remove_blocks_by_paths(paths, tables::DOCUMENT_BLOCKS).await?;
 		// Also remove file metadata to prevent stale mtime from causing skip-on-reindex
-		table_ops
-			.remove_blocks_by_paths(paths, tables::FILE_METADATA)
-			.await?;
+		table_ops.remove_blocks_by_paths(paths, tables::FILE_METADATA).await?;
 
 		for table in [
 			tables::GRAPHRAG_NODES,
@@ -700,11 +639,7 @@ impl Store {
 	pub async fn get_all_indexed_file_paths(&self) -> Result<std::collections::HashSet<String>> {
 		let table_ops = self.table_ops();
 		table_ops
-			.get_all_indexed_file_paths(&[
-				tables::CODE_BLOCKS,
-				tables::TEXT_BLOCKS,
-				tables::DOCUMENT_BLOCKS,
-			])
+			.get_all_indexed_file_paths(&[tables::CODE_BLOCKS, tables::TEXT_BLOCKS, tables::DOCUMENT_BLOCKS])
 			.await
 	}
 
@@ -823,12 +758,7 @@ impl Store {
 						.await
 						.insert(B::TABLE_NAME.to_string(), true);
 				} else if let Err(e) = table_ops
-					.create_vector_index_optimized(
-						B::TABLE_NAME,
-						"embedding",
-						vector_dim,
-						self.quantization,
-					)
+					.create_vector_index_optimized(B::TABLE_NAME, "embedding", vector_dim, self.quantization)
 					.await
 				{
 					tracing::warn!("Failed to create optimized vector index: {}", e);
@@ -910,11 +840,7 @@ impl Store {
 
 				// Apply distance threshold if specified
 				if let Some(distance_threshold_value) = distance_threshold {
-					blocks.retain(|block| {
-						block
-							.distance()
-							.is_none_or(|d| d <= distance_threshold_value)
-					});
+					blocks.retain(|block| block.distance().is_none_or(|d| d <= distance_threshold_value));
 				}
 
 				all_blocks.append(&mut blocks);
@@ -923,9 +849,7 @@ impl Store {
 
 		// Sort results by distance (ascending - lower distance = higher similarity)
 		all_blocks.sort_unstable_by(|a, b| match (a.distance(), b.distance()) {
-			(Some(dist_a), Some(dist_b)) => dist_a
-				.partial_cmp(&dist_b)
-				.unwrap_or(std::cmp::Ordering::Equal),
+			(Some(dist_a), Some(dist_b)) => dist_a.partial_cmp(&dist_b).unwrap_or(std::cmp::Ordering::Equal),
 			(Some(_), None) => std::cmp::Ordering::Less, // Results with distance come first
 			(None, Some(_)) => std::cmp::Ordering::Greater,
 			(None, None) => std::cmp::Ordering::Equal,
@@ -990,15 +914,9 @@ impl Store {
 		if !table_ops.table_exists(tables::DOCUMENT_BLOCKS).await? {
 			return Ok(false);
 		}
-		let table = self
-			.db
-			.open_table(tables::DOCUMENT_BLOCKS)
-			.execute()
-			.await?;
+		let table = self.db.open_table(tables::DOCUMENT_BLOCKS).execute().await?;
 		let markdown_rows = table
-			.count_rows(Some(
-				"path LIKE '%.md' OR path LIKE '%.markdown'".to_string(),
-			))
+			.count_rows(Some("path LIKE '%.md' OR path LIKE '%.markdown'".to_string()))
 			.await?;
 		Ok(markdown_rows > 0)
 	}
@@ -1056,9 +974,7 @@ impl Store {
 
 	pub async fn store_commits_last_commit_hash(&self, commit_hash: &str) -> Result<()> {
 		let metadata_ops = self.metadata_ops();
-		metadata_ops
-			.store_commits_last_commit_hash(commit_hash)
-			.await
+		metadata_ops.store_commits_last_commit_hash(commit_hash).await
 	}
 
 	// GraphRAG operations
@@ -1104,9 +1020,7 @@ impl Store {
 
 	pub async fn remove_graph_relationships_by_path(&self, file_path: &str) -> Result<usize> {
 		let graphrag_ops = self.graphrag_ops();
-		graphrag_ops
-			.remove_graph_relationships_by_path(file_path)
-			.await
+		graphrag_ops.remove_graph_relationships_by_path(file_path).await
 	}
 
 	pub async fn get_all_graph_nodes(&self) -> Result<RecordBatch> {
@@ -1131,9 +1045,7 @@ impl Store {
 		direction: crate::indexer::graphrag::types::RelationshipDirection,
 	) -> Result<Vec<crate::indexer::graphrag::types::CodeRelationship>> {
 		let graphrag_ops = self.graphrag_ops();
-		graphrag_ops
-			.get_node_relationships(node_id, direction)
-			.await
+		graphrag_ops.get_node_relationships(node_id, direction).await
 	}
 
 	/// Get relationships filtered by type (NEW - Phase 1.2)
@@ -1230,11 +1142,7 @@ impl Store {
 
 	/// Fetch up to `limit` code blocks for a file path. Used by GraphRAG
 	/// expansion to pull candidates from structurally-related files.
-	pub async fn get_code_blocks_by_path(
-		&self,
-		path: &str,
-		limit: usize,
-	) -> Result<Vec<CodeBlock>> {
+	pub async fn get_code_blocks_by_path(&self, path: &str, limit: usize) -> Result<Vec<CodeBlock>> {
 		self.query_code_blocks_by_path(path, Some(limit)).await
 	}
 
@@ -1243,11 +1151,7 @@ impl Store {
 		self.query_code_blocks_by_path(path, None).await
 	}
 
-	async fn query_code_blocks_by_path(
-		&self,
-		path: &str,
-		limit: Option<usize>,
-	) -> Result<Vec<CodeBlock>> {
+	async fn query_code_blocks_by_path(&self, path: &str, limit: Option<usize>) -> Result<Vec<CodeBlock>> {
 		let table_ops = self.table_ops();
 		if !table_ops.table_exists(tables::CODE_BLOCKS).await? {
 			return Ok(Vec::new());
@@ -1278,15 +1182,9 @@ impl Store {
 	}
 
 	// Add missing methods for backward compatibility
-	pub async fn get_file_blocks_metadata(
-		&self,
-		file_path: &str,
-		table_name: &str,
-	) -> Result<Vec<String>> {
+	pub async fn get_file_blocks_metadata(&self, file_path: &str, table_name: &str) -> Result<Vec<String>> {
 		let table_ops = self.table_ops();
-		table_ops
-			.get_file_blocks_metadata(file_path, table_name)
-			.await
+		table_ops.get_file_blocks_metadata(file_path, table_name).await
 	}
 
 	pub async fn remove_blocks_by_hashes(&self, hashes: &[String], table_name: &str) -> Result<()> {
@@ -1383,12 +1281,11 @@ impl Store {
 				// the unweighted default — e.g. vector=0.3 / keyword=0.7 favours BM25
 				// hits, which matters for identifier-heavy code queries where the FTS
 				// signal is the cleaner one.
-				let reranker =
-					std::sync::Arc::new(crate::store::weighted_rrf::WeightedRRFReranker::new(
-						self.rrf_k,
-						query.vector_weight,
-						query.keyword_weight,
-					));
+				let reranker = std::sync::Arc::new(crate::store::weighted_rrf::WeightedRRFReranker::new(
+					self.rrf_k,
+					query.vector_weight,
+					query.keyword_weight,
+				));
 				let mut vq = table
 					.vector_search(embedding.clone())?
 					.distance_type(DistanceType::Cosine)

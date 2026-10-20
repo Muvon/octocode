@@ -21,8 +21,7 @@ use std::sync::LazyLock;
 use tree_sitter::Node;
 
 static MARKDOWN_LINK_RE: LazyLock<Regex> = LazyLock::new(|| {
-	Regex::new(r"\[[^\]]*\]\(([^)]+\.(?:md|markdown))(?:#[^)]*)?\)")
-		.expect("markdown link regex must be valid")
+	Regex::new(r"\[[^\]]*\]\(([^)]+\.(?:md|markdown))(?:#[^)]*)?\)").expect("markdown link regex must be valid")
 });
 
 fn extract_markdown_links(contents: &str) -> Vec<String> {
@@ -171,25 +170,14 @@ Long extension is kept: [Long](./manual.markdown)
 			"introduction/credit-accounts.md",
 			&all_files,
 		);
-		assert_eq!(
-			resolved,
-			Some("core-architecture/credit-suite.md".to_string())
-		);
+		assert_eq!(resolved, Some("core-architecture/credit-suite.md".to_string()));
 
 		// Same-directory link
-		let resolved = md.resolve_import(
-			"./adapters.md",
-			"introduction/credit-accounts.md",
-			&all_files,
-		);
+		let resolved = md.resolve_import("./adapters.md", "introduction/credit-accounts.md", &all_files);
 		assert_eq!(resolved, Some("introduction/adapters.md".to_string()));
 
 		// Non-existent target
-		let resolved = md.resolve_import(
-			"../nonexistent.md",
-			"introduction/credit-accounts.md",
-			&all_files,
-		);
+		let resolved = md.resolve_import("../nonexistent.md", "introduction/credit-accounts.md", &all_files);
 		assert_eq!(resolved, None);
 	}
 
@@ -212,10 +200,7 @@ Long extension is kept: [Long](./manual.markdown)
 		);
 		assert_eq!(
 			resolved,
-			Some(
-				"projects/gearbox/autodocs-about/docs/core-architecture/credit-suite.md"
-					.to_string()
-			),
+			Some("projects/gearbox/autodocs-about/docs/core-architecture/credit-suite.md".to_string()),
 			"Same-dir link should resolve"
 		);
 
@@ -227,9 +212,7 @@ Long extension is kept: [Long](./manual.markdown)
 		);
 		assert_eq!(
 			resolved,
-			Some(
-				"projects/gearbox/autodocs-about/docs/introduction/credit-accounts.md".to_string()
-			),
+			Some("projects/gearbox/autodocs-about/docs/introduction/credit-accounts.md".to_string()),
 			"Parent-dir link should resolve"
 		);
 	}

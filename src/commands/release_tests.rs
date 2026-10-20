@@ -17,12 +17,7 @@ mod tests {
 	use super::super::*;
 	use tempfile::TempDir;
 
-	fn analysis(
-		breaking: &[&str],
-		features: &[&str],
-		fixes: &[&str],
-		other: &[&str],
-	) -> CommitAnalysis {
+	fn analysis(breaking: &[&str], features: &[&str], fixes: &[&str], other: &[&str]) -> CommitAnalysis {
 		CommitAnalysis {
 			commits: vec![],
 			breaking_changes: breaking.iter().map(|s| s.to_string()).collect(),
@@ -48,10 +43,7 @@ mod tests {
 	#[test]
 	fn project_type_is_detected_from_the_manifest_that_is_present() {
 		let dir = TempDir::new().unwrap();
-		assert!(matches!(
-			detect_project_type(dir.path()).unwrap(),
-			ProjectType::Unknown
-		));
+		assert!(matches!(detect_project_type(dir.path()).unwrap(), ProjectType::Unknown));
 
 		for (file, expect) in [
 			("pyproject.toml", "Python (pyproject.toml)"),
@@ -80,22 +72,13 @@ mod tests {
 			extract_version_from_line("version = \"1.2.3\"").as_deref(),
 			Some("1.2.3")
 		);
-		assert_eq!(
-			extract_version_from_line("version = '4.5.6'").as_deref(),
-			Some("4.5.6")
-		);
+		assert_eq!(extract_version_from_line("version = '4.5.6'").as_deref(), Some("4.5.6"));
 		assert_eq!(extract_version_from_line("version = 7"), None);
 	}
 
 	#[test]
 	fn semver_validation_accepts_the_spec_and_rejects_junk() {
-		for good in [
-			"0.0.0",
-			"1.2.3",
-			"1.2.3-beta.1",
-			"1.2.3+build.5",
-			"1.2.3-rc-1+sha.abc",
-		] {
+		for good in ["0.0.0", "1.2.3", "1.2.3-beta.1", "1.2.3+build.5", "1.2.3-rc-1+sha.abc"] {
 			assert!(is_valid_semver(good), "{good} should be valid");
 		}
 		for bad in [
@@ -115,8 +98,7 @@ mod tests {
 
 	#[test]
 	fn conventional_commits_are_split_into_type_scope_and_description() {
-		let (kind, scope, description, breaking) =
-			parse_conventional_commit("feat(api): add endpoint");
+		let (kind, scope, description, breaking) = parse_conventional_commit("feat(api): add endpoint");
 		assert_eq!(kind, "feat");
 		assert_eq!(scope.as_deref(), Some("api"));
 		assert_eq!(description, "add endpoint");
@@ -137,10 +119,7 @@ mod tests {
 
 		// A `!` inside the description is not a breaking marker.
 		let (_, _, _, breaking) = parse_conventional_commit("fix: prevent panic!() in parser");
-		assert!(
-			!breaking,
-			"an exclamation in prose must not signal breaking"
-		);
+		assert!(!breaking, "an exclamation in prose must not signal breaking");
 
 		let (_, _, _, breaking) = parse_conventional_commit("chore: tidy\n\nBREAKING CHANGE: api");
 		assert!(breaking);
@@ -221,10 +200,7 @@ mod tests {
 	#[test]
 	fn a_toml_field_is_extracted_by_name() {
 		let content = "[package]\nname = \"octocode\"\nversion = \"1.0.0\"\n";
-		assert_eq!(
-			extract_field_from_toml(content, "name").as_deref(),
-			Some("octocode")
-		);
+		assert_eq!(extract_field_from_toml(content, "name").as_deref(), Some("octocode"));
 		assert_eq!(extract_field_from_toml(content, "missing"), None);
 	}
 
@@ -243,15 +219,13 @@ mod tests {
 
 	#[test]
 	fn updating_a_pyproject_version_preserves_the_quote_style() {
-		let content =
-			"[project]\nname = \"x\"\nversion = \"1.0.0\"\n\n[tool.black]\nversion = \"9.9.9\"\n";
+		let content = "[project]\nname = \"x\"\nversion = \"1.0.0\"\n\n[tool.black]\nversion = \"9.9.9\"\n";
 		let updated = update_pyproject_version(content, "1.1.0").unwrap();
 		assert!(updated.contains("version = \"1.1.0\""));
 		// The unrelated section keeps its own value.
 		assert!(updated.contains("version = \"9.9.9\""));
 
-		let single =
-			update_pyproject_version("[tool.poetry]\nversion = '1.0.0'\n", "1.1.0").unwrap();
+		let single = update_pyproject_version("[tool.poetry]\nversion = '1.0.0'\n", "1.1.0").unwrap();
 		assert!(single.contains("version = '1.1.0'"), "{single}");
 	}
 
@@ -280,10 +254,7 @@ mod tests {
 		assert!(updated.contains("\"name\": \"x\""));
 
 		// A field that isn't present leaves the document untouched.
-		assert_eq!(
-			update_json_version(content, "1.1.0", "nope").unwrap(),
-			content
-		);
+		assert_eq!(update_json_version(content, "1.1.0", "nope").unwrap(), content);
 	}
 
 	#[test]
@@ -309,8 +280,7 @@ mod tests {
 
 	#[test]
 	fn a_plist_short_version_string_is_rewritten() {
-		let content =
-			"<dict>\n\t<key>CFBundleShortVersionString</key>\n\t<string>1.0.0</string>\n</dict>";
+		let content = "<dict>\n\t<key>CFBundleShortVersionString</key>\n\t<string>1.0.0</string>\n</dict>";
 		let updated = update_plist_version(content, "1.1.0").unwrap();
 		assert!(updated.contains("<string>1.1.0</string>"));
 	}
@@ -332,17 +302,11 @@ mod tests {
 			"{\"name\": \"pwa\", \"start_url\": \"/\"}",
 		)
 		.unwrap();
-		assert!(matches!(
-			detect_project_type(dir.path()).unwrap(),
-			ProjectType::Unknown
-		));
+		assert!(matches!(detect_project_type(dir.path()).unwrap(), ProjectType::Unknown));
 
 		std::fs::write(dir.path().join("manifest.json"), EXTENSION_MANIFEST).unwrap();
 		let detected = detect_project_type(dir.path()).unwrap();
-		assert_eq!(
-			format_project_type(&detected),
-			"Chrome extension (manifest.json)"
-		);
+		assert_eq!(format_project_type(&detected), "Chrome extension (manifest.json)");
 	}
 
 	#[test]
@@ -351,11 +315,7 @@ mod tests {
 		std::fs::write(dir.path().join("manifest.json"), EXTENSION_MANIFEST).unwrap();
 		for sub in ["public", "dist", "node_modules"] {
 			std::fs::create_dir_all(dir.path().join(sub)).unwrap();
-			std::fs::write(
-				dir.path().join(sub).join("manifest.json"),
-				EXTENSION_MANIFEST,
-			)
-			.unwrap();
+			std::fs::write(dir.path().join(sub).join("manifest.json"), EXTENSION_MANIFEST).unwrap();
 		}
 		std::fs::create_dir_all(dir.path().join("web")).unwrap();
 		std::fs::write(dir.path().join("web/manifest.json"), "{\"name\": \"pwa\"}").unwrap();
@@ -410,25 +370,13 @@ mod tests {
 		let manifest = dir.path().join("manifest.json");
 		std::fs::write(&manifest, EXTENSION_MANIFEST).unwrap();
 
-		let result = update_project_version(
-			&ProjectType::ChromeExtension(manifest.clone()),
-			"1.1.0-beta.1",
-		)
-		.await;
+		let result = update_project_version(&ProjectType::ChromeExtension(manifest.clone()), "1.1.0-beta.1").await;
 
 		assert!(result.is_err());
-		assert_eq!(
-			std::fs::read_to_string(&manifest).unwrap(),
-			EXTENSION_MANIFEST
-		);
+		assert_eq!(std::fs::read_to_string(&manifest).unwrap(), EXTENSION_MANIFEST);
 	}
 
-	fn typed(
-		commit_type: &str,
-		message: &str,
-		scope: Option<&str>,
-		description: &str,
-	) -> CommitInfo {
+	fn typed(commit_type: &str, message: &str, scope: Option<&str>, description: &str) -> CommitInfo {
 		let mut info = commit(message, scope, description);
 		info.commit_type = commit_type.to_string();
 		info
@@ -440,12 +388,7 @@ mod tests {
 		a.commits = vec![
 			typed("feat", "feat(api): add", Some("api"), "add"),
 			typed("fix", "fix(index): resume", Some("index"), "resume"),
-			typed(
-				"chore",
-				"chore(deps): bump serde",
-				Some("deps"),
-				"bump serde",
-			),
+			typed("chore", "chore(deps): bump serde", Some("deps"), "bump serde"),
 		];
 		let sections = changelog_sections(&a);
 		assert!(
@@ -457,8 +400,7 @@ mod tests {
 			"{sections}"
 		);
 		assert!(
-			sections
-				.contains("1 maintenance, dependency, and tooling update not listed individually."),
+			sections.contains("1 maintenance, dependency, and tooling update not listed individually."),
 			"{sections}"
 		);
 		assert!(!sections.contains("Release Summary"), "{sections}");
@@ -468,12 +410,7 @@ mod tests {
 	fn only_feat_fix_perf_or_breaking_commits_earn_a_prose_summary() {
 		let mut quiet = analysis(&[], &[], &[], &[]);
 		quiet.commits = vec![
-			typed(
-				"chore",
-				"chore(deps): bump serde",
-				Some("deps"),
-				"bump serde",
-			),
+			typed("chore", "chore(deps): bump serde", Some("deps"), "bump serde"),
 			typed("docs", "docs: refresh", None, "refresh"),
 		];
 		assert!(!has_user_facing_changes(&quiet));

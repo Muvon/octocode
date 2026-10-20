@@ -25,8 +25,7 @@ pub trait BlockType: Clone + Send + Sync + 'static {
 	const TABLE_NAME: &'static str;
 
 	/// Convert blocks to Arrow RecordBatch
-	fn to_batch(blocks: &[Self], embeddings: &[Vec<f32>], vector_dim: usize)
-		-> Result<RecordBatch>;
+	fn to_batch(blocks: &[Self], embeddings: &[Vec<f32>], vector_dim: usize) -> Result<RecordBatch>;
 
 	/// Convert Arrow RecordBatch to blocks
 	fn from_batch(batch: &RecordBatch) -> Result<Vec<Self>>;
@@ -44,13 +43,8 @@ pub trait BlockType: Clone + Send + Sync + 'static {
 impl BlockType for CodeBlock {
 	const TABLE_NAME: &'static str = super::tables::CODE_BLOCKS;
 
-	fn to_batch(
-		blocks: &[Self],
-		embeddings: &[Vec<f32>],
-		vector_dim: usize,
-	) -> Result<RecordBatch> {
-		super::batch_converter::BatchConverter::new(vector_dim)
-			.code_block_to_batch(blocks, embeddings)
+	fn to_batch(blocks: &[Self], embeddings: &[Vec<f32>], vector_dim: usize) -> Result<RecordBatch> {
+		super::batch_converter::BatchConverter::new(vector_dim).code_block_to_batch(blocks, embeddings)
 	}
 
 	fn from_batch(batch: &RecordBatch) -> Result<Vec<Self>> {
@@ -73,13 +67,8 @@ impl BlockType for CodeBlock {
 impl BlockType for TextBlock {
 	const TABLE_NAME: &'static str = super::tables::TEXT_BLOCKS;
 
-	fn to_batch(
-		blocks: &[Self],
-		embeddings: &[Vec<f32>],
-		vector_dim: usize,
-	) -> Result<RecordBatch> {
-		super::batch_converter::BatchConverter::new(vector_dim)
-			.text_block_to_batch(blocks, embeddings)
+	fn to_batch(blocks: &[Self], embeddings: &[Vec<f32>], vector_dim: usize) -> Result<RecordBatch> {
+		super::batch_converter::BatchConverter::new(vector_dim).text_block_to_batch(blocks, embeddings)
 	}
 
 	fn from_batch(batch: &RecordBatch) -> Result<Vec<Self>> {
@@ -102,13 +91,8 @@ impl BlockType for TextBlock {
 impl BlockType for DocumentBlock {
 	const TABLE_NAME: &'static str = super::tables::DOCUMENT_BLOCKS;
 
-	fn to_batch(
-		blocks: &[Self],
-		embeddings: &[Vec<f32>],
-		vector_dim: usize,
-	) -> Result<RecordBatch> {
-		super::batch_converter::BatchConverter::new(vector_dim)
-			.document_block_to_batch(blocks, embeddings)
+	fn to_batch(blocks: &[Self], embeddings: &[Vec<f32>], vector_dim: usize) -> Result<RecordBatch> {
+		super::batch_converter::BatchConverter::new(vector_dim).document_block_to_batch(blocks, embeddings)
 	}
 
 	fn from_batch(batch: &RecordBatch) -> Result<Vec<Self>> {
@@ -131,13 +115,8 @@ impl BlockType for DocumentBlock {
 impl BlockType for CommitBlock {
 	const TABLE_NAME: &'static str = super::tables::COMMIT_BLOCKS;
 
-	fn to_batch(
-		blocks: &[Self],
-		embeddings: &[Vec<f32>],
-		vector_dim: usize,
-	) -> Result<RecordBatch> {
-		super::batch_converter::BatchConverter::new(vector_dim)
-			.commit_block_to_batch(blocks, embeddings)
+	fn to_batch(blocks: &[Self], embeddings: &[Vec<f32>], vector_dim: usize) -> Result<RecordBatch> {
+		super::batch_converter::BatchConverter::new(vector_dim).commit_block_to_batch(blocks, embeddings)
 	}
 
 	fn from_batch(batch: &RecordBatch) -> Result<Vec<Self>> {

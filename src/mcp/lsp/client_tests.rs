@@ -15,9 +15,7 @@
 #[cfg(test)]
 mod tests {
 	use super::super::{LspClient, ProgressState};
-	use crate::mcp::lsp::protocol::{
-		LspIncomingNotification, LspIncomingRequest, LspMessage, LspNotification,
-	};
+	use crate::mcp::lsp::protocol::{LspIncomingNotification, LspIncomingRequest, LspMessage, LspNotification};
 	use serde_json::{json, Value};
 	use std::collections::HashMap;
 	use std::sync::Arc;
@@ -62,10 +60,7 @@ mod tests {
 	}
 
 	fn progress_state() -> (Progress, Arc<RwLock<bool>>) {
-		(
-			Arc::new(RwLock::new(HashMap::new())),
-			Arc::new(RwLock::new(false)),
-		)
+		(Arc::new(RwLock::new(HashMap::new())), Arc::new(RwLock::new(false)))
 	}
 
 	fn notification(method: &str, params: Option<Value>) -> LspIncomingNotification {
@@ -138,10 +133,7 @@ sys.stdout.buffer.flush()
 		)
 		.await
 		.expect_err("a malformed length cannot be parsed");
-		assert!(
-			error.to_string().contains("invalid digit"),
-			"unexpected error: {error}"
-		);
+		assert!(error.to_string().contains("invalid digit"), "unexpected error: {error}");
 	}
 
 	#[tokio::test]
@@ -174,10 +166,7 @@ sys.stdout.buffer.flush()
 		)
 		.await
 		.expect_err("a non-JSON body cannot be deserialized");
-		assert!(
-			error.to_string().contains("expected"),
-			"unexpected error: {error}"
-		);
+		assert!(error.to_string().contains("expected"), "unexpected error: {error}");
 	}
 
 	// --- Progress tracking ---
@@ -226,10 +215,7 @@ sys.stdout.buffer.flush()
 		)
 		.await
 		.unwrap();
-		assert!(
-			states.read().await.is_empty(),
-			"a completed run is cleaned up"
-		);
+		assert!(states.read().await.is_empty(), "a completed run is cleaned up");
 		assert!(
 			*indexing.read().await,
 			"a run titled 'Indexing' marks indexing complete"
@@ -289,13 +275,9 @@ sys.stdout.buffer.flush()
 	#[tokio::test]
 	async fn a_begin_without_a_title_falls_back_to_unknown() {
 		let (states, indexing) = progress_state();
-		LspClient::handle_progress_notification(
-			&json!({"value": {"kind": "begin"}}),
-			&states,
-			&indexing,
-		)
-		.await
-		.unwrap();
+		LspClient::handle_progress_notification(&json!({"value": {"kind": "begin"}}), &states, &indexing)
+			.await
+			.unwrap();
 
 		let snapshot = states.read().await;
 		// A missing token is tracked under the empty string, not dropped.
@@ -309,10 +291,9 @@ sys.stdout.buffer.flush()
 	async fn a_malformed_progress_notification_is_an_error() {
 		let (states, indexing) = progress_state();
 
-		let no_value =
-			LspClient::handle_progress_notification(&json!({"token": "t"}), &states, &indexing)
-				.await
-				.expect_err("a progress payload must carry a value");
+		let no_value = LspClient::handle_progress_notification(&json!({"token": "t"}), &states, &indexing)
+			.await
+			.expect_err("a progress payload must carry a value");
 		assert!(no_value.to_string().contains("'value'"), "{no_value}");
 
 		let no_kind = LspClient::handle_progress_notification(
@@ -359,16 +340,10 @@ sys.stdout.buffer.flush()
 			notification("$/progress", Some(json!({"token": "t"}))),
 			notification("$/progress", None),
 			notification("rust-analyzer/serverStatus", Some(json!({"health": "ok"}))),
-			notification(
-				"window/logMessage",
-				Some(json!({"type": 1, "message": "boom"})),
-			),
+			notification("window/logMessage", Some(json!({"type": 1, "message": "boom"}))),
 			notification("window/logMessage", Some(json!({"garbage": true}))),
 			notification("window/logMessage", None),
-			notification(
-				"window/showMessage",
-				Some(json!({"type": 3, "message": "hello"})),
-			),
+			notification("window/showMessage", Some(json!({"type": 3, "message": "hello"}))),
 			notification("window/showMessage", Some(json!({"garbage": true}))),
 			notification("textDocument/publishDiagnostics", Some(json!({"uri": "x"}))),
 		] {
@@ -431,10 +406,7 @@ sys.stdout.buffer.flush()
 	#[tokio::test]
 	async fn an_empty_command_cannot_start_a_server() {
 		let client = LspClient::new(String::new(), std::env::temp_dir());
-		let error = client
-			.start()
-			.await
-			.expect_err("there is no program to run");
+		let error = client.start().await.expect_err("there is no program to run");
 		assert!(error.to_string().contains("Empty LSP command"), "{error}");
 		assert!(!client.is_connected());
 	}
@@ -447,9 +419,7 @@ sys.stdout.buffer.flush()
 		);
 		let error = client.start().await.expect_err("the binary does not exist");
 		assert!(
-			error
-				.to_string()
-				.contains("octocode-no-such-language-server"),
+			error.to_string().contains("octocode-no-such-language-server"),
 			"{error}"
 		);
 		assert!(!client.is_connected());

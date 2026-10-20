@@ -78,8 +78,7 @@ pub async fn execute(args: &ViewArgs) -> Result<(), anyhow::Error> {
 				}
 
 				// See if this file matches our pattern
-				let relative_path =
-					indexer::PathUtils::to_relative_string(entry.path(), &current_dir);
+				let relative_path = indexer::PathUtils::to_relative_string(entry.path(), &current_dir);
 				if glob_pattern.is_match(&relative_path) {
 					matching_files.push(entry.path().to_path_buf());
 				}

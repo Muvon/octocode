@@ -108,9 +108,7 @@ pub fn to_relative_path(absolute_path: &str, project_root: &Path) -> Result<Stri
 	// though the path is plainly inside the project. Retry against the unresolved
 	// root before declaring the path outside it.
 	if let Ok(relative) = canonical_abs.strip_prefix(&canonical_root) {
-		return Ok(PathNormalizer::normalize_separators(
-			&relative.to_string_lossy(),
-		));
+		return Ok(PathNormalizer::normalize_separators(&relative.to_string_lossy()));
 	}
 
 	let relative = canonical_abs.strip_prefix(project_root).map_err(|_| {
@@ -123,9 +121,7 @@ pub fn to_relative_path(absolute_path: &str, project_root: &Path) -> Result<Stri
 		)
 	})?;
 
-	Ok(PathNormalizer::normalize_separators(
-		&relative.to_string_lossy(),
-	))
+	Ok(PathNormalizer::normalize_separators(&relative.to_string_lossy()))
 }
 
 // Render GraphRAG nodes to JSON format
@@ -145,14 +141,10 @@ pub fn graphrag_nodes_to_text(nodes: &[CodeNode]) -> String {
 	output.push_str(&format!("GRAPHRAG NODES ({} found)\n\n", nodes.len()));
 
 	// Group nodes by file path for better organization
-	let mut nodes_by_file: std::collections::HashMap<String, Vec<&CodeNode>> =
-		std::collections::HashMap::new();
+	let mut nodes_by_file: std::collections::HashMap<String, Vec<&CodeNode>> = std::collections::HashMap::new();
 
 	for node in nodes {
-		nodes_by_file
-			.entry(node.path.clone())
-			.or_default()
-			.push(node);
+		nodes_by_file.entry(node.path.clone()).or_default().push(node);
 	}
 
 	// Print results organized by file
@@ -198,14 +190,10 @@ pub fn graphrag_nodes_to_markdown(nodes: &[CodeNode]) -> String {
 	markdown.push_str(&format!("# Found {} GraphRAG nodes\n\n", nodes.len()));
 
 	// Group nodes by file path for better organization
-	let mut nodes_by_file: std::collections::HashMap<String, Vec<&CodeNode>> =
-		std::collections::HashMap::new();
+	let mut nodes_by_file: std::collections::HashMap<String, Vec<&CodeNode>> = std::collections::HashMap::new();
 
 	for node in nodes {
-		nodes_by_file
-			.entry(node.path.clone())
-			.or_default()
-			.push(node);
+		nodes_by_file.entry(node.path.clone()).or_default().push(node);
 	}
 
 	// Print results organized by file
@@ -274,10 +262,7 @@ pub fn find_node_id<'a>(graph: &'a super::types::CodeGraph, input: &str) -> Opti
 	// 2. Normalized match
 	let normalized = normalize_node_id(input);
 	if graph.nodes.contains_key(&normalized) {
-		return graph
-			.nodes
-			.get_key_value(&normalized)
-			.map(|(k, _)| k.as_str());
+		return graph.nodes.get_key_value(&normalized).map(|(k, _)| k.as_str());
 	}
 
 	// 3. Suffix match — user provides "searchd.cpp", stored as "src/searchd.cpp"
@@ -448,24 +433,12 @@ mod tests {
 		assert!(is_parent_child_relationship("src\\main.rs", "src"));
 
 		// Test mixed separators
-		assert!(is_parent_child_relationship(
-			"src/utils",
-			"src\\utils\\helper.rs"
-		));
-		assert!(is_parent_child_relationship(
-			"src\\utils\\helper.rs",
-			"src/utils"
-		));
+		assert!(is_parent_child_relationship("src/utils", "src\\utils\\helper.rs"));
+		assert!(is_parent_child_relationship("src\\utils\\helper.rs", "src/utils"));
 
 		// Test non-parent-child relationships
-		assert!(!is_parent_child_relationship(
-			"src/main.rs",
-			"lib/helper.rs"
-		));
-		assert!(!is_parent_child_relationship(
-			"src\\main.rs",
-			"lib\\helper.rs"
-		));
+		assert!(!is_parent_child_relationship("src/main.rs", "lib/helper.rs"));
+		assert!(!is_parent_child_relationship("src\\main.rs", "lib\\helper.rs"));
 
 		// Test same level (not parent-child)
 		assert!(!is_parent_child_relationship("src/main.rs", "src/lib.rs"));

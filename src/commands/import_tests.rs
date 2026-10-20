@@ -59,10 +59,7 @@ mod tests {
 		let bogus = dir.path().join("notes.txt");
 		std::fs::write(&bogus, "plain text").unwrap();
 		assert!(extract_and_validate(&bogus, &dir.path().join("dest")).is_err());
-		assert!(
-			extract_and_validate(&dir.path().join("missing.tar.zst"), &dir.path().join("d"))
-				.is_err()
-		);
+		assert!(extract_and_validate(&dir.path().join("missing.tar.zst"), &dir.path().join("d")).is_err());
 	}
 
 	#[test]
@@ -78,10 +75,7 @@ mod tests {
 		let dir = TempDir::new().unwrap();
 		let file = archive(
 			dir.path(),
-			&[
-				("octocode-export.marker", "some other tool"),
-				("storage/table", "rows"),
-			],
+			&[("octocode-export.marker", "some other tool"), ("storage/table", "rows")],
 		);
 		let err = extract_and_validate(&file, &dir.path().join("dest")).unwrap_err();
 		assert!(err.to_string().contains("marker content"), "{err}");
@@ -90,10 +84,7 @@ mod tests {
 	#[test]
 	fn an_archive_without_a_storage_directory_is_rejected() {
 		let dir = TempDir::new().unwrap();
-		let file = archive(
-			dir.path(),
-			&[("octocode-export.marker", "octocode-export-v1\n")],
-		);
+		let file = archive(dir.path(), &[("octocode-export.marker", "octocode-export-v1\n")]);
 		let err = extract_and_validate(&file, &dir.path().join("dest")).unwrap_err();
 		assert!(err.to_string().contains("missing 'storage'"), "{err}");
 	}
@@ -124,13 +115,7 @@ mod tests {
 		std::fs::create_dir_all(&source).unwrap();
 		std::fs::write(source.join("new"), "new").unwrap();
 
-		swap_dir(
-			&source,
-			&dir.path().join("target"),
-			&dir.path().join("backup"),
-			true,
-		)
-		.unwrap();
+		swap_dir(&source, &dir.path().join("target"), &dir.path().join("backup"), true).unwrap();
 		assert!(dir.path().join("target/new").is_file());
 	}
 
@@ -165,10 +150,7 @@ mod tests {
 			std::fs::read_dir(&project)
 				.unwrap()
 				.filter_map(Result::ok)
-				.all(|e| !e
-					.file_name()
-					.to_string_lossy()
-					.starts_with(".octocode-backup")),
+				.all(|e| !e.file_name().to_string_lossy().starts_with(".octocode-backup")),
 			"backups must be cleaned up on success"
 		);
 	}

@@ -63,10 +63,7 @@ fn try_u32_column<'a>(batch: &'a RecordBatch, column_name: &str) -> Option<&'a U
 }
 
 /// Helper function to safely extract a FixedSizeListArray column from a RecordBatch
-fn extract_embedding_column<'a>(
-	batch: &'a RecordBatch,
-	column_name: &str,
-) -> Result<&'a FixedSizeListArray> {
+fn extract_embedding_column<'a>(batch: &'a RecordBatch, column_name: &str) -> Result<&'a FixedSizeListArray> {
 	batch
 		.column_by_name(column_name)
 		.with_context(|| format!("Column '{}' not found in batch", column_name))?
@@ -107,10 +104,7 @@ impl<'a> DatabaseOperations<'a> {
 		}
 
 		if !quiet {
-			println!(
-				"Loading {} GraphRAG nodes from database...",
-				node_batch.num_rows()
-			);
+			println!("Loading {} GraphRAG nodes from database...", node_batch.num_rows());
 		}
 
 		// Process nodes - extract columns safely
@@ -169,17 +163,13 @@ impl<'a> DatabaseOperations<'a> {
 			};
 
 			// Parse functions JSON
-			let functions: Vec<crate::indexer::graphrag::types::FunctionInfo> =
-				match functions_array {
-					Some(arr) if !arr.is_null(i) => {
-						serde_json::from_str(arr.value(i)).unwrap_or_default()
-					}
-					_ => Vec::new(),
-				};
+			let functions: Vec<crate::indexer::graphrag::types::FunctionInfo> = match functions_array {
+				Some(arr) if !arr.is_null(i) => serde_json::from_str(arr.value(i)).unwrap_or_default(),
+				_ => Vec::new(),
+			};
 
 			let size_lines = size_lines_array.map_or(0, |arr| arr.value(i));
-			let language = language_array
-				.map_or_else(|| "unknown".to_string(), |arr| arr.value(i).to_string());
+			let language = language_array.map_or_else(|| "unknown".to_string(), |arr| arr.value(i).to_string());
 			let hash = hash_array.value(i).to_string();
 
 			// Extract the embedding for this node
@@ -253,9 +243,8 @@ impl<'a> DatabaseOperations<'a> {
 					description: desc_array.value(i).to_string(),
 					confidence: conf_array.value(i),
 					weight: 1.0,
-					provenance: provenance_array.map_or(Provenance::default(), |arr| {
-						Provenance::parse_or_default(arr.value(i))
-					}),
+					provenance: provenance_array
+						.map_or(Provenance::default(), |arr| Provenance::parse_or_default(arr.value(i))),
 				};
 				graph.relationships.push(relationship);
 			}
@@ -313,11 +302,7 @@ impl<'a> DatabaseOperations<'a> {
 	}
 
 	// Search for nodes in database
-	pub async fn search_nodes_in_database(
-		&self,
-		query_embedding: &[f32],
-		query: &str,
-	) -> Result<Vec<CodeNode>> {
+	pub async fn search_nodes_in_database(&self, query_embedding: &[f32], query: &str) -> Result<Vec<CodeNode>> {
 		// Check if the tables exist
 		if !self.store.tables_exist(&["graphrag_nodes"]).await? {
 			return Ok(Vec::new()); // No nodes in database
@@ -389,17 +374,13 @@ impl<'a> DatabaseOperations<'a> {
 			};
 
 			// Parse functions JSON
-			let functions: Vec<crate::indexer::graphrag::types::FunctionInfo> =
-				match functions_array {
-					Some(arr) if !arr.is_null(i) => {
-						serde_json::from_str(arr.value(i)).unwrap_or_default()
-					}
-					_ => Vec::new(),
-				};
+			let functions: Vec<crate::indexer::graphrag::types::FunctionInfo> = match functions_array {
+				Some(arr) if !arr.is_null(i) => serde_json::from_str(arr.value(i)).unwrap_or_default(),
+				_ => Vec::new(),
+			};
 
 			let size_lines = size_lines_array.map_or(0, |arr| arr.value(i));
-			let language = language_array
-				.map_or_else(|| "unknown".to_string(), |arr| arr.value(i).to_string());
+			let language = language_array.map_or_else(|| "unknown".to_string(), |arr| arr.value(i).to_string());
 			let hash = hash_array.value(i).to_string();
 
 			// Extract the embedding for this node
@@ -418,18 +399,11 @@ impl<'a> DatabaseOperations<'a> {
 			let name_contains = name.to_lowercase().contains(&query_lower);
 			let kind_contains = kind.to_lowercase().contains(&query_lower);
 			let desc_contains = description.to_lowercase().contains(&query_lower);
-			let symbols_contain = symbols
-				.iter()
-				.any(|s| s.to_lowercase().contains(&query_lower));
+			let symbols_contain = symbols.iter().any(|s| s.to_lowercase().contains(&query_lower));
 
 			// Use a lower threshold for semantic similarity (0.5 instead of 0.6)
 			// OR include if the query is a substring of any important field
-			if similarity > 0.5
-				|| name_contains
-				|| kind_contains
-				|| desc_contains
-				|| symbols_contain
-			{
+			if similarity > 0.5 || name_contains || kind_contains || desc_contains || symbols_contain {
 				// Create the node
 				let node = CodeNode {
 					id,
@@ -456,15 +430,11 @@ impl<'a> DatabaseOperations<'a> {
 		nodes.sort_by(|a, b| {
 			let a_contains = a.name.to_lowercase().contains(&query_lower)
 				|| a.kind.to_lowercase().contains(&query_lower)
-				|| a.symbols
-					.iter()
-					.any(|s| s.to_lowercase().contains(&query_lower));
+				|| a.symbols.iter().any(|s| s.to_lowercase().contains(&query_lower));
 
 			let b_contains = b.name.to_lowercase().contains(&query_lower)
 				|| b.kind.to_lowercase().contains(&query_lower)
-				|| b.symbols
-					.iter()
-					.any(|s| s.to_lowercase().contains(&query_lower));
+				|| b.symbols.iter().any(|s| s.to_lowercase().contains(&query_lower));
 
 			if a_contains && !b_contains {
 				std::cmp::Ordering::Less
@@ -474,9 +444,7 @@ impl<'a> DatabaseOperations<'a> {
 				// Both contain or both don't contain, sort by similarity
 				let a_sim = cosine_similarity(query_embedding, &a.embedding);
 				let b_sim = cosine_similarity(query_embedding, &b.embedding);
-				b_sim
-					.partial_cmp(&a_sim)
-					.unwrap_or(std::cmp::Ordering::Equal)
+				b_sim.partial_cmp(&a_sim).unwrap_or(std::cmp::Ordering::Equal)
 			}
 		});
 
@@ -495,19 +463,16 @@ impl<'a> DatabaseOperations<'a> {
 			Field::new("kind", DataType::Utf8, false),
 			Field::new("path", DataType::Utf8, false),
 			Field::new("description", DataType::Utf8, false),
-			Field::new("symbols", DataType::Utf8, true), // JSON serialized
-			Field::new("imports", DataType::Utf8, true), // JSON serialized
-			Field::new("exports", DataType::Utf8, true), // JSON serialized
+			Field::new("symbols", DataType::Utf8, true),   // JSON serialized
+			Field::new("imports", DataType::Utf8, true),   // JSON serialized
+			Field::new("exports", DataType::Utf8, true),   // JSON serialized
 			Field::new("functions", DataType::Utf8, true), // JSON serialized
 			Field::new("size_lines", DataType::UInt32, false),
 			Field::new("language", DataType::Utf8, false),
 			Field::new("hash", DataType::Utf8, false),
 			Field::new(
 				"embedding",
-				DataType::FixedSizeList(
-					Arc::new(Field::new("item", DataType::Float32, true)),
-					vector_dim as i32,
-				),
+				DataType::FixedSizeList(Arc::new(Field::new("item", DataType::Float32, true)), vector_dim as i32),
 				true,
 			),
 		]));
@@ -608,26 +573,14 @@ impl<'a> DatabaseOperations<'a> {
 		]));
 
 		// Generate unique IDs
-		let ids: Vec<String> = relationships
-			.iter()
-			.map(|_| uuid::Uuid::new_v4().to_string())
-			.collect();
+		let ids: Vec<String> = relationships.iter().map(|_| uuid::Uuid::new_v4().to_string()).collect();
 		let sources: Vec<&str> = relationships.iter().map(|r| r.source.as_str()).collect();
 		let targets: Vec<&str> = relationships.iter().map(|r| r.target.as_str()).collect();
-		let types: Vec<&str> = relationships
-			.iter()
-			.map(|r| r.relation_type.as_str())
-			.collect();
-		let descriptions: Vec<&str> = relationships
-			.iter()
-			.map(|r| r.description.as_str())
-			.collect();
+		let types: Vec<&str> = relationships.iter().map(|r| r.relation_type.as_str()).collect();
+		let descriptions: Vec<&str> = relationships.iter().map(|r| r.description.as_str()).collect();
 		let confidences: Vec<f32> = relationships.iter().map(|r| r.confidence).collect();
 		let weights: Vec<f32> = relationships.iter().map(|r| r.weight).collect();
-		let provenances: Vec<&str> = relationships
-			.iter()
-			.map(|r| r.provenance.as_str())
-			.collect();
+		let provenances: Vec<&str> = relationships.iter().map(|r| r.provenance.as_str()).collect();
 
 		// Create record batch
 		let batch = arrow::record_batch::RecordBatch::try_new(

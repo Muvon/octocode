@@ -33,16 +33,11 @@ pub fn associated_language(path: &Path) -> Option<&'static str> {
 	FILE_ASSOCIATIONS.read().get(&extension).copied()
 }
 
-fn normalize_file_associations(
-	associations: &HashMap<String, String>,
-) -> Result<HashMap<String, &'static str>> {
+fn normalize_file_associations(associations: &HashMap<String, String>) -> Result<HashMap<String, &'static str>> {
 	associations
 		.iter()
 		.map(|(extension, language)| {
-			let extension = extension
-				.strip_prefix('.')
-				.unwrap_or(extension)
-				.to_ascii_lowercase();
+			let extension = extension.strip_prefix('.').unwrap_or(extension).to_ascii_lowercase();
 			if extension.is_empty()
 				|| !extension
 					.chars()
@@ -81,10 +76,7 @@ mod tests {
 		let associations = HashMap::from([("pfbinc".to_string(), "php".to_string())]);
 		configure_file_associations(&associations).unwrap();
 
-		assert_eq!(
-			associated_language(Path::new("functions.pfbinc")),
-			Some("php")
-		);
+		assert_eq!(associated_language(Path::new("functions.pfbinc")), Some("php"));
 
 		configure_file_associations(&HashMap::new()).unwrap();
 	}

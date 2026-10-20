@@ -39,14 +39,8 @@ mod tests {
 
 	#[test]
 	fn leading_whitespace_splits_cleanly() {
-		assert_eq!(
-			split_leading_whitespace("\t  code();"),
-			("\t  ".to_string(), "code();")
-		);
-		assert_eq!(
-			split_leading_whitespace("code();"),
-			(String::new(), "code();")
-		);
+		assert_eq!(split_leading_whitespace("\t  code();"), ("\t  ".to_string(), "code();"));
+		assert_eq!(split_leading_whitespace("code();"), (String::new(), "code();"));
 		assert_eq!(split_leading_whitespace("   "), ("   ".to_string(), ""));
 	}
 
@@ -78,27 +72,18 @@ mod tests {
 
 	#[test]
 	fn spaces_convert_to_one_tab_per_logical_level() {
-		assert_eq!(
-			convert_indentation_smart("        ", IndentStyle::Tabs, 4),
-			"\t\t"
-		);
+		assert_eq!(convert_indentation_smart("        ", IndentStyle::Tabs, 4), "\t\t");
 		assert_eq!(convert_indentation_smart("", IndentStyle::Tabs, 4), "");
 	}
 
 	#[test]
 	fn tabs_convert_to_the_target_space_width() {
-		assert_eq!(
-			convert_indentation_smart("\t\t", IndentStyle::Spaces, 2),
-			"    "
-		);
+		assert_eq!(convert_indentation_smart("\t\t", IndentStyle::Spaces, 2), "    ");
 	}
 
 	#[test]
 	fn spaces_already_matching_the_target_width_are_left_alone() {
-		assert_eq!(
-			convert_indentation_smart("    ", IndentStyle::Spaces, 4),
-			"    "
-		);
+		assert_eq!(convert_indentation_smart("    ", IndentStyle::Spaces, 4), "    ");
 	}
 
 	#[test]
@@ -150,29 +135,17 @@ mod tests {
 		assert_eq!(get_effective_indent_size(&Properties::new()), 2);
 
 		let explicit = properties(&[("indent_size", "8")]);
-		assert!(matches!(
-			explicit.get::<IndentSize>(),
-			Ok(IndentSize::Value(8))
-		));
+		assert!(matches!(explicit.get::<IndentSize>(), Ok(IndentSize::Value(8))));
 		assert_eq!(get_effective_indent_size(&explicit), 8);
 
 		let via_tab_width = properties(&[("indent_size", "tab"), ("tab_width", "6")]);
-		assert!(matches!(
-			via_tab_width.get::<TabWidth>(),
-			Ok(TabWidth::Value(6))
-		));
+		assert!(matches!(via_tab_width.get::<TabWidth>(), Ok(TabWidth::Value(6))));
 		assert_eq!(get_effective_indent_size(&via_tab_width), 6);
 
 		// indent_size = tab with no tab_width has nothing to fall back on.
-		assert_eq!(
-			get_effective_indent_size(&properties(&[("indent_size", "tab")])),
-			2
-		);
+		assert_eq!(get_effective_indent_size(&properties(&[("indent_size", "tab")])), 2);
 
-		assert_eq!(
-			get_effective_indent_size(&properties(&[("tab_width", "3")])),
-			3
-		);
+		assert_eq!(get_effective_indent_size(&properties(&[("tab_width", "3")])), 3);
 	}
 
 	#[test]
@@ -234,11 +207,7 @@ mod tests {
 
 	fn editorconfig_workspace(rules: &str) -> tempfile::TempDir {
 		let dir = tempfile::TempDir::new().unwrap();
-		std::fs::write(
-			dir.path().join(".editorconfig"),
-			format!("root = true\n\n[*]\n{rules}"),
-		)
-		.unwrap();
+		std::fs::write(dir.path().join(".editorconfig"), format!("root = true\n\n[*]\n{rules}")).unwrap();
 		dir
 	}
 

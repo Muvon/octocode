@@ -80,10 +80,7 @@ impl TaskFocusedSubgraph {
 
 			// Display top concepts (limit to 10 to save tokens)
 			for (concept, relevance) in concepts.iter().take(10) {
-				markdown.push_str(&format!(
-					"- **{}** (relevance: {:.2})\n",
-					concept, relevance
-				));
+				markdown.push_str(&format!("- **{}** (relevance: {:.2})\n", concept, relevance));
 			}
 			markdown.push('\n');
 		}
@@ -101,10 +98,7 @@ impl TaskFocusedSubgraph {
 			}
 
 			if self.relevant_files.len() > 15 {
-				markdown.push_str(&format!(
-					"- *(and {} more files)*\n",
-					self.relevant_files.len() - 15
-				));
+				markdown.push_str(&format!("- *(and {} more files)*\n", self.relevant_files.len() - 15));
 			}
 
 			markdown.push('\n');
@@ -119,10 +113,7 @@ impl TaskFocusedSubgraph {
 			let mut node_by_kind: HashMap<String, Vec<&CodeNode>> = HashMap::new();
 
 			for node in &self.nodes {
-				node_by_kind
-					.entry(node.kind.clone())
-					.or_default()
-					.push(node);
+				node_by_kind.entry(node.kind.clone()).or_default().push(node);
 			}
 
 			let mut total_nodes_shown = 0;
@@ -160,10 +151,7 @@ impl TaskFocusedSubgraph {
 			let mut rels_by_type: HashMap<String, Vec<&CodeRelationship>> = HashMap::new();
 
 			for rel in &self.relationships {
-				rels_by_type
-					.entry(rel.relation_type.to_string())
-					.or_default()
-					.push(rel);
+				rels_by_type.entry(rel.relation_type.to_string()).or_default().push(rel);
 			}
 
 			// Show a limited number of relationship types and examples
@@ -264,10 +252,7 @@ impl GraphOptimizer {
 		}
 
 		// 3. Find direct relationships between these nodes
-		let node_ids: HashSet<String> = relevant_nodes
-			.iter()
-			.map(|(node, _)| node.id.clone())
-			.collect();
+		let node_ids: HashSet<String> = relevant_nodes.iter().map(|(node, _)| node.id.clone()).collect();
 
 		for relationship in &full_graph.relationships {
 			if node_ids.contains(&relationship.source) && node_ids.contains(&relationship.target) {
@@ -282,9 +267,7 @@ impl GraphOptimizer {
 			// If one endpoint is in our subgraph, consider adding the other
 			if node_ids.contains(&relationship.source) && !node_ids.contains(&relationship.target) {
 				additional_nodes.insert(relationship.target.clone());
-			} else if node_ids.contains(&relationship.target)
-				&& !node_ids.contains(&relationship.source)
-			{
+			} else if node_ids.contains(&relationship.target) && !node_ids.contains(&relationship.source) {
 				additional_nodes.insert(relationship.source.clone());
 			}
 
@@ -338,8 +321,7 @@ impl GraphOptimizer {
 		}
 
 		// Sort by similarity (highest first)
-		similarities
-			.sort_unstable_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+		similarities.sort_unstable_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
 		// Return top matches
 		Ok(similarities
@@ -350,12 +332,7 @@ impl GraphOptimizer {
 	}
 
 	/// Extract key concepts from a node and add them to the subgraph
-	fn extract_key_concepts(
-		&self,
-		subgraph: &mut TaskFocusedSubgraph,
-		node: &CodeNode,
-		relevance: f32,
-	) {
+	fn extract_key_concepts(&self, subgraph: &mut TaskFocusedSubgraph, node: &CodeNode, relevance: f32) {
 		// Add the node name as a concept
 		subgraph.add_key_concept(node.name.clone(), relevance);
 
@@ -375,8 +352,7 @@ impl GraphOptimizer {
 			// Skip common words, focus on technical terms
 			if is_likely_technical_term(word) {
 				subgraph.add_key_concept(
-					word.trim_matches(|c: char| !c.is_alphanumeric())
-						.to_string(),
+					word.trim_matches(|c: char| !c.is_alphanumeric()).to_string(),
 					relevance * 0.5,
 				);
 			}
@@ -400,8 +376,7 @@ impl GraphOptimizer {
 		let graph_markdown = subgraph.to_markdown();
 
 		// 3. Find the most relevant code snippets based on the key concepts
-		let relevant_snippets =
-			self.find_relevant_code_snippets(query_embedding, &subgraph, code_blocks, 5)?;
+		let relevant_snippets = self.find_relevant_code_snippets(query_embedding, &subgraph, code_blocks, 5)?;
 
 		// 4. Combine the graph overview with code snippets
 		let mut result = String::new();
@@ -418,17 +393,12 @@ impl GraphOptimizer {
 			result.push_str("## Relevant Code Snippets\n\n");
 
 			for (idx, (block, similarity)) in relevant_snippets.iter().enumerate() {
-				result.push_str(&format!(
-					"### Snippet {} (Relevance: {:.2})\n\n",
-					idx + 1,
-					similarity
-				));
+				result.push_str(&format!("### Snippet {} (Relevance: {:.2})\n\n", idx + 1, similarity));
 				result.push_str(&format!("File: `{}`\n\n", block.path));
 
 				// Add symbols if available
 				if !block.symbols.is_empty() {
-					let display_symbols: Vec<_> =
-						block.symbols.iter().filter(|s| !s.contains('_')).collect();
+					let display_symbols: Vec<_> = block.symbols.iter().filter(|s| !s.contains('_')).collect();
 
 					if !display_symbols.is_empty() {
 						result.push_str("**Symbols:** ");
@@ -460,11 +430,7 @@ impl GraphOptimizer {
 					result.push_str(&format!(
 						"// ... {} lines omitted ...{}\n",
 						lines.len() - 20,
-						if !lines.is_empty() {
-							" for brevity"
-						} else {
-							""
-						}
+						if !lines.is_empty() { " for brevity" } else { "" }
 					));
 					// Show last 10 lines
 					for line in lines.iter().skip(lines.len() - 10) {
@@ -511,8 +477,7 @@ impl GraphOptimizer {
 					.any(|symbol| subgraph.key_concepts.contains_key(symbol));
 
 			// If contains key concepts, boost the similarity score
-			let mut similarity =
-				cosine_similarity(query_embedding, &generate_block_embedding(block)?);
+			let mut similarity = cosine_similarity(query_embedding, &generate_block_embedding(block)?);
 			if contains_key_concept {
 				similarity *= 1.5; // Boost blocks containing key concepts
 			}
@@ -594,10 +559,9 @@ fn is_likely_technical_term(word: &str) -> bool {
 
 	// Skip common English words
 	let common_words = [
-		"about", "after", "again", "below", "could", "every", "first", "found", "great", "house",
-		"large", "learn", "never", "other", "place", "plant", "point", "right", "small", "sound",
-		"spell", "still", "study", "their", "there", "these", "thing", "think", "three", "water",
-		"where", "which", "world", "would", "write",
+		"about", "after", "again", "below", "could", "every", "first", "found", "great", "house", "large", "learn",
+		"never", "other", "place", "plant", "point", "right", "small", "sound", "spell", "still", "study", "their",
+		"there", "these", "thing", "think", "three", "water", "where", "which", "world", "would", "write",
 	];
 
 	if common_words.contains(&word.as_str()) {
@@ -605,8 +569,7 @@ fn is_likely_technical_term(word: &str) -> bool {
 	}
 
 	// Words with mixed case are likely technical terms (camelCase, PascalCase)
-	let has_mixed_case =
-		trimmed.chars().any(|c| c.is_uppercase()) && trimmed.chars().any(|c| c.is_lowercase());
+	let has_mixed_case = trimmed.chars().any(|c| c.is_uppercase()) && trimmed.chars().any(|c| c.is_lowercase());
 
 	// Words with underscores are likely technical terms
 	let has_underscore = word.contains('_');

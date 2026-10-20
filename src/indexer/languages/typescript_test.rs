@@ -37,10 +37,7 @@ export class Foo {
 
 	let regions = parse_regions(source);
 
-	let method_regions: Vec<_> = regions
-		.iter()
-		.filter(|r| r.node_kind == "method_definition")
-		.collect();
+	let method_regions: Vec<_> = regions.iter().filter(|r| r.node_kind == "method_definition").collect();
 	assert_eq!(
 		method_regions.len(),
 		2,
@@ -49,17 +46,11 @@ export class Foo {
 		regions.iter().map(|r| &r.content).collect::<Vec<_>>()
 	);
 
-	let export_regions: Vec<_> = regions
-		.iter()
-		.filter(|r| r.node_kind == "export_statement")
-		.collect();
+	let export_regions: Vec<_> = regions.iter().filter(|r| r.node_kind == "export_statement").collect();
 	assert!(
 		export_regions.is_empty(),
 		"exported class should not collapse into a single export_statement blob region, got: {:?}",
-		export_regions
-			.iter()
-			.map(|r| &r.content)
-			.collect::<Vec<_>>()
+		export_regions.iter().map(|r| &r.content).collect::<Vec<_>>()
 	);
 }
 
@@ -73,10 +64,7 @@ export default class Bar {
 
 	let regions = parse_regions(source);
 
-	let method_regions: Vec<_> = regions
-		.iter()
-		.filter(|r| r.node_kind == "method_definition")
-		.collect();
+	let method_regions: Vec<_> = regions.iter().filter(|r| r.node_kind == "method_definition").collect();
 	assert_eq!(
 		method_regions.len(),
 		1,
@@ -85,10 +73,7 @@ export default class Bar {
 		regions.iter().map(|r| &r.content).collect::<Vec<_>>()
 	);
 
-	let export_regions: Vec<_> = regions
-		.iter()
-		.filter(|r| r.node_kind == "export_statement")
-		.collect();
+	let export_regions: Vec<_> = regions.iter().filter(|r| r.node_kind == "export_statement").collect();
 	assert!(
 		export_regions.is_empty(),
 		"export default class should not collapse into a single export_statement blob region, got: {:?}",
@@ -136,10 +121,7 @@ fn test_export_default_expression_regression_unchanged() {
 
 	let regions = parse_regions(source);
 
-	let export_regions: Vec<_> = regions
-		.iter()
-		.filter(|r| r.node_kind == "export_statement")
-		.collect();
+	let export_regions: Vec<_> = regions.iter().filter(|r| r.node_kind == "export_statement").collect();
 	assert_eq!(
 		export_regions.len(),
 		1,
@@ -156,10 +138,7 @@ fn test_export_named_braces_regression_unchanged() {
 
 	let regions = parse_regions(source);
 
-	let export_regions: Vec<_> = regions
-		.iter()
-		.filter(|r| r.node_kind == "export_statement")
-		.collect();
+	let export_regions: Vec<_> = regions.iter().filter(|r| r.node_kind == "export_statement").collect();
 	assert_eq!(
 		export_regions.len(),
 		1,
@@ -167,9 +146,7 @@ fn test_export_named_braces_regression_unchanged() {
 		export_regions.len(),
 		regions.iter().map(|r| &r.content).collect::<Vec<_>>()
 	);
-	assert!(export_regions[0]
-		.content
-		.contains("export { existingName }"));
+	assert!(export_regions[0].content.contains("export { existingName }"));
 }
 
 #[test]
@@ -212,9 +189,7 @@ fn test_export_type_alias_regression_unchanged() {
 
 fn parse_tree(source: &str) -> Tree {
 	let mut parser = Parser::new();
-	parser
-		.set_language(&TypeScript {}.get_ts_language())
-		.unwrap();
+	parser.set_language(&TypeScript {}.get_ts_language()).unwrap();
 	parser.parse(source, None).unwrap()
 }
 
@@ -312,17 +287,10 @@ fn language_metadata_matches_the_typescript_grammar() {
 fn node_type_descriptions_cover_every_typescript_group() {
 	let ts = TypeScript {};
 
-	for kind in [
-		"function_declaration",
-		"method_definition",
-		"arrow_function",
-	] {
+	for kind in ["function_declaration", "method_definition", "arrow_function"] {
 		assert_eq!(ts.get_node_type_description(kind), "function declarations");
 	}
-	assert_eq!(
-		ts.get_node_type_description("class_declaration"),
-		"class declarations"
-	);
+	assert_eq!(ts.get_node_type_description("class_declaration"), "class declarations");
 	assert_eq!(
 		ts.get_node_type_description("interface_declaration"),
 		"interface declarations"
@@ -332,20 +300,14 @@ fn node_type_descriptions_cover_every_typescript_group() {
 		"type declarations"
 	);
 	for kind in ["import_statement", "export_statement"] {
-		assert_eq!(
-			ts.get_node_type_description(kind),
-			"import/export statements"
-		);
+		assert_eq!(ts.get_node_type_description(kind), "import/export statements");
 	}
 	for kind in ["variable_declaration", "lexical_declaration"] {
 		assert_eq!(ts.get_node_type_description(kind), "variable declarations");
 	}
 	// The override replaces the trait default outright, so kinds it does not
 	// list get the generic label even when they read like a type or class.
-	assert_eq!(
-		ts.get_node_type_description("enum_declaration"),
-		"declarations"
-	);
+	assert_eq!(ts.get_node_type_description("enum_declaration"), "declarations");
 	assert_eq!(
 		ts.get_node_type_description("abstract_class_declaration"),
 		"declarations"
@@ -428,10 +390,7 @@ fn methods_of_an_abstract_class_lose_their_owner() {
 
 	// The owner lookup only recognises `class_declaration`, and an abstract
 	// class parses as `abstract_class_declaration`, so "Base" is missing.
-	assert_eq!(
-		as_strs(&TypeScript {}.extract_symbols(method, source)),
-		["run", "v"]
-	);
+	assert_eq!(as_strs(&TypeScript {}.extract_symbols(method, source)), ["run", "v"]);
 }
 
 #[test]
@@ -470,10 +429,7 @@ fn arrow_functions_are_named_only_when_bound_to_a_variable() {
 	let arrows = all_of_kind(&tree, "arrow_function");
 	assert_eq!(arrows.len(), 2);
 
-	assert_eq!(
-		ts.extract_declaration_name(arrows[0], source).as_deref(),
-		Some("build")
-	);
+	assert_eq!(ts.extract_declaration_name(arrows[0], source).as_deref(), Some("build"));
 	// An arrow passed straight into a call has an `arguments` parent, so it
 	// declares no name at all.
 	assert_eq!(ts.extract_declaration_name(arrows[1], source), None);
@@ -527,8 +483,7 @@ fn a_typescript_import_resolves_to_the_file_it_names() {
 	let source = "import { Helper } from './helper';\n";
 	let tree = parse_tree(source);
 	let ts = TypeScript {};
-	let (imports, _) =
-		ts.extract_imports_exports(all_of_kind(&tree, "import_statement")[0], source);
+	let (imports, _) = ts.extract_imports_exports(all_of_kind(&tree, "import_statement")[0], source);
 
 	let files = vec!["src/main.ts".to_string(), "src/helper.ts".to_string()];
 	let registry = crate::indexer::languages::resolution_utils::FileRegistry::new(&files);
@@ -573,22 +528,19 @@ fn exported_function_names_come_back_clean_from_the_text_parser() {
 
 	let multi_line = "export function exported() {\n\treturn 1;\n}\n";
 	let tree = parse_tree(multi_line);
-	let (_, exports) =
-		ts.extract_imports_exports(first_of_kind(&tree, "export_statement"), multi_line);
+	let (_, exports) = ts.extract_imports_exports(first_of_kind(&tree, "export_statement"), multi_line);
 	assert_eq!(as_strs(&exports), ["exported"]);
 
 	// A body on the same line must not be read as a named-export list.
 	let single_line = "export function tight() {}\n";
 	let tree = parse_tree(single_line);
-	let (_, exports) =
-		ts.extract_imports_exports(first_of_kind(&tree, "export_statement"), single_line);
+	let (_, exports) = ts.extract_imports_exports(first_of_kind(&tree, "export_statement"), single_line);
 	assert_eq!(as_strs(&exports), ["tight"]);
 }
 
 #[test]
 fn exported_declaration_nodes_report_their_own_name_from_the_ast() {
-	let source =
-		"export function exported() {\n\treturn 1;\n}\nfunction plain() {\n\treturn 2;\n}\n";
+	let source = "export function exported() {\n\treturn 1;\n}\nfunction plain() {\n\treturn 2;\n}\n";
 
 	let tree = parse_tree(source);
 	let ts = TypeScript {};
@@ -706,8 +658,7 @@ fn types_without_heritage_yield_no_relations() {
 		"function_declaration",
 	] {
 		assert!(
-			ts.extract_type_relations(first_of_kind(&tree, kind), source)
-				.is_empty(),
+			ts.extract_type_relations(first_of_kind(&tree, kind), source).is_empty(),
 			"{kind} should declare no type relations"
 		);
 	}
@@ -774,10 +725,7 @@ type Alias = {
 	let regions = parse_regions(source);
 
 	assert_eq!(
-		regions
-			.iter()
-			.map(|r| r.node_kind.as_str())
-			.collect::<Vec<_>>(),
+		regions.iter().map(|r| r.node_kind.as_str()).collect::<Vec<_>>(),
 		["interface_declaration", "type_alias_declaration"]
 	);
 }
@@ -856,8 +804,5 @@ fn barrel_imports_resolve_to_the_index_file() {
 fn third_party_imports_that_match_no_indexed_file_stay_unresolved() {
 	let registry = ts_registry();
 
-	assert_eq!(
-		TypeScript {}.resolve_import("react", "src/app.ts", &registry),
-		None
-	);
+	assert_eq!(TypeScript {}.resolve_import("react", "src/app.ts", &registry), None);
 }

@@ -139,10 +139,7 @@ pub fn get_branch_commit(repo_path: &Path, branch: &str) -> Result<String> {
 		.output()?;
 
 	if !output.status.success() {
-		return Err(anyhow::anyhow!(
-			"Failed to resolve commit for branch '{}'",
-			branch
-		));
+		return Err(anyhow::anyhow!("Failed to resolve commit for branch '{}'", branch));
 	}
 
 	Ok(String::from_utf8(output.stdout)?.trim().to_string())
@@ -283,22 +280,16 @@ pub async fn reconcile_master_state(
 					 branch delta."
 				);
 			}
-			super::index_files_with_quiet(
-				main_store,
-				state.clone(),
-				config,
-				Some(git_repo_root),
-				quiet,
-			)
-			.await
-			.map_err(|e| {
-				anyhow::anyhow!(
-					"Main index baseline failed while preparing branch delta for '{}': {}. \
+			super::index_files_with_quiet(main_store, state.clone(), config, Some(git_repo_root), quiet)
+				.await
+				.map_err(|e| {
+					anyhow::anyhow!(
+						"Main index baseline failed while preparing branch delta for '{}': {}. \
 						 Branch indexing aborted — main DB is left in its previous state.",
-					branch_name,
-					e
-				)
-			})?;
+						branch_name,
+						e
+					)
+				})?;
 			main_store.flush().await?;
 			// The baseline indexed the current working tree and was stamped
 			// with HEAD (the branch commit), not the default-branch ref —
@@ -321,10 +312,7 @@ pub async fn reconcile_master_state(
 /// Compute the delta between the current branch and a specific base commit
 /// (typically the fork-point returned by [`reconcile_master_state`]).
 /// Returns `(changed_files, deleted_files)` as relative paths.
-pub fn compute_branch_delta(
-	repo_path: &Path,
-	base_ref: &str,
-) -> Result<(Vec<String>, Vec<String>)> {
+pub fn compute_branch_delta(repo_path: &Path, base_ref: &str) -> Result<(Vec<String>, Vec<String>)> {
 	// Get committed changes: files that differ between base ref and HEAD
 	let changed = get_diff_files(repo_path, base_ref, None)?;
 	let deleted = get_diff_files(repo_path, base_ref, Some("D"))?;
@@ -353,11 +341,7 @@ pub fn compute_branch_delta(
 
 /// Get files that differ between default_branch and HEAD.
 /// If `diff_filter` is Some, apply --diff-filter (e.g. "D" for deleted only).
-fn get_diff_files(
-	repo_path: &Path,
-	default_branch: &str,
-	diff_filter: Option<&str>,
-) -> Result<Vec<String>> {
+fn get_diff_files(repo_path: &Path, default_branch: &str, diff_filter: Option<&str>) -> Result<Vec<String>> {
 	let range = format!("{}...HEAD", default_branch);
 	let mut args = vec!["diff", "--name-only"];
 	if let Some(filter) = diff_filter {
@@ -373,11 +357,7 @@ fn get_diff_files(
 
 	if !output.status.success() {
 		let stderr = String::from_utf8_lossy(&output.stderr);
-		return Err(anyhow::anyhow!(
-			"git diff failed for range '{}': {}",
-			range,
-			stderr
-		));
+		return Err(anyhow::anyhow!("git diff failed for range '{}': {}", range, stderr));
 	}
 
 	let stdout = String::from_utf8(output.stdout)?;
@@ -551,10 +531,7 @@ pub fn delete_branch_index(project_path: &Path, branch_name: &str) -> Result<()>
 
 /// Resolve the branch directory path, loading manifest if available.
 /// Returns `(branch_dir, Option<manifest>)`.
-pub fn resolve_branch_state(
-	project_path: &Path,
-	branch_name: &str,
-) -> Result<(PathBuf, Option<BranchManifest>)> {
+pub fn resolve_branch_state(project_path: &Path, branch_name: &str) -> Result<(PathBuf, Option<BranchManifest>)> {
 	let branch_dir = crate::storage::get_branch_dir(project_path, branch_name)?;
 	let manifest = if branch_dir.exists() {
 		load_manifest(&branch_dir)?

@@ -107,55 +107,28 @@ function standalone_function($param)
 		println!("  Symbols: {:?}", region.symbols);
 		println!(
 			"  Content preview: {}",
-			region
-				.content
-				.lines()
-				.take(3)
-				.collect::<Vec<_>>()
-				.join("\\n")
+			region.content.lines().take(3).collect::<Vec<_>>().join("\\n")
 		);
 		println!();
 	}
 
 	// Verify we have individual methods, not entire class
-	let method_regions: Vec<_> = regions
-		.iter()
-		.filter(|r| r.node_kind == "method_declaration")
-		.collect();
+	let method_regions: Vec<_> = regions.iter().filter(|r| r.node_kind == "method_declaration").collect();
 
 	let function_regions: Vec<_> = regions
 		.iter()
 		.filter(|r| r.node_kind == "function_definition")
 		.collect();
 
-	let class_regions: Vec<_> = regions
-		.iter()
-		.filter(|r| r.node_kind == "class_declaration")
-		.collect();
+	let class_regions: Vec<_> = regions.iter().filter(|r| r.node_kind == "class_declaration").collect();
 
 	// Assertions
-	assert_eq!(
-		class_regions.len(),
-		0,
-		"Should not have any class_declaration regions"
-	);
-	assert_eq!(
-		method_regions.len(),
-		6,
-		"Should have 6 individual method regions"
-	);
-	assert_eq!(
-		function_regions.len(),
-		1,
-		"Should have 1 standalone function region"
-	);
+	assert_eq!(class_regions.len(), 0, "Should not have any class_declaration regions");
+	assert_eq!(method_regions.len(), 6, "Should have 6 individual method regions");
+	assert_eq!(function_regions.len(), 1, "Should have 1 standalone function region");
 
 	// Verify method names are extracted correctly
-	let method_names: Vec<String> = method_regions
-		.iter()
-		.flat_map(|r| &r.symbols)
-		.cloned()
-		.collect();
+	let method_names: Vec<String> = method_regions.iter().flat_map(|r| &r.symbols).cloned().collect();
 
 	let expected_methods = vec![
 		"fromRequest",
@@ -175,11 +148,7 @@ function standalone_function($param)
 	}
 
 	// Verify standalone function
-	let function_names: Vec<String> = function_regions
-		.iter()
-		.flat_map(|r| &r.symbols)
-		.cloned()
-		.collect();
+	let function_names: Vec<String> = function_regions.iter().flat_map(|r| &r.symbols).cloned().collect();
 
 	assert!(
 		function_names.contains(&"standalone_function".to_string()),
@@ -290,10 +259,7 @@ class BasePayload
 	extract_meaningful_regions(tree.root_node(), php_code, &php_lang, &mut regions);
 
 	// Print regions for debugging
-	println!(
-		"Found {} regions for BasePayload-like class:",
-		regions.len()
-	);
+	println!("Found {} regions for BasePayload-like class:", regions.len());
 	for (i, region) in regions.iter().enumerate() {
 		let line_count = region.end_line - region.start_line + 1;
 		println!(
@@ -309,20 +275,17 @@ class BasePayload
 	}
 
 	// Critical assertions to prevent regression
-	let class_regions: Vec<_> = regions
-		.iter()
-		.filter(|r| r.node_kind == "class_declaration")
-		.collect();
+	let class_regions: Vec<_> = regions.iter().filter(|r| r.node_kind == "class_declaration").collect();
 
-	let method_regions: Vec<_> = regions
-		.iter()
-		.filter(|r| r.node_kind == "method_declaration")
-		.collect();
+	let method_regions: Vec<_> = regions.iter().filter(|r| r.node_kind == "method_declaration").collect();
 
 	// MAIN ASSERTION: No massive class chunks
-	assert_eq!(class_regions.len(), 0,
+	assert_eq!(
+		class_regions.len(),
+		0,
 		"❌ REGRESSION: Found {} class_declaration regions! This means entire classes are being chunked again.",
-		class_regions.len());
+		class_regions.len()
+	);
 
 	// Should have individual methods instead
 	assert!(
@@ -334,17 +297,16 @@ class BasePayload
 	// Verify no region is excessively large (the original issue was 84 lines)
 	for region in &regions {
 		let line_count = region.end_line - region.start_line + 1;
-		assert!(line_count <= 25,
+		assert!(
+			line_count <= 25,
 			"❌ REGRESSION: Region '{}' has {} lines (too large)! Original issue was 84-line class chunks.",
-			region.node_kind, line_count);
+			region.node_kind,
+			line_count
+		);
 	}
 
 	// Verify we have the expected method names
-	let method_names: Vec<String> = method_regions
-		.iter()
-		.flat_map(|r| &r.symbols)
-		.cloned()
-		.collect();
+	let method_names: Vec<String> = method_regions.iter().flat_map(|r| &r.symbols).cloned().collect();
 
 	let expected_methods = vec![
 		"fromRequest",
@@ -375,8 +337,10 @@ fn test_php_meaningful_kinds_excludes_class() {
 	let meaningful_kinds = php_lang.get_meaningful_kinds();
 
 	// Critical assertion: class_declaration should NOT be in meaningful kinds
-	assert!(!meaningful_kinds.contains(&"class_declaration"),
-		"❌ REGRESSION: class_declaration found in meaningful_kinds! This will cause massive class chunks again.");
+	assert!(
+		!meaningful_kinds.contains(&"class_declaration"),
+		"❌ REGRESSION: class_declaration found in meaningful_kinds! This will cause massive class chunks again."
+	);
 
 	// Should still have method and function declarations
 	assert!(
@@ -388,9 +352,7 @@ fn test_php_meaningful_kinds_excludes_class() {
 		"function_definition should be in meaningful_kinds"
 	);
 
-	println!(
-		"✅ PHP meaningful_kinds configuration verified - class_declaration properly excluded"
-	);
+	println!("✅ PHP meaningful_kinds configuration verified - class_declaration properly excluded");
 }
 
 #[test]
@@ -561,14 +523,8 @@ fn every_node_type_description_arm_is_reachable() {
 		php.get_node_type_description("method_declaration"),
 		"function declarations"
 	);
-	assert_eq!(
-		php.get_node_type_description("class_declaration"),
-		"class declarations"
-	);
-	assert_eq!(
-		php.get_node_type_description("trait_declaration"),
-		"trait declarations"
-	);
+	assert_eq!(php.get_node_type_description("class_declaration"), "class declarations");
+	assert_eq!(php.get_node_type_description("trait_declaration"), "trait declarations");
 	assert_eq!(
 		php.get_node_type_description("interface_declaration"),
 		"interface declarations"
@@ -585,10 +541,7 @@ fn every_node_type_description_arm_is_reachable() {
 		php.get_node_type_description("namespace_definition"),
 		"namespace declarations"
 	);
-	assert_eq!(
-		php.get_node_type_description("use_declaration"),
-		"use statements"
-	);
+	assert_eq!(php.get_node_type_description("use_declaration"), "use statements");
 	assert_eq!(
 		php.get_node_type_description("namespace_use_declaration"),
 		"declarations"
@@ -645,29 +598,21 @@ fn a_standalone_function_contributes_only_its_own_name() {
 	let source = "<?php\nfunction helper($x) {\n    return $x + 1;\n}\n";
 	let tree = parse_tree(source);
 	let node = first_node(&tree, "function_definition");
-	assert_eq!(
-		Php {}.extract_symbols(node, source),
-		vec!["helper".to_string()]
-	);
+	assert_eq!(Php {}.extract_symbols(node, source), vec!["helper".to_string()]);
 }
 
 #[test]
 fn an_unhandled_node_kind_falls_back_to_identifier_extraction() {
-	let source =
-		"<?php\nfunction f() {\n  $total = 1;\n  $total = $total + 1;\n  return $total;\n}\n";
+	let source = "<?php\nfunction f() {\n  $total = 1;\n  $total = $total + 1;\n  return $total;\n}\n";
 	let tree = parse_tree(source);
 	let body = first_node(&tree, "compound_statement");
 	// The `$` prefix is stripped and repeats are collapsed.
-	assert_eq!(
-		Php {}.extract_symbols(body, source),
-		vec!["total".to_string()]
-	);
+	assert_eq!(Php {}.extract_symbols(body, source), vec!["total".to_string()]);
 }
 
 #[test]
 fn identifier_extraction_strips_the_dollar_prefix_and_deduplicates() {
-	let source =
-		"<?php\nfunction f() {\n  $total = 1;\n  $total = $total + 1;\n  return $total;\n}\n";
+	let source = "<?php\nfunction f() {\n  $total = 1;\n  $total = $total + 1;\n  return $total;\n}\n";
 	let tree = parse_tree(source);
 	let body = first_node(&tree, "compound_statement");
 	let mut symbols = Vec::new();
@@ -697,10 +642,7 @@ use App\Http\{Request, Response as Resp};
 	assert_eq!(
 		php.extract_imports_exports(nth_node(&tree, "namespace_use_declaration", 2), source)
 			.0,
-		vec![
-			"App/Http/Request".to_string(),
-			"App/Http/Response".to_string(),
-		]
+		vec!["App/Http/Request".to_string(), "App/Http/Response".to_string(),]
 	);
 }
 
@@ -754,11 +696,7 @@ function helper() { return 1; }
 	] {
 		let (imports, exports) = php.extract_imports_exports(first_node(&tree, kind), source);
 		assert!(imports.is_empty(), "{kind} should not import anything");
-		assert_eq!(
-			exports,
-			vec![expected.to_string()],
-			"wrong export for {kind}"
-		);
+		assert_eq!(exports, vec![expected.to_string()], "wrong export for {kind}");
 	}
 }
 
@@ -927,13 +865,11 @@ fn an_unknown_third_party_namespace_resolves_to_nothing() {
 
 #[test]
 fn consecutive_use_statements_merge_under_the_fallback_description() {
-	let source = "<?php\n\nuse App\\A;\nuse App\\B;\n\nfunction solo() {\n    $x = 1;\n    $y = 2;\n    return $x + $y;\n}\n";
+	let source =
+		"<?php\n\nuse App\\A;\nuse App\\B;\n\nfunction solo() {\n    $x = 1;\n    $y = 2;\n    return $x + $y;\n}\n";
 	let regions = parse_regions(source);
 	assert_eq!(
-		regions
-			.iter()
-			.map(|r| r.node_kind.as_str())
-			.collect::<Vec<_>>(),
+		regions.iter().map(|r| r.node_kind.as_str()).collect::<Vec<_>>(),
 		vec!["namespace_use_declaration", "function_definition"]
 	);
 	assert!(

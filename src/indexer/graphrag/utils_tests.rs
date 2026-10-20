@@ -40,9 +40,7 @@ mod tests {
 		let mut graph = CodeGraph::default();
 		for id in ids {
 			let name = id.rsplit("::").next().unwrap_or(id);
-			graph
-				.nodes
-				.insert(id.to_string(), node(id, "function", name, &[]));
+			graph.nodes.insert(id.to_string(), node(id, "function", name, &[]));
 		}
 		graph
 	}
@@ -50,10 +48,7 @@ mod tests {
 	#[test]
 	fn cosine_similarity_scores_direction() {
 		let close = |actual: f32, expected: f32| {
-			assert!(
-				(actual - expected).abs() < 1e-6,
-				"expected {expected}, got {actual}"
-			);
+			assert!((actual - expected).abs() < 1e-6, "expected {expected}, got {actual}");
 		};
 
 		close(cosine_similarity(&[1.0, 0.0, 0.0], &[1.0, 0.0, 0.0]), 1.0);
@@ -97,10 +92,7 @@ mod tests {
 		let file = root.join("src/main.rs");
 		std::fs::write(&file, "fn main() {}").unwrap();
 
-		assert_eq!(
-			to_relative_path(&file.to_string_lossy(), &root).unwrap(),
-			"src/main.rs"
-		);
+		assert_eq!(to_relative_path(&file.to_string_lossy(), &root).unwrap(), "src/main.rs");
 		// A path that does not exist yet is resolved against the root instead of
 		// the filesystem.
 		assert_eq!(
@@ -117,10 +109,7 @@ mod tests {
 		std::fs::write(&stranger, "").unwrap();
 
 		let err = to_relative_path(&stranger.to_string_lossy(), project.path()).unwrap_err();
-		assert!(
-			err.to_string().contains("is not within project root"),
-			"{err}"
-		);
+		assert!(err.to_string().contains("is not within project root"), "{err}");
 	}
 
 	#[test]
@@ -151,11 +140,7 @@ mod tests {
 		let mut node = node("src/a.rs::alpha", "function", "alpha", &[]);
 		// Duplicates collapse, output is sorted, and `_`-bearing internal symbol
 		// names are not shown to users.
-		node.symbols = vec![
-			"gamma_x".to_string(),
-			"beta".to_string(),
-			"beta".to_string(),
-		];
+		node.symbols = vec!["gamma_x".to_string(), "beta".to_string(), "beta".to_string()];
 
 		assert_eq!(
 			graphrag_nodes_to_text(&[node]),

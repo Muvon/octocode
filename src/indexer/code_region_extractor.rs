@@ -54,14 +54,7 @@ pub fn extract_meaningful_regions(
 	let mut candidate_regions = Vec::new();
 
 	// First pass: collect all meaningful regions without merging
-	collect_meaningful_regions_recursive(
-		node,
-		contents,
-		lang_impl,
-		&kinds,
-		None,
-		&mut candidate_regions,
-	);
+	collect_meaningful_regions_recursive(node, contents, lang_impl, &kinds, None, &mut candidate_regions);
 
 	// Second pass: apply smart merging logic
 	apply_smart_merging(candidate_regions, regions, lang_impl);
@@ -89,9 +82,7 @@ fn descend_children(
 		let mut prev: Option<Node> = None;
 		loop {
 			let current = cursor.node();
-			collect_meaningful_regions_recursive(
-				current, contents, lang_impl, kinds, prev, regions,
-			);
+			collect_meaningful_regions_recursive(current, contents, lang_impl, kinds, prev, regions);
 			prev = Some(current);
 			if !cursor.goto_next_sibling() {
 				break;
@@ -144,8 +135,7 @@ fn collect_meaningful_regions_recursive(
 			return;
 		}
 
-		let (combined_content, start_line) =
-			combine_with_preceding_comments(node, contents, prev_sibling);
+		let (combined_content, start_line) = combine_with_preceding_comments(node, contents, prev_sibling);
 		let end_line = node.end_position().row;
 		let symbols = lang_impl.extract_symbols(node, contents);
 
@@ -185,8 +175,7 @@ fn apply_smart_merging(
 
 	// Regions are moved out as they are emitted (instead of cloned); the
 	// look-ahead only ever reads indices >= i, which are still present.
-	let mut candidate_regions: Vec<Option<CodeRegion>> =
-		candidate_regions.into_iter().map(Some).collect();
+	let mut candidate_regions: Vec<Option<CodeRegion>> = candidate_regions.into_iter().map(Some).collect();
 
 	let mut i = 0;
 	while i < candidate_regions.len() {
@@ -206,11 +195,8 @@ fn apply_smart_merging(
 					break;
 				};
 				if is_single_line_declaration(next)
-					&& are_consecutive_or_related(
-						consecutive_single_lines.last().unwrap(),
-						next,
-						lang_impl,
-					) {
+					&& are_consecutive_or_related(consecutive_single_lines.last().unwrap(), next, lang_impl)
+				{
 					consecutive_single_lines.push(next);
 					j += 1;
 				} else {
@@ -245,11 +231,7 @@ fn is_single_line_declaration(region: &CodeRegion) -> bool {
 }
 
 /// Checks if two single-line regions are consecutive or thematically related
-fn are_consecutive_or_related(
-	first: &CodeRegion,
-	second: &CodeRegion,
-	lang_impl: &dyn languages::Language,
-) -> bool {
+fn are_consecutive_or_related(first: &CodeRegion, second: &CodeRegion, lang_impl: &dyn languages::Language) -> bool {
 	// Consider consecutive if they're within a few lines of each other
 	let line_gap = second.start_line.saturating_sub(first.end_line);
 
@@ -267,11 +249,7 @@ fn are_consecutive_or_related(
 }
 
 /// Checks if two regions contain thematically related content using language-specific logic
-fn are_thematically_related(
-	first: &CodeRegion,
-	second: &CodeRegion,
-	lang_impl: &dyn languages::Language,
-) -> bool {
+fn are_thematically_related(first: &CodeRegion, second: &CodeRegion, lang_impl: &dyn languages::Language) -> bool {
 	// Direct node kind match
 	if first.node_kind == second.node_kind {
 		return true;
@@ -350,8 +328,7 @@ fn create_merged_blocks_from_group(
 
 		// Add a descriptive comment to the merged block using language-specific description
 		let block_type = determine_block_type(chunk[0], lang_impl);
-		let block_description =
-			format!("// Merged {} ({} declarations)\n", block_type, chunk.len());
+		let block_description = format!("// Merged {} ({} declarations)\n", block_type, chunk.len());
 		let final_content = block_description + &combined_content;
 
 		final_regions.push(CodeRegion {
@@ -366,21 +343,14 @@ fn create_merged_blocks_from_group(
 }
 
 /// Determines the type of block for descriptive purposes using language-specific logic
-fn determine_block_type(
-	sample_region: &CodeRegion,
-	lang_impl: &dyn languages::Language,
-) -> &'static str {
+fn determine_block_type(sample_region: &CodeRegion, lang_impl: &dyn languages::Language) -> &'static str {
 	lang_impl.get_node_type_description(&sample_region.node_kind)
 }
 
 /// Combines a preceding comment or attribute node with a declaration node.
 /// `prev_sibling` must be the node's immediately-preceding sibling (or `None`
 /// if it has none), as already known by the caller's tree walk.
-pub fn combine_with_preceding_comments(
-	node: Node,
-	contents: &str,
-	prev_sibling: Option<Node>,
-) -> (String, usize) {
+pub fn combine_with_preceding_comments(node: Node, contents: &str, prev_sibling: Option<Node>) -> (String, usize) {
 	let mut combined_start = node.start_position().row;
 	let mut snippet = String::new();
 	if let Some(last) = prev_sibling {

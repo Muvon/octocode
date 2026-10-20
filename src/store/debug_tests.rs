@@ -14,9 +14,7 @@
 
 #[cfg(test)]
 mod tests {
-	use crate::store::mod_tests::{
-		code_block, document_block, embedding, test_store, text_block, CODE_DIM, TEXT_DIM,
-	};
+	use crate::store::mod_tests::{code_block, document_block, embedding, test_store, text_block, CODE_DIM, TEXT_DIM};
 
 	#[tokio::test]
 	async fn listing_an_empty_index_reports_no_files() {
@@ -39,10 +37,7 @@ mod tests {
 			.await
 			.unwrap();
 		store
-			.store_document_blocks(
-				&[document_block("README.md", "d1")],
-				&[embedding(TEXT_DIM, 0)],
-			)
+			.store_document_blocks(&[document_block("README.md", "d1")], &[embedding(TEXT_DIM, 0)])
 			.await
 			.unwrap();
 
@@ -91,10 +86,7 @@ mod tests {
 			.unwrap();
 		store
 			.store_document_blocks(
-				&[
-					document_block("README.md", "d1"),
-					document_block("README.md", "d2"),
-				],
+				&[document_block("README.md", "d1"), document_block("README.md", "d2")],
 				&[embedding(TEXT_DIM, 2), embedding(TEXT_DIM, 3)],
 			)
 			.await
@@ -139,14 +131,7 @@ mod tests {
 			.await
 			.unwrap();
 
-		assert_eq!(
-			store
-				.get_code_blocks_by_path(shared, 10)
-				.await
-				.unwrap()
-				.len(),
-			1
-		);
+		assert_eq!(store.get_code_blocks_by_path(shared, 10).await.unwrap().len(), 1);
 		store.show_file_chunks(shared).await.unwrap();
 	}
 
@@ -161,10 +146,7 @@ mod tests {
 			.await
 			.unwrap();
 
-		let blocks = store
-			.get_code_blocks_by_path("src/long.rs", 10)
-			.await
-			.unwrap();
+		let blocks = store.get_code_blocks_by_path("src/long.rs", 10).await.unwrap();
 		assert_eq!(blocks.len(), 1);
 		assert_eq!(blocks[0].content.lines().count(), 10);
 		store.show_file_chunks("src/long.rs").await.unwrap();

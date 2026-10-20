@@ -39,11 +39,7 @@ mod differential_processor_tests;
 /// language parser recognizes. The per-language `extract_imports_exports`
 /// inspects a single node's kind, so we have to visit every descendant — the
 /// root is almost never an `import_statement` itself.
-fn walk_for_imports_exports(
-	node: Node,
-	contents: &str,
-	lang: &dyn languages::Language,
-) -> (Vec<String>, Vec<String>) {
+fn walk_for_imports_exports(node: Node, contents: &str, lang: &dyn languages::Language) -> (Vec<String>, Vec<String>) {
 	let mut imports = Vec::new();
 	let mut exports = Vec::new();
 	let mut stack = vec![node];
@@ -104,24 +100,15 @@ pub async fn process_file_differential(
 		.unwrap_or_else(|| parser.parse("", None).unwrap());
 	let mut code_regions = Vec::new();
 
-	extract_meaningful_regions(
-		tree.root_node(),
-		contents,
-		lang_impl.as_ref(),
-		&mut code_regions,
-	);
+	extract_meaningful_regions(tree.root_node(), contents, lang_impl.as_ref(), &mut code_regions);
 
 	// Only build the contextual-description input when that feature is on;
 	// otherwise this second AST walk + symbol collect is wasted (default: off).
 	if ctx.config.index.contextual_descriptions {
 		// Extract file-level imports/exports for the LLM contextual-description
 		// prompt (Anthropic "situate within document").
-		let (imports, exports) =
-			walk_for_imports_exports(tree.root_node(), contents, lang_impl.as_ref());
-		let all_symbols: Vec<String> = code_regions
-			.iter()
-			.flat_map(|r| r.symbols.iter().cloned())
-			.collect();
+		let (imports, exports) = walk_for_imports_exports(tree.root_node(), contents, lang_impl.as_ref());
+		let all_symbols: Vec<String> = code_regions.iter().flat_map(|r| r.symbols.iter().cloned()).collect();
 		file_context.insert(
 			file_path.to_string(),
 			FileContext {
@@ -155,12 +142,8 @@ pub async fn process_file_differential(
 
 	for region in code_regions {
 		// Use a hash that includes content, path, and line ranges
-		let content_hash = calculate_content_hash_with_lines(
-			&region.content,
-			file_path,
-			region.start_line,
-			region.end_line,
-		);
+		let content_hash =
+			calculate_content_hash_with_lines(&region.content, file_path, region.start_line, region.end_line);
 		new_hashes.insert(content_hash.clone());
 
 		// Skip the check if force_reindex is true
@@ -257,19 +240,13 @@ pub async fn process_text_file_differential(
 	};
 
 	// Split content into chunks using configuration values
-	let chunks = chunk_text(
-		contents,
-		config.index.chunk_size,
-		config.index.chunk_overlap,
-	);
+	let chunks = chunk_text(contents, config.index.chunk_size, config.index.chunk_overlap);
 	let mut new_hashes = HashSet::new();
 
 	for (chunk_idx, chunk_with_lines) in chunks.iter().enumerate() {
 		// Use chunk index in hash for uniqueness but keep path clean
-		let chunk_hash = calculate_unique_content_hash(
-			&chunk_with_lines.content,
-			&format!("{}#{}", file_path, chunk_idx),
-		);
+		let chunk_hash =
+			calculate_unique_content_hash(&chunk_with_lines.content, &format!("{}#{}", file_path, chunk_idx));
 		new_hashes.insert(chunk_hash.clone());
 
 		// Skip the check if force_reindex is true
@@ -295,9 +272,7 @@ pub async fn process_text_file_differential(
 			.collect();
 
 		if !hashes_to_remove.is_empty() {
-			store
-				.remove_blocks_by_hashes(&hashes_to_remove, "text_blocks")
-				.await?;
+			store.remove_blocks_by_hashes(&hashes_to_remove, "text_blocks").await?;
 		}
 	}
 
@@ -390,23 +365,14 @@ pub async fn process_file(
 		.unwrap_or_else(|| parser.parse("", None).unwrap());
 	let mut code_regions = Vec::new();
 
-	extract_meaningful_regions(
-		tree.root_node(),
-		contents,
-		lang_impl.as_ref(),
-		&mut code_regions,
-	);
+	extract_meaningful_regions(tree.root_node(), contents, lang_impl.as_ref(), &mut code_regions);
 
 	// Only build the contextual-description input when that feature is on;
 	// otherwise this second AST walk + symbol collect is wasted (default: off).
 	if ctx.config.index.contextual_descriptions {
 		// Extract file-level imports/exports for the LLM contextual-description prompt.
-		let (imports, exports) =
-			walk_for_imports_exports(tree.root_node(), contents, lang_impl.as_ref());
-		let all_symbols: Vec<String> = code_regions
-			.iter()
-			.flat_map(|r| r.symbols.iter().cloned())
-			.collect();
+		let (imports, exports) = walk_for_imports_exports(tree.root_node(), contents, lang_impl.as_ref());
+		let all_symbols: Vec<String> = code_regions.iter().flat_map(|r| r.symbols.iter().cloned()).collect();
 		file_context.insert(
 			file_path.to_string(),
 			FileContext {
@@ -422,19 +388,11 @@ pub async fn process_file(
 
 	for region in code_regions {
 		// Use a hash that includes content, path, and line ranges
-		let content_hash = calculate_content_hash_with_lines(
-			&region.content,
-			file_path,
-			region.start_line,
-			region.end_line,
-		);
+		let content_hash =
+			calculate_content_hash_with_lines(&region.content, file_path, region.start_line, region.end_line);
 
 		// Skip the check if force_reindex is true
-		let exists = !force_reindex
-			&& ctx
-				.store
-				.content_exists(&content_hash, "code_blocks")
-				.await?;
+		let exists = !force_reindex && ctx.store.content_exists(&content_hash, "code_blocks").await?;
 		if !exists {
 			let code_block = CodeBlock {
 				path: file_path.to_string(),

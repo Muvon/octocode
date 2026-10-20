@@ -65,20 +65,13 @@ impl GraphBuilder {
 	}
 
 	/// Create a GraphBuilder with a pre-created Store (used for branch stores).
-	pub async fn new_with_store(
-		config: Config,
-		working_dir: &Path,
-		store: Store,
-		quiet: bool,
-	) -> Result<Self> {
-		let project_root = detect_project_root_from(working_dir).unwrap_or_else(|_| {
-			detect_project_root().unwrap_or_else(|_| working_dir.to_path_buf())
-		});
+	pub async fn new_with_store(config: Config, working_dir: &Path, store: Store, quiet: bool) -> Result<Self> {
+		let project_root = detect_project_root_from(working_dir)
+			.unwrap_or_else(|_| detect_project_root().unwrap_or_else(|_| working_dir.to_path_buf()));
 
-		let embedding_provider =
-			crate::embedding::create_shared_provider(&config.embedding.text_model)
-				.await
-				.context("Failed to initialize embedding provider from config")?;
+		let embedding_provider = crate::embedding::create_shared_provider(&config.embedding.text_model)
+			.await
+			.context("Failed to initialize embedding provider from config")?;
 
 		let db_ops = DatabaseOperations::new(&store);
 		let graph = Arc::new(RwLock::new(db_ops.load_graph(&project_root, quiet).await?));
@@ -139,14 +132,10 @@ impl GraphBuilder {
 		// Group code blocks by file for efficient processing
 		let mut files_to_blocks: HashMap<String, Vec<&CodeBlock>> = HashMap::new();
 		for block in code_blocks {
-			files_to_blocks
-				.entry(block.path.clone())
-				.or_default()
-				.push(block);
+			files_to_blocks.entry(block.path.clone()).or_default().push(block);
 		}
 
-		let mut files_to_process: HashMap<String, (String, String, Vec<&CodeBlock>)> =
-			HashMap::new();
+		let mut files_to_process: HashMap<String, (String, String, Vec<&CodeBlock>)> = HashMap::new();
 		for (file_path, file_blocks) in files_to_blocks {
 			// Skip files that no longer exist on disk to avoid IO errors
 			if !std::path::Path::new(&file_path).exists() {
@@ -193,11 +182,7 @@ impl GraphBuilder {
 			.values()
 			.map(|(relative_path, _, _)| relative_path.clone())
 			.collect();
-		if let Err(e) = self
-			.store
-			.remove_graph_nodes_by_paths(&relative_paths)
-			.await
-		{
+		if let Err(e) = self.store.remove_graph_nodes_by_paths(&relative_paths).await {
 			if !self.quiet {
 				eprintln!(
 					"Warning: Failed to clean up old GraphRAG data for {} files: {}",
@@ -229,9 +214,9 @@ impl GraphBuilder {
 					);
 				}
 				graph.nodes.retain(|id, _| !stale_ids.contains(id));
-				graph.relationships.retain(|rel| {
-					!stale_ids.contains(&rel.source) && !stale_ids.contains(&rel.target)
-				});
+				graph
+					.relationships
+					.retain(|rel| !stale_ids.contains(&rel.source) && !stale_ids.contains(&rel.target));
 			}
 		}
 
@@ -281,11 +266,7 @@ impl GraphBuilder {
 					}
 					// Fallback to the old heuristic if AST parsing fails
 					let (imports, exports) =
-						RelationshipDiscovery::extract_imports_exports_efficient(
-							&symbols,
-							&language,
-							&relative_path,
-						);
+						RelationshipDiscovery::extract_imports_exports_efficient(&symbols, &language, &relative_path);
 					FileAstData {
 						imports,
 						exports,
@@ -334,16 +315,11 @@ impl GraphBuilder {
 					content_sample,
 					function_count: symbols
 						.iter()
-						.filter(|s| {
-							s.contains("fn ") || s.contains("function ") || s.contains("def ")
-						})
+						.filter(|s| s.contains("fn ") || s.contains("function ") || s.contains("def "))
 						.count(),
 					class_count: symbols
 						.iter()
-						.filter(|s| {
-							s.contains("class ")
-								|| s.contains("struct ") || s.contains("interface ")
-						})
+						.filter(|s| s.contains("class ") || s.contains("struct ") || s.contains("interface "))
 						.count(),
 				};
 				ai_batch_queue.push(file_for_ai);
@@ -356,10 +332,7 @@ impl GraphBuilder {
 
 					// Call batch AI extraction through AI enhancements
 					if let Some(ref ai_enhancements) = self.ai_enhancements {
-						match ai_enhancements
-							.extract_ai_descriptions_batch(&ai_batch_queue)
-							.await
-						{
+						match ai_enhancements.extract_ai_descriptions_batch(&ai_batch_queue).await {
 							Ok(batch_descriptions) => {
 								// Store all descriptions from batch
 								for (file_path, description) in batch_descriptions {
@@ -375,9 +348,10 @@ impl GraphBuilder {
 							Err(e) => {
 								if !self.quiet {
 									eprintln!(
-											"⚠️  AI batch failed after retries: {}. Deferring {} files to next run.",
-											e, ai_batch_queue.len()
-										);
+										"⚠️  AI batch failed after retries: {}. Deferring {} files to next run.",
+										e,
+										ai_batch_queue.len()
+									);
 								}
 								let failed_ids: HashSet<String> =
 									ai_batch_queue.iter().map(|f| f.file_id.clone()).collect();
@@ -385,10 +359,7 @@ impl GraphBuilder {
 								// position, not id), so dropping entries from new_nodes
 								// alone would desync the embedding assignment in
 								// process_nodes_batch. Drop the same positions from both.
-								let keep: Vec<bool> = new_nodes
-									.iter()
-									.map(|n| !failed_ids.contains(&n.id))
-									.collect();
+								let keep: Vec<bool> = new_nodes.iter().map(|n| !failed_ids.contains(&n.id)).collect();
 								let mut keep_iter = keep.iter();
 								new_nodes.retain(|_| *keep_iter.next().unwrap());
 								let mut keep_iter = keep.iter();
@@ -422,12 +393,7 @@ impl GraphBuilder {
 				}
 
 				// For now, use simple description - will be replaced after batch processing
-				RelationshipDiscovery::generate_simple_description(
-					&file_name,
-					&language,
-					&symbols,
-					total_lines as u32,
-				)
+				RelationshipDiscovery::generate_simple_description(&file_name, &language, &symbols, total_lines as u32)
 			} else {
 				if !self.quiet && self.llm_enabled() {
 					eprintln!(
@@ -435,21 +401,11 @@ impl GraphBuilder {
 						relative_path
 					);
 				}
-				RelationshipDiscovery::generate_simple_description(
-					&file_name,
-					&language,
-					&symbols,
-					total_lines as u32,
-				)
+				RelationshipDiscovery::generate_simple_description(&file_name, &language, &symbols, total_lines as u32)
 			};
 
 			// Generate summary text for embedding (include description for semantic quality)
-			let summary_text = format!(
-				"{}\n{}\nKey symbols: {}",
-				description,
-				language,
-				symbols.join(", ")
-			);
+			let summary_text = format!("{}\n{}\nKey symbols: {}", description, language, symbols.join(", "));
 
 			// Store summary text for batch embedding generation
 			pending_embeddings.push(summary_text);
@@ -496,18 +452,12 @@ impl GraphBuilder {
 		// Process any remaining AI batch queue
 		if !ai_batch_queue.is_empty() {
 			if !self.quiet {
-				eprintln!(
-					"🚀 Processing final AI batch: {} files",
-					ai_batch_queue.len()
-				);
+				eprintln!("🚀 Processing final AI batch: {} files", ai_batch_queue.len());
 			}
 
 			// Call batch AI extraction through AI enhancements
 			if let Some(ref ai_enhancements) = self.ai_enhancements {
-				match ai_enhancements
-					.extract_ai_descriptions_batch(&ai_batch_queue)
-					.await
-				{
+				match ai_enhancements.extract_ai_descriptions_batch(&ai_batch_queue).await {
 					Ok(batch_descriptions) => {
 						// Store all descriptions from batch
 						for (file_path, description) in batch_descriptions {
@@ -524,18 +474,15 @@ impl GraphBuilder {
 						if !self.quiet {
 							eprintln!(
 								"⚠️  Final AI batch failed after retries: {}. Deferring {} files to next run.",
-								e, ai_batch_queue.len()
+								e,
+								ai_batch_queue.len()
 							);
 						}
-						let failed_ids: HashSet<String> =
-							ai_batch_queue.iter().map(|f| f.file_id.clone()).collect();
+						let failed_ids: HashSet<String> = ai_batch_queue.iter().map(|f| f.file_id.clone()).collect();
 						// See the mid-loop batch-failure handling above: pending_embeddings
 						// is paired with new_nodes by position, so both must be filtered
 						// with the same mask or the embedding assignment desyncs.
-						let keep: Vec<bool> = new_nodes
-							.iter()
-							.map(|n| !failed_ids.contains(&n.id))
-							.collect();
+						let keep: Vec<bool> = new_nodes.iter().map(|n| !failed_ids.contains(&n.id)).collect();
 						let mut keep_iter = keep.iter();
 						new_nodes.retain(|_| *keep_iter.next().unwrap());
 						let mut keep_iter = keep.iter();
@@ -603,12 +550,13 @@ impl GraphBuilder {
 						.file_stem()
 						.and_then(|s| s.to_str())
 						.unwrap_or("unknown");
-					node.description = crate::indexer::graphrag::relationships::RelationshipDiscovery::generate_simple_description(
-						file_name,
-						&node.language,
-						&node.symbols,
-						node.size_lines,
-					);
+					node.description =
+						crate::indexer::graphrag::relationships::RelationshipDiscovery::generate_simple_description(
+							file_name,
+							&node.language,
+							&node.symbols,
+							node.size_lines,
+						);
 					if !self.quiet {
 						eprintln!("⚠️  Fallback to simple description for: {}", node.id);
 					}
@@ -688,15 +636,13 @@ impl GraphBuilder {
 					.filter(|node| !node.is_symbol_node())
 					.filter(|node| !processed_node_ids.contains(&node.id))
 					.filter(|node| {
-						crate::indexer::languages::get_language(&node.language).is_some_and(
-							|language| {
-								node.imports.iter().any(|import| {
-									language
-										.resolve_import(import, &node.path, &registry)
-										.is_some_and(|path| processed_node_ids.contains(&path))
-								})
-							},
-						)
+						crate::indexer::languages::get_language(&node.language).is_some_and(|language| {
+							node.imports.iter().any(|import| {
+								language
+									.resolve_import(import, &node.path, &registry)
+									.is_some_and(|path| processed_node_ids.contains(&path))
+							})
+						})
 					})
 					.map(|node| node.without_embedding())
 					.collect();
@@ -714,8 +660,7 @@ impl GraphBuilder {
 						.await?
 				} else {
 					// Fast rule-based relationship discovery only
-					self.discover_relationships_efficiently(&all_processed_nodes)
-						.await?
+					self.discover_relationships_efficiently(&all_processed_nodes).await?
 				};
 
 				// Calls/Extends/Implements resolved per declaration by the live
@@ -730,33 +675,25 @@ impl GraphBuilder {
 				// their entire pre-existing edge sets on every incremental run.
 				let all_relationships: Vec<_> = all_relationships
 					.into_iter()
-					.filter(|r| {
-						processed_node_ids.contains(&r.source)
-							|| processed_node_ids.contains(&r.target)
-					})
+					.filter(|r| processed_node_ids.contains(&r.source) || processed_node_ids.contains(&r.target))
 					.collect();
 
 				// Store relationships in batches for incremental storage
 				if !all_relationships.is_empty() {
 					let mut relationship_batches_processed = 0;
 					let mut total_relationship_batches_done = 0;
-					let total_relationship_batches =
-						all_relationships.len().div_ceil(relationship_batch_size);
+					let total_relationship_batches = all_relationships.len().div_ceil(relationship_batch_size);
 
 					for relationship_batch in all_relationships.chunks(relationship_batch_size) {
 						// Add relationships to in-memory graph
 						{
 							let mut graph = self.graph.write().await;
-							graph
-								.relationships
-								.extend(relationship_batch.iter().cloned());
+							graph.relationships.extend(relationship_batch.iter().cloned());
 						}
 
 						// Save relationship batch to database incrementally
 						let db_ops = DatabaseOperations::new(&self.store);
-						db_ops
-							.save_graph_incremental(&[], relationship_batch)
-							.await?;
+						db_ops.save_graph_incremental(&[], relationship_batch).await?;
 
 						relationship_batches_processed += 1;
 						total_relationship_batches_done += 1;
@@ -827,10 +764,7 @@ impl GraphBuilder {
 	}
 
 	// Discover relationships efficiently without AI for most cases
-	async fn discover_relationships_efficiently(
-		&self,
-		new_files: &[CodeNode],
-	) -> Result<Vec<CodeRelationship>> {
+	async fn discover_relationships_efficiently(&self, new_files: &[CodeNode]) -> Result<Vec<CodeRelationship>> {
 		// Get all nodes from the graph for relationship discovery (discovery
 		// ignores embeddings — skip copying them).
 		let all_nodes = {
@@ -847,12 +781,7 @@ impl GraphBuilder {
 	}
 
 	// Determine if a file is complex enough to benefit from AI analysis
-	fn should_use_ai_for_description(
-		&self,
-		symbols: &[String],
-		lines: u32,
-		language: &str,
-	) -> bool {
+	fn should_use_ai_for_description(&self, symbols: &[String], lines: u32, language: &str) -> bool {
 		if let Some(ref ai) = self.ai_enhancements {
 			ai.should_use_ai_for_description(symbols, lines, language)
 		} else {
@@ -870,11 +799,7 @@ impl GraphBuilder {
 	}
 
 	// Legacy method for backward compatibility - now uses efficient code block processing
-	pub async fn process_code_blocks(
-		&self,
-		code_blocks: &[CodeBlock],
-		state: Option<SharedState>,
-	) -> Result<()> {
+	pub async fn process_code_blocks(&self, code_blocks: &[CodeBlock], state: Option<SharedState>) -> Result<()> {
 		// Use the new efficient method that processes code blocks directly
 		self.process_files_from_codeblocks(code_blocks, state).await
 	}
@@ -900,10 +825,7 @@ impl GraphBuilder {
 		}
 		if let Err(e) = self.store.clear_graph_relationships().await {
 			if !self.quiet {
-				eprintln!(
-					"Warning: Failed to clear existing graph relationships: {}",
-					e
-				);
+				eprintln!("Warning: Failed to clear existing graph relationships: {}", e);
 			}
 			tracing::warn!(
 				error = %e,
@@ -924,8 +846,7 @@ impl GraphBuilder {
 		if all_code_blocks.is_empty() {
 			if let Some(ref state) = state {
 				let mut state_guard = state.write();
-				state_guard.status_message =
-					"No code blocks found in database for GraphRAG".to_string();
+				state_guard.status_message = "No code blocks found in database for GraphRAG".to_string();
 			}
 			return Ok(());
 		}
@@ -933,10 +854,7 @@ impl GraphBuilder {
 		// Update state with the number of blocks to process
 		if let Some(ref state) = state {
 			let mut state_guard = state.write();
-			state_guard.status_message = format!(
-				"Processing {} code blocks for GraphRAG...",
-				all_code_blocks.len()
-			);
+			state_guard.status_message = format!("Processing {} code blocks for GraphRAG...", all_code_blocks.len());
 		}
 
 		// Process the code blocks to build the graph
@@ -976,11 +894,10 @@ impl GraphBuilder {
 		graph
 			.nodes
 			.retain(|_id, node| !overridden_paths.contains(node.path.as_str()));
-		let remaining_ids: std::collections::HashSet<String> =
-			graph.nodes.keys().cloned().collect();
-		graph.relationships.retain(|rel| {
-			remaining_ids.contains(&rel.source) && remaining_ids.contains(&rel.target)
-		});
+		let remaining_ids: std::collections::HashSet<String> = graph.nodes.keys().cloned().collect();
+		graph
+			.relationships
+			.retain(|rel| remaining_ids.contains(&rel.source) && remaining_ids.contains(&rel.target));
 	}
 
 	/// Merge a branch graph into the current (filtered) graph.
@@ -1022,9 +939,7 @@ impl GraphBuilder {
 
 			// Load graph from database
 			let db_ops = DatabaseOperations::new(&self.store);
-			let loaded_graph = db_ops
-				.load_graph(std::path::Path::new("."), self.quiet)
-				.await?;
+			let loaded_graph = db_ops.load_graph(std::path::Path::new("."), self.quiet).await?;
 
 			// Update in-memory graph with loaded data
 			{
@@ -1077,19 +992,11 @@ impl GraphBuilder {
 			let name_contains = node.name.to_lowercase().contains(&query_lower);
 			let kind_contains = node.kind.to_lowercase().contains(&query_lower);
 			let desc_contains = node.description.to_lowercase().contains(&query_lower);
-			let symbols_contain = node
-				.symbols
-				.iter()
-				.any(|s| s.to_lowercase().contains(&query_lower));
+			let symbols_contain = node.symbols.iter().any(|s| s.to_lowercase().contains(&query_lower));
 
 			// Use a lower threshold for semantic similarity (0.5 instead of 0.6)
 			// OR include if the query is a substring of any important field
-			if similarity > 0.5
-				|| name_contains
-				|| kind_contains
-				|| desc_contains
-				|| symbols_contain
-			{
+			if similarity > 0.5 || name_contains || kind_contains || desc_contains || symbols_contain {
 				// Boost similarity score for exact matches to ensure they appear at the top
 				let boosted_similarity = if name_contains || kind_contains || symbols_contain {
 					// Ensure exact matches get higher priority
@@ -1104,8 +1011,7 @@ impl GraphBuilder {
 		drop(graph);
 
 		// Sort by similarity (highest first)
-		similarities
-			.sort_unstable_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+		similarities.sort_unstable_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
 
 		// Return the nodes (without the similarity scores)
 		let results = similarities.into_iter().map(|(_, node)| node).collect();
@@ -1119,18 +1025,11 @@ impl GraphBuilder {
 		let query_embedding = self.generate_embedding(query).await?;
 
 		let db_ops = DatabaseOperations::new(&self.store);
-		db_ops
-			.search_nodes_in_database(&query_embedding, query)
-			.await
+		db_ops.search_nodes_in_database(&query_embedding, query).await
 	}
 
 	// Find paths between nodes in the graph
-	pub async fn find_paths(
-		&self,
-		source_id: &str,
-		target_id: &str,
-		max_depth: usize,
-	) -> Result<Vec<Vec<String>>> {
+	pub async fn find_paths(&self, source_id: &str, target_id: &str, max_depth: usize) -> Result<Vec<Vec<String>>> {
 		let graph = self.graph.read().await;
 
 		// Ensure both nodes exist
@@ -1221,12 +1120,13 @@ impl GraphBuilder {
 					.file_stem()
 					.and_then(|s| s.to_str())
 					.unwrap_or("unknown");
-				node.description = crate::indexer::graphrag::relationships::RelationshipDiscovery::generate_simple_description(
-					file_name,
-					&node.language,
-					&node.symbols,
-					node.size_lines,
-				);
+				node.description =
+					crate::indexer::graphrag::relationships::RelationshipDiscovery::generate_simple_description(
+						file_name,
+						&node.language,
+						&node.symbols,
+						node.size_lines,
+					);
 			}
 		}
 
@@ -1252,8 +1152,10 @@ impl GraphBuilder {
 				// Check if node already exists to prevent duplicates
 				if let Some(existing_node) = graph.nodes.get(&node.id) {
 					if !self.quiet {
-						eprintln!("⚠️  Preventing duplicate node insertion: {} (existing hash: {}, new hash: {})",
-							node.id, existing_node.hash, node.hash);
+						eprintln!(
+							"⚠️  Preventing duplicate node insertion: {} (existing hash: {}, new hash: {})",
+							node.id, existing_node.hash, node.hash
+						);
 					}
 					// Only replace if the hash is different (content changed)
 					if existing_node.hash != node.hash {

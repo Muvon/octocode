@@ -25,11 +25,7 @@ mod tests {
 	fn project() -> (TempDir, GraphRagProvider) {
 		let dir = TempDir::new().unwrap();
 		std::fs::create_dir_all(dir.path().join("src")).unwrap();
-		std::fs::write(
-			dir.path().join("src/helper.rs"),
-			"pub fn helper() -> u32 {\n\t7\n}\n",
-		)
-		.unwrap();
+		std::fs::write(dir.path().join("src/helper.rs"), "pub fn helper() -> u32 {\n\t7\n}\n").unwrap();
 		std::fs::write(
 			dir.path().join("src/main.rs"),
 			"mod helper;\n\nfn main() {\n\tlet value = helper::helper();\n\tprintln!(\"{value}\");\n}\n",
@@ -47,18 +43,13 @@ mod tests {
 		let (_dir, provider) = project();
 		let err = provider.execute(&json!({})).await.unwrap_err();
 		assert_eq!(err.code, -32602);
-		assert!(err
-			.message
-			.contains("Missing required parameter 'operation'"));
+		assert!(err.message.contains("Missing required parameter 'operation'"));
 	}
 
 	#[tokio::test]
 	async fn an_unknown_operation_is_rejected() {
 		let (_dir, provider) = project();
-		let err = provider
-			.execute(&json!({"operation": "explode"}))
-			.await
-			.unwrap_err();
+		let err = provider.execute(&json!({"operation": "explode"})).await.unwrap_err();
 		assert!(err.message.contains("Invalid operation 'explode'"), "{err}");
 	}
 
@@ -66,13 +57,8 @@ mod tests {
 	async fn search_requires_a_non_empty_bounded_query() {
 		let (_dir, provider) = project();
 
-		let missing = provider
-			.execute(&json!({"operation": "search"}))
-			.await
-			.unwrap_err();
-		assert!(missing
-			.message
-			.contains("Missing required parameter 'query'"));
+		let missing = provider.execute(&json!({"operation": "search"})).await.unwrap_err();
+		assert!(missing.message.contains("Missing required parameter 'query'"));
 
 		let empty = provider
 			.execute(&json!({"operation": "search", "query": "   "}))
@@ -91,14 +77,8 @@ mod tests {
 	async fn node_operations_require_a_node_id() {
 		let (_dir, provider) = project();
 		for operation in ["get-node", "get-relationships"] {
-			let err = provider
-				.execute(&json!({"operation": operation}))
-				.await
-				.unwrap_err();
-			assert!(
-				err.message.contains("Missing required parameter 'node_id'"),
-				"{err}"
-			);
+			let err = provider.execute(&json!({"operation": operation})).await.unwrap_err();
+			assert!(err.message.contains("Missing required parameter 'node_id'"), "{err}");
 		}
 	}
 
@@ -106,10 +86,7 @@ mod tests {
 	async fn find_path_requires_both_endpoints() {
 		let (_dir, provider) = project();
 
-		let no_source = provider
-			.execute(&json!({"operation": "find-path"}))
-			.await
-			.unwrap_err();
+		let no_source = provider.execute(&json!({"operation": "find-path"})).await.unwrap_err();
 		assert!(no_source.message.contains("'source_id'"), "{no_source}");
 
 		let no_target = provider
@@ -144,10 +121,7 @@ mod tests {
 	#[tokio::test]
 	async fn an_overview_describes_the_live_graph() {
 		let (_dir, provider) = project();
-		let out = provider
-			.execute(&json!({"operation": "overview"}))
-			.await
-			.unwrap();
+		let out = provider.execute(&json!({"operation": "overview"})).await.unwrap();
 		assert!(!out.is_empty());
 	}
 
@@ -268,10 +242,7 @@ mod tests {
 		config.graphrag.enabled = false;
 		let provider = GraphRagProvider::new(config, dir.path().to_path_buf());
 
-		let err = provider
-			.execute(&json!({"operation": "overview"}))
-			.await
-			.unwrap_err();
+		let err = provider.execute(&json!({"operation": "overview"})).await.unwrap_err();
 		assert!(err.message.contains("No supported source symbols"), "{err}");
 	}
 
@@ -327,15 +298,9 @@ mod tests {
 	async fn an_overview_reports_the_graph_mode_and_its_counts() {
 		let (_dir, provider) = project();
 
-		let text = provider
-			.execute(&json!({"operation": "overview"}))
-			.await
-			.unwrap();
+		let text = provider.execute(&json!({"operation": "overview"})).await.unwrap();
 		// GraphRAG persistence is off, so the answer comes from the live graph.
-		assert!(
-			text.starts_with("Code Graph Overview (runtime_structural): "),
-			"{text}"
-		);
+		assert!(text.starts_with("Code Graph Overview (runtime_structural): "), "{text}");
 		assert!(text.contains("Node Types:\n"), "{text}");
 		assert!(text.contains("Relationship Types:\n"), "{text}");
 
@@ -372,29 +337,19 @@ mod tests {
 			.await
 			.unwrap();
 		assert!(text.starts_with("Node: "), "{text}");
-		for label in [
-			"\nID: ",
-			"\nKind: ",
-			"\nPath: ",
-			"\nDescription: ",
-			"\nSymbols: ",
-		] {
+		for label in ["\nID: ", "\nKind: ", "\nPath: ", "\nDescription: ", "\nSymbols: "] {
 			assert!(text.contains(label), "missing {label:?} in: {text}");
 		}
 
 		let markdown = provider
-			.execute(
-				&json!({"operation": "get-node", "node_id": "src/helper.rs", "format": "markdown"}),
-			)
+			.execute(&json!({"operation": "get-node", "node_id": "src/helper.rs", "format": "markdown"}))
 			.await
 			.unwrap();
 		assert!(markdown.starts_with("# Node: "), "{markdown}");
 		assert!(markdown.contains("**Kind:**"), "{markdown}");
 
 		let raw = provider
-			.execute(
-				&json!({"operation": "get-node", "node_id": "src/helper.rs", "format": "json"}),
-			)
+			.execute(&json!({"operation": "get-node", "node_id": "src/helper.rs", "format": "json"}))
 			.await
 			.unwrap();
 		let parsed: Value = serde_json::from_str(&raw).expect("json format must parse");
@@ -407,9 +362,7 @@ mod tests {
 	async fn relationships_are_returned_as_structured_edges_in_json() {
 		let (_dir, provider) = project();
 		let raw = provider
-			.execute(
-				&json!({"operation": "get-relationships", "node_id": "src/main.rs", "format": "json"}),
-			)
+			.execute(&json!({"operation": "get-relationships", "node_id": "src/main.rs", "format": "json"}))
 			.await
 			.unwrap();
 
@@ -435,9 +388,7 @@ mod tests {
 		let nodes = parsed.as_array().expect("an array of nodes");
 		assert!(!nodes.is_empty(), "`helper` exists in the corpus: {raw}");
 		assert!(
-			nodes
-				.iter()
-				.any(|node| node["path"].as_str() == Some("src/helper.rs")),
+			nodes.iter().any(|node| node["path"].as_str() == Some("src/helper.rs")),
 			"{raw}"
 		);
 		// The search is capped, so it can never flood the model's context.

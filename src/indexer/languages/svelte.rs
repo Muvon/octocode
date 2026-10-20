@@ -51,11 +51,7 @@ fn extract_destructured_names(pattern: &str) -> Vec<String> {
 			let after_colon = item.split(':').next_back().unwrap_or(item).trim();
 			// `name = default` -> strip the default value
 			let name = after_colon.split('=').next().unwrap_or(after_colon).trim();
-			if !name.is_empty()
-				&& name
-					.chars()
-					.all(|c| c.is_alphanumeric() || c == '_' || c == '$')
-			{
+			if !name.is_empty() && name.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '$') {
 				Some(name.to_string())
 			} else {
 				None
@@ -127,10 +123,7 @@ impl Language for Svelte {
 			_ => return None,
 		};
 
-		let Some(raw_text) = node
-			.children(&mut node.walk())
-			.find(|child| child.kind() == "raw_text")
-		else {
+		let Some(raw_text) = node.children(&mut node.walk()).find(|child| child.kind() == "raw_text") else {
 			return Some(Vec::new());
 		};
 		let embedded_text = raw_text.utf8_text(contents.as_bytes()).unwrap_or_default();
@@ -143,10 +136,7 @@ impl Language for Svelte {
 		};
 
 		let mut parser = tree_sitter::Parser::new();
-		if parser
-			.set_language(&embedded_lang.get_ts_language())
-			.is_err()
-		{
+		if parser.set_language(&embedded_lang.get_ts_language()).is_err() {
 			return Some(Vec::new());
 		}
 		let Some(tree) = parser.parse(embedded_text, None) else {
@@ -199,10 +189,7 @@ impl Language for Svelte {
 		let kind = node.kind();
 
 		// Extract meaningful identifiers, avoiding noise
-		if (kind.contains("identifier") || kind.contains("name"))
-			&& !kind.contains("property")
-			&& kind != "tag_name"
-		{
+		if (kind.contains("identifier") || kind.contains("name")) && !kind.contains("property") && kind != "tag_name" {
 			if let Ok(text) = node.utf8_text(contents.as_bytes()) {
 				let text = text.trim();
 				if !text.is_empty() && !symbols.iter().any(|s| s.as_str() == text) {
@@ -235,17 +222,9 @@ impl Language for Svelte {
 		// Svelte-specific semantic groups
 		let semantic_groups = [
 			// Functions and methods
-			&[
-				"function_declaration",
-				"method_definition",
-				"arrow_function",
-			] as &[&str],
+			&["function_declaration", "method_definition", "arrow_function"] as &[&str],
 			// Variable declarations
-			&[
-				"variable_declaration",
-				"lexical_declaration",
-				"reactive_declaration",
-			],
+			&["variable_declaration", "lexical_declaration", "reactive_declaration"],
 			// Reactive statements
 			&["reactive_statement", "reactive_declaration"],
 			// Components and elements
@@ -269,9 +248,7 @@ impl Language for Svelte {
 
 	fn get_node_type_description(&self, node_type: &str) -> &'static str {
 		match node_type {
-			"function_declaration" | "method_definition" | "arrow_function" => {
-				"function declarations"
-			}
+			"function_declaration" | "method_definition" | "arrow_function" => "function declarations",
 			"variable_declaration" | "lexical_declaration" => "variable declarations",
 			"reactive_statement" | "reactive_declaration" => "reactive declarations",
 			"class_declaration" => "class declarations",
@@ -349,12 +326,7 @@ impl Language for Svelte {
 
 impl Svelte {
 	/// Extract JavaScript symbols from script element content
-	fn extract_script_content_symbols(
-		&self,
-		node: Node,
-		contents: &str,
-		symbols: &mut Vec<String>,
-	) {
+	fn extract_script_content_symbols(&self, node: Node, contents: &str, symbols: &mut Vec<String>) {
 		// Look for the raw_text content inside script element
 		for child in node.children(&mut node.walk()) {
 			if child.kind() == "raw_text" {
@@ -391,12 +363,7 @@ impl Svelte {
 	}
 
 	/// Extract symbols from meaningful Svelte elements (components, event handlers)
-	fn extract_meaningful_element_symbols(
-		&self,
-		node: Node,
-		contents: &str,
-		symbols: &mut Vec<String>,
-	) {
+	fn extract_meaningful_element_symbols(&self, node: Node, contents: &str, symbols: &mut Vec<String>) {
 		// Check for Svelte-specific attributes. A self-closing component
 		// (`<Modal on:close={h} />`) is a `self_closing_tag`, so without it the
 		// component name and all its directives are lost.
@@ -424,8 +391,7 @@ impl Svelte {
 					else if tag_child.kind() == "tag_name" {
 						if let Ok(tag_name) = tag_child.utf8_text(contents.as_bytes()) {
 							// Svelte components are typically capitalized
-							if tag_name.chars().next().is_some_and(|c| c.is_uppercase())
-								&& !self.is_html_tag(tag_name)
+							if tag_name.chars().next().is_some_and(|c| c.is_uppercase()) && !self.is_html_tag(tag_name)
 							{
 								symbols.push(tag_name.to_string());
 							}
@@ -451,10 +417,7 @@ impl Svelte {
 				}
 			}
 			// Extract variable declarations: let/const/var name = (or destructured)
-			else if line.starts_with("let ")
-				|| line.starts_with("const ")
-				|| line.starts_with("var ")
-			{
+			else if line.starts_with("let ") || line.starts_with("const ") || line.starts_with("var ") {
 				symbols.extend(self.extract_variable_name(line));
 			}
 			// Extract export declarations: export let name = (or destructured)
@@ -567,8 +530,7 @@ impl Svelte {
 			.trim_end_matches('=')
 			.trim_end_matches(',')
 			.trim();
-		if rest.split_whitespace().count() >= 3 && !name.is_empty() && !self.is_svelte_keyword(name)
-		{
+		if rest.split_whitespace().count() >= 3 && !name.is_empty() && !self.is_svelte_keyword(name) {
 			vec![name.to_string()]
 		} else {
 			Vec::new()
@@ -762,9 +724,7 @@ impl Svelte {
 		// A semicolon-terminated import (`from 'svelte';`) still carries its `;`
 		// here, which would fail the closing-quote check and drop the path.
 		let text = text.trim().trim_end_matches(';').trim();
-		if (text.starts_with('"') && text.ends_with('"'))
-			|| (text.starts_with('\'') && text.ends_with('\''))
-		{
+		if (text.starts_with('"') && text.ends_with('"')) || (text.starts_with('\'') && text.ends_with('\'')) {
 			Some(text[1..text.len() - 1].to_string())
 		} else {
 			None

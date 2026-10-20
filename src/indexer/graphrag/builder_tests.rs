@@ -71,9 +71,7 @@ mod tests {
 		let mut config = offline_config();
 		config.graphrag.use_llm = false;
 
-		let builder = GraphBuilder::new_with_quiet(config, dir.path(), true)
-			.await
-			.unwrap();
+		let builder = GraphBuilder::new_with_quiet(config, dir.path(), true).await.unwrap();
 		assert!(builder.get_graph().await.unwrap().nodes.is_empty());
 	}
 
@@ -99,9 +97,7 @@ mod tests {
 	async fn paths_are_reported_relative_to_the_project_root() {
 		let (dir, builder) = project().await;
 		let absolute = dir.path().join("src/a.rs");
-		let relative = builder
-			.to_relative_path(&absolute.to_string_lossy())
-			.unwrap();
+		let relative = builder.to_relative_path(&absolute.to_string_lossy()).unwrap();
 		assert!(relative.ends_with("src/a.rs"), "{relative}");
 	}
 
@@ -113,19 +109,11 @@ mod tests {
 		assert_eq!(paths.len(), 1, "{paths:?}");
 		assert_eq!(
 			paths[0],
-			vec![
-				"src/a.rs".to_string(),
-				"src/b.rs".to_string(),
-				"src/c.rs".to_string()
-			]
+			vec!["src/a.rs".to_string(), "src/b.rs".to_string(), "src/c.rs".to_string()]
 		);
 
 		// A depth budget shorter than the chain finds nothing.
-		assert!(builder
-			.find_paths("src/a.rs", "src/c.rs", 1)
-			.await
-			.unwrap()
-			.is_empty());
+		assert!(builder.find_paths("src/a.rs", "src/c.rs", 1).await.unwrap().is_empty());
 		// Unknown endpoints yield no paths rather than an error.
 		assert!(builder
 			.find_paths("src/nope.rs", "src/c.rs", 4)
@@ -291,9 +279,7 @@ mod tests {
 		std::fs::write(dir.path().join("Cargo.toml"), "[package]").unwrap();
 		let mut config = offline_config();
 		config.graphrag.use_llm = false;
-		let builder = GraphBuilder::new_with_quiet(config, dir.path(), true)
-			.await
-			.unwrap();
+		let builder = GraphBuilder::new_with_quiet(config, dir.path(), true).await.unwrap();
 
 		std::fs::write(dir.path().join("inside.rs"), "").unwrap();
 		assert_eq!(
@@ -306,13 +292,8 @@ mod tests {
 		let elsewhere = TempDir::new().unwrap();
 		let stranger = elsewhere.path().join("outside.rs");
 		std::fs::write(&stranger, "").unwrap();
-		let err = builder
-			.to_relative_path(&stranger.to_string_lossy())
-			.unwrap_err();
-		assert!(
-			err.to_string().contains("is not within project root"),
-			"{err}"
-		);
+		let err = builder.to_relative_path(&stranger.to_string_lossy()).unwrap_err();
+		assert!(err.to_string().contains("is not within project root"), "{err}");
 	}
 
 	#[tokio::test]
@@ -337,16 +318,8 @@ mod tests {
 		assert_eq!(
 			paths,
 			vec![
-				vec![
-					"src/a.rs".to_string(),
-					"src/b.rs".to_string(),
-					"src/d.rs".to_string()
-				],
-				vec![
-					"src/a.rs".to_string(),
-					"src/c.rs".to_string(),
-					"src/d.rs".to_string()
-				],
+				vec!["src/a.rs".to_string(), "src/b.rs".to_string(), "src/d.rs".to_string()],
+				vec!["src/a.rs".to_string(), "src/c.rs".to_string(), "src/d.rs".to_string()],
 			]
 		);
 	}
@@ -388,19 +361,12 @@ mod tests {
 				// `load_graph` only reads a store once BOTH graphrag tables exist,
 				// and they are created lazily on first write — so the branch delta
 				// needs a relationship for its nodes to be readable at all.
-				&[graph_relationship(
-					"src/a.rs",
-					"src/c.rs",
-					RelationType::Calls,
-				)],
+				&[graph_relationship("src/a.rs", "src/c.rs", RelationType::Calls)],
 			)
 			.await
 			.unwrap();
 
-		assert_eq!(
-			builder.get_graph().await.unwrap().nodes["src/a.rs"].kind,
-			"file"
-		);
+		assert_eq!(builder.get_graph().await.unwrap().nodes["src/a.rs"].kind, "file");
 		builder.merge_branch_graph(&branch_store).await.unwrap();
 
 		let graph = builder.get_graph().await.unwrap();
@@ -415,10 +381,7 @@ mod tests {
 		let state = create_shared_state();
 
 		builder
-			.process_files_from_codeblocks(
-				&[code_block("/definitely/not/here/gone.rs", "h1")],
-				Some(state.clone()),
-			)
+			.process_files_from_codeblocks(&[code_block("/definitely/not/here/gone.rs", "h1")], Some(state.clone()))
 			.await
 			.unwrap();
 
@@ -476,11 +439,7 @@ mod tests {
 
 		let mut batches = frequency - 1;
 		builder.flush_if_needed(&mut batches).await.unwrap();
-		assert_eq!(
-			batches,
-			frequency - 1,
-			"below the frequency nothing flushes"
-		);
+		assert_eq!(batches, frequency - 1, "below the frequency nothing flushes");
 
 		let mut batches = frequency;
 		builder.flush_if_needed(&mut batches).await.unwrap();

@@ -79,10 +79,7 @@ mod tests {
 	#[test]
 	fn goto_definition_formatting_uses_the_first_location_in_one_based_coordinates() {
 		let provider = provider();
-		assert_eq!(
-			provider.format_goto_definition_response(&[]),
-			"No definition found"
-		);
+		assert_eq!(provider.format_goto_definition_response(&[]), "No definition found");
 
 		let out = provider.format_goto_definition_response(&[
 			location(&format!("{ROOT_URI}/src/lib.rs"), 0, 7),
@@ -106,9 +103,7 @@ mod tests {
 		let provider = provider();
 
 		let with_range = provider.format_hover_response(&Hover {
-			contents: HoverContents::Scalar(MarkedString::String(
-				"```rust\n**fn** helper() -> u32\n```".to_string(),
-			)),
+			contents: HoverContents::Scalar(MarkedString::String("```rust\n**fn** helper() -> u32\n```".to_string())),
 			range: Some(range(0, 6, 0, 12)),
 		});
 		assert_eq!(with_range, "Hover info (1:7-1:13):\nfn helper() -> u32");
@@ -125,18 +120,14 @@ mod tests {
 		let provider = provider();
 
 		assert_eq!(
-			provider.extract_hover_contents(&HoverContents::Scalar(MarkedString::String(
-				"scalar".to_string()
-			))),
+			provider.extract_hover_contents(&HoverContents::Scalar(MarkedString::String("scalar".to_string()))),
 			"scalar"
 		);
 		assert_eq!(
-			provider.extract_hover_contents(&HoverContents::Scalar(MarkedString::LanguageString(
-				LanguageString {
-					language: "rust".to_string(),
-					value: "fn helper()".to_string(),
-				}
-			))),
+			provider.extract_hover_contents(&HoverContents::Scalar(MarkedString::LanguageString(LanguageString {
+				language: "rust".to_string(),
+				value: "fn helper()".to_string(),
+			}))),
 			"fn helper()"
 		);
 		assert_eq!(
@@ -161,19 +152,13 @@ mod tests {
 	#[test]
 	fn references_are_numbered_in_one_based_coordinates() {
 		let provider = provider();
-		assert_eq!(
-			provider.format_references_response(&[]),
-			"No references found"
-		);
+		assert_eq!(provider.format_references_response(&[]), "No references found");
 
 		let out = provider.format_references_response(&[
 			location(&format!("{ROOT_URI}/src/lib.rs"), 0, 7),
 			location(&format!("{ROOT_URI}/src/lib.rs"), 4, 1),
 		]);
-		assert_eq!(
-			out,
-			"Found 2 reference(s):\n1. src/lib.rs:1:8\n2. src/lib.rs:5:2"
-		);
+		assert_eq!(out, "Found 2 reference(s):\n1. src/lib.rs:1:8\n2. src/lib.rs:5:2");
 	}
 
 	#[test]
@@ -217,14 +202,9 @@ mod tests {
 	#[test]
 	fn completions_are_capped_at_ten_with_a_remainder_line() {
 		let provider = provider();
-		assert_eq!(
-			provider.format_completion_response(&[]),
-			"No completions available"
-		);
+		assert_eq!(provider.format_completion_response(&[]), "No completions available");
 
-		let items: Vec<serde_json::Value> = (0..12)
-			.map(|i| json!({"label": format!("item{}", i)}))
-			.collect();
+		let items: Vec<serde_json::Value> = (0..12).map(|i| json!({"label": format!("item{}", i)})).collect();
 		let out = provider.format_completion_response(&items);
 		assert!(out.starts_with("Found 12 completion(s):\n"), "{out}");
 		assert!(out.contains("\n10. item9\n"), "{out}");
@@ -249,10 +229,7 @@ mod tests {
 	fn goto_definition_parsing_accepts_every_documented_response_shape() {
 		let provider = provider();
 
-		assert!(provider
-			.parse_goto_definition_response(json!(null))
-			.unwrap()
-			.is_empty());
+		assert!(provider.parse_goto_definition_response(json!(null)).unwrap().is_empty());
 
 		let single = provider
 			.parse_goto_definition_response(json!({
@@ -357,10 +334,7 @@ mod tests {
 	fn completion_parsing_accepts_both_a_list_and_a_bare_array() {
 		let provider = provider();
 
-		assert!(provider
-			.parse_completion_response(json!(null))
-			.unwrap()
-			.is_empty());
+		assert!(provider.parse_completion_response(json!(null)).unwrap().is_empty());
 
 		let list = provider
 			.parse_completion_response(json!({

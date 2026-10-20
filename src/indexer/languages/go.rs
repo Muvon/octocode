@@ -106,11 +106,8 @@ impl Language for Go {
 		match node.kind() {
 			"function_declaration" | "method_declaration" => {
 				// Extract function or method name
-				if let Some(name) = super::extract_symbol_by_kinds(
-					node,
-					contents,
-					&["identifier", "field_identifier"],
-				) {
+				if let Some(name) = super::extract_symbol_by_kinds(node, contents, &["identifier", "field_identifier"])
+				{
 					symbols.push(name);
 				}
 
@@ -127,9 +124,7 @@ impl Language for Go {
 				// exact match on "identifier" never fires.
 				for child in node.children(&mut node.walk()) {
 					if child.kind() == "type_spec" {
-						if let Some(name) =
-							super::extract_symbol_by_kind(child, contents, "type_identifier")
-						{
+						if let Some(name) = super::extract_symbol_by_kind(child, contents, "type_identifier") {
 							symbols.push(name);
 						}
 						break;
@@ -153,8 +148,7 @@ impl Language for Go {
 				}
 			}
 			"type_spec" => {
-				if let Some(name) = super::extract_symbol_by_kind(node, contents, "type_identifier")
-				{
+				if let Some(name) = super::extract_symbol_by_kind(node, contents, "type_identifier") {
 					symbols.push(name);
 				}
 			}
@@ -180,11 +174,7 @@ impl Language for Go {
 			// Type definitions
 			&["type_declaration", "struct_type", "interface_type"],
 			// Variable and constant declarations
-			&[
-				"var_declaration",
-				"const_declaration",
-				"short_var_declaration",
-			],
+			&["var_declaration", "const_declaration", "short_var_declaration"],
 			// Import statements
 			&["import_declaration"],
 		];
@@ -198,9 +188,7 @@ impl Language for Go {
 			"type_declaration" => "type declarations",
 			"struct_type" => "struct definitions",
 			"interface_type" => "interface definitions",
-			"var_declaration" | "const_declaration" | "short_var_declaration" => {
-				"variable declarations"
-			}
+			"var_declaration" | "const_declaration" | "short_var_declaration" => "variable declarations",
 			"import_declaration" => "import statements",
 			_ => "declarations",
 		}
@@ -231,10 +219,7 @@ impl Language for Go {
 				// one level down inside its spec node, so both levels are scanned.
 				let mut push_if_exported = |node: Node| {
 					for child in node.children(&mut node.walk()) {
-						if matches!(
-							child.kind(),
-							"identifier" | "field_identifier" | "type_identifier"
-						) {
+						if matches!(child.kind(), "identifier" | "field_identifier" | "type_identifier") {
 							if let Ok(name) = child.utf8_text(contents.as_bytes()) {
 								if name.chars().next().is_some_and(|c| c.is_uppercase()) {
 									exports.push(name.to_string());
@@ -284,11 +269,7 @@ impl Language for Go {
 		None
 	}
 
-	fn extract_type_relations(
-		&self,
-		node: Node,
-		contents: &str,
-	) -> Vec<(super::TypeRelationKind, String)> {
+	fn extract_type_relations(&self, node: Node, contents: &str) -> Vec<(super::TypeRelationKind, String)> {
 		// Go has no `extends`/`implements`, but struct embedding —
 		// `type Foo struct { Bar }` — is the idiomatic equivalent of
 		// inheritance/composition and is the most useful edge to capture.
@@ -366,8 +347,7 @@ impl Go {
 							if spec.kind() == "var_spec" {
 								for spec_child in spec.children(&mut spec.walk()) {
 									if spec_child.kind() == "identifier" {
-										if let Ok(name) = spec_child.utf8_text(contents.as_bytes())
-										{
+										if let Ok(name) = spec_child.utf8_text(contents.as_bytes()) {
 											if !symbols.iter().any(|s| s.as_str() == name) {
 												symbols.push(name.to_string());
 											}
@@ -383,8 +363,7 @@ impl Go {
 							if spec.kind() == "const_spec" {
 								for spec_child in spec.children(&mut spec.walk()) {
 									if spec_child.kind() == "identifier" {
-										if let Ok(name) = spec_child.utf8_text(contents.as_bytes())
-										{
+										if let Ok(name) = spec_child.utf8_text(contents.as_bytes()) {
 											if !symbols.iter().any(|s| s.as_str() == name) {
 												symbols.push(name.to_string());
 											}
@@ -435,12 +414,7 @@ impl Go {
 
 	/// Extract field names from struct or interface types
 	#[allow(clippy::only_used_in_recursion)]
-	fn extract_struct_interface_fields(
-		&self,
-		node: Node,
-		contents: &str,
-		symbols: &mut Vec<String>,
-	) {
+	fn extract_struct_interface_fields(&self, node: Node, contents: &str, symbols: &mut Vec<String>) {
 		let mut cursor = node.walk();
 		if cursor.goto_first_child() {
 			loop {
@@ -549,12 +523,7 @@ fn parse_go_import_statement(import_text: &str) -> Option<Vec<String>> {
 
 impl Go {
 	/// Resolve relative imports in Go
-	fn resolve_relative_import(
-		&self,
-		import_path: &str,
-		source_file: &str,
-		go_files: &[String],
-	) -> Option<String> {
+	fn resolve_relative_import(&self, import_path: &str, source_file: &str, go_files: &[String]) -> Option<String> {
 		use super::resolution_utils::resolve_relative_path;
 
 		let relative_path = resolve_relative_path(source_file, import_path)?;
@@ -583,12 +552,8 @@ impl Go {
 				let dir_str = file_dir.to_string_lossy().replace('\\', "/");
 				// Match if the directory path ends with the import path (or its last segment)
 				if dir_str.ends_with(&normalized_import)
-					|| dir_str.ends_with(
-						normalized_import
-							.split('/')
-							.next_back()
-							.unwrap_or(&normalized_import),
-					) {
+					|| dir_str.ends_with(normalized_import.split('/').next_back().unwrap_or(&normalized_import))
+				{
 					return Some(go_file.clone());
 				}
 			}

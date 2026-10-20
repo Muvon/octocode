@@ -154,9 +154,7 @@ fn find_owning_symbol(symbols: &[SymbolDecl], order: &[usize], line: u32) -> Opt
 		if line <= symbol.end_line {
 			let span = symbol.end_line.saturating_sub(symbol.start_line);
 			let better = match best {
-				Some((best_span, best_idx)) => {
-					span < best_span || (span == best_span && idx < best_idx)
-				}
+				Some((best_span, best_idx)) => span < best_span || (span == best_span && idx < best_idx),
 				None => true,
 			};
 			if better {
@@ -196,10 +194,7 @@ pub fn symbol_kind_from_node_kind(kind: &str) -> &'static str {
 		"trait"
 	} else if kind.contains("enum") {
 		"enum"
-	} else if kind.contains("mod")
-		|| kind.contains("module")
-		|| kind.contains("namespace")
-		|| kind.contains("package")
+	} else if kind.contains("mod") || kind.contains("module") || kind.contains("namespace") || kind.contains("package")
 	{
 		"module"
 	} else if kind.contains("macro") {
@@ -217,9 +212,8 @@ pub fn symbol_kind_from_node_kind(kind: &str) -> &'static str {
 /// relations, and symbol declarations from ONE tree-sitter parse. Replaces
 /// the three separate parses (one per extractor) that ran per file.
 pub fn extract_symbols_from_file(file_path: &str, language: &str) -> Result<FileAstData> {
-	let lang_impl = languages::get_language(language).ok_or_else(|| {
-		anyhow::anyhow!("Failed to get language implementation for: {}", language)
-	})?;
+	let lang_impl = languages::get_language(language)
+		.ok_or_else(|| anyhow::anyhow!("Failed to get language implementation for: {}", language))?;
 
 	let contents = std::fs::read_to_string(file_path)
 		.with_context(|| format!("Failed to read file for AST extraction: {}", file_path))?;
@@ -233,13 +227,7 @@ pub fn extract_symbols_from_file(file_path: &str, language: &str) -> Result<File
 	let symbol_kinds = lang_impl.get_symbol_kinds();
 	let mut data = FileAstData::default();
 	let root = tree.root_node();
-	walk_ast(
-		root,
-		&contents,
-		lang_impl.as_ref(),
-		&symbol_kinds,
-		&mut data,
-	);
+	walk_ast(root, &contents, lang_impl.as_ref(), &symbol_kinds, &mut data);
 
 	for embedded in lang_impl.extract_embedded_sources(root, &contents) {
 		let Some(embedded_impl) = languages::get_language(embedded.language) else {
@@ -289,12 +277,8 @@ fn walk_ast(
 	data: &mut FileAstData,
 ) {
 	let (imports, exports) = lang_impl.extract_imports_exports(node, contents);
-	data.import_bindings.extend(extract_import_bindings(
-		lang_impl.name(),
-		node,
-		contents,
-		&imports,
-	));
+	data.import_bindings
+		.extend(extract_import_bindings(lang_impl.name(), node, contents, &imports));
 	data.imports.extend(imports);
 	data.exports.extend(exports);
 
@@ -448,10 +432,7 @@ fn extract_import_bindings(
 		"rust" | "php" if text.contains(" as ") => {
 			let cleaned = text.trim_start_matches("use ").trim_end_matches(';').trim();
 			if let Some((path, alias)) = cleaned.rsplit_once(" as ") {
-				let imported = path
-					.rsplit([':', '\\'])
-					.find(|part| !part.is_empty())
-					.unwrap_or(path);
+				let imported = path.rsplit([':', '\\']).find(|part| !part.is_empty()).unwrap_or(path);
 				bindings.push(ImportBinding {
 					local_name: alias.trim().to_string(),
 					imported_name: Some(imported.to_string()),
@@ -492,11 +473,7 @@ impl SymbolIndex {
 		for file in files {
 			let ids = symbol_node_ids(&file.path, &file.symbols);
 			for (symbol, id) in file.symbols.iter().zip(ids.iter()) {
-				index
-					.by_name
-					.entry(symbol.name.clone())
-					.or_default()
-					.push(id.clone());
+				index.by_name.entry(symbol.name.clone()).or_default().push(id.clone());
 				index
 					.by_file
 					.entry(file.path.clone())
@@ -533,11 +510,7 @@ impl SymbolIndex {
 		allow_ambiguous: bool,
 	) -> Vec<(&str, Provenance, f32)> {
 		// 1. Same file — direct AST fact.
-		if let Some(targets) = self
-			.by_file
-			.get(source_path)
-			.and_then(|m| m.get(target_name))
-		{
+		if let Some(targets) = self.by_file.get(source_path).and_then(|m| m.get(target_name)) {
 			if targets.len() == 1 {
 				return vec![(targets[0].as_str(), Provenance::Extracted, 0.9)];
 			}
@@ -555,11 +528,7 @@ impl SymbolIndex {
 		// silently choose between two equally plausible declarations.
 		let mut imported_targets = Vec::new();
 		for imported in imported_files {
-			if let Some(targets) = self
-				.by_file
-				.get(imported.as_str())
-				.and_then(|m| m.get(target_name))
-			{
+			if let Some(targets) = self.by_file.get(imported.as_str()).and_then(|m| m.get(target_name)) {
 				imported_targets.extend(targets);
 			}
 		}
@@ -586,10 +555,7 @@ impl SymbolIndex {
 			// Multiple candidates: only type relations (extends/implements)
 			// record them — call sites hit ubiquitous method names (`new`,
 			// `get`) and would balloon the edge set with noise.
-			Some(ids) if allow_ambiguous => ids
-				.iter()
-				.map(|id| (id.as_str(), Provenance::Ambiguous, 0.4))
-				.collect(),
+			Some(ids) if allow_ambiguous => ids.iter().map(|id| (id.as_str(), Provenance::Ambiguous, 0.4)).collect(),
 			_ => Vec::new(),
 		}
 	}
@@ -607,11 +573,7 @@ impl SymbolIndex {
 		for (binding, path) in bindings {
 			if target.qualifier.is_none() && binding.local_name == target.name {
 				let imported_name = binding.imported_name.as_deref().unwrap_or(&target.name);
-				if let Some(ids) = self
-					.by_file
-					.get(path)
-					.and_then(|symbols| symbols.get(imported_name))
-				{
+				if let Some(ids) = self.by_file.get(path).and_then(|symbols| symbols.get(imported_name)) {
 					bound_targets.extend(ids);
 				}
 			}
@@ -620,9 +582,7 @@ impl SymbolIndex {
 					self.by_file_owner
 						.get(&(path.clone(), owner.clone(), target.name.clone()))
 				} else {
-					self.by_file
-						.get(path)
-						.and_then(|symbols| symbols.get(&target.name))
+					self.by_file.get(path).and_then(|symbols| symbols.get(&target.name))
 				};
 				if let Some(ids) = ids {
 					bound_targets.extend(ids);
@@ -649,11 +609,10 @@ impl SymbolIndex {
 
 		if matches!(qualifier_leaf, "self" | "Self" | "this") {
 			if let Some(owner) = source_owner {
-				if let Some(ids) = self.by_file_owner.get(&(
-					source_path.to_string(),
-					owner.to_string(),
-					target.name.clone(),
-				)) {
+				if let Some(ids) =
+					self.by_file_owner
+						.get(&(source_path.to_string(), owner.to_string(), target.name.clone()))
+				{
 					if ids.len() == 1 {
 						return vec![(ids[0].as_str(), Provenance::Extracted, 0.95)];
 					}
@@ -663,29 +622,21 @@ impl SymbolIndex {
 		}
 
 		// Static/type-qualified call (`Service::run`, `Service.run`).
-		if let Some(ids) = self.by_file_owner.get(&(
-			source_path.to_string(),
-			qualifier_leaf.to_string(),
-			target.name.clone(),
-		)) {
+		if let Some(ids) =
+			self.by_file_owner
+				.get(&(source_path.to_string(), qualifier_leaf.to_string(), target.name.clone()))
+		{
 			if ids.len() == 1 {
 				return vec![(ids[0].as_str(), Provenance::Extracted, 0.95)];
 			}
 		}
-		if let Some(ids) = self
-			.by_owner
-			.get(&(qualifier_leaf.to_string(), target.name.clone()))
-		{
+		if let Some(ids) = self.by_owner.get(&(qualifier_leaf.to_string(), target.name.clone())) {
 			if ids.len() == 1 {
 				return vec![(ids[0].as_str(), Provenance::Extracted, 0.9)];
 			}
 			let imported: Vec<_> = ids
 				.iter()
-				.filter(|id| {
-					imported_files
-						.iter()
-						.any(|path| id.starts_with(path.as_str()))
-				})
+				.filter(|id| imported_files.iter().any(|path| id.starts_with(path.as_str())))
 				.collect();
 			if imported.len() == 1 {
 				return vec![(imported[0].as_str(), Provenance::Extracted, 0.85)];
@@ -762,20 +713,12 @@ pub fn discover_symbol_relationships(new_files: &[SymbolFileData]) -> Vec<CodeRe
 					.map(|path| (binding.clone(), path))
 			})
 			.collect();
-		let imported_files: Vec<String> = resolved_imports
-			.iter()
-			.map(|(_, path)| path.clone())
-			.collect();
+		let imported_files: Vec<String> = resolved_imports.iter().map(|(_, path)| path.clone()).collect();
 
 		let symbol_ids = index
 			.by_file_symbol_ids
 			.get(&source_file.path)
-			.unwrap_or_else(|| {
-				panic!(
-					"SymbolIndex::build was not given this file: {}",
-					source_file.path
-				)
-			});
+			.unwrap_or_else(|| panic!("SymbolIndex::build was not given this file: {}", source_file.path));
 		// Symbol indices sorted by start_line (ties broken by original index) so
 		// `owning_symbol` below can binary-search + scan backward for the
 		// innermost containing declaration instead of scanning every symbol per
@@ -850,12 +793,9 @@ pub fn discover_symbol_relationships(new_files: &[SymbolFileData]) -> Vec<CodeRe
 					TypeRelationKind::Extends => RelationType::Extends,
 					TypeRelationKind::Implements => RelationType::Implements,
 				};
-				for (target, provenance, confidence) in index.resolve(
-					&source_file.path,
-					&relation.target_name,
-					&imported_files,
-					true,
-				) {
+				for (target, provenance, confidence) in
+					index.resolve(&source_file.path, &relation.target_name, &imported_files, true)
+				{
 					relationships.push(CodeRelationship {
 						source: source_id.to_string(),
 						target: target.to_string(),
@@ -878,9 +818,7 @@ pub fn discover_symbol_relationships(new_files: &[SymbolFileData]) -> Vec<CodeRe
 	relationships.sort_unstable_by(|a, b| {
 		(&a.source, &a.target, &a.relation_type).cmp(&(&b.source, &b.target, &b.relation_type))
 	});
-	relationships.dedup_by(|a, b| {
-		a.source == b.source && a.target == b.target && a.relation_type == b.relation_type
-	});
+	relationships.dedup_by(|a, b| a.source == b.source && a.target == b.target && a.relation_type == b.relation_type);
 
 	relationships
 }
@@ -899,13 +837,7 @@ mod tests {
 		}
 	}
 
-	fn owned_declaration(
-		owner: &str,
-		name: &str,
-		kind: &str,
-		start_line: u32,
-		end_line: u32,
-	) -> SymbolDecl {
+	fn owned_declaration(owner: &str, name: &str, kind: &str, start_line: u32, end_line: u32) -> SymbolDecl {
 		SymbolDecl {
 			owner: Some(owner.to_string()),
 			..declaration(name, kind, start_line, end_line)
@@ -919,10 +851,7 @@ mod tests {
 		assert_eq!(symbol_kind_from_node_kind("class_declaration"), "class");
 		assert_eq!(symbol_kind_from_node_kind("struct_item"), "struct");
 		assert_eq!(symbol_kind_from_node_kind("trait_item"), "trait");
-		assert_eq!(
-			symbol_kind_from_node_kind("interface_declaration"),
-			"interface"
-		);
+		assert_eq!(symbol_kind_from_node_kind("interface_declaration"), "interface");
 		assert_eq!(symbol_kind_from_node_kind("enum_item"), "enum");
 		assert_eq!(symbol_kind_from_node_kind("mod_item"), "module");
 		assert_eq!(symbol_kind_from_node_kind("const_item"), "const");
@@ -933,8 +862,7 @@ mod tests {
 
 	#[test]
 	fn test_extract_symbols_from_file_rust() {
-		let path =
-			std::env::temp_dir().join(format!("octocode_symbols_test_{}.rs", std::process::id()));
+		let path = std::env::temp_dir().join(format!("octocode_symbols_test_{}.rs", std::process::id()));
 		let code = r#"use std::collections::HashMap;
 
 pub struct Config {
@@ -968,9 +896,7 @@ pub fn main_fn() {
 
 		// Imports extracted
 		assert!(
-			data.imports
-				.iter()
-				.any(|i| i == "std::collections::HashMap"),
+			data.imports.iter().any(|i| i == "std::collections::HashMap"),
 			"imports: {:?}",
 			data.imports
 		);
@@ -1020,18 +946,12 @@ pub fn main_fn() {
 
 	/// Reference implementation: the original O(S) linear scan `owning_symbol`
 	/// used before `find_owning_symbol` was introduced.
-	fn linear_owning_symbol(
-		symbols: &[SymbolDecl],
-		line: u32,
-		functions_only: bool,
-	) -> Option<usize> {
+	fn linear_owning_symbol(symbols: &[SymbolDecl], line: u32, functions_only: bool) -> Option<usize> {
 		symbols
 			.iter()
 			.enumerate()
 			.filter(|(_, symbol)| {
-				line >= symbol.start_line
-					&& line <= symbol.end_line
-					&& (!functions_only || symbol.kind == "function")
+				line >= symbol.start_line && line <= symbol.end_line && (!functions_only || symbol.kind == "function")
 			})
 			.min_by_key(|(_, symbol)| symbol.end_line.saturating_sub(symbol.start_line))
 			.map(|(index, _)| index)
@@ -1135,13 +1055,12 @@ pub fn main_fn() {
 		};
 
 		// Same-file call → Extracted
-		let same_file = find("src/a.rs::run", "src/a.rs::helper", RelationType::Calls)
-			.expect("same-file call edge");
+		let same_file = find("src/a.rs::run", "src/a.rs::helper", RelationType::Calls).expect("same-file call edge");
 		assert_eq!(same_file.provenance, Provenance::Extracted);
 
 		// Unique global call → Inferred
-		let global = find("src/a.rs::run", "src/b.rs::unique_fn", RelationType::Calls)
-			.expect("global-unique call edge");
+		let global =
+			find("src/a.rs::run", "src/b.rs::unique_fn", RelationType::Calls).expect("global-unique call edge");
 		assert_eq!(global.provenance, Provenance::Inferred);
 
 		// Ambiguous call (`new` in b.rs and c.rs) → no edge
@@ -1149,11 +1068,11 @@ pub fn main_fn() {
 		assert!(find("src/a.rs::run", "src/c.rs::new", RelationType::Calls).is_none());
 
 		// Ambiguous extends (`Base` in b.rs and c.rs) → Ambiguous edges to both
-		let amb_b = find("src/a.rs::run", "src/b.rs::Base", RelationType::Extends)
-			.expect("ambiguous extends edge to b");
+		let amb_b =
+			find("src/a.rs::run", "src/b.rs::Base", RelationType::Extends).expect("ambiguous extends edge to b");
 		assert_eq!(amb_b.provenance, Provenance::Ambiguous);
-		let amb_c = find("src/a.rs::run", "src/c.rs::Base", RelationType::Extends)
-			.expect("ambiguous extends edge to c");
+		let amb_c =
+			find("src/a.rs::run", "src/c.rs::Base", RelationType::Extends).expect("ambiguous extends edge to c");
 		assert_eq!(amb_c.provenance, Provenance::Ambiguous);
 	}
 
@@ -1243,10 +1162,7 @@ pub fn main_fn() {
 
 	#[test]
 	fn svelte_embedded_script_builds_symbols_and_calls() {
-		let path = std::env::temp_dir().join(format!(
-			"octocode_symbols_svelte_test_{}.svelte",
-			std::process::id()
-		));
+		let path = std::env::temp_dir().join(format!("octocode_symbols_svelte_test_{}.svelte", std::process::id()));
 		std::fs::write(
 			&path,
 			"<script>\nfunction helper() {}\nfunction run() { helper(); }\n</script>\n",
@@ -1263,10 +1179,7 @@ pub fn main_fn() {
 
 	#[test]
 	fn elixir_builds_live_symbols_imported_calls_and_protocol_edges() {
-		let root = std::env::temp_dir().join(format!(
-			"octocode_symbols_elixir_test_{}",
-			std::process::id()
-		));
+		let root = std::env::temp_dir().join(format!("octocode_symbols_elixir_test_{}", std::process::id()));
 		let fixture = root.join("lib/fixture");
 		std::fs::create_dir_all(&fixture).unwrap();
 		let files = [
@@ -1316,34 +1229,27 @@ end
 			.iter()
 			.find(|file| file.path.ends_with("accounts.ex"))
 			.unwrap();
-		assert!(accounts.symbols.iter().any(|symbol| {
-			symbol.name == "fetch_user" && symbol.owner.as_deref() == Some("Fixture.Accounts")
-		}));
+		assert!(accounts
+			.symbols
+			.iter()
+			.any(|symbol| { symbol.name == "fetch_user" && symbol.owner.as_deref() == Some("Fixture.Accounts") }));
 		assert!(accounts.imports.contains(&"Fixture.Repo".to_string()));
 		assert!(accounts.imports.contains(&"Fixture.Validation".to_string()));
 
 		let relationships = discover_symbol_relationships(&graph_files);
 		assert!(relationships.iter().any(|relationship| {
 			relationship.relation_type == RelationType::Calls
-				&& relationship
-					.source
-					.ends_with("::Fixture.Accounts::fetch_user")
+				&& relationship.source.ends_with("::Fixture.Accounts::fetch_user")
 				&& relationship.target.ends_with("::Fixture.Repo::get")
 		}));
 		assert!(relationships.iter().any(|relationship| {
 			relationship.relation_type == RelationType::Calls
-				&& relationship
-					.source
-					.ends_with("::Fixture.Accounts::fetch_user")
-				&& relationship
-					.target
-					.ends_with("::Fixture.Validation::validate_result")
+				&& relationship.source.ends_with("::Fixture.Accounts::fetch_user")
+				&& relationship.target.ends_with("::Fixture.Validation::validate_result")
 		}));
 		assert!(relationships.iter().any(|relationship| {
 			relationship.relation_type == RelationType::Implements
-				&& relationship
-					.source
-					.ends_with("::Fixture.Renderable for Fixture.User")
+				&& relationship.source.ends_with("::Fixture.Renderable for Fixture.User")
 				&& relationship.target.ends_with("::Fixture.Renderable")
 		}));
 	}
@@ -1353,11 +1259,7 @@ end
 		let cases = [
 			("javascript", "class Service { run() {} }", "run"),
 			("typescript", "class Service { run(): void {} }", "run"),
-			(
-				"python",
-				"class Service:\n    def run(self):\n        pass\n",
-				"run",
-			),
+			("python", "class Service:\n    def run(self):\n        pass\n", "run"),
 			(
 				"go",
 				"package p\ntype Service struct{}\nfunc (s *Service) Run() {}\n",
@@ -1369,19 +1271,11 @@ end
 			("ruby", "class Service\n  def run\n  end\nend\n", "run"),
 			("lua", "function Service.run() end", "run"),
 			("swift", "class Service { func run() {} }", "run"),
-			(
-				"elixir",
-				"defmodule Service do\n  def run(), do: :ok\nend\n",
-				"run",
-			),
+			("elixir", "defmodule Service do\n  def run(), do: :ok\nend\n", "run"),
 		];
 
 		for (index, (language, code, method)) in cases.into_iter().enumerate() {
-			let path = std::env::temp_dir().join(format!(
-				"octocode_owner_test_{}_{}",
-				std::process::id(),
-				index
-			));
+			let path = std::env::temp_dir().join(format!("octocode_owner_test_{}_{}", std::process::id(), index));
 			std::fs::write(&path, code).unwrap();
 			let data = extract_symbols_from_file(path.to_str().unwrap(), language).unwrap();
 			std::fs::remove_file(&path).unwrap();

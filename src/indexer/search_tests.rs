@@ -112,10 +112,7 @@ mod tests {
 
 	#[test]
 	fn code_results_carry_similarity_and_public_symbols_only() {
-		let out = format_code_search_results_as_text(
-			&[code("src/a.rs", "fn a() {}", Some(0.25))],
-			"partial",
-		);
+		let out = format_code_search_results_as_text(&[code("src/a.rs", "fn a() {}", Some(0.25))], "partial");
 		assert!(out.starts_with("CODE RESULTS (1)\n"));
 		assert!(out.contains("1. src/a.rs"));
 		assert!(out.contains("Similarity 0.750"));
@@ -125,8 +122,7 @@ mod tests {
 
 	#[test]
 	fn a_code_result_without_a_distance_omits_the_similarity_line() {
-		let out =
-			format_code_search_results_as_text(&[code("src/a.rs", "fn a() {}", None)], "partial");
+		let out = format_code_search_results_as_text(&[code("src/a.rs", "fn a() {}", None)], "partial");
 		assert!(!out.contains("Similarity"));
 	}
 
@@ -135,8 +131,7 @@ mod tests {
 		let body = lines(30, "line");
 		let block = code("src/a.rs", &body, Some(0.1));
 
-		let signatures =
-			format_code_search_results_as_text(std::slice::from_ref(&block), "signatures");
+		let signatures = format_code_search_results_as_text(std::slice::from_ref(&block), "signatures");
 		assert!(signatures.contains("10: line1"));
 		assert!(!signatures.contains("more lines"));
 
@@ -157,21 +152,10 @@ mod tests {
 	#[test]
 	fn text_results_render_at_every_detail_level() {
 		let block = text("notes.txt", &lines(30, "n"));
-		assert!(
-			format_text_search_results_as_text(std::slice::from_ref(&block), "signatures")
-				.contains("5: n1")
-		);
-		assert!(
-			format_text_search_results_as_text(std::slice::from_ref(&block), "partial")
-				.contains("more lines")
-		);
-		assert!(
-			format_text_search_results_as_text(std::slice::from_ref(&block), "full")
-				.contains("34: n30")
-		);
-		assert!(
-			format_text_search_results_as_text(&[block], "unknown").contains("TEXT RESULTS (1)")
-		);
+		assert!(format_text_search_results_as_text(std::slice::from_ref(&block), "signatures").contains("5: n1"));
+		assert!(format_text_search_results_as_text(std::slice::from_ref(&block), "partial").contains("more lines"));
+		assert!(format_text_search_results_as_text(std::slice::from_ref(&block), "full").contains("34: n30"));
+		assert!(format_text_search_results_as_text(&[block], "unknown").contains("TEXT RESULTS (1)"));
 	}
 
 	#[test]
@@ -183,16 +167,9 @@ mod tests {
 		assert!(out.contains("| 3-7"));
 		assert!(out.contains("Similarity 0.600"));
 
-		assert!(
-			format_doc_search_results_as_text(std::slice::from_ref(&block), "signatures")
-				.contains("3: d1")
-		);
-		assert!(
-			format_doc_search_results_as_text(std::slice::from_ref(&block), "full")
-				.contains("32: d30")
-		);
-		assert!(format_doc_search_results_as_text(&[block], "unknown")
-			.contains("DOCUMENTATION RESULTS"));
+		assert!(format_doc_search_results_as_text(std::slice::from_ref(&block), "signatures").contains("3: d1"));
+		assert!(format_doc_search_results_as_text(std::slice::from_ref(&block), "full").contains("32: d30"));
+		assert!(format_doc_search_results_as_text(&[block], "unknown").contains("DOCUMENTATION RESULTS"));
 	}
 
 	#[test]
@@ -217,8 +194,7 @@ mod tests {
 
 	#[test]
 	fn a_commit_with_unparseable_files_json_still_renders() {
-		let out =
-			format_commit_search_results_as_text(&[commit("abcdef1234", "not json")], "partial");
+		let out = format_commit_search_results_as_text(&[commit("abcdef1234", "not json")], "partial");
 		assert!(out.contains("Message: subject line"));
 		assert!(!out.contains("Files:"));
 	}
@@ -242,12 +218,8 @@ mod tests {
 		assert!(out.find("DOCUMENTATION RESULTS") < out.find("CODE RESULTS"));
 		assert!(out.find("CODE RESULTS") < out.find("TEXT RESULTS"));
 
-		let code_only = format_combined_search_results_as_text(
-			&[code("src/a.rs", "fn a() {}", Some(0.1))],
-			&[],
-			&[],
-			"partial",
-		);
+		let code_only =
+			format_combined_search_results_as_text(&[code("src/a.rs", "fn a() {}", Some(0.1))], &[], &[], "partial");
 		assert!(!code_only.contains("DOCUMENTATION RESULTS"));
 		assert!(!code_only.contains("TEXT RESULTS"));
 	}
@@ -272,11 +244,7 @@ mod tests {
 	fn full_detail_cli_rendering_runs_over_the_configured_budget_without_panicking() {
 		let mut config = Config::default();
 		config.search.search_block_max_characters = 40;
-		render_code_blocks_with_config(
-			&[code("src/a.rs", &lines(40, "verylongline"), None)],
-			&config,
-			"full",
-		);
+		render_code_blocks_with_config(&[code("src/a.rs", &lines(40, "verylongline"), None)], &config, "full");
 	}
 
 	#[test]
@@ -328,10 +296,7 @@ mod tests {
 
 	#[test]
 	fn natural_language_queries_keep_the_configured_weights() {
-		assert_eq!(
-			classify_query_weights("how does indexing work", 0.8, 0.2),
-			(0.8, 0.2)
-		);
+		assert_eq!(classify_query_weights("how does indexing work", 0.8, 0.2), (0.8, 0.2));
 		// Lowercase and punctuation-free short queries are not identifiers either.
 		assert_eq!(classify_query_weights("parse remote", 0.8, 0.2), (0.8, 0.2));
 		assert_eq!(classify_query_weights("", 0.8, 0.2), (0.8, 0.2));
@@ -353,10 +318,8 @@ mod tests {
 		let mut code_blocks: Vec<CodeBlock> = (0..5)
 			.map(|i| code(&format!("src/{i}.rs"), "a", Some(0.01 * i as f32)))
 			.collect();
-		let mut text_blocks: Vec<TextBlock> =
-			(0..5).map(|i| text(&format!("n{i}.txt"), "n")).collect();
-		let mut doc_blocks: Vec<DocumentBlock> =
-			(0..5).map(|i| doc(&format!("d{i}.md"), "d")).collect();
+		let mut text_blocks: Vec<TextBlock> = (0..5).map(|i| text(&format!("n{i}.txt"), "n")).collect();
+		let mut doc_blocks: Vec<DocumentBlock> = (0..5).map(|i| doc(&format!("d{i}.md"), "d")).collect();
 
 		fuse_all_mode_results(&mut code_blocks, &mut text_blocks, &mut doc_blocks, 3);
 
@@ -388,10 +351,7 @@ mod tests {
 	fn deduplication_applies_the_distance_threshold() {
 		let results = vec![query_result(
 			0,
-			vec![
-				code("src/near.rs", "a", Some(0.1)),
-				code("src/far.rs", "b", Some(0.9)),
-			],
+			vec![code("src/near.rs", "a", Some(0.1)), code("src/far.rs", "b", Some(0.9))],
 		)];
 		let (code_blocks, _, _, _) = deduplicate_and_merge_results(results, Some(0.5));
 		assert_eq!(code_blocks.len(), 1);
@@ -449,10 +409,7 @@ mod tests {
 	fn a_block_that_is_nothing_but_comments_is_previewed_from_its_first_line() {
 		// No non-comment line exists, so the skip loop finds no start and the
 		// preview falls back to the top of the block.
-		let content = (1..=12)
-			.map(|i| format!("// note {i}"))
-			.collect::<Vec<_>>()
-			.join("\n");
+		let content = (1..=12).map(|i| format!("// note {i}")).collect::<Vec<_>>().join("\n");
 		let preview = get_code_preview_with_lines(&content, 1, "rust");
 		assert!(preview.starts_with("1: // note 1"), "{preview}");
 		assert!(preview.contains("... (8 more lines)"), "{preview}");
@@ -467,10 +424,7 @@ mod tests {
 			(0.8, 0.2)
 		);
 		// Exactly three words with a symbol still counts as an identifier lookup.
-		assert_eq!(
-			classify_query_weights("Store::new call site", 0.8, 0.2),
-			(0.3, 0.7)
-		);
+		assert_eq!(classify_query_weights("Store::new call site", 0.8, 0.2), (0.3, 0.7));
 	}
 
 	#[test]
@@ -503,10 +457,8 @@ mod tests {
 		let mut second = code("src/alpha.rs", "a", None);
 		second.hash = "hash-a".to_string();
 
-		let (code_blocks, _, _, _) = deduplicate_and_merge_results(
-			vec![query_result(0, vec![first]), query_result(1, vec![second])],
-			None,
-		);
+		let (code_blocks, _, _, _) =
+			deduplicate_and_merge_results(vec![query_result(0, vec![first]), query_result(1, vec![second])], None);
 		assert_eq!(code_blocks.len(), 2);
 		assert_eq!(code_blocks[0].hash, "hash-a");
 		assert_eq!(code_blocks[1].hash, "hash-b");
@@ -517,10 +469,7 @@ mod tests {
 		// Threshold filtering only drops blocks that actually carry a cosine.
 		let results = vec![query_result(
 			0,
-			vec![
-				code("src/unscored.rs", "u", None),
-				code("src/far.rs", "f", Some(0.9)),
-			],
+			vec![code("src/unscored.rs", "u", None), code("src/far.rs", "f", Some(0.9))],
 		)];
 		let (code_blocks, _, _, _) = deduplicate_and_merge_results(results, Some(0.5));
 		assert_eq!(code_blocks.len(), 1);
@@ -531,8 +480,7 @@ mod tests {
 		use super::super::super::*;
 		use crate::embedding::SearchModeEmbeddings;
 		use crate::store::mod_tests::{
-			code_block, commit_block, document_block, embedding, test_store, text_block, CODE_DIM,
-			TEXT_DIM,
+			code_block, commit_block, document_block, embedding, test_store, text_block, CODE_DIM, TEXT_DIM,
 		};
 		use crate::store::Store;
 
@@ -550,10 +498,7 @@ mod tests {
 				.await
 				.unwrap();
 			store
-				.store_document_blocks(
-					&[document_block("README.md", "d1")],
-					&[embedding(TEXT_DIM, 0)],
-				)
+				.store_document_blocks(&[document_block("README.md", "d1")], &[embedding(TEXT_DIM, 0)])
 				.await
 				.unwrap();
 			store
@@ -586,52 +531,32 @@ mod tests {
 		async fn each_mode_queries_only_its_own_modality() {
 			let (_dir, store) = populated().await;
 
-			let code = execute_single_search_with_embeddings(
-				&store,
-				both_embeddings(),
-				&params("code", false),
-				0,
-				None,
-			)
-			.await
-			.unwrap();
+			let code =
+				execute_single_search_with_embeddings(&store, both_embeddings(), &params("code", false), 0, None)
+					.await
+					.unwrap();
 			assert_eq!(code.code_blocks.len(), 2);
 			assert!(code.text_blocks.is_empty());
 			assert!(code.doc_blocks.is_empty());
 			assert!(code.commit_blocks.is_empty());
 
-			let docs = execute_single_search_with_embeddings(
-				&store,
-				both_embeddings(),
-				&params("docs", false),
-				1,
-				None,
-			)
-			.await
-			.unwrap();
+			let docs =
+				execute_single_search_with_embeddings(&store, both_embeddings(), &params("docs", false), 1, None)
+					.await
+					.unwrap();
 			assert_eq!(docs.doc_blocks.len(), 1);
 			assert_eq!(docs.query_index, 1);
 
-			let text = execute_single_search_with_embeddings(
-				&store,
-				both_embeddings(),
-				&params("text", false),
-				2,
-				None,
-			)
-			.await
-			.unwrap();
+			let text =
+				execute_single_search_with_embeddings(&store, both_embeddings(), &params("text", false), 2, None)
+					.await
+					.unwrap();
 			assert_eq!(text.text_blocks.len(), 1);
 
-			let commits = execute_single_search_with_embeddings(
-				&store,
-				both_embeddings(),
-				&params("commits", false),
-				3,
-				None,
-			)
-			.await
-			.unwrap();
+			let commits =
+				execute_single_search_with_embeddings(&store, both_embeddings(), &params("commits", false), 3, None)
+					.await
+					.unwrap();
 			assert_eq!(commits.commit_blocks.len(), 1);
 		}
 
@@ -641,12 +566,10 @@ mod tests {
 			let mut p = params("all", false);
 			p.limit = 2;
 
-			let result =
-				execute_single_search_with_embeddings(&store, both_embeddings(), &p, 0, None)
-					.await
-					.unwrap();
-			let total =
-				result.code_blocks.len() + result.text_blocks.len() + result.doc_blocks.len();
+			let result = execute_single_search_with_embeddings(&store, both_embeddings(), &p, 0, None)
+				.await
+				.unwrap();
+			let total = result.code_blocks.len() + result.text_blocks.len() + result.doc_blocks.len();
 			assert_eq!(total, 2, "got {result:?}");
 		}
 
@@ -658,15 +581,9 @@ mod tests {
 				text_embeddings: None,
 			};
 
-			let result = execute_single_search_with_embeddings(
-				&store,
-				code_only,
-				&params("all", false),
-				0,
-				None,
-			)
-			.await
-			.unwrap();
+			let result = execute_single_search_with_embeddings(&store, code_only, &params("all", false), 0, None)
+				.await
+				.unwrap();
 			assert!(!result.code_blocks.is_empty());
 			assert!(result.text_blocks.is_empty());
 			assert!(result.doc_blocks.is_empty());
@@ -675,15 +592,9 @@ mod tests {
 				code_embeddings: None,
 				text_embeddings: None,
 			};
-			let empty = execute_single_search_with_embeddings(
-				&store,
-				text_only,
-				&params("code", false),
-				0,
-				None,
-			)
-			.await
-			.unwrap();
+			let empty = execute_single_search_with_embeddings(&store, text_only, &params("code", false), 0, None)
+				.await
+				.unwrap();
 			assert!(empty.code_blocks.is_empty());
 		}
 
@@ -706,15 +617,10 @@ mod tests {
 		#[tokio::test]
 		async fn a_blank_query_falls_back_to_the_vector_path() {
 			let (_dir, store) = populated().await;
-			let result = execute_single_search_with_embeddings(
-				&store,
-				both_embeddings(),
-				&params("code", true),
-				0,
-				Some("   "),
-			)
-			.await
-			.unwrap();
+			let result =
+				execute_single_search_with_embeddings(&store, both_embeddings(), &params("code", true), 0, Some("   "))
+					.await
+					.unwrap();
 			assert_eq!(result.code_blocks.len(), 2);
 		}
 
@@ -723,25 +629,19 @@ mod tests {
 			let (_dir, store) = populated().await;
 			let mut p = params("code", false);
 			p.language_filter = Some("python");
-			let result =
-				execute_single_search_with_embeddings(&store, both_embeddings(), &p, 0, None)
-					.await
-					.unwrap();
+			let result = execute_single_search_with_embeddings(&store, both_embeddings(), &p, 0, None)
+				.await
+				.unwrap();
 			assert!(result.code_blocks.is_empty());
 		}
 
 		#[tokio::test]
 		async fn an_unknown_mode_is_rejected() {
 			let (_dir, store) = populated().await;
-			let err = execute_single_search_with_embeddings(
-				&store,
-				both_embeddings(),
-				&params("sideways", false),
-				0,
-				None,
-			)
-			.await
-			.unwrap_err();
+			let err =
+				execute_single_search_with_embeddings(&store, both_embeddings(), &params("sideways", false), 0, None)
+					.await
+					.unwrap_err();
 			assert!(err.to_string().contains("Invalid search mode"), "{err}");
 		}
 
@@ -778,9 +678,7 @@ mod tests {
 		#[tokio::test]
 		async fn a_project_without_a_branch_index_has_no_branch_context() {
 			let (dir, store) = populated().await;
-			assert!(detect_branch_search_context(&store, dir.path())
-				.await
-				.is_none());
+			assert!(detect_branch_search_context(&store, dir.path()).await.is_none());
 		}
 	}
 }

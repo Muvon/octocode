@@ -46,10 +46,7 @@ mod tests {
 		let err = run_watcher(tx, missing, false, 4)
 			.await
 			.expect_err("watching a path that does not exist must fail");
-		assert!(
-			err.to_string().starts_with("Failed to watch directory"),
-			"{err}"
-		);
+		assert!(err.to_string().starts_with("Failed to watch directory"), "{err}");
 	}
 
 	#[tokio::test]
@@ -63,10 +60,7 @@ mod tests {
 		writer.abort();
 		watcher.abort();
 
-		assert_eq!(
-			seen.expect("a file change must reach the index channel"),
-			Some(())
-		);
+		assert_eq!(seen.expect("a file change must reach the index channel"), Some(()));
 	}
 
 	#[tokio::test]
@@ -111,9 +105,6 @@ mod tests {
 		writer.abort();
 
 		let result = stopped.expect("the watcher must stop once the channel is gone");
-		assert!(
-			result.is_ok(),
-			"giving up is a clean stop, not an error: {result:?}"
-		);
+		assert!(result.is_ok(), "giving up is a clean stop, not an error: {result:?}");
 	}
 }

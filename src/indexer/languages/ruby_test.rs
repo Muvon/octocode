@@ -54,10 +54,7 @@ end
 	assert!(
 		describe_regions.is_empty(),
 		"describe block should not collapse into a single blob region, got: {:?}",
-		describe_regions
-			.iter()
-			.map(|r| &r.content)
-			.collect::<Vec<_>>()
+		describe_regions.iter().map(|r| &r.content).collect::<Vec<_>>()
 	);
 }
 
@@ -80,9 +77,7 @@ fn test_plain_call_still_produces_its_own_region() {
 
 fn parse(source: &str) -> Tree {
 	let mut parser = Parser::new();
-	parser
-		.set_language(&Ruby {}.get_ts_language())
-		.expect("ruby grammar");
+	parser.set_language(&Ruby {}.get_ts_language()).expect("ruby grammar");
 	parser.parse(source, None).expect("parse")
 }
 
@@ -100,9 +95,7 @@ fn nodes_of_kind<'a>(node: Node<'a>, kind: &str, out: &mut Vec<Node<'a>>) {
 fn first_node<'a>(tree: &'a Tree, kind: &str) -> Node<'a> {
 	let mut found = Vec::new();
 	nodes_of_kind(tree.root_node(), kind, &mut found);
-	*found
-		.first()
-		.unwrap_or_else(|| panic!("no {kind} node in source"))
+	*found.first().unwrap_or_else(|| panic!("no {kind} node in source"))
 }
 
 fn registry(files: &[&str]) -> FileRegistry {
@@ -133,10 +126,7 @@ fn the_parser_is_named_ruby_and_claims_the_rb_extension() {
 #[test]
 fn containers_are_excluded_from_chunking_but_restored_as_symbol_kinds() {
 	let lang = Ruby {};
-	assert_eq!(
-		lang.get_meaningful_kinds(),
-		vec!["method", "singleton_method", "call"]
-	);
+	assert_eq!(lang.get_meaningful_kinds(), vec!["method", "singleton_method", "call"]);
 	assert_eq!(
 		lang.get_symbol_kinds(),
 		vec!["method", "singleton_method", "class", "module"]
@@ -182,8 +172,7 @@ fn node_types_are_equivalent_only_within_their_semantic_group() {
 
 #[test]
 fn a_method_carries_its_owner_and_its_local_variables() {
-	let source =
-		"class Invoice\n  def total\n    subtotal = 10\n    tax = 2\n    subtotal + tax\n  end\nend\n";
+	let source = "class Invoice\n  def total\n    subtotal = 10\n    tax = 2\n    subtotal + tax\n  end\nend\n";
 	let tree = parse(source);
 	let node = first_node(&tree, "method");
 	assert_eq!(
@@ -197,10 +186,7 @@ fn a_singleton_method_carries_its_owner() {
 	let source = "class Invoice\n  def self.build\n    new\n  end\nend\n";
 	let tree = parse(source);
 	let node = first_node(&tree, "singleton_method");
-	assert_eq!(
-		Ruby {}.extract_symbols(node, source),
-		vec!["Invoice", "build"]
-	);
+	assert_eq!(Ruby {}.extract_symbols(node, source), vec!["Invoice", "build"]);
 }
 
 #[test]
@@ -227,14 +213,8 @@ fn a_namespaced_definition_reports_its_qualified_name() {
 	let tree = parse(source);
 	let node = first_node(&tree, "module");
 	let lang = Ruby {};
-	assert_eq!(
-		lang.extract_symbols(node, source),
-		vec!["Outer::Inner".to_string()]
-	);
-	assert_eq!(
-		lang.extract_declaration_name(node, source),
-		Some("Inner".to_string())
-	);
+	assert_eq!(lang.extract_symbols(node, source), vec!["Outer::Inner".to_string()]);
+	assert_eq!(lang.extract_declaration_name(node, source), Some("Inner".to_string()));
 }
 
 #[test]
@@ -264,10 +244,7 @@ fn an_unhandled_node_kind_falls_back_to_identifier_extraction() {
 	let source = "puts message\n";
 	let tree = parse(source);
 	let node = first_node(&tree, "call");
-	assert_eq!(
-		Ruby {}.extract_symbols(node, source),
-		vec!["message", "puts"]
-	);
+	assert_eq!(Ruby {}.extract_symbols(node, source), vec!["message", "puts"]);
 }
 
 #[test]
@@ -286,10 +263,7 @@ fn identifier_extraction_skips_instance_variables_and_leaves_duplicates() {
 fn require_and_load_calls_become_imports() {
 	for (source, expected) in [
 		("require \"json\"\n", "json"),
-		(
-			"require_relative \"helpers/util\"\n",
-			"relative:helpers/util",
-		),
+		("require_relative \"helpers/util\"\n", "relative:helpers/util"),
 		("load 'legacy.rb'\n", "legacy.rb"),
 	] {
 		let tree = parse(source);
@@ -377,10 +351,7 @@ fn a_class_with_a_superclass_reports_an_extends_relation() {
 
 #[test]
 fn a_plain_class_or_module_declares_no_type_relations() {
-	for (source, kind) in [
-		("class Plain\nend\n", "class"),
-		("module M\nend\n", "module"),
-	] {
+	for (source, kind) in [("class Plain\nend\n", "class"), ("module M\nend\n", "module")] {
 		let tree = parse(source);
 		let node = first_node(&tree, kind);
 		assert!(
@@ -392,8 +363,7 @@ fn a_plain_class_or_module_declares_no_type_relations() {
 
 #[test]
 fn symbol_owner_walks_up_to_the_enclosing_class_or_module() {
-	let source =
-		"module Billing\n  class Invoice\n    def total\n    end\n  end\n\n  def helper\n  end\nend\n";
+	let source = "module Billing\n  class Invoice\n    def total\n    end\n  end\n\n  def helper\n  end\nend\n";
 	let tree = parse(source);
 	let mut methods = Vec::new();
 	nodes_of_kind(tree.root_node(), "method", &mut methods);
@@ -489,8 +459,7 @@ fn a_class_body_splits_into_one_region_per_method_form() {
 
 #[test]
 fn a_block_call_without_nested_block_calls_stays_a_single_region() {
-	let source =
-		"it(\"a\") do\n  result = subject.call(\"a\")\n  expect(result).to eq(\"value-a\")\nend\n";
+	let source = "it(\"a\") do\n  result = subject.call(\"a\")\n  expect(result).to eq(\"value-a\")\nend\n";
 	let regions = parse_regions(source);
 
 	assert_eq!(

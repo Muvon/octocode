@@ -22,10 +22,7 @@ impl FileUtils {
 	/// Get file modification time as seconds since Unix epoch
 	pub fn get_file_mtime(file_path: &Path) -> Result<u64> {
 		let metadata = std::fs::metadata(file_path)?;
-		let mtime = metadata
-			.modified()?
-			.duration_since(std::time::UNIX_EPOCH)?
-			.as_secs();
+		let mtime = metadata.modified()?.duration_since(std::time::UNIX_EPOCH)?.as_secs();
 		Ok(mtime)
 	}
 
@@ -133,8 +130,9 @@ impl FileUtils {
 			// Java
 			"java" => Some("java"),
 			// C++
-			"cpp" | "cc" | "cxx" | "c++" | "c" | "h" | "hpp" | "hxx" | "cppm" | "ixx" | "mxx"
-			| "ccm" | "cxxm" => Some("cpp"),
+			"cpp" | "cc" | "cxx" | "c++" | "c" | "h" | "hpp" | "hxx" | "cppm" | "ixx" | "mxx" | "ccm" | "cxxm" => {
+				Some("cpp")
+			}
 			// PHP
 			"php" => Some("php"),
 			// Bash/Shell

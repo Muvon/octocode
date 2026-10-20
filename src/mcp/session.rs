@@ -27,8 +27,8 @@ use anyhow::Result;
 use rmcp::{
 	handler::server::ServerHandler,
 	model::{
-		CacheScope, CallToolRequestParams, CallToolResponse, ListToolsResult,
-		PaginatedRequestParams, ServerConfig, Tool,
+		CacheScope, CallToolRequestParams, CallToolResponse, ListToolsResult, PaginatedRequestParams, ServerConfig,
+		Tool,
 	},
 	service::RequestContext,
 	ErrorData, RoleServer,
@@ -88,8 +88,7 @@ impl Sessions {
 	}
 
 	fn build(root: PathBuf, root_spans_subdirs: bool, pool: RepoPool) -> Self {
-		let repo_tools =
-			McpServer::new_repo_core(pool.config.clone(), root.clone()).list_tool_defs();
+		let repo_tools = McpServer::new_repo_core(pool.config.clone(), root.clone()).list_tool_defs();
 		Self {
 			root,
 			root_spans_subdirs,
@@ -116,23 +115,16 @@ impl Sessions {
 		let no_git = self.pool.no_git;
 		let repo_tools = self.repo_tools.to_vec();
 		let path = workdir.clone();
-		let target = tokio::task::spawn_blocking(move || {
-			resolve_target(&root, root_spans_subdirs, &path, no_git, repo_tools)
-		})
-		.await
-		.map_err(|e| {
-			ErrorData::internal_error(format!("Failed to resolve session directory: {}", e), None)
-		})?
-		.map_err(|e| {
-			ErrorData::internal_error(
-				format!(
-					"Failed to discover repositories in '{}': {}",
-					workdir.display(),
-					e
-				),
-				None,
-			)
-		})?;
+		let target =
+			tokio::task::spawn_blocking(move || resolve_target(&root, root_spans_subdirs, &path, no_git, repo_tools))
+				.await
+				.map_err(|e| ErrorData::internal_error(format!("Failed to resolve session directory: {}", e), None))?
+				.map_err(|e| {
+					ErrorData::internal_error(
+						format!("Failed to discover repositories in '{}': {}", workdir.display(), e),
+						None,
+					)
+				})?;
 		self.targets.lock().await.insert(workdir, target.clone());
 		Ok(target)
 	}
@@ -173,10 +165,7 @@ fn resolve_target(
 /// The calling session's directory: `None` when the client sends no session
 /// context, `Some(None)` when it sends one without a usable directory.
 fn session_workdir(context: &RequestContext<RoleServer>) -> Option<Option<PathBuf>> {
-	let session = context
-		.client_capabilities()?
-		.experimental?
-		.remove("session")?;
+	let session = context.client_capabilities()?.experimental?.remove("session")?;
 	let workdir = session
 		.get("workdir")
 		.and_then(|value| value.as_str())

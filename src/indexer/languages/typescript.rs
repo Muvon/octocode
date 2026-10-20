@@ -179,11 +179,7 @@ impl Language for TypeScript {
 		// TypeScript-specific semantic groups
 		let semantic_groups = [
 			// Functions and methods
-			&[
-				"function_declaration",
-				"method_definition",
-				"arrow_function",
-			] as &[&str],
+			&["function_declaration", "method_definition", "arrow_function"] as &[&str],
 			// Classes and interfaces
 			&["class_declaration", "interface_declaration"],
 			// Type definitions
@@ -209,9 +205,7 @@ impl Language for TypeScript {
 
 	fn get_node_type_description(&self, node_type: &str) -> &'static str {
 		match node_type {
-			"function_declaration" | "method_definition" | "arrow_function" => {
-				"function declarations"
-			}
+			"function_declaration" | "method_definition" | "arrow_function" => "function declarations",
 			"class_declaration" => "class declarations",
 			"interface_declaration" => "interface declarations",
 			"type_alias_declaration" => "type declarations",
@@ -298,11 +292,7 @@ impl Language for TypeScript {
 		}
 	}
 
-	fn extract_type_relations(
-		&self,
-		node: Node,
-		contents: &str,
-	) -> Vec<(super::TypeRelationKind, String)> {
+	fn extract_type_relations(&self, node: Node, contents: &str) -> Vec<(super::TypeRelationKind, String)> {
 		let mut out = Vec::new();
 		match node.kind() {
 			// `class Foo extends Bar implements Baz, Qux { }`
@@ -393,13 +383,7 @@ impl TypeScript {
 		}
 
 		// Try index files in directory (TypeScript-first)
-		let index_candidates = [
-			"index.ts",
-			"index.tsx",
-			"index.d.ts",
-			"index.js",
-			"index.jsx",
-		];
+		let index_candidates = ["index.ts", "index.tsx", "index.d.ts", "index.js", "index.jsx"];
 		for index_file in &index_candidates {
 			// `join` uses the platform separator, so on Windows the candidate is
 			// `src\models\index.ts` while the registry holds the `/` form every
@@ -437,10 +421,8 @@ impl TypeScript {
 									(target_parent.to_str(), ts_parent.to_str())
 								{
 									// Cross-platform path comparison using PathNormalizer
-									if crate::utils::path::PathNormalizer::paths_equal(
-										target_parent_str,
-										ts_parent_str,
-									) {
+									if crate::utils::path::PathNormalizer::paths_equal(target_parent_str, ts_parent_str)
+									{
 										return Some(ts_file.clone());
 									}
 								}
@@ -548,11 +530,7 @@ fn parse_ts_export_statement(export_text: &str) -> Option<Vec<String>> {
 use super::javascript::{parse_js_export_statement, parse_js_import_statement_full_path};
 
 /// Walk a `class_heritage` node and collect both extends and implements targets.
-fn collect_ts_heritage(
-	heritage: Node,
-	contents: &str,
-	out: &mut Vec<(super::TypeRelationKind, String)>,
-) {
+fn collect_ts_heritage(heritage: Node, contents: &str, out: &mut Vec<(super::TypeRelationKind, String)>) {
 	let mut cursor = heritage.walk();
 	for child in heritage.children(&mut cursor) {
 		match child.kind() {
@@ -568,11 +546,7 @@ fn collect_ts_heritage(
 }
 
 /// Walk an `extends_type_clause`/`extends_clause` (interface inheritance) and emit Extends edges.
-fn collect_ts_extends(
-	clause: Node,
-	contents: &str,
-	out: &mut Vec<(super::TypeRelationKind, String)>,
-) {
+fn collect_ts_extends(clause: Node, contents: &str, out: &mut Vec<(super::TypeRelationKind, String)>) {
 	collect_ts_clause_names(clause, contents, super::TypeRelationKind::Extends, out);
 }
 

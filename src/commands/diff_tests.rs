@@ -86,8 +86,7 @@ mod tests {
 		assert_eq!(files, vec!["first.txt".to_string()]);
 		assert_eq!(label, "Working changes");
 
-		let (staged_diff, staged_files, staged_label) =
-			get_diff(dir.path(), &args(None, true)).unwrap();
+		let (staged_diff, staged_files, staged_label) = get_diff(dir.path(), &args(None, true)).unwrap();
 		assert!(staged_diff.trim().is_empty());
 		assert!(staged_files.is_empty());
 		assert_eq!(staged_label, "Staged changes");
@@ -107,8 +106,7 @@ mod tests {
 	#[test]
 	fn a_commit_range_diffs_the_two_endpoints() {
 		let dir = repo();
-		let (diff, files, label) =
-			get_diff(dir.path(), &args(Some("main..feature"), false)).unwrap();
+		let (diff, files, label) = get_diff(dir.path(), &args(Some("main..feature"), false)).unwrap();
 		assert!(diff.contains("third.txt"));
 		assert_eq!(files, vec!["third.txt".to_string()]);
 		assert_eq!(label, "Range: main..feature");

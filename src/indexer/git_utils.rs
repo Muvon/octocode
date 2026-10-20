@@ -56,10 +56,7 @@ impl GitUtils {
 	}
 
 	/// Get files changed between two commits (committed changes only, no unstaged)
-	pub fn get_changed_files_since_commit(
-		repo_path: &Path,
-		since_commit: &str,
-	) -> Result<Vec<String>> {
+	pub fn get_changed_files_since_commit(repo_path: &Path, since_commit: &str) -> Result<Vec<String>> {
 		let mut changed_files = std::collections::HashSet::new();
 
 		// Get files changed between commits (committed changes only)
@@ -200,12 +197,7 @@ impl GitUtils {
 			.output()?;
 		if !output.status.success() {
 			let stderr = String::from_utf8_lossy(&output.stderr);
-			return Err(anyhow::anyhow!(
-				"git merge-base {} {} failed: {}",
-				a,
-				b,
-				stderr.trim()
-			));
+			return Err(anyhow::anyhow!("git merge-base {} {} failed: {}", a, b, stderr.trim()));
 		}
 		Ok(String::from_utf8(output.stdout)?.trim().to_string())
 	}
@@ -271,11 +263,7 @@ impl GitUtils {
 	}
 
 	/// Get commit log entries. If `since_commit` is Some, only returns commits after that hash.
-	pub fn get_commit_log(
-		repo_path: &Path,
-		branch: &str,
-		since_commit: Option<&str>,
-	) -> Result<Vec<CommitEntry>> {
+	pub fn get_commit_log(repo_path: &Path, branch: &str, since_commit: Option<&str>) -> Result<Vec<CommitEntry>> {
 		let range = match since_commit {
 			Some(hash) => format!("{}..{}", hash, branch),
 			None => branch.to_string(),
@@ -329,8 +317,7 @@ impl GitUtils {
 		use std::io::Write;
 		use std::process::Stdio;
 
-		let mut result: std::collections::HashMap<String, Vec<String>> =
-			std::collections::HashMap::new();
+		let mut result: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
 		if hashes.is_empty() {
 			return Ok(result);
 		}
@@ -387,14 +374,7 @@ impl GitUtils {
 	/// Get changed file paths for a specific commit
 	pub fn get_changed_files_for_commit(repo_path: &Path, hash: &str) -> Result<Vec<String>> {
 		let output = Command::new("git")
-			.args([
-				"diff-tree",
-				"--no-commit-id",
-				"--name-only",
-				"-r",
-				"--root",
-				hash,
-			])
+			.args(["diff-tree", "--no-commit-id", "--name-only", "-r", "--root", hash])
 			.current_dir(repo_path)
 			.output()?;
 

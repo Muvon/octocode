@@ -37,17 +37,12 @@ impl RelationshipDiscovery {
 		// mentioning the name (issues #85, #86).
 
 		// Pre-build path index for parent-child lookups
-		let all_node_ids: Vec<(&str, &str)> = all_nodes
-			.iter()
-			.map(|n| (n.id.as_str(), n.path.as_str()))
-			.collect();
+		let all_node_ids: Vec<(&str, &str)> = all_nodes.iter().map(|n| (n.id.as_str(), n.path.as_str())).collect();
 
 		// Build the import-resolution maps ONCE (they depend only on `all_nodes`).
 		// Rebuilding them per source file made discovery O(new_files × all_nodes).
-		let file_map: std::collections::HashMap<String, &CodeNode> = all_nodes
-			.iter()
-			.map(|node| (node.path.clone(), node))
-			.collect();
+		let file_map: std::collections::HashMap<String, &CodeNode> =
+			all_nodes.iter().map(|node| (node.path.clone(), node)).collect();
 		let all_files: Vec<String> = all_nodes.iter().map(|node| node.path.clone()).collect();
 		let registry = crate::indexer::languages::resolution_utils::FileRegistry::new(&all_files);
 
@@ -101,9 +96,8 @@ impl RelationshipDiscovery {
 				&b.description,
 			))
 		});
-		relationships.dedup_by(|a, b| {
-			a.source == b.source && a.target == b.target && a.relation_type == b.relation_type
-		});
+		relationships
+			.dedup_by(|a, b| a.source == b.source && a.target == b.target && a.relation_type == b.relation_type);
 
 		Ok(relationships)
 	}
@@ -149,10 +143,8 @@ impl RelationshipDiscovery {
 		all_nodes: &[CodeNode],
 		relationships: &mut Vec<CodeRelationship>,
 	) {
-		let file_map: std::collections::HashMap<String, &CodeNode> = all_nodes
-			.iter()
-			.map(|node| (node.path.clone(), node))
-			.collect();
+		let file_map: std::collections::HashMap<String, &CodeNode> =
+			all_nodes.iter().map(|node| (node.path.clone(), node)).collect();
 		let all_files: Vec<String> = all_nodes.iter().map(|node| node.path.clone()).collect();
 		let registry = crate::indexer::languages::resolution_utils::FileRegistry::new(&all_files);
 		Self::resolve_import_relationships(source_file, &file_map, &registry, relationships);
@@ -170,9 +162,7 @@ impl RelationshipDiscovery {
 		if let Some(lang_impl) = crate::indexer::languages::get_language(&source_file.language) {
 			// Resolve each import to create direct relationships
 			for import_path in &source_file.imports {
-				if let Some(resolved_path) =
-					lang_impl.resolve_import(import_path, &source_file.path, registry)
-				{
+				if let Some(resolved_path) = lang_impl.resolve_import(import_path, &source_file.path, registry) {
 					// Find the target node
 					if let Some(target_node) = file_map.get(&resolved_path) {
 						// Use References for markdown cross-links, Imports for code
@@ -190,10 +180,7 @@ impl RelationshipDiscovery {
 							source: source_file.id.clone(),
 							target: target_node.id.clone(),
 							relation_type: rel_type,
-							description: format!(
-								"{}: {} -> {}",
-								description_prefix, import_path, resolved_path
-							),
+							description: format!("{}: {} -> {}", description_prefix, import_path, resolved_path),
 							confidence: 0.95,
 							weight: 1.0,
 							provenance: crate::indexer::graphrag::types::Provenance::Extracted,
@@ -280,8 +267,7 @@ impl RelationshipDiscovery {
 			.unwrap_or_default();
 
 		for other_file in all_nodes {
-			if other_file.id == source_file.id
-				|| !["javascript", "typescript"].contains(&other_file.language.as_str())
+			if other_file.id == source_file.id || !["javascript", "typescript"].contains(&other_file.language.as_str())
 			{
 				continue;
 			}
@@ -447,20 +433,18 @@ impl RelationshipDiscovery {
 		// Simple pattern matching for common function symbol formats
 		// This can be expanded based on your language implementations
 
-		symbol
-			.strip_prefix("function_")
-			.map(|function_name| FunctionInfo {
-				name: function_name.to_string(),
-				signature: format!("{}(...)", function_name), // Simplified
-				start_line: block.start_line as u32,
-				end_line: block.end_line as u32,
-				calls: Vec::new(), // Will be populated during relationship discovery
-				called_by: Vec::new(),
-				parameters: Vec::new(), // Could be extracted from content if needed
-				return_type: None,
-				extends: Vec::new(),
-				implements: Vec::new(),
-			})
+		symbol.strip_prefix("function_").map(|function_name| FunctionInfo {
+			name: function_name.to_string(),
+			signature: format!("{}(...)", function_name), // Simplified
+			start_line: block.start_line as u32,
+			end_line: block.end_line as u32,
+			calls: Vec::new(), // Will be populated during relationship discovery
+			called_by: Vec::new(),
+			parameters: Vec::new(), // Could be extracted from content if needed
+			return_type: None,
+			extends: Vec::new(),
+			implements: Vec::new(),
+		})
 	}
 
 	// Extract imports/exports efficiently based on language patterns and symbols
@@ -506,12 +490,7 @@ impl RelationshipDiscovery {
 	}
 
 	// Generate simple description without AI for speed (fallback and default)
-	pub fn generate_simple_description(
-		file_name: &str,
-		language: &str,
-		symbols: &[String],
-		lines: u32,
-	) -> String {
+	pub fn generate_simple_description(file_name: &str, language: &str, symbols: &[String], lines: u32) -> String {
 		let function_count = symbols
 			.iter()
 			.filter(|s| s.contains("function_") || s.contains("method_"))

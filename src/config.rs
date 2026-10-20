@@ -414,13 +414,11 @@ impl Config {
 		// Current configs are read-only. Acquire the write lock only when the file
 		// is missing or an actual migration is required.
 		if config_path.exists() {
-			let content = fs::read_to_string(config_path).with_context(|| {
-				format!("failed to read configuration at {}", config_path.display())
-			})?;
+			let content = fs::read_to_string(config_path)
+				.with_context(|| format!("failed to read configuration at {}", config_path.display()))?;
 			if migrations::migrate(&content, DEFAULT_CONFIG_TEMPLATE)?.is_none() {
-				return toml::from_str(&content).with_context(|| {
-					format!("failed to load configuration at {}", config_path.display())
-				});
+				return toml::from_str(&content)
+					.with_context(|| format!("failed to load configuration at {}", config_path.display()));
 			}
 		}
 
@@ -430,13 +428,11 @@ impl Config {
 	fn load_from_path_locked(config_path: &Path) -> Result<Self> {
 		if !config_path.exists() {
 			config_file::atomic_write(config_path, DEFAULT_CONFIG_TEMPLATE.as_bytes(), None)?;
-			return toml::from_str(DEFAULT_CONFIG_TEMPLATE)
-				.context("failed to parse embedded default configuration");
+			return toml::from_str(DEFAULT_CONFIG_TEMPLATE).context("failed to parse embedded default configuration");
 		}
 
-		let original = fs::read_to_string(config_path).with_context(|| {
-			format!("failed to read configuration at {}", config_path.display())
-		})?;
+		let original = fs::read_to_string(config_path)
+			.with_context(|| format!("failed to read configuration at {}", config_path.display()))?;
 		let migration = migrations::migrate(&original, DEFAULT_CONFIG_TEMPLATE)?;
 		let content = migration
 			.as_ref()
@@ -468,9 +464,7 @@ impl Config {
 		let config_path = Self::get_config_path()?;
 		let toml_content = toml::to_string_pretty(self)?;
 		config_file::with_lock(&config_path, || {
-			let permissions = fs::metadata(&config_path)
-				.ok()
-				.map(|metadata| metadata.permissions());
+			let permissions = fs::metadata(&config_path).ok().map(|metadata| metadata.permissions());
 			config_file::atomic_write(&config_path, toml_content.as_bytes(), permissions)
 		})
 	}
@@ -523,8 +517,7 @@ mod tests {
 
 	impl TempConfigDir {
 		fn new() -> Self {
-			let path =
-				std::env::temp_dir().join(format!("octocode-config-test-{}", uuid::Uuid::new_v4()));
+			let path = std::env::temp_dir().join(format!("octocode-config-test-{}", uuid::Uuid::new_v4()));
 			fs::create_dir_all(&path).expect("temporary config directory should be created");
 			Self { path }
 		}
@@ -544,9 +537,7 @@ mod tests {
 	/// octolib's to choose, so tests here only ask whether a backup or a lock
 	/// was made, never what it's called.
 	fn siblings(config_path: &Path, extension: &str) -> Vec<PathBuf> {
-		let parent = config_path
-			.parent()
-			.expect("config path must have a parent");
+		let parent = config_path.parent().expect("config path must have a parent");
 		fs::read_dir(parent)
 			.expect("config directory must be readable")
 			.map(|entry| entry.expect("directory entry must be readable").path())
@@ -613,10 +604,7 @@ mod tests {
 	#[test]
 	fn the_template_ships_a_low_ranking_budget() {
 		let config = Config::load_from_template().expect("template should load");
-		assert_eq!(
-			config.search.reasoning.reasoning_effort,
-			ReasoningEffortConfig::Low
-		);
+		assert_eq!(config.search.reasoning.reasoning_effort, ReasoningEffortConfig::Low);
 	}
 
 	#[test]
@@ -637,14 +625,8 @@ mod tests {
 		// Test new GraphRAG configuration structure
 		assert!(!config.graphrag.enabled);
 		assert!(!config.graphrag.use_llm);
-		assert_eq!(
-			config.graphrag.llm.description_model,
-			"openrouter:openai/gpt-4o-mini"
-		);
-		assert_eq!(
-			config.graphrag.llm.relationship_model,
-			"openrouter:openai/gpt-4o-mini"
-		);
+		assert_eq!(config.graphrag.llm.description_model, "openrouter:openai/gpt-4o-mini");
+		assert_eq!(config.graphrag.llm.relationship_model, "openrouter:openai/gpt-4o-mini");
 		assert_eq!(config.graphrag.llm.ai_batch_size, 8);
 		assert_eq!(config.graphrag.llm.max_batch_tokens, 16384);
 		assert_eq!(config.graphrag.llm.batch_timeout_seconds, 60);
@@ -678,21 +660,12 @@ mod tests {
 			config.embedding.code_model,
 			"fastembed:jinaai/jina-embeddings-v2-base-code"
 		);
-		assert_eq!(
-			config.embedding.text_model,
-			"fastembed:nomic-ai/nomic-embed-text-v1.5"
-		);
+		assert_eq!(config.embedding.text_model, "fastembed:nomic-ai/nomic-embed-text-v1.5");
 		// Test new GraphRAG configuration structure from template
 		assert!(!config.graphrag.enabled);
 		assert!(!config.graphrag.use_llm);
-		assert_eq!(
-			config.graphrag.llm.description_model,
-			"openrouter:openai/gpt-4o-mini"
-		);
-		assert_eq!(
-			config.graphrag.llm.relationship_model,
-			"openrouter:openai/gpt-4o-mini"
-		);
+		assert_eq!(config.graphrag.llm.description_model, "openrouter:openai/gpt-4o-mini");
+		assert_eq!(config.graphrag.llm.relationship_model, "openrouter:openai/gpt-4o-mini");
 		assert_eq!(config.graphrag.llm.ai_batch_size, 8);
 		assert_eq!(config.graphrag.llm.max_batch_tokens, 16384);
 		assert_eq!(config.graphrag.llm.batch_timeout_seconds, 60);
@@ -734,11 +707,7 @@ mod tests {
 		let config: Config = toml::from_str(&configured).expect("association should parse");
 
 		assert_eq!(
-			config
-				.index
-				.file_associations
-				.get("inc")
-				.map(String::as_str),
+			config.index.file_associations.get("inc").map(String::as_str),
 			Some("php")
 		);
 	}
@@ -761,10 +730,7 @@ mod tests {
 		let config = Config::load_from_path(&config_path).expect("config should be created");
 
 		assert_eq!(config.version, 3);
-		assert_eq!(
-			fs::read_to_string(&config_path).unwrap(),
-			DEFAULT_CONFIG_TEMPLATE
-		);
+		assert_eq!(fs::read_to_string(&config_path).unwrap(), DEFAULT_CONFIG_TEMPLATE);
 		assert!(siblings(&config_path, "bak").is_empty());
 	}
 
@@ -813,9 +779,7 @@ mod tests {
 
 		let error = Config::load_from_path(&config_path).expect_err("future config should fail");
 
-		assert!(error
-			.to_string()
-			.contains("newer than this octocode binary"));
+		assert!(error.to_string().contains("newer than this octocode binary"));
 		assert_eq!(fs::read_to_string(&config_path).unwrap(), future);
 		assert!(siblings(&config_path, "bak").is_empty());
 	}
@@ -869,14 +833,7 @@ mod tests {
 			.collect();
 
 		for thread in threads {
-			assert_eq!(
-				thread
-					.join()
-					.expect("loader should not panic")
-					.unwrap()
-					.version,
-				3
-			);
+			assert_eq!(thread.join().expect("loader should not panic").unwrap().version, 3);
 		}
 
 		let migrated = fs::read_to_string(config_path.as_ref()).unwrap();

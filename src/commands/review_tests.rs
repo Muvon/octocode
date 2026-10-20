@@ -78,8 +78,7 @@ mod tests {
 
 	#[test]
 	fn a_well_formed_response_parses_into_a_review() {
-		let review =
-			parse_review_response(&valid_response(), 2, &["src/a.rs".to_string()]).unwrap();
+		let review = parse_review_response(&valid_response(), 2, &["src/a.rs".to_string()]).unwrap();
 		assert_eq!(review.summary.total_files, 2);
 		assert_eq!(review.summary.overall_score, 80);
 		assert_eq!(review.issues.len(), 1);

@@ -107,19 +107,10 @@ impl LspProvider {
 		let mut result = format!("Found {} symbol(s):\n", symbols.len());
 
 		for (i, symbol) in symbols.iter().enumerate() {
-			let name = symbol
-				.get("name")
-				.and_then(|v| v.as_str())
-				.unwrap_or("unknown");
-			let kind = symbol
-				.get("kind")
-				.and_then(|v| v.as_str())
-				.unwrap_or("unknown");
+			let name = symbol.get("name").and_then(|v| v.as_str()).unwrap_or("unknown");
+			let kind = symbol.get("kind").and_then(|v| v.as_str()).unwrap_or("unknown");
 			let line = symbol.get("line").and_then(|v| v.as_u64()).unwrap_or(0);
-			let character = symbol
-				.get("character")
-				.and_then(|v| v.as_u64())
-				.unwrap_or(0);
+			let character = symbol.get("character").and_then(|v| v.as_u64()).unwrap_or(0);
 
 			result.push_str(&format!(
 				"{}. {} ({}) at {}:{}\n",
@@ -143,18 +134,9 @@ impl LspProvider {
 		let mut result = format!("Found {} symbol(s) in workspace:\n", symbols.len());
 
 		for (i, symbol) in symbols.iter().enumerate() {
-			let name = symbol
-				.get("name")
-				.and_then(|v| v.as_str())
-				.unwrap_or("unknown");
-			let kind = symbol
-				.get("kind")
-				.and_then(|v| v.as_str())
-				.unwrap_or("unknown");
-			let file_path = symbol
-				.get("file_path")
-				.and_then(|v| v.as_str())
-				.unwrap_or("unknown");
+			let name = symbol.get("name").and_then(|v| v.as_str()).unwrap_or("unknown");
+			let kind = symbol.get("kind").and_then(|v| v.as_str()).unwrap_or("unknown");
+			let file_path = symbol.get("file_path").and_then(|v| v.as_str()).unwrap_or("unknown");
 			let line = symbol.get("line").and_then(|v| v.as_u64()).unwrap_or(0);
 
 			result.push_str(&format!(
@@ -182,24 +164,12 @@ impl LspProvider {
 		let limited_completions = completions.iter().take(10);
 
 		for (i, completion) in limited_completions.enumerate() {
-			let label = completion
-				.get("label")
-				.and_then(|v| v.as_str())
-				.unwrap_or("unknown");
-			let kind = completion
-				.get("kind")
-				.and_then(|v| v.as_str())
-				.unwrap_or("");
-			let detail = completion
-				.get("detail")
-				.and_then(|v| v.as_str())
-				.unwrap_or("");
+			let label = completion.get("label").and_then(|v| v.as_str()).unwrap_or("unknown");
+			let kind = completion.get("kind").and_then(|v| v.as_str()).unwrap_or("");
+			let detail = completion.get("detail").and_then(|v| v.as_str()).unwrap_or("");
 
 			let kind_str = if !kind.is_empty() {
-				format!(
-					" ({})",
-					kind.replace("CompletionItemKind::", "").to_lowercase()
-				)
+				format!(" ({})", kind.replace("CompletionItemKind::", "").to_lowercase())
 			} else {
 				String::new()
 			};
@@ -214,10 +184,7 @@ impl LspProvider {
 		}
 
 		if completions.len() > 10 {
-			result.push_str(&format!(
-				"... and {} more completions",
-				completions.len() - 10
-			));
+			result.push_str(&format!("... and {} more completions", completions.len() - 10));
 		}
 
 		result.trim_end().to_string()
@@ -226,12 +193,7 @@ impl LspProvider {
 
 impl LspProvider {
 	/// LSP goto definition tool
-	pub async fn goto_definition(
-		&self,
-		file_path: &str,
-		line: u32,
-		character: u32,
-	) -> Result<String> {
+	pub async fn goto_definition(&self, file_path: &str, line: u32, character: u32) -> Result<String> {
 		if !self.is_ready() {
 			return Err(Self::lsp_not_ready_error());
 		}
@@ -242,8 +204,7 @@ impl LspProvider {
 		self.ensure_file_opened(file_path).await?;
 
 		let params = GotoDefinitionParams {
-			text_document_position_params: self
-				.text_document_position(file_path, line, character)?,
+			text_document_position_params: self.text_document_position(file_path, line, character)?,
 			work_done_progress_params: WorkDoneProgressParams::default(),
 			partial_result_params: PartialResultParams::default(),
 		};
@@ -273,9 +234,7 @@ impl LspProvider {
 		self.ensure_file_opened(file_path).await?;
 
 		let params = HoverParams {
-			text_document_position_params: match self
-				.text_document_position(file_path, line, character)
-			{
+			text_document_position_params: match self.text_document_position(file_path, line, character) {
 				Ok(pos) => {
 					debug!(
 						"Created text document position: uri={:?}, line={}, character={}",
@@ -306,8 +265,7 @@ impl LspProvider {
 		};
 		debug!(
 			"Sending hover request: {}",
-			serde_json::to_string(&request)
-				.unwrap_or_else(|_| "<serialization failed>".to_string())
+			serde_json::to_string(&request).unwrap_or_else(|_| "<serialization failed>".to_string())
 		);
 		let response = self.client.send_request(request).await?;
 
@@ -348,9 +306,7 @@ impl LspProvider {
 			text_document_position: self.text_document_position(file_path, line, character)?,
 			work_done_progress_params: WorkDoneProgressParams::default(),
 			partial_result_params: PartialResultParams::default(),
-			context: ReferenceContext {
-				include_declaration,
-			},
+			context: ReferenceContext { include_declaration },
 		};
 
 		let request = LspRequest::find_references(self.next_request_id(), params)?;

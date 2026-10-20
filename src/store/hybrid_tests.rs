@@ -151,8 +151,7 @@ mod tests {
 					block
 				})
 				.collect();
-			let embeddings: Vec<Vec<f32>> =
-				(1..=3).map(|i| embedding(CODE_DIM, i as usize)).collect();
+			let embeddings: Vec<Vec<f32>> = (1..=3).map(|i| embedding(CODE_DIM, i as usize)).collect();
 			store
 				.store_code_blocks(&blocks, &embeddings)
 				.await
@@ -214,10 +213,7 @@ mod tests {
 				.await
 				.expect("search");
 			assert!(!out.is_empty());
-			let exact = out
-				.iter()
-				.find(|b| b.path == "src/f1.rs")
-				.expect("the matching block");
+			let exact = out.iter().find(|b| b.path == "src/f1.rs").expect("the matching block");
 			// A recomputed cosine distance, not the RRF relevance score.
 			assert!(exact.distance.expect("distance") < 1e-5);
 		}
@@ -262,27 +258,18 @@ mod tests {
 			let mut q = query(Some(embedding(CODE_DIM, 1)), None);
 			q.min_relevance = Some(0.99);
 			let out: Vec<CodeBlock> = store.hybrid_search(&q).await.expect("search");
-			assert_eq!(
-				out.iter().map(|b| b.path.as_str()).collect::<Vec<_>>(),
-				["src/f1.rs"]
-			);
+			assert_eq!(out.iter().map(|b| b.path.as_str()).collect::<Vec<_>>(), ["src/f1.rs"]);
 		}
 
 		#[tokio::test]
 		async fn text_and_document_blocks_search_through_the_same_generic_path() {
 			let (_dir, store) = test_store().await;
 			store
-				.store_text_blocks(
-					&[text_block("notes.txt", "alpha")],
-					&[embedding(TEXT_DIM, 4)],
-				)
+				.store_text_blocks(&[text_block("notes.txt", "alpha")], &[embedding(TEXT_DIM, 4)])
 				.await
 				.expect("store text");
 			store
-				.store_document_blocks(
-					&[document_block("README.md", "alpha")],
-					&[embedding(TEXT_DIM, 5)],
-				)
+				.store_document_blocks(&[document_block("README.md", "alpha")], &[embedding(TEXT_DIM, 5)])
 				.await
 				.expect("store docs");
 
@@ -290,28 +277,19 @@ mod tests {
 				.hybrid_search(&query(Some(embedding(TEXT_DIM, 4)), None))
 				.await
 				.expect("text search");
-			assert_eq!(
-				texts.iter().map(|b| b.path.as_str()).collect::<Vec<_>>(),
-				["notes.txt"]
-			);
+			assert_eq!(texts.iter().map(|b| b.path.as_str()).collect::<Vec<_>>(), ["notes.txt"]);
 
 			let docs: Vec<DocumentBlock> = store
 				.hybrid_search(&query(None, Some("alpha")))
 				.await
 				.expect("doc search");
-			assert_eq!(
-				docs.iter().map(|b| b.path.as_str()).collect::<Vec<_>>(),
-				["README.md"]
-			);
+			assert_eq!(docs.iter().map(|b| b.path.as_str()).collect::<Vec<_>>(), ["README.md"]);
 		}
 
 		#[tokio::test]
 		async fn blocks_are_readable_by_exact_path_up_to_a_limit() {
 			let (_dir, store) = store_with_code().await;
-			let hits = store
-				.get_code_blocks_by_path("src/f2.rs", 10)
-				.await
-				.expect("by path");
+			let hits = store.get_code_blocks_by_path("src/f2.rs", 10).await.expect("by path");
 			assert_eq!(hits.len(), 1);
 			assert_eq!(hits[0].hash, "h2");
 

@@ -75,10 +75,7 @@ const (
 )
 "#;
 		let regions = parse_regions(source);
-		let const_decl_regions: Vec<_> = regions
-			.iter()
-			.filter(|r| r.node_kind == "const_declaration")
-			.collect();
+		let const_decl_regions: Vec<_> = regions.iter().filter(|r| r.node_kind == "const_declaration").collect();
 		assert_eq!(
 			const_decl_regions.len(),
 			0,
@@ -86,10 +83,7 @@ const (
 			regions.iter().map(|r| &r.node_kind).collect::<Vec<_>>()
 		);
 
-		let const_spec_regions: Vec<_> = regions
-			.iter()
-			.filter(|r| r.node_kind == "const_spec")
-			.collect();
+		let const_spec_regions: Vec<_> = regions.iter().filter(|r| r.node_kind == "const_spec").collect();
 		assert!(
 			!const_spec_regions.is_empty(),
 			"grouped const block should surface as const_spec region(s), got {:?}",
@@ -106,10 +100,7 @@ const (
 		source.push_str(")\n");
 
 		let regions = parse_regions(&source);
-		let const_spec_regions: Vec<_> = regions
-			.iter()
-			.filter(|r| r.node_kind == "const_spec")
-			.collect();
+		let const_spec_regions: Vec<_> = regions.iter().filter(|r| r.node_kind == "const_spec").collect();
 		assert!(
 			const_spec_regions.len() > 1,
 			"a 40-spec grouped const block must not become a single oversized region, got {} const_spec region(s)",
@@ -124,10 +115,7 @@ const (
 const X = 1
 "#;
 		let regions = parse_regions(source);
-		let const_decl_regions: Vec<_> = regions
-			.iter()
-			.filter(|r| r.node_kind == "const_declaration")
-			.collect();
+		let const_decl_regions: Vec<_> = regions.iter().filter(|r| r.node_kind == "const_declaration").collect();
 		assert_eq!(
 			const_decl_regions.len(),
 			1,
@@ -151,10 +139,7 @@ var (
 )
 "#;
 		let regions = parse_regions(source);
-		let var_decl_regions: Vec<_> = regions
-			.iter()
-			.filter(|r| r.node_kind == "var_declaration")
-			.collect();
+		let var_decl_regions: Vec<_> = regions.iter().filter(|r| r.node_kind == "var_declaration").collect();
 		assert_eq!(
 			var_decl_regions.len(),
 			0,
@@ -162,10 +147,7 @@ var (
 			regions.iter().map(|r| &r.node_kind).collect::<Vec<_>>()
 		);
 
-		let var_spec_regions: Vec<_> = regions
-			.iter()
-			.filter(|r| r.node_kind == "var_spec")
-			.collect();
+		let var_spec_regions: Vec<_> = regions.iter().filter(|r| r.node_kind == "var_spec").collect();
 		assert!(
 			!var_spec_regions.is_empty(),
 			"grouped var block should surface as var_spec region(s), got {:?}",
@@ -180,10 +162,7 @@ var (
 var X = 1
 "#;
 		let regions = parse_regions(source);
-		let var_decl_regions: Vec<_> = regions
-			.iter()
-			.filter(|r| r.node_kind == "var_declaration")
-			.collect();
+		let var_decl_regions: Vec<_> = regions.iter().filter(|r| r.node_kind == "var_declaration").collect();
 		assert_eq!(
 			var_decl_regions.len(),
 			1,
@@ -218,10 +197,7 @@ type (
 )
 "#;
 		let regions = parse_regions(source);
-		let type_decl_regions: Vec<_> = regions
-			.iter()
-			.filter(|r| r.node_kind == "type_declaration")
-			.collect();
+		let type_decl_regions: Vec<_> = regions.iter().filter(|r| r.node_kind == "type_declaration").collect();
 		assert_eq!(
 			type_decl_regions.len(),
 			0,
@@ -229,10 +205,7 @@ type (
 			regions.iter().map(|r| &r.node_kind).collect::<Vec<_>>()
 		);
 
-		let type_spec_regions: Vec<_> = regions
-			.iter()
-			.filter(|r| r.node_kind == "type_spec")
-			.collect();
+		let type_spec_regions: Vec<_> = regions.iter().filter(|r| r.node_kind == "type_spec").collect();
 		assert_eq!(
 			type_spec_regions.len(),
 			2,
@@ -250,10 +223,7 @@ type Foo struct {
 }
 "#;
 		let regions = parse_regions(source);
-		let type_decl_regions: Vec<_> = regions
-			.iter()
-			.filter(|r| r.node_kind == "type_declaration")
-			.collect();
+		let type_decl_regions: Vec<_> = regions.iter().filter(|r| r.node_kind == "type_declaration").collect();
 		assert_eq!(
 			type_decl_regions.len(),
 			1,
@@ -307,22 +277,10 @@ type Foo struct {
 			go.get_node_type_description("method_declaration"),
 			"function declarations"
 		);
-		assert_eq!(
-			go.get_node_type_description("type_declaration"),
-			"type declarations"
-		);
-		assert_eq!(
-			go.get_node_type_description("struct_type"),
-			"struct definitions"
-		);
-		assert_eq!(
-			go.get_node_type_description("interface_type"),
-			"interface definitions"
-		);
-		assert_eq!(
-			go.get_node_type_description("var_declaration"),
-			"variable declarations"
-		);
+		assert_eq!(go.get_node_type_description("type_declaration"), "type declarations");
+		assert_eq!(go.get_node_type_description("struct_type"), "struct definitions");
+		assert_eq!(go.get_node_type_description("interface_type"), "interface definitions");
+		assert_eq!(go.get_node_type_description("var_declaration"), "variable declarations");
 		assert_eq!(
 			go.get_node_type_description("const_declaration"),
 			"variable declarations"
@@ -331,10 +289,7 @@ type Foo struct {
 			go.get_node_type_description("short_var_declaration"),
 			"variable declarations"
 		);
-		assert_eq!(
-			go.get_node_type_description("import_declaration"),
-			"import statements"
-		);
+		assert_eq!(go.get_node_type_description("import_declaration"), "import statements");
 		assert_eq!(go.get_node_type_description("comment"), "declarations");
 	}
 
@@ -480,10 +435,7 @@ type Handler interface {
 		let receiver = method.child_by_field_name("receiver").unwrap();
 		// A parameter_list is not a handled kind, so the `_` arm collects the
 		// identifiers below it — the receiver binding, not its type.
-		assert_eq!(
-			Go {}.extract_symbols(receiver, source),
-			vec!["s".to_string()]
-		);
+		assert_eq!(Go {}.extract_symbols(receiver, source), vec!["s".to_string()]);
 	}
 
 	#[test]
@@ -494,10 +446,7 @@ type Handler interface {
 		let mut symbols = Vec::new();
 		Go {}.extract_identifiers(method, source, &mut symbols);
 		// `Server` and `int` are `type_identifier` nodes and are excluded.
-		assert_eq!(
-			symbols,
-			vec!["s".to_string(), "Handle".to_string(), "ctx".to_string()]
-		);
+		assert_eq!(symbols, vec!["s".to_string(), "Handle".to_string(), "ctx".to_string()]);
 	}
 
 	#[test]
@@ -525,10 +474,7 @@ type Handler interface {
 		let source = "package main\n\nfunc (s *Store[T]) Handle() {}\n";
 		let tree = parse(source);
 		let method = first_node(&tree, "method_declaration");
-		assert_eq!(
-			Go {}.extract_symbol_owner(method, source),
-			Some("Store".to_string())
-		);
+		assert_eq!(Go {}.extract_symbol_owner(method, source), Some("Store".to_string()));
 	}
 
 	#[test]
@@ -573,11 +519,7 @@ import (
 		let (imports, _) = Go {}.extract_imports_exports(node, source);
 		assert_eq!(
 			imports,
-			vec![
-				"os".to_string(),
-				"strings".to_string(),
-				"github.com/lib/pq".to_string(),
-			]
+			vec!["os".to_string(), "strings".to_string(), "github.com/lib/pq".to_string(),]
 		);
 	}
 
@@ -586,19 +528,15 @@ import (
 		let go = Go {};
 		let source = "package main\n\nfunc Exported() {}\n\nfunc unexported() {}\n";
 		let tree = parse(source);
-		let (_, exported) =
-			go.extract_imports_exports(nth_node(&tree, "function_declaration", 0), source);
+		let (_, exported) = go.extract_imports_exports(nth_node(&tree, "function_declaration", 0), source);
 		assert_eq!(exported, vec!["Exported".to_string()]);
-		let (_, unexported) =
-			go.extract_imports_exports(nth_node(&tree, "function_declaration", 1), source);
+		let (_, unexported) = go.extract_imports_exports(nth_node(&tree, "function_declaration", 1), source);
 		assert!(unexported.is_empty());
 
 		let method_source = "package main\n\nfunc (s *Server) Handle() {}\n";
 		let method_tree = parse(method_source);
-		let (_, method_exports) = go.extract_imports_exports(
-			first_node(&method_tree, "method_declaration"),
-			method_source,
-		);
+		let (_, method_exports) =
+			go.extract_imports_exports(first_node(&method_tree, "method_declaration"), method_source);
 		assert_eq!(method_exports, vec!["Handle".to_string()]);
 	}
 
@@ -608,21 +546,9 @@ import (
 		// scanning only direct children found nothing at all.
 		let go = Go {};
 		for (source, kind, expected) in [
-			(
-				"package main\n\ntype Server struct{}\n",
-				"type_declaration",
-				"Server",
-			),
-			(
-				"package main\n\nvar Public = 1\n",
-				"var_declaration",
-				"Public",
-			),
-			(
-				"package main\n\nconst Public = 1\n",
-				"const_declaration",
-				"Public",
-			),
+			("package main\n\ntype Server struct{}\n", "type_declaration", "Server"),
+			("package main\n\nvar Public = 1\n", "var_declaration", "Public"),
+			("package main\n\nconst Public = 1\n", "const_declaration", "Public"),
 		] {
 			let tree = parse(source);
 			let (_, exports) = go.extract_imports_exports(first_node(&tree, kind), source);
@@ -640,8 +566,7 @@ import (
 
 	#[test]
 	fn calls_keep_their_receiver_as_the_qualifier() {
-		let source =
-			"package main\n\nfunc main() {\n\thelper()\n\tfmt.Println(1)\n\tpkg.Sub.Deep()\n}\n";
+		let source = "package main\n\nfunc main() {\n\thelper()\n\tfmt.Println(1)\n\tpkg.Sub.Deep()\n}\n";
 		let tree = parse(source);
 		let go = Go {};
 		assert_eq!(
@@ -677,8 +602,7 @@ import (
 
 	#[test]
 	fn an_embedded_struct_field_becomes_an_extends_relation() {
-		let source =
-			"package main\n\ntype Server struct {\n\tLogger\n\tmu sync.Mutex\n\tName string\n}\n";
+		let source = "package main\n\ntype Server struct {\n\tLogger\n\tmu sync.Mutex\n\tName string\n}\n";
 		let tree = parse(source);
 		let go = Go {};
 		assert_eq!(
@@ -802,11 +726,7 @@ func Greet(name string) string {
 		);
 		assert_eq!(
 			function.symbols,
-			vec![
-				"Greet".to_string(),
-				"message".to_string(),
-				"prefix".to_string()
-			]
+			vec!["Greet".to_string(), "message".to_string(), "prefix".to_string()]
 		);
 	}
 

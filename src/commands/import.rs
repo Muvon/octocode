@@ -53,8 +53,7 @@ pub async fn execute(args: &ImportArgs) -> Result<()> {
 	if temp_dir.exists() {
 		let _ = std::fs::remove_dir_all(&temp_dir);
 	}
-	std::fs::create_dir_all(&temp_dir)
-		.with_context(|| format!("Failed to create temp dir {}", temp_dir.display()))?;
+	std::fs::create_dir_all(&temp_dir).with_context(|| format!("Failed to create temp dir {}", temp_dir.display()))?;
 
 	// Acquire lock so no concurrent indexer/watcher mutates the DB while we
 	// validate and swap directories. The lock file lives inside
@@ -66,8 +65,7 @@ pub async fn execute(args: &ImportArgs) -> Result<()> {
 	// Run the IO-heavy work on the blocking pool.
 	let file = args.file.clone();
 	let temp_clone = temp_dir.clone();
-	let extract_res =
-		tokio::task::spawn_blocking(move || extract_and_validate(&file, &temp_clone)).await?;
+	let extract_res = tokio::task::spawn_blocking(move || extract_and_validate(&file, &temp_clone)).await?;
 
 	if let Err(e) = extract_res {
 		let _ = std::fs::remove_dir_all(&temp_dir);
@@ -91,25 +89,19 @@ pub async fn execute(args: &ImportArgs) -> Result<()> {
 /// export. Returns an error (and leaves `dest` populated for the caller to
 /// clean up) when the archive is invalid.
 fn extract_and_validate(file: &Path, dest: &Path) -> Result<()> {
-	let f =
-		std::fs::File::open(file).with_context(|| format!("Failed to open {}", file.display()))?;
+	let f = std::fs::File::open(file).with_context(|| format!("Failed to open {}", file.display()))?;
 	let decoder = zstd::Decoder::new(f).context("Not a valid zstd-compressed archive")?;
 	let mut archive = tar::Archive::new(decoder);
-	archive
-		.unpack(dest)
-		.context("Failed to extract tar.zst archive")?;
+	archive.unpack(dest).context("Failed to extract tar.zst archive")?;
 
 	// Validate the marker file. This rules out arbitrary tar.zst files being
 	// passed in by accident.
 	let marker = dest.join(MARKER_FILE);
 	if !marker.exists() {
-		bail!(
-			"Invalid octocode export: missing marker file '{}'",
-			MARKER_FILE
-		);
+		bail!("Invalid octocode export: missing marker file '{}'", MARKER_FILE);
 	}
-	let content = std::fs::read_to_string(&marker)
-		.with_context(|| format!("Failed to read marker {}", marker.display()))?;
+	let content =
+		std::fs::read_to_string(&marker).with_context(|| format!("Failed to read marker {}", marker.display()))?;
 	if !content.trim_start().starts_with(MARKER_PREFIX) {
 		bail!(
 			"Invalid octocode export: marker content does not start with '{}'",
@@ -161,10 +153,7 @@ fn install_atomic(temp_dir: &Path, project_storage: &Path, pid: u32) -> Result<(
 fn swap_dir(source: &Path, target: &Path, backup: &Path, required: bool) -> Result<()> {
 	if !source.exists() {
 		if required {
-			bail!(
-				"Missing required directory in archive: {}",
-				source.display()
-			);
+			bail!("Missing required directory in archive: {}", source.display());
 		}
 		return Ok(());
 	}

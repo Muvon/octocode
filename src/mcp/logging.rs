@@ -41,15 +41,14 @@ pub fn init_mcp_logging(base_dir: PathBuf, debug_mode: bool) -> Result<(), anyho
 		let _ = std::fs::write(&latest_file, log_dir.to_string_lossy().as_bytes());
 
 		// Create rotating file appender
-		let file_appender = match std::panic::catch_unwind(|| {
-			RollingFileAppender::new(Rotation::DAILY, &log_dir, "mcp_server.log")
-		}) {
-			Ok(appender) => appender,
-			Err(_) => {
-				// If logging cannot be initialized, continue without file logging.
-				return Ok(());
-			}
-		};
+		let file_appender =
+			match std::panic::catch_unwind(|| RollingFileAppender::new(Rotation::DAILY, &log_dir, "mcp_server.log")) {
+				Ok(appender) => appender,
+				Err(_) => {
+					// If logging cannot be initialized, continue without file logging.
+					return Ok(());
+				}
+			};
 
 		// Set up environment filter with sensible defaults
 		let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| {
@@ -99,11 +98,7 @@ pub fn init_mcp_logging(base_dir: PathBuf, debug_mode: bool) -> Result<(), anyho
 }
 
 /// Log MCP server request details with reduced verbosity
-pub fn log_mcp_request(
-	method: &str,
-	params: Option<&serde_json::Value>,
-	request_id: Option<&serde_json::Value>,
-) {
+pub fn log_mcp_request(method: &str, params: Option<&serde_json::Value>, request_id: Option<&serde_json::Value>) {
 	// Extract key parameters for common methods without logging full params
 	let key_info = match method {
 		"tools/call" => params
@@ -134,12 +129,7 @@ pub fn log_mcp_request(
 }
 
 /// Log MCP server response
-pub fn log_mcp_response(
-	method: &str,
-	success: bool,
-	request_id: Option<&serde_json::Value>,
-	duration_ms: Option<u64>,
-) {
+pub fn log_mcp_response(method: &str, success: bool, request_id: Option<&serde_json::Value>, duration_ms: Option<u64>) {
 	if success {
 		info!(
 			method = method,
@@ -215,12 +205,7 @@ pub fn log_watcher_event(event_type: &str, path: Option<&std::path::Path>, count
 }
 
 /// Log indexing operations with enhanced metrics
-pub fn log_indexing_operation(
-	operation: &str,
-	file_count: Option<usize>,
-	duration_ms: Option<u64>,
-	success: bool,
-) {
+pub fn log_indexing_operation(operation: &str, file_count: Option<usize>, duration_ms: Option<u64>, success: bool) {
 	let performance_tier = duration_ms.map(|d| match d {
 		0..=1000 => "fast",
 		1001..=5000 => "normal",
@@ -262,9 +247,7 @@ pub fn log_indexing_progress(
 	};
 
 	match phase {
-		"file_processing"
-			if files_processed.is_multiple_of(50) || files_processed == total_files =>
-		{
+		"file_processing" if files_processed.is_multiple_of(50) || files_processed == total_files => {
 			info!(
 				phase = phase,
 				files_processed = files_processed,
@@ -330,12 +313,7 @@ pub fn log_performance_metrics(
 }
 
 /// Log git operations for debugging
-pub fn log_git_operation(
-	operation: &str,
-	repo_path: &str,
-	files_affected: Option<usize>,
-	success: bool,
-) {
+pub fn log_git_operation(operation: &str, repo_path: &str, files_affected: Option<usize>, success: bool) {
 	if success {
 		debug!(
 			operation = operation,
@@ -361,8 +339,7 @@ pub fn get_log_directory() -> Option<PathBuf> {
 
 /// Get all log directories for MCP server
 pub fn get_all_log_directories(base_dir: &std::path::Path) -> Result<Vec<PathBuf>, std::io::Error> {
-	let project_storage =
-		crate::storage::get_project_storage_path(base_dir).map_err(std::io::Error::other)?;
+	let project_storage = crate::storage::get_project_storage_path(base_dir).map_err(std::io::Error::other)?;
 	let logs_dir = project_storage.join("logs");
 
 	if !logs_dir.exists() {
@@ -376,8 +353,7 @@ pub fn get_all_log_directories(base_dir: &std::path::Path) -> Result<Vec<PathBuf
 
 /// Print log directory information
 pub fn print_log_directories(base_dir: &Path) -> Result<(), std::io::Error> {
-	let project_storage =
-		crate::storage::get_project_storage_path(base_dir).map_err(std::io::Error::other)?;
+	let project_storage = crate::storage::get_project_storage_path(base_dir).map_err(std::io::Error::other)?;
 	let logs_dir = project_storage.join("logs");
 
 	println!("MCP Server Log Directory:");
@@ -411,10 +387,7 @@ pub fn print_log_directories(base_dir: &Path) -> Result<(), std::io::Error> {
 
 			println!("  Log files:");
 			for log_file in log_files {
-				println!(
-					"    - {}",
-					log_file.file_name().unwrap_or_default().to_string_lossy()
-				);
+				println!("    - {}", log_file.file_name().unwrap_or_default().to_string_lossy());
 			}
 		} else {
 			println!("    (no log files)");

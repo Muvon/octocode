@@ -25,8 +25,8 @@ use lancedb::{
 };
 
 use crate::store::{
-	batch_converter::BatchConverter, sql::escape_single_quotes, table_ops::TableOperations, tables,
-	CodeBlock, DocumentBlock, TextBlock,
+	batch_converter::BatchConverter, sql::escape_single_quotes, table_ops::TableOperations, tables, CodeBlock,
+	DocumentBlock, TextBlock,
 };
 
 /// Debug and inspection operations for the database
@@ -50,11 +50,7 @@ impl<'a> DebugOperations<'a> {
 		let table_names = self.db.table_names().execute().await?;
 		let mut total_files = 0;
 
-		for table_name in &[
-			tables::CODE_BLOCKS,
-			tables::TEXT_BLOCKS,
-			tables::DOCUMENT_BLOCKS,
-		] {
+		for table_name in &[tables::CODE_BLOCKS, tables::TEXT_BLOCKS, tables::DOCUMENT_BLOCKS] {
 			if table_names.contains(&table_name.to_string()) {
 				println!("\n📁 Files in {} table:", table_name);
 				let table = self.db.open_table(*table_name).execute().await?;
@@ -70,8 +66,7 @@ impl<'a> DebugOperations<'a> {
 				while let Some(batch) = results.try_next().await? {
 					if batch.num_rows() > 0 {
 						if let Some(column) = batch.column_by_name("path") {
-							if let Some(path_array) = column.as_any().downcast_ref::<StringArray>()
-							{
+							if let Some(path_array) = column.as_any().downcast_ref::<StringArray>() {
 								for i in 0..path_array.len() {
 									let path = path_array.value(i).to_string();
 									unique_paths.insert(path);
@@ -246,11 +241,7 @@ impl<'a> DebugOperations<'a> {
 
 	/// Get all document blocks for a specific file
 	async fn get_file_document_blocks(&self, file_path: &str) -> Result<Vec<DocumentBlock>> {
-		let table = self
-			.db
-			.open_table(tables::DOCUMENT_BLOCKS)
-			.execute()
-			.await?;
+		let table = self.db.open_table(tables::DOCUMENT_BLOCKS).execute().await?;
 
 		let mut results = table
 			.query()

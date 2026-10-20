@@ -202,10 +202,7 @@ while True:
 		// Every tool refuses to run until the handshake completes.
 		assert!(provider.hover("src/lib.rs", 1, 8).await.is_err());
 		assert!(provider.goto_definition("src/lib.rs", 6, 2).await.is_err());
-		assert!(provider
-			.find_references("src/lib.rs", 1, 8, true)
-			.await
-			.is_err());
+		assert!(provider.find_references("src/lib.rs", 1, 8, true).await.is_err());
 		assert!(provider.document_symbols("src/lib.rs").await.is_err());
 		assert!(provider.workspace_symbols("helper").await.is_err());
 		assert!(provider.completion("src/lib.rs", 6, 2).await.is_err());
@@ -214,10 +211,7 @@ while True:
 	#[tokio::test]
 	async fn starting_a_missing_server_binary_reports_an_error() {
 		let dir = TempDir::new().unwrap();
-		let mut provider = LspProvider::new(
-			dir.path().to_path_buf(),
-			"octocode-no-such-language-server".to_string(),
-		);
+		let mut provider = LspProvider::new(dir.path().to_path_buf(), "octocode-no-such-language-server".to_string());
 		assert!(provider.start_initialization().await.is_err());
 		assert!(!provider.is_ready());
 	}
@@ -269,10 +263,7 @@ while True:
 	async fn find_references_lists_every_hit() {
 		let (dir, command) = workspace();
 		let provider = ready_provider(dir.path(), command).await;
-		let out = provider
-			.find_references("src/lib.rs", 1, 8, true)
-			.await
-			.unwrap();
+		let out = provider.find_references("src/lib.rs", 1, 8, true).await.unwrap();
 		assert!(out.contains("2"), "{out}");
 		assert!(out.contains("lib.rs"), "{out}");
 	}
@@ -316,11 +307,7 @@ while True:
 		// A second open is a no-op.
 		provider.ensure_file_opened("src/lib.rs").await.unwrap();
 
-		std::fs::write(
-			dir.path().join("src/lib.rs"),
-			"pub fn helper() -> u32 {\n\t8\n}\n",
-		)
-		.unwrap();
+		std::fs::write(dir.path().join("src/lib.rs"), "pub fn helper() -> u32 {\n\t8\n}\n").unwrap();
 		provider.update_file("src/lib.rs").await.unwrap();
 		// Updating with unchanged content must not fail either.
 		provider.update_file("src/lib.rs").await.unwrap();
@@ -364,10 +351,7 @@ while True:
 			.await
 			.expect("a malformed handshake must not hang")
 			.expect_err("the capabilities payload is not an object");
-		assert!(
-			error.to_string().contains("Failed to parse initialize"),
-			"{error}"
-		);
+		assert!(error.to_string().contains("Failed to parse initialize"), "{error}");
 		assert!(provider.capabilities().is_none());
 	}
 
@@ -427,33 +411,18 @@ while True:
 			.await
 			.unwrap_err();
 		assert_eq!(no_definition_path.code, -32602);
-		assert!(
-			no_definition_path.message.contains("file_path"),
-			"{no_definition_path}"
-		);
+		assert!(no_definition_path.message.contains("file_path"), "{no_definition_path}");
 
 		let no_references_line = provider
 			.execute_find_references(&json!({"file_path": "src/lib.rs"}))
 			.await
 			.unwrap_err();
-		assert!(
-			no_references_line.message.contains("line"),
-			"{no_references_line}"
-		);
+		assert!(no_references_line.message.contains("line"), "{no_references_line}");
 
-		let no_symbols_path = provider
-			.execute_document_symbols(&json!({}))
-			.await
-			.unwrap_err();
-		assert!(
-			no_symbols_path.message.contains("file_path"),
-			"{no_symbols_path}"
-		);
+		let no_symbols_path = provider.execute_document_symbols(&json!({})).await.unwrap_err();
+		assert!(no_symbols_path.message.contains("file_path"), "{no_symbols_path}");
 
-		let no_query = provider
-			.execute_workspace_symbols(&json!({}))
-			.await
-			.unwrap_err();
+		let no_query = provider.execute_workspace_symbols(&json!({})).await.unwrap_err();
 		assert!(no_query.message.contains("query"), "{no_query}");
 
 		let no_completion_symbol = provider
@@ -510,10 +479,7 @@ while True:
 			workspace_symbols.starts_with("Found 1 symbol(s) in workspace:"),
 			"{workspace_symbols}"
 		);
-		assert!(
-			workspace_symbols.ends_with("in src/lib.rs:1"),
-			"{workspace_symbols}"
-		);
+		assert!(workspace_symbols.ends_with("in src/lib.rs:1"), "{workspace_symbols}");
 	}
 
 	#[tokio::test]
@@ -526,11 +492,7 @@ while True:
 			.unwrap();
 		assert!(out.contains("helper"), "{out}");
 		assert!(
-			provider
-				.opened_documents
-				.lock()
-				.unwrap()
-				.contains("src/lib.rs"),
+			provider.opened_documents.lock().unwrap().contains("src/lib.rs"),
 			"the cleaned path is what gets opened"
 		);
 	}
@@ -574,11 +536,7 @@ while True:
 			.execute_hover(&json!({"file_path": "src/lib.rs", "line": 2, "symbol": "zzz"}))
 			.await
 			.unwrap_err();
-		assert!(
-			error.message.contains("no fallback position"),
-			"{}",
-			error.message
-		);
+		assert!(error.message.contains("no fallback position"), "{}", error.message);
 	}
 
 	#[tokio::test]
@@ -634,22 +592,13 @@ while True:
 		// Line 1 has 24 UTF-16 units, so column 25 is the insertion point past
 		// its end and 26 is out of bounds.
 		assert!(provider.text_document_position("src/lib.rs", 1, 25).is_ok());
-		let past_column = provider
-			.text_document_position("src/lib.rs", 1, 26)
-			.unwrap_err();
-		assert!(
-			past_column.to_string().contains("Character 26"),
-			"{past_column}"
-		);
+		let past_column = provider.text_document_position("src/lib.rs", 1, 26).unwrap_err();
+		assert!(past_column.to_string().contains("Character 26"), "{past_column}");
 
 		assert!(provider.text_document_position("src/lib.rs", 0, 1).is_err());
-		assert!(provider
-			.text_document_position("src/lib.rs", 99, 1)
-			.is_err());
+		assert!(provider.text_document_position("src/lib.rs", 99, 1).is_err());
 
-		let unopened = provider
-			.text_document_position("src/caller.rs", 1, 1)
-			.unwrap_err();
+		let unopened = provider.text_document_position("src/caller.rs", 1, 1).unwrap_err();
 		assert!(unopened.to_string().contains("not opened"), "{unopened}");
 	}
 
@@ -685,10 +634,7 @@ while True:
 			.ensure_file_opened(&secret.to_string_lossy())
 			.await
 			.unwrap_err();
-		assert!(
-			error.to_string().contains("outside the working directory"),
-			"{error}"
-		);
+		assert!(error.to_string().contains("outside the working directory"), "{error}");
 	}
 
 	// --- Document synchronisation bookkeeping ---
@@ -728,24 +674,14 @@ while True:
 
 		provider.ensure_file_opened("src/lib.rs").await.unwrap();
 		assert_eq!(
-			*provider
-				.document_versions
-				.lock()
-				.unwrap()
-				.get("src/lib.rs")
-				.unwrap(),
+			*provider.document_versions.lock().unwrap().get("src/lib.rs").unwrap(),
 			1
 		);
 
 		std::fs::write(&file, "pub fn helper() -> u32 {\n\t9\n}\n").unwrap();
 		provider.ensure_file_opened("src/lib.rs").await.unwrap();
 		assert_eq!(
-			*provider
-				.document_versions
-				.lock()
-				.unwrap()
-				.get("src/lib.rs")
-				.unwrap(),
+			*provider.document_versions.lock().unwrap().get("src/lib.rs").unwrap(),
 			2
 		);
 		assert!(provider
@@ -759,12 +695,7 @@ while True:
 		// An unchanged file is not resent.
 		provider.ensure_file_opened("src/lib.rs").await.unwrap();
 		assert_eq!(
-			*provider
-				.document_versions
-				.lock()
-				.unwrap()
-				.get("src/lib.rs")
-				.unwrap(),
+			*provider.document_versions.lock().unwrap().get("src/lib.rs").unwrap(),
 			2
 		);
 	}
@@ -820,10 +751,7 @@ while True:
 			"No hover information available"
 		);
 		assert_eq!(
-			provider
-				.find_references("src/lib.rs", 1, 8, false)
-				.await
-				.unwrap(),
+			provider.find_references("src/lib.rs", 1, 8, false).await.unwrap(),
 			"No references found"
 		);
 		assert_eq!(

@@ -76,8 +76,7 @@ mod tests {
 	#[test]
 	fn a_glob_path_filter_is_honoured() {
 		let dir = repo();
-		let (files, _) =
-			collect_file_data(dir.path(), "rust", Some(&["src/**/*.rs".to_string()]), &[]);
+		let (files, _) = collect_file_data(dir.path(), "rust", Some(&["src/**/*.rs".to_string()]), &[]);
 		assert!(displays(&files).contains(&"src/inner/helper.rs"));
 	}
 
@@ -95,8 +94,7 @@ mod tests {
 	#[test]
 	fn a_filter_matching_nothing_collects_nothing() {
 		let dir = repo();
-		let (files, stamp) =
-			collect_file_data(dir.path(), "rust", Some(&["nowhere".to_string()]), &[]);
+		let (files, stamp) = collect_file_data(dir.path(), "rust", Some(&["nowhere".to_string()]), &[]);
 		assert!(files.is_empty());
 		assert_eq!(stamp, RepoStamp::default());
 	}
@@ -104,17 +102,9 @@ mod tests {
 	#[test]
 	fn the_literal_prefilter_flags_files_that_contain_every_token() {
 		let dir = repo();
-		let (files, _) = collect_file_data(
-			dir.path(),
-			"rust",
-			None,
-			&["unwrap".to_string(), "parse".to_string()],
-		);
+		let (files, _) = collect_file_data(dir.path(), "rust", None, &["unwrap".to_string(), "parse".to_string()]);
 		let main = files.iter().find(|f| f.display == "src/main.rs").unwrap();
-		let helper = files
-			.iter()
-			.find(|f| f.display == "src/inner/helper.rs")
-			.unwrap();
+		let helper = files.iter().find(|f| f.display == "src/inner/helper.rs").unwrap();
 		assert!(main.prefilter_hit);
 		assert!(!helper.prefilter_hit, "helper has neither token");
 	}
@@ -143,10 +133,7 @@ mod tests {
 		assert_ne!(base, fingerprint_request(&["go", "$X.unwrap()", ""]));
 		assert_ne!(base, fingerprint_request(&["rust", "$X.expect()", ""]));
 		// Field boundaries matter: the same concatenation must not collide.
-		assert_ne!(
-			fingerprint_request(&["ab", "c"]),
-			fingerprint_request(&["a", "bc"])
-		);
+		assert_ne!(fingerprint_request(&["ab", "c"]), fingerprint_request(&["a", "bc"]));
 	}
 
 	#[test]
@@ -165,10 +152,7 @@ mod tests {
 
 		assert!(!cache.matches.is_empty());
 		assert_eq!(cache.stamp, stamp);
-		assert_ne!(
-			cache.fingerprint,
-			fingerprint_request(&["go", "$X.unwrap()"])
-		);
+		assert_ne!(cache.fingerprint, fingerprint_request(&["go", "$X.unwrap()"]));
 	}
 
 	#[test]
@@ -177,10 +161,7 @@ mod tests {
 		let (files, _) = collect_file_data(dir.path(), "rust", None, &[]);
 		let outcome = symbol_search(&files, "[", "rust", false);
 		assert!(outcome.matches.is_empty());
-		assert!(
-			outcome.diagnostic.is_some(),
-			"a bad symbol spec must explain itself"
-		);
+		assert!(outcome.diagnostic.is_some(), "a bad symbol spec must explain itself");
 	}
 
 	#[test]
@@ -211,20 +192,13 @@ mod tests {
 	fn a_python_def_pattern_broadens_to_the_function_definition_kind() {
 		// The arity is wrong, so the structural pass finds nothing and the
 		// `def` keyword broadens the search to every function definition.
-		let files = vec![fd(
-			"app.py",
-			"@route(\"/\")\ndef handler():\n    return 1\n",
-		)];
+		let files = vec![fd("app.py", "@route(\"/\")\ndef handler():\n    return 1\n")];
 		let out = smart_search(&files, "def $N($A, $B, $C): $$$", "python", &[], None, None);
 		assert_eq!(out.matches.len(), 1, "{:?}", out.diagnostic);
 		let note = out.note.expect("a broadening note");
 		assert!(note.contains("[kind: function_definition]"), "{note}");
 		assert!(note.contains("function definitions"), "{note}");
-		assert!(
-			out.matches[0].text.contains("handler"),
-			"{}",
-			out.matches[0].text
-		);
+		assert!(out.matches[0].text.contains("handler"), "{}", out.matches[0].text);
 	}
 
 	#[test]
@@ -234,11 +208,7 @@ mod tests {
 		assert_eq!(out.matches.len(), 1, "{:?}", out.diagnostic);
 		let note = out.note.expect("a broadening note");
 		assert!(note.contains("[kind: function_declaration]"), "{note}");
-		assert!(
-			out.matches[0].text.contains("run"),
-			"{}",
-			out.matches[0].text
-		);
+		assert!(out.matches[0].text.contains("run"), "{}", out.matches[0].text);
 	}
 
 	#[test]
@@ -274,10 +244,7 @@ mod tests {
 	fn a_rust_type_expression_is_wrapped_in_a_type_alias_context() {
 		// `Arc<Mutex<$T>>` is not a standalone Rust item, so it only matches
 		// once the fallback wraps it as `type _ = ...;`.
-		let files = vec![fd(
-			"a.rs",
-			"pub struct Store {\n\tinner: Arc<Mutex<u32>>,\n}\n",
-		)];
+		let files = vec![fd("a.rs", "pub struct Store {\n\tinner: Arc<Mutex<u32>>,\n}\n")];
 		let out = smart_search(&files, "Arc<Mutex<$T>>", "rust", &[], None, None);
 		assert_eq!(out.matches.len(), 1, "{:?}", out.diagnostic);
 		let note = out.note.expect("a context-wrap note");
@@ -339,10 +306,7 @@ mod tests {
 		);
 		assert!(diagnostic.contains("parse_error=true"), "{diagnostic}");
 		assert!(diagnostic.contains("metavars=$N"), "{diagnostic}");
-		assert!(
-			diagnostic.contains("doesn't parse as standalone rust"),
-			"{diagnostic}"
-		);
+		assert!(diagnostic.contains("doesn't parse as standalone rust"), "{diagnostic}");
 	}
 
 	#[test]
@@ -386,10 +350,7 @@ mod tests {
 
 	#[test]
 	fn a_symbol_with_no_definition_falls_back_to_a_labelled_lexical_scan() {
-		let files = vec![fd(
-			"a.rs",
-			"// frobnicate is only mentioned here\nfn main() {}\n",
-		)];
+		let files = vec![fd("a.rs", "// frobnicate is only mentioned here\nfn main() {}\n")];
 
 		let definitions = symbol_search(&files, "frobnicate", "rust", false);
 		assert_eq!(definitions.matches.len(), 1);
@@ -412,26 +373,17 @@ mod tests {
 		assert!(out.note.is_none());
 
 		let diagnostic = out.diagnostic.expect("a diagnostic explains the miss");
-		assert!(
-			diagnostic.starts_with("No symbol definitions for `z*`"),
-			"{diagnostic}"
-		);
+		assert!(diagnostic.starts_with("No symbol definitions for `z*`"), "{diagnostic}");
 		assert!(diagnostic.contains("1 files scanned"), "{diagnostic}");
 		assert!(diagnostic.contains("language: rust"), "{diagnostic}");
 	}
 
 	#[test]
 	fn symbol_references_include_the_definition_site_and_every_call() {
-		let files = vec![fd(
-			"a.rs",
-			"fn flush() {}\nfn main() {\n\tflush();\n\tflush();\n}\n",
-		)];
+		let files = vec![fd("a.rs", "fn flush() {}\nfn main() {\n\tflush();\n\tflush();\n}\n")];
 		let out = symbol_search(&files, "flush", "rust", true);
 		assert_eq!(out.matches.len(), 3, "{:?}", out.diagnostic);
 		assert_eq!(out.note.unwrap(), "[symbol references: flush]");
-		assert_eq!(
-			out.matches.iter().map(|m| m.line).collect::<Vec<_>>(),
-			vec![1, 3, 4]
-		);
+		assert_eq!(out.matches.iter().map(|m| m.line).collect::<Vec<_>>(), vec![1, 3, 4]);
 	}
 }

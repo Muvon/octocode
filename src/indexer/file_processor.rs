@@ -73,18 +73,12 @@ pub async fn process_text_file(
 	let force_reindex = state.read().force_reindex;
 
 	// Split content into chunks using configuration values
-	let chunks = chunk_text(
-		contents,
-		config.index.chunk_size,
-		config.index.chunk_overlap,
-	);
+	let chunks = chunk_text(contents, config.index.chunk_size, config.index.chunk_overlap);
 
 	for (chunk_idx, chunk_with_lines) in chunks.iter().enumerate() {
 		// Use chunk index in hash for uniqueness but keep path clean
-		let chunk_hash = calculate_unique_content_hash(
-			&chunk_with_lines.content,
-			&format!("{}#{}", file_path, chunk_idx),
-		);
+		let chunk_hash =
+			calculate_unique_content_hash(&chunk_with_lines.content, &format!("{}#{}", file_path, chunk_idx));
 
 		// Skip the check if force_reindex is true
 		let exists = !force_reindex && store.content_exists(&chunk_hash, "text_blocks").await?;
@@ -121,10 +115,7 @@ pub async fn process_markdown_file(
 
 	for doc_block in document_blocks {
 		// Check if this document block already exists (unless force reindex)
-		let exists = !force_reindex
-			&& store
-				.content_exists(&doc_block.hash, "document_blocks")
-				.await?;
+		let exists = !force_reindex && store.content_exists(&doc_block.hash, "document_blocks").await?;
 		if !exists {
 			document_blocks_batch.push(doc_block);
 		}

@@ -27,10 +27,7 @@ mod tests {
 	fn position_params(uri: Uri) -> TextDocumentPositionParams {
 		TextDocumentPositionParams {
 			text_document: TextDocumentIdentifier { uri },
-			position: Position {
-				line: 1,
-				character: 2,
-			},
+			position: Position { line: 1, character: 2 },
 		}
 	}
 
@@ -129,10 +126,7 @@ mod tests {
 		std::fs::write(&file, "fn a() {}\n").unwrap();
 		let uri = uri_for(&file);
 
-		assert_eq!(
-			LspNotification::initialized().unwrap().method,
-			"initialized"
-		);
+		assert_eq!(LspNotification::initialized().unwrap().method, "initialized");
 
 		let did_open = LspNotification::did_open(DidOpenTextDocumentParams {
 			text_document: TextDocumentItem {
@@ -211,27 +205,24 @@ mod tests {
 	#[test]
 	fn a_message_deserializes_into_the_right_variant() {
 		let response: LspMessage =
-			serde_json::from_value(json!({"jsonrpc": "2.0", "id": 1, "result": {"ok": true}}))
-				.unwrap();
+			serde_json::from_value(json!({"jsonrpc": "2.0", "id": 1, "result": {"ok": true}})).unwrap();
 		assert!(matches!(response, LspMessage::Response(_)));
 
 		// `LspResponse` has only optional fields beyond `jsonrpc`, so the untagged
 		// enum resolves an id-less notification to it as well; the client
 		// distinguishes them by whether `id` is present.
-		let notification: LspMessage = serde_json::from_value(
-			json!({"jsonrpc": "2.0", "method": "$/progress", "params": {"token": "t"}}),
-		)
-		.unwrap();
+		let notification: LspMessage =
+			serde_json::from_value(json!({"jsonrpc": "2.0", "method": "$/progress", "params": {"token": "t"}}))
+				.unwrap();
 		match notification {
 			LspMessage::Response(r) => assert!(r.id.is_none()),
 			LspMessage::Notification(n) => assert_eq!(n.method, "$/progress"),
 			LspMessage::IncomingRequest(_) => panic!("no id means no request"),
 		}
 
-		let request: LspMessage = serde_json::from_value(
-			json!({"jsonrpc": "2.0", "id": 4, "method": "window/workDoneProgress/create"}),
-		)
-		.unwrap();
+		let request: LspMessage =
+			serde_json::from_value(json!({"jsonrpc": "2.0", "id": 4, "method": "window/workDoneProgress/create"}))
+				.unwrap();
 		// An incoming request carries both an id and a method; the untagged enum
 		// resolves it to the response arm first because every field is optional
 		// there, so only the method distinguishes it downstream.

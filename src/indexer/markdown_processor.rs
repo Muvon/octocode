@@ -115,9 +115,7 @@ impl ChunkResult {
 
 		// Check if it's just code fence markers
 		let trimmed = self.storage_content.trim();
-		if (trimmed.starts_with("```") || trimmed.starts_with("~~~"))
-			&& trimmed.lines().count() <= 2
-		{
+		if (trimmed.starts_with("```") || trimmed.starts_with("~~~")) && trimmed.lines().count() <= 2 {
 			// Just a fence and maybe a language identifier
 			return false;
 		}
@@ -290,11 +288,7 @@ impl DocumentHierarchy {
 		self.post_process_tiny_chunks(chunks, base_chunk_size)
 	}
 
-	fn post_process_tiny_chunks(
-		&self,
-		chunks: Vec<ChunkResult>,
-		base_chunk_size: usize,
-	) -> Vec<ChunkResult> {
+	fn post_process_tiny_chunks(&self, chunks: Vec<ChunkResult>, base_chunk_size: usize) -> Vec<ChunkResult> {
 		let tiny_threshold = base_chunk_size / 4;
 		let mut result = Vec::new();
 		let mut i = 0;
@@ -337,11 +331,7 @@ impl DocumentHierarchy {
 		result
 	}
 
-	fn try_merge_tiny_chunks(
-		&self,
-		first: &ChunkResult,
-		second: &ChunkResult,
-	) -> Option<ChunkResult> {
+	fn try_merge_tiny_chunks(&self, first: &ChunkResult, second: &ChunkResult) -> Option<ChunkResult> {
 		// Only merge if they're reasonably close in the document.
 		if second.start_line.saturating_sub(first.end_line) <= 5 {
 			Some(ChunkResult {
@@ -419,11 +409,7 @@ impl DocumentHierarchy {
 					// True leaf section (no sub-headings): process_children_smartly
 					// was a no-op, so this section's own oversized content would
 					// otherwise become a single unsplit chunk. Split it instead.
-					chunks.extend(self.split_oversized_leaf_section(
-						section_idx,
-						target_size,
-						overlap,
-					));
+					chunks.extend(self.split_oversized_leaf_section(section_idx, target_size, overlap));
 				} else {
 					// Non-leaf: children already produced their own chunks above;
 					// this chunk covers only the section's own (pre-child) content.
@@ -479,11 +465,7 @@ impl DocumentHierarchy {
 		}
 	}
 
-	fn find_best_child_merge(
-		&self,
-		children: &[usize],
-		base_chunk_size: usize,
-	) -> ChildMergeResult {
+	fn find_best_child_merge(&self, children: &[usize], base_chunk_size: usize) -> ChildMergeResult {
 		let mut best_merge = ChildMergeResult {
 			indices: Vec::new(),
 			efficiency: 0.0,
@@ -611,30 +593,21 @@ impl DocumentHierarchy {
 	/// using the shared text chunker, since it has no sub-headings to divide
 	/// the work for it. Line numbers from the chunker are 1-based within
 	/// `section.content`, so they're shifted by the section's own start line.
-	fn split_oversized_leaf_section(
-		&self,
-		section_idx: usize,
-		target_size: usize,
-		overlap: usize,
-	) -> Vec<ChunkResult> {
+	fn split_oversized_leaf_section(&self, section_idx: usize, target_size: usize, overlap: usize) -> Vec<ChunkResult> {
 		let section = &self.sections[section_idx];
 		let title = self.get_section_title(section_idx);
 
-		crate::indexer::text_processing::TextProcessor::chunk_text(
-			&section.content,
-			target_size,
-			overlap,
-		)
-		.into_iter()
-		.map(|piece| ChunkResult {
-			title: title.clone(),
-			storage_content: piece.content,
-			context: section.context.clone(),
-			level: section.level,
-			start_line: section.start_line + piece.start_line,
-			end_line: section.start_line + piece.end_line,
-		})
-		.collect()
+		crate::indexer::text_processing::TextProcessor::chunk_text(&section.content, target_size, overlap)
+			.into_iter()
+			.map(|piece| ChunkResult {
+				title: title.clone(),
+				storage_content: piece.content,
+				context: section.context.clone(),
+				level: section.level,
+				start_line: section.start_line + piece.start_line,
+				end_line: section.start_line + piece.end_line,
+			})
+			.collect()
 	}
 
 	// Note: collect_section_tree functions were part of old implementation, removed as unused
@@ -648,17 +621,12 @@ impl DocumentHierarchy {
 }
 
 /// Parse markdown content and split it into meaningful chunks by headers
-pub fn parse_markdown_content(
-	contents: &str,
-	file_path: &str,
-	config: &Config,
-) -> Vec<DocumentBlock> {
+pub fn parse_markdown_content(contents: &str, file_path: &str, config: &Config) -> Vec<DocumentBlock> {
 	// Parse the document into hierarchical sections
 	let hierarchy = parse_document_hierarchy(contents);
 
 	// Perform bottom-up chunking
-	let chunk_results =
-		hierarchy.bottom_up_chunking(config.index.chunk_size, config.index.chunk_overlap);
+	let chunk_results = hierarchy.bottom_up_chunking(config.index.chunk_size, config.index.chunk_overlap);
 
 	// Validate and repair chunks to ensure meaningful content
 	let mut valid_chunks = Vec::new();
@@ -699,12 +667,8 @@ pub fn parse_markdown_content(
 	valid_chunks
 		.into_iter()
 		.map(|chunk| {
-			let content_hash = calculate_content_hash_with_lines(
-				&chunk.storage_content,
-				file_path,
-				chunk.start_line,
-				chunk.end_line,
-			);
+			let content_hash =
+				calculate_content_hash_with_lines(&chunk.storage_content, file_path, chunk.start_line, chunk.end_line);
 			DocumentBlock {
 				path: file_path.to_string(),
 				title: chunk.title,
@@ -853,10 +817,7 @@ mod tests {
 		assert_eq!(detect_code_fence("~~~~yaml"), Some("~~~~".to_string()));
 		assert_eq!(detect_code_fence("# Header"), None);
 		assert_eq!(detect_code_fence("regular text"), None);
-		assert_eq!(
-			detect_code_fence("  ```  indented"),
-			Some("```".to_string())
-		);
+		assert_eq!(detect_code_fence("  ```  indented"), Some("```".to_string()));
 	}
 
 	#[test]
@@ -1024,11 +985,7 @@ Content after code block."#;
 
 		// Should not have any blocks with only fence markers
 		for block in &blocks {
-			assert!(
-				block.content.len() > 10,
-				"Block content too short: '{}'",
-				block.content
-			);
+			assert!(block.content.len() > 10, "Block content too short: '{}'", block.content);
 			assert!(
 				!block.content.trim().starts_with("```") || block.content.lines().count() > 2,
 				"Block contains only fence marker: '{}'",
@@ -1064,9 +1021,7 @@ Content here."#;
 
 		// Check that the first section contains the entire code block
 		let first_section = &hierarchy.sections[0];
-		assert!(first_section
-			.content
-			.contains("# This is not a real header"));
+		assert!(first_section.content.contains("# This is not a real header"));
 		assert!(first_section.content.contains("## Neither is this"));
 	}
 
@@ -1236,10 +1191,7 @@ content8
 
 		for section in &hierarchy.sections {
 			assert!(section.parent.is_none(), "flat headers must have no parent");
-			assert!(
-				section.children.is_empty(),
-				"flat headers must have no children"
-			);
+			assert!(section.children.is_empty(), "flat headers must have no children");
 		}
 		assert_eq!(hierarchy.root_sections.len(), 600);
 	}

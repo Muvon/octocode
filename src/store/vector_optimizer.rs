@@ -233,8 +233,8 @@ impl VectorOptimizer {
 		}
 
 		// Recreate if partition count is significantly different (> 50%)
-		let partition_diff = (current_partitions as f32 - optimal.num_partitions as f32).abs()
-			/ optimal.num_partitions as f32;
+		let partition_diff =
+			(current_partitions as f32 - optimal.num_partitions as f32).abs() / optimal.num_partitions as f32;
 
 		// Recreate if difference is > 50%
 		partition_diff > 0.5

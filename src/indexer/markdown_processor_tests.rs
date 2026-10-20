@@ -141,10 +141,7 @@ Call the binary with a subcommand.
 		let config = Config::default();
 		let doc = "# Title\n\nintro text here\n\n```rust\nfn unterminated() {\n";
 		let blocks = parse_markdown_content(doc, "broken.md", &config);
-		assert!(
-			!blocks.is_empty(),
-			"an unterminated fence must not drop the file"
-		);
+		assert!(!blocks.is_empty(), "an unterminated fence must not drop the file");
 	}
 
 	#[test]
@@ -153,9 +150,7 @@ Call the binary with a subcommand.
 		let doc = "# Real\n\nprose here\n\n####### not a heading\n";
 		let hierarchy = parse_document_hierarchy(doc);
 		assert_eq!(levels(&hierarchy), vec![1]);
-		assert!(hierarchy.sections[0]
-			.content
-			.contains("####### not a heading"));
+		assert!(hierarchy.sections[0].content.contains("####### not a heading"));
 	}
 
 	#[test]
@@ -184,13 +179,7 @@ Call the binary with a subcommand.
 
 	// ---- section/chunk helpers ----
 
-	fn section(
-		level: usize,
-		title: &str,
-		content: &str,
-		start: usize,
-		end: usize,
-	) -> HeaderSection {
+	fn section(level: usize, title: &str, content: &str, start: usize, end: usize) -> HeaderSection {
 		HeaderSection {
 			level,
 			content: content.to_string(),
@@ -269,10 +258,7 @@ Call the binary with a subcommand.
 		let merged = hierarchy.merge_multiple_sections(&[]);
 		assert_eq!(merged.title, "Empty Section");
 		assert_eq!(merged.storage_content, "");
-		assert_eq!(
-			(merged.level, merged.start_line, merged.end_line),
-			(1, 0, 0)
-		);
+		assert_eq!((merged.level, merged.start_line, merged.end_line), (1, 0, 0));
 	}
 
 	#[test]
@@ -379,10 +365,7 @@ Call the binary with a subcommand.
 	fn nearby_tiny_chunks_are_merged_and_span_both_line_ranges() {
 		let hierarchy = DocumentHierarchy::new();
 		let merged = hierarchy
-			.try_merge_tiny_chunks(
-				&chunk("## A", "alpha", 10, 12),
-				&chunk("## B", "beta", 14, 18),
-			)
+			.try_merge_tiny_chunks(&chunk("## A", "alpha", 10, 12), &chunk("## B", "beta", 14, 18))
 			.expect("chunks 2 lines apart must merge");
 
 		assert_eq!(merged.title, "## A");
@@ -396,10 +379,7 @@ Call the binary with a subcommand.
 		// after `second` in the document. The merged range must not invert.
 		let hierarchy = DocumentHierarchy::new();
 		let merged = hierarchy
-			.try_merge_tiny_chunks(
-				&chunk("## A", "alpha", 30, 34),
-				&chunk("## B", "beta", 29, 31),
-			)
+			.try_merge_tiny_chunks(&chunk("## A", "alpha", 30, 34), &chunk("## B", "beta", 29, 31))
 			.expect("chunks 5 lines apart or closer must merge");
 		assert_eq!((merged.start_line, merged.end_line), (29, 34));
 		assert!(merged.start_line <= merged.end_line);
@@ -409,10 +389,7 @@ Call the binary with a subcommand.
 	fn tiny_chunks_far_apart_in_the_document_are_left_alone() {
 		let hierarchy = DocumentHierarchy::new();
 		assert!(hierarchy
-			.try_merge_tiny_chunks(
-				&chunk("## A", "alpha", 10, 12),
-				&chunk("## B", "beta", 18, 20)
-			)
+			.try_merge_tiny_chunks(&chunk("## A", "alpha", 10, 12), &chunk("## B", "beta", 18, 20))
 			.is_none());
 	}
 

@@ -39,17 +39,10 @@ impl LspRequest {
 	}
 
 	pub fn initialize(id: u32, params: InitializeParams) -> Result<Self, serde_json::Error> {
-		Ok(Self::new(
-			id,
-			"initialize".to_string(),
-			serde_json::to_value(params)?,
-		))
+		Ok(Self::new(id, "initialize".to_string(), serde_json::to_value(params)?))
 	}
 
-	pub fn goto_definition(
-		id: u32,
-		params: GotoDefinitionParams,
-	) -> Result<Self, serde_json::Error> {
+	pub fn goto_definition(id: u32, params: GotoDefinitionParams) -> Result<Self, serde_json::Error> {
 		Ok(Self::new(
 			id,
 			"textDocument/definition".to_string(),
@@ -73,10 +66,7 @@ impl LspRequest {
 		))
 	}
 
-	pub fn document_symbols(
-		id: u32,
-		params: DocumentSymbolParams,
-	) -> Result<Self, serde_json::Error> {
+	pub fn document_symbols(id: u32, params: DocumentSymbolParams) -> Result<Self, serde_json::Error> {
 		Ok(Self::new(
 			id,
 			"textDocument/documentSymbol".to_string(),
@@ -84,10 +74,7 @@ impl LspRequest {
 		))
 	}
 
-	pub fn workspace_symbols(
-		id: u32,
-		params: WorkspaceSymbolParams,
-	) -> Result<Self, serde_json::Error> {
+	pub fn workspace_symbols(id: u32, params: WorkspaceSymbolParams) -> Result<Self, serde_json::Error> {
 		Ok(Self::new(
 			id,
 			"workspace/symbol".to_string(),
@@ -195,8 +182,7 @@ pub struct LspError {
 
 /// Utility functions for path handling
 pub fn file_path_to_uri(path: &std::path::Path) -> anyhow::Result<Url> {
-	Url::from_file_path(path)
-		.map_err(|_| anyhow::anyhow!("Failed to convert path to URI: {}", path.display()))
+	Url::from_file_path(path).map_err(|_| anyhow::anyhow!("Failed to convert path to URI: {}", path.display()))
 }
 
 pub fn uri_to_file_path(uri: &Uri) -> anyhow::Result<std::path::PathBuf> {
@@ -209,26 +195,18 @@ pub fn uri_to_file_path(uri: &Uri) -> anyhow::Result<std::path::PathBuf> {
 
 /// Convert relative path to absolute path based on working directory,
 /// rejecting any path that resolves outside of it.
-pub fn resolve_relative_path(
-	working_dir: &std::path::Path,
-	relative_path: &str,
-) -> anyhow::Result<std::path::PathBuf> {
+pub fn resolve_relative_path(working_dir: &std::path::Path, relative_path: &str) -> anyhow::Result<std::path::PathBuf> {
 	let candidate = if std::path::Path::new(relative_path).is_absolute() {
 		std::path::PathBuf::from(relative_path)
 	} else {
 		working_dir.join(relative_path)
 	};
 
-	let canonical_dir = working_dir
-		.canonicalize()
-		.unwrap_or_else(|_| working_dir.to_path_buf());
+	let canonical_dir = working_dir.canonicalize().unwrap_or_else(|_| working_dir.to_path_buf());
 	let canonical_candidate = candidate.canonicalize().unwrap_or(candidate);
 
 	if !canonical_candidate.starts_with(&canonical_dir) {
-		anyhow::bail!(
-			"path '{}' resolves outside the working directory",
-			relative_path
-		);
+		anyhow::bail!("path '{}' resolves outside the working directory", relative_path);
 	}
 
 	Ok(canonical_candidate)

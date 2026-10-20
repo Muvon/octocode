@@ -136,8 +136,7 @@ impl Language for Elixir {
 				.or(Some(protocol));
 		}
 		if FUNCTION_DEFINITION_MACROS.contains(&macro_name.as_str()) {
-			return first_argument(node)
-				.and_then(|argument| definition_head_name(argument, contents));
+			return first_argument(node).and_then(|argument| definition_head_name(argument, contents));
 		}
 		if TEST_DEFINITION_MACROS.contains(&macro_name.as_str()) {
 			return first_argument(node)
@@ -241,15 +240,12 @@ impl Language for Elixir {
 			Vec::new()
 		};
 
-		let exports = if matches!(macro_name.as_str(), "defmodule" | "defprotocol")
-			|| is_public_definition_macro(&macro_name)
-		{
-			self.extract_declaration_name(node, contents)
-				.into_iter()
-				.collect()
-		} else {
-			Vec::new()
-		};
+		let exports =
+			if matches!(macro_name.as_str(), "defmodule" | "defprotocol") || is_public_definition_macro(&macro_name) {
+				self.extract_declaration_name(node, contents).into_iter().collect()
+			} else {
+				Vec::new()
+			};
 
 		(imports, exports)
 	}
@@ -282,21 +278,14 @@ impl Language for Elixir {
 			return Vec::new();
 		};
 		if target.kind() == "identifier"
-			&& (is_definition_macro(&target_text)
-				|| NON_CALL_MACROS.contains(&target_text.as_str()))
+			&& (is_definition_macro(&target_text) || NON_CALL_MACROS.contains(&target_text.as_str()))
 		{
 			return Vec::new();
 		}
-		super::extract_call_target(&target_text)
-			.into_iter()
-			.collect()
+		super::extract_call_target(&target_text).into_iter().collect()
 	}
 
-	fn extract_type_relations(
-		&self,
-		node: Node,
-		contents: &str,
-	) -> Vec<(TypeRelationKind, String)> {
+	fn extract_type_relations(&self, node: Node, contents: &str) -> Vec<(TypeRelationKind, String)> {
 		if call_macro_name(node, contents).as_deref() != Some("defimpl") {
 			return Vec::new();
 		}
@@ -341,8 +330,7 @@ impl Language for Elixir {
 			.iter()
 			.filter(|file| {
 				let normalized = file.replace('\\', "/");
-				exact_names.contains(&normalized)
-					|| suffixes.iter().any(|suffix| normalized.ends_with(suffix))
+				exact_names.contains(&normalized) || suffixes.iter().any(|suffix| normalized.ends_with(suffix))
 			})
 			.cloned()
 			.collect();
@@ -371,12 +359,7 @@ fn is_definition_macro(name: &str) -> bool {
 fn is_public_definition_macro(name: &str) -> bool {
 	matches!(
 		name,
-		"def"
-			| "defdelegate"
-			| "defguard"
-			| "defmacro"
-			| "defn" | "defcallback"
-			| "defmacrocallback"
+		"def" | "defdelegate" | "defguard" | "defmacro" | "defn" | "defcallback" | "defmacrocallback"
 	)
 }
 
@@ -396,17 +379,13 @@ fn call_macro_name(node: Node, contents: &str) -> Option<String> {
 
 fn first_argument(node: Node) -> Option<Node> {
 	let mut cursor = node.walk();
-	let arguments = node
-		.children(&mut cursor)
-		.find(|child| child.kind() == "arguments")?;
+	let arguments = node.children(&mut cursor).find(|child| child.kind() == "arguments")?;
 	arguments.named_child(0)
 }
 
 fn has_do_block(node: Node) -> bool {
 	let mut cursor = node.walk();
-	let found = node
-		.children(&mut cursor)
-		.any(|child| child.kind() == "do_block");
+	let found = node.children(&mut cursor).any(|child| child.kind() == "do_block");
 	found
 }
 
@@ -449,10 +428,7 @@ fn expand_module_aliases(text: String) -> Vec<String> {
 				.collect();
 		}
 	}
-	(!normalized.is_empty())
-		.then_some(normalized)
-		.into_iter()
-		.collect()
+	(!normalized.is_empty()).then_some(normalized).into_iter().collect()
 }
 
 fn implementation_type(node: Node, contents: &str) -> Option<String> {
@@ -463,9 +439,7 @@ fn implementation_type(node: Node, contents: &str) -> Option<String> {
 		if let Some((_, tail)) = text.split_once("for:") {
 			let target = tail
 				.trim_start()
-				.split(|character: char| {
-					character.is_whitespace() || matches!(character, ',' | ')' | ']')
-				})
+				.split(|character: char| character.is_whitespace() || matches!(character, ',' | ')' | ']'))
 				.find(|part| !part.is_empty())?;
 			if !target.starts_with('[') {
 				return Some(normalize_module_name(target.to_string()));
@@ -486,10 +460,7 @@ fn find_for_option(node: Node, contents: &str) -> Option<String> {
 		let key = node
 			.child_by_field_name("key")
 			.and_then(|child| node_text(child, contents));
-		if key
-			.as_deref()
-			.is_some_and(|key| key.trim_end_matches(':') == "for")
-		{
+		if key.as_deref().is_some_and(|key| key.trim_end_matches(':') == "for") {
 			return node
 				.child_by_field_name("value")
 				.and_then(|child| node_text(child, contents))
@@ -523,10 +494,7 @@ fn is_definition_head_call(node: Node, contents: &str) -> bool {
 }
 
 fn module_to_file_path(module: &str) -> Option<String> {
-	let module = module
-		.trim()
-		.trim_start_matches(':')
-		.trim_start_matches("Elixir.");
+	let module = module.trim().trim_start_matches(':').trim_start_matches("Elixir.");
 	if module.is_empty()
 		|| !module
 			.chars()
@@ -534,29 +502,19 @@ fn module_to_file_path(module: &str) -> Option<String> {
 	{
 		return None;
 	}
-	Some(
-		module
-			.split('.')
-			.map(camel_to_snake)
-			.collect::<Vec<_>>()
-			.join("/"),
-	)
+	Some(module.split('.').map(camel_to_snake).collect::<Vec<_>>().join("/"))
 }
 
 fn camel_to_snake(segment: &str) -> String {
 	let characters: Vec<char> = segment.chars().collect();
 	let mut output = String::with_capacity(segment.len() + 4);
 	for (index, character) in characters.iter().copied().enumerate() {
-		let previous = index
-			.checked_sub(1)
-			.and_then(|i| characters.get(i))
-			.copied();
+		let previous = index.checked_sub(1).and_then(|i| characters.get(i)).copied();
 		let next = characters.get(index + 1).copied();
 		if character.is_uppercase()
 			&& index > 0
 			&& (previous.is_some_and(|previous| previous.is_lowercase() || previous.is_numeric())
-				|| (previous.is_some_and(char::is_uppercase)
-					&& next.is_some_and(char::is_lowercase)))
+				|| (previous.is_some_and(char::is_uppercase) && next.is_some_and(char::is_lowercase)))
 		{
 			output.push('_');
 		}

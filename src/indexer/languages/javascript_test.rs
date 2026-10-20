@@ -37,10 +37,7 @@ export class Foo {
 
 	let regions = parse_regions(source);
 
-	let method_regions: Vec<_> = regions
-		.iter()
-		.filter(|r| r.node_kind == "method_definition")
-		.collect();
+	let method_regions: Vec<_> = regions.iter().filter(|r| r.node_kind == "method_definition").collect();
 	assert_eq!(
 		method_regions.len(),
 		2,
@@ -49,17 +46,11 @@ export class Foo {
 		regions.iter().map(|r| &r.content).collect::<Vec<_>>()
 	);
 
-	let export_regions: Vec<_> = regions
-		.iter()
-		.filter(|r| r.node_kind == "export_statement")
-		.collect();
+	let export_regions: Vec<_> = regions.iter().filter(|r| r.node_kind == "export_statement").collect();
 	assert!(
 		export_regions.is_empty(),
 		"exported class should not collapse into a single export_statement blob region, got: {:?}",
-		export_regions
-			.iter()
-			.map(|r| &r.content)
-			.collect::<Vec<_>>()
+		export_regions.iter().map(|r| &r.content).collect::<Vec<_>>()
 	);
 }
 
@@ -73,10 +64,7 @@ export default class Bar {
 
 	let regions = parse_regions(source);
 
-	let method_regions: Vec<_> = regions
-		.iter()
-		.filter(|r| r.node_kind == "method_definition")
-		.collect();
+	let method_regions: Vec<_> = regions.iter().filter(|r| r.node_kind == "method_definition").collect();
 	assert_eq!(
 		method_regions.len(),
 		1,
@@ -85,10 +73,7 @@ export default class Bar {
 		regions.iter().map(|r| &r.content).collect::<Vec<_>>()
 	);
 
-	let export_regions: Vec<_> = regions
-		.iter()
-		.filter(|r| r.node_kind == "export_statement")
-		.collect();
+	let export_regions: Vec<_> = regions.iter().filter(|r| r.node_kind == "export_statement").collect();
 	assert!(
 		export_regions.is_empty(),
 		"export default class should not collapse into a single export_statement blob region, got: {:?}",
@@ -136,10 +121,7 @@ fn test_export_default_expression_regression_unchanged() {
 
 	let regions = parse_regions(source);
 
-	let export_regions: Vec<_> = regions
-		.iter()
-		.filter(|r| r.node_kind == "export_statement")
-		.collect();
+	let export_regions: Vec<_> = regions.iter().filter(|r| r.node_kind == "export_statement").collect();
 	assert_eq!(
 		export_regions.len(),
 		1,
@@ -156,10 +138,7 @@ fn test_export_named_braces_regression_unchanged() {
 
 	let regions = parse_regions(source);
 
-	let export_regions: Vec<_> = regions
-		.iter()
-		.filter(|r| r.node_kind == "export_statement")
-		.collect();
+	let export_regions: Vec<_> = regions.iter().filter(|r| r.node_kind == "export_statement").collect();
 	assert_eq!(
 		export_regions.len(),
 		1,
@@ -167,9 +146,7 @@ fn test_export_named_braces_regression_unchanged() {
 		export_regions.len(),
 		regions.iter().map(|r| &r.content).collect::<Vec<_>>()
 	);
-	assert!(export_regions[0]
-		.content
-		.contains("export { existingName }"));
+	assert!(export_regions[0].content.contains("export { existingName }"));
 }
 
 // ── harness ──────────────────────────────────────────────────────────────────
@@ -179,9 +156,7 @@ fn parse_js(source: &str) -> Tree {
 	parser
 		.set_language(&JavaScript {}.get_ts_language())
 		.expect("JavaScript grammar should load");
-	parser
-		.parse(source, None)
-		.expect("JavaScript source should parse")
+	parser.parse(source, None).expect("JavaScript source should parse")
 }
 
 fn collect_nodes<'tree>(node: Node<'tree>, kinds: &[&str], out: &mut Vec<Node<'tree>>) {
@@ -399,10 +374,7 @@ fn unmapped_node_kinds_fall_back_to_identifier_extraction() {
 	// Only the individual identifiers: `named_imports` also matches the
 	// `kind.contains("name")` filter and would otherwise leak the whole brace
 	// list in as one symbol.
-	assert_eq!(
-		symbols_of(source, "import_statement"),
-		vec!["alpha", "beta", "gamma"]
-	);
+	assert_eq!(symbols_of(source, "import_statement"), vec!["alpha", "beta", "gamma"]);
 }
 
 #[test]
@@ -431,11 +403,7 @@ fn identifier_extraction_keeps_the_object_and_drops_the_property() {
 #[test]
 fn declaration_names_cover_bound_arrows_methods_functions_and_classes() {
 	for (source, kind, expected) in [
-		(
-			"const arrowFn = (x) => x;\n",
-			"arrow_function",
-			Some("arrowFn"),
-		),
+		("const arrowFn = (x) => x;\n", "arrow_function", Some("arrowFn")),
 		// An arrow passed straight to a call has no binding to name it.
 		("run((x) => x);\n", "arrow_function", None),
 		(
@@ -443,11 +411,7 @@ fn declaration_names_cover_bound_arrows_methods_functions_and_classes() {
 			"method_definition",
 			Some("render"),
 		),
-		(
-			"function topLevel() {}\n",
-			"function_declaration",
-			Some("topLevel"),
-		),
+		("function topLevel() {}\n", "function_declaration", Some("topLevel")),
 		("class Widget {}\n", "class_declaration", Some("Widget")),
 	] {
 		let tree = parse_js(source);
@@ -460,10 +424,7 @@ fn declaration_names_cover_bound_arrows_methods_functions_and_classes() {
 
 #[test]
 fn every_import_form_with_a_from_clause_yields_the_module_path() {
-	assert_eq!(
-		imports_of("import defaultExport from './mod.js';\n"),
-		vec!["./mod.js"]
-	);
+	assert_eq!(imports_of("import defaultExport from './mod.js';\n"), vec!["./mod.js"]);
 	assert_eq!(
 		imports_of("import { alpha, beta as gamma } from \"../lib/util\";\n"),
 		vec!["../lib/util"]
@@ -482,10 +443,7 @@ fn every_import_form_with_a_from_clause_yields_the_module_path() {
 fn side_effect_imports_still_yield_their_module_path() {
 	// A bare side-effect import has no `from` clause; keying only off that
 	// dropped the dependency entirely.
-	assert_eq!(
-		imports_of("import 'side-effect.css';\n"),
-		vec!["side-effect.css"]
-	);
+	assert_eq!(imports_of("import 'side-effect.css';\n"), vec!["side-effect.css"]);
 }
 
 #[test]
@@ -498,14 +456,8 @@ fn export_clauses_report_the_local_name_of_each_alias() {
 
 #[test]
 fn exported_declarations_report_the_declared_name() {
-	assert_eq!(
-		exports_of("export const exportedConst = 2;\n"),
-		vec!["exportedConst"]
-	);
-	assert_eq!(
-		exports_of("export default class Bar {\n\tm() {}\n}\n"),
-		vec!["Bar"]
-	);
+	assert_eq!(exports_of("export const exportedConst = 2;\n"), vec!["exportedConst"]);
+	assert_eq!(exports_of("export default class Bar {\n\tm() {}\n}\n"), vec!["Bar"]);
 	assert_eq!(exports_of("export class Foo {\n\tm() {}\n}\n"), vec!["Foo"]);
 }
 
@@ -522,10 +474,7 @@ fn an_exported_function_name_carries_no_parameter_list() {
 fn a_single_line_exported_function_is_still_read_as_a_declaration() {
 	// The declaration branch runs before the `{ … }` named-export branch, so a
 	// one-line body is not mistaken for an export list.
-	assert_eq!(
-		exports_of("export function inline() { return 1; }\n"),
-		vec!["inline"]
-	);
+	assert_eq!(exports_of("export function inline() { return 1; }\n"), vec!["inline"]);
 }
 
 #[test]
@@ -580,15 +529,9 @@ fn class_heritage_is_reported_as_an_extends_relation() {
 		("class Mixin extends factory(Base) {}\n", "factory"),
 	] {
 		let extracted = relations_of(source, "class_declaration");
-		let relations: Vec<(TypeRelationKind, &str)> = extracted
-			.iter()
-			.map(|(kind, name)| (*kind, name.as_str()))
-			.collect();
-		assert_eq!(
-			relations,
-			vec![(TypeRelationKind::Extends, expected)],
-			"for {source:?}"
-		);
+		let relations: Vec<(TypeRelationKind, &str)> =
+			extracted.iter().map(|(kind, name)| (*kind, name.as_str())).collect();
+		assert_eq!(relations, vec![(TypeRelationKind::Extends, expected)], "for {source:?}");
 	}
 }
 
@@ -622,11 +565,7 @@ fn extension_less_imports_try_every_javascript_extension_then_the_barrel_file() 
 		Some("src/Button.jsx".to_string())
 	);
 	assert_eq!(
-		javascript.resolve_import(
-			"./components",
-			"src/app.js",
-			&registry_of(&["src/components/index.js"])
-		),
+		javascript.resolve_import("./components", "src/app.js", &registry_of(&["src/components/index.js"])),
 		Some("src/components/index.js".to_string())
 	);
 }
@@ -648,11 +587,7 @@ fn bare_module_imports_try_source_directories_then_node_modules() {
 		Some("lib/helper.js".to_string())
 	);
 	assert_eq!(
-		javascript.resolve_import(
-			"lodash",
-			"src/app.js",
-			&registry_of(&["node_modules/lodash/index.js"])
-		),
+		javascript.resolve_import("lodash", "src/app.js", &registry_of(&["node_modules/lodash/index.js"])),
 		Some("node_modules/lodash/index.js".to_string())
 	);
 }
@@ -660,10 +595,7 @@ fn bare_module_imports_try_source_directories_then_node_modules() {
 #[test]
 fn third_party_modules_absent_from_the_project_do_not_resolve() {
 	let registry = registry_of(&["src/app.js", "src/util.js"]);
-	assert_eq!(
-		JavaScript {}.resolve_import("react", "src/app.js", &registry),
-		None
-	);
+	assert_eq!(JavaScript {}.resolve_import("react", "src/app.js", &registry), None);
 }
 
 // ── region extraction ────────────────────────────────────────────────────────

@@ -84,9 +84,7 @@ mod tests {
 		assert!(matcher
 			.matched_path_or_any_parents(dir.path().join("target/build.rs"), false)
 			.is_ignore());
-		assert!(matcher
-			.matched(dir.path().join("secret.txt"), false)
-			.is_ignore());
+		assert!(matcher.matched(dir.path().join("secret.txt"), false).is_ignore());
 		assert!(!matcher
 			.matched_path_or_any_parents(dir.path().join("src/main.rs"), false)
 			.is_ignore());
@@ -96,9 +94,7 @@ mod tests {
 	fn a_matcher_for_a_bare_directory_ignores_nothing() {
 		let dir = TempDir::new().unwrap();
 		let matcher = NoindexWalker::create_matcher(dir.path(), false).unwrap();
-		assert!(!matcher
-			.matched(dir.path().join("anything.rs"), false)
-			.is_ignore());
+		assert!(!matcher.matched(dir.path().join("anything.rs"), false).is_ignore());
 	}
 
 	#[test]
@@ -148,20 +144,14 @@ mod tests {
 		// gitignore is not re-applied to an explicit change set.
 		assert_eq!(fast_count_indexable_files(dir.path(), Some(&changed)), 2);
 
-		assert_eq!(
-			fast_count_indexable_files(dir.path(), Some(&HashSet::new())),
-			0
-		);
+		assert_eq!(fast_count_indexable_files(dir.path(), Some(&HashSet::new())), 0);
 	}
 
 	#[test]
 	fn the_git_helper_module_resolves_this_repository() {
 		let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
 		assert!(git::is_git_repo_root(manifest));
-		assert_eq!(
-			git::find_git_root(&manifest.join("src")).as_deref(),
-			Some(manifest)
-		);
+		assert_eq!(git::find_git_root(&manifest.join("src")).as_deref(), Some(manifest));
 		assert!(!git::get_current_commit_hash(manifest).unwrap().is_empty());
 		assert!(git::get_all_changed_files(manifest).is_ok());
 	}
@@ -285,9 +275,7 @@ mod tests {
 	mod store_backed {
 		use super::super::super::*;
 		use crate::config::Config;
-		use crate::store::mod_tests::{
-			code_block, embedding, offline_config, test_store, CODE_DIM,
-		};
+		use crate::store::mod_tests::{code_block, embedding, offline_config, test_store, CODE_DIM};
 		use crate::store::tables;
 		use tempfile::TempDir;
 
@@ -297,20 +285,14 @@ mod tests {
 			let config = Config::default();
 			let mut batches = 0;
 
-			assert!(!flush_if_needed(&store, &mut batches, &config, false)
-				.await
-				.unwrap());
+			assert!(!flush_if_needed(&store, &mut batches, &config, false).await.unwrap());
 			assert_eq!(batches, 0);
 
 			// Forcing flushes regardless of the counter.
-			assert!(flush_if_needed(&store, &mut batches, &config, true)
-				.await
-				.unwrap());
+			assert!(flush_if_needed(&store, &mut batches, &config, true).await.unwrap());
 
 			batches = config.index.flush_frequency;
-			assert!(flush_if_needed(&store, &mut batches, &config, false)
-				.await
-				.unwrap());
+			assert!(flush_if_needed(&store, &mut batches, &config, false).await.unwrap());
 			assert_eq!(batches, 0, "the counter resets after a flush");
 		}
 
@@ -342,11 +324,7 @@ mod tests {
 						code_block("src/deleted.rs", "h2"),
 						code_block("build/gen.rs", "h3"),
 					],
-					&[
-						embedding(CODE_DIM, 0),
-						embedding(CODE_DIM, 1),
-						embedding(CODE_DIM, 2),
-					],
+					&[embedding(CODE_DIM, 0), embedding(CODE_DIM, 1), embedding(CODE_DIM, 2)],
 				)
 				.await
 				.unwrap();
@@ -398,26 +376,16 @@ mod tests {
 			persist_and_store_metadata(&store, Some(manifest), &config, true, "test")
 				.await
 				.unwrap();
-			assert!(store
-				.get_graphrag_last_commit_hash()
-				.await
-				.unwrap()
-				.is_some());
+			assert!(store.get_graphrag_last_commit_hash().await.unwrap().is_some());
 		}
 
 		#[tokio::test]
 		async fn a_directory_that_is_not_a_repository_skips_the_commit_marker() {
 			let (_dir, store) = test_store().await;
 			let outside = TempDir::new().unwrap();
-			persist_and_store_metadata(
-				&store,
-				Some(outside.path()),
-				&offline_config(),
-				true,
-				"test",
-			)
-			.await
-			.expect("a missing commit hash is not fatal");
+			persist_and_store_metadata(&store, Some(outside.path()), &offline_config(), true, "test")
+				.await
+				.expect("a missing commit hash is not fatal");
 			assert_eq!(store.get_last_commit_hash().await.unwrap(), None);
 		}
 
@@ -426,10 +394,7 @@ mod tests {
 			let (_dir, store) = test_store().await;
 			store
 				.store_code_blocks(
-					&[
-						code_block("src/gone.rs", "h1"),
-						code_block("src/stay.rs", "h2"),
-					],
+					&[code_block("src/gone.rs", "h1"), code_block("src/stay.rs", "h2")],
 					&[embedding(CODE_DIM, 0), embedding(CODE_DIM, 1)],
 				)
 				.await
@@ -442,13 +407,7 @@ mod tests {
 			let remaining = store.get_all_indexed_file_paths().await.unwrap();
 			assert!(!remaining.contains("src/gone.rs"));
 			assert!(remaining.contains("src/stay.rs"));
-			assert_eq!(
-				store
-					.get_table_row_count(tables::CODE_BLOCKS)
-					.await
-					.unwrap(),
-				1
-			);
+			assert_eq!(store.get_table_row_count(tables::CODE_BLOCKS).await.unwrap(), 1);
 		}
 
 		/// A repository containing nothing the indexer can index, so a full run
@@ -479,15 +438,9 @@ mod tests {
 			store.store_commits_last_commit_hash(&head).await.unwrap();
 
 			let state = state_at(dir.path());
-			index_files_with_quiet(
-				&store,
-				state.clone(),
-				&offline_config(),
-				Some(dir.path()),
-				true,
-			)
-			.await
-			.unwrap();
+			index_files_with_quiet(&store, state.clone(), &offline_config(), Some(dir.path()), true)
+				.await
+				.unwrap();
 
 			assert!(state.read().indexing_complete);
 			assert_eq!(state.read().indexed_files, 0);
@@ -509,23 +462,14 @@ mod tests {
 
 			// A row whose file no longer exists on disk.
 			store
-				.store_code_blocks(
-					&[code_block("src/vanished.rs", "h1")],
-					&[embedding(CODE_DIM, 0)],
-				)
+				.store_code_blocks(&[code_block("src/vanished.rs", "h1")], &[embedding(CODE_DIM, 0)])
 				.await
 				.unwrap();
 
 			let state = state_at(dir.path());
-			index_files_with_quiet(
-				&store,
-				state.clone(),
-				&offline_config(),
-				Some(dir.path()),
-				true,
-			)
-			.await
-			.unwrap();
+			index_files_with_quiet(&store, state.clone(), &offline_config(), Some(dir.path()), true)
+				.await
+				.unwrap();
 
 			assert!(state.read().indexing_complete);
 			assert!(
@@ -552,15 +496,9 @@ mod tests {
 			store.store_commits_last_commit_hash(&head).await.unwrap();
 
 			let state = state_at(dir.path());
-			index_files_with_quiet(
-				&store,
-				state.clone(),
-				&offline_config(),
-				Some(dir.path()),
-				true,
-			)
-			.await
-			.unwrap();
+			index_files_with_quiet(&store, state.clone(), &offline_config(), Some(dir.path()), true)
+				.await
+				.unwrap();
 
 			assert_eq!(store.get_last_commit_hash().await.unwrap(), Some(head));
 			assert_eq!(state.read().embedding_calls, 0);

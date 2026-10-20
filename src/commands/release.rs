@@ -92,8 +92,8 @@ pub async fn execute(config: &Config, args: &ReleaseArgs) -> Result<()> {
 	let current_dir = std::env::current_dir()?;
 
 	// Find git repository root
-	let git_root = GitUtils::find_git_root(&current_dir)
-		.ok_or_else(|| anyhow::anyhow!("❌ Not in a git repository!"))?;
+	let git_root =
+		GitUtils::find_git_root(&current_dir).ok_or_else(|| anyhow::anyhow!("❌ Not in a git repository!"))?;
 
 	// Use git root as working directory for all operations
 	let current_dir = git_root;
@@ -102,10 +102,7 @@ pub async fn execute(config: &Config, args: &ReleaseArgs) -> Result<()> {
 
 	// Detect project type
 	let project_type = detect_project_type(&current_dir)?;
-	println!(
-		"📦 Project type detected: {}",
-		format_project_type(&project_type)
-	);
+	println!("📦 Project type detected: {}", format_project_type(&project_type));
 
 	// Get current version from project files or git tags
 	let current_version = get_current_version(&project_type).await?;
@@ -132,10 +129,7 @@ pub async fn execute(config: &Config, args: &ReleaseArgs) -> Result<()> {
 		return Ok(());
 	}
 
-	println!(
-		"📊 Found {} commits to analyze",
-		commit_analysis.commits.len()
-	);
+	println!("📊 Found {} commits to analyze", commit_analysis.commits.len());
 
 	// Calculate new version
 	let version_calculation = if let Some(forced_version) = &args.force_version {
@@ -171,13 +165,8 @@ pub async fn execute(config: &Config, args: &ReleaseArgs) -> Result<()> {
 	println!("   Type:    {}", version_calculation.version_type);
 	println!("   Reason:  {}", version_calculation.reasoning);
 
-	let changelog_content = generate_changelog_entry(
-		config,
-		&version_calculation,
-		&commit_analysis,
-		&project_type,
-	)
-	.await?;
+	let changelog_content =
+		generate_changelog_entry(config, &version_calculation, &commit_analysis, &project_type).await?;
 
 	println!("\n📝 Generated changelog entry:");
 	println!("═══════════════════════════════════");
@@ -191,10 +180,7 @@ pub async fn execute(config: &Config, args: &ReleaseArgs) -> Result<()> {
 
 	// Confirm with user (unless --yes flag is used)
 	if !args.yes {
-		print!(
-			"\nProceed with release {}? [y/N] ",
-			version_calculation.new_version
-		);
+		print!("\nProceed with release {}? [y/N] ", version_calculation.new_version);
 		io::stdout().flush()?;
 
 		let mut input = String::new();
@@ -218,10 +204,7 @@ pub async fn execute(config: &Config, args: &ReleaseArgs) -> Result<()> {
 
 	// Update changelog — resolve against the git root, not the process cwd, so
 	// running `octocode release` from a subdirectory still finds/writes it.
-	let changelog_path = current_dir
-		.join(&args.changelog)
-		.to_string_lossy()
-		.into_owned();
+	let changelog_path = current_dir.join(&args.changelog).to_string_lossy().into_owned();
 	update_changelog(&changelog_path, &changelog_content).await?;
 	println!("✅ Updated {}", args.changelog);
 
@@ -238,10 +221,7 @@ pub async fn execute(config: &Config, args: &ReleaseArgs) -> Result<()> {
 	create_tag(&version_calculation.new_version, &changelog_content).await?;
 	println!("✅ Created git tag: {}", version_calculation.new_version);
 
-	println!(
-		"\n🎉 Release {} created successfully!",
-		version_calculation.new_version
-	);
+	println!("\n🎉 Release {} created successfully!", version_calculation.new_version);
 	let current_branch = Command::new("git")
 		.args(["rev-parse", "--abbrev-ref", "HEAD"])
 		.output()
@@ -557,22 +537,13 @@ fn parse_conventional_commit(message: &str) -> (String, Option<String>, String, 
 /// Deterministic on purpose: semver is a rule, not a judgement call. While the
 /// major version is 0 a breaking change bumps minor, matching the pre-1.0
 /// convention of release-please (`bump-minor-pre-major`) and cargo.
-fn calculate_version(
-	current_version: &str,
-	analysis: &CommitAnalysis,
-) -> Result<VersionCalculation> {
+fn calculate_version(current_version: &str, analysis: &CommitAnalysis) -> Result<VersionCalculation> {
 	// Bump only the major.minor.patch core; a pre-release/build suffix (e.g.
 	// "1.2.3-beta.1") is valid semver but isn't part of what gets incremented.
-	let core_version = current_version
-		.split(['-', '+'])
-		.next()
-		.unwrap_or(current_version);
+	let core_version = current_version.split(['-', '+']).next().unwrap_or(current_version);
 	let parts: Vec<&str> = core_version.split('.').collect();
 	if parts.len() != 3 {
-		return Err(anyhow::anyhow!(
-			"Invalid version format: {}",
-			current_version
-		));
+		return Err(anyhow::anyhow!("Invalid version format: {}", current_version));
 	}
 
 	let major: u32 = parts[0].parse().context("Invalid major version")?;
@@ -587,18 +558,10 @@ fn calculate_version(
 				"Breaking changes detected; minor bump while major version is 0",
 			)
 		} else {
-			(
-				format!("{}.0.0", major + 1),
-				"major",
-				"Breaking changes detected",
-			)
+			(format!("{}.0.0", major + 1), "major", "Breaking changes detected")
 		}
 	} else if !analysis.features.is_empty() {
-		(
-			format!("{}.{}.0", major, minor + 1),
-			"minor",
-			"New features added",
-		)
+		(format!("{}.{}.0", major, minor + 1), "minor", "New features added")
 	} else {
 		(
 			format!("{}.{}.{}", major, minor, patch + 1),
@@ -630,17 +593,14 @@ fn changelog_sections(analysis: &CommitAnalysis) -> String {
 			breaking_commits.push(commit);
 			continue;
 		}
-		let is_deps = commit.scope.as_deref() == Some("deps")
-			|| commit.description.to_lowercase().starts_with("bump ");
+		let is_deps = commit.scope.as_deref() == Some("deps") || commit.description.to_lowercase().starts_with("bump ");
 		match commit.commit_type.as_str() {
 			"feat" => feature_commits.push(commit),
 			"fix" => fix_commits.push(commit),
 			// Meaningful refactors/improvements, but not pure dep bumps
 			"perf" | "refactor" | "style" => improvement_commits.push(commit),
 			// chore/ci/build/test with a real scope are improvements; deps/tooling noise is only counted
-			"chore" | "ci" | "build" | "test" if !is_deps && commit.scope.is_some() => {
-				improvement_commits.push(commit)
-			}
+			"chore" | "ci" | "build" | "test" if !is_deps && commit.scope.is_some() => improvement_commits.push(commit),
 			"docs" => docs_commits.push(commit),
 			_ => other_count += 1,
 		}
@@ -650,10 +610,7 @@ fn changelog_sections(analysis: &CommitAnalysis) -> String {
 	let sections = [
 		("### 🚨 Breaking Changes\n\n", &breaking_commits),
 		("### ✨ New Features & Enhancements\n\n", &feature_commits),
-		(
-			"### 🔧 Improvements & Optimizations\n\n",
-			&improvement_commits,
-		),
+		("### 🔧 Improvements & Optimizations\n\n", &improvement_commits),
 		("### 🐛 Bug Fixes & Stability\n\n", &fix_commits),
 		("### 📚 Documentation & Examples\n\n", &docs_commits),
 	];
@@ -693,10 +650,7 @@ fn format_enhanced_commit_entry(commit: &CommitInfo) -> String {
 
 	// Enhanced formatting with scope and better presentation
 	if let Some(ref scope) = commit.scope {
-		entry.push_str(&format!(
-			"- **{}**: {} `{}`\n",
-			scope, display_text, short_hash
-		));
+		entry.push_str(&format!("- **{}**: {} `{}`\n", scope, display_text, short_hash));
 	} else {
 		entry.push_str(&format!("- {} `{}`\n", display_text, short_hash));
 	}
@@ -741,10 +695,8 @@ async fn gather_project_context(project_type: &ProjectType) -> Result<(String, S
 	let (name, description) = match project_type {
 		ProjectType::Rust(cargo_path) => {
 			let content = fs::read_to_string(cargo_path).unwrap_or_default();
-			let name =
-				extract_field_from_toml(&content, "name").unwrap_or("Unknown Project".to_string());
-			let description = extract_field_from_toml(&content, "description")
-				.unwrap_or("Rust project".to_string());
+			let name = extract_field_from_toml(&content, "name").unwrap_or("Unknown Project".to_string());
+			let description = extract_field_from_toml(&content, "description").unwrap_or("Rust project".to_string());
 			(name, description)
 		}
 		ProjectType::Node(package_path) => {
@@ -801,10 +753,8 @@ async fn gather_project_context(project_type: &ProjectType) -> Result<(String, S
 		}
 		ProjectType::Python(pyproject_path) => {
 			let content = fs::read_to_string(pyproject_path).unwrap_or_default();
-			let name =
-				extract_field_from_toml(&content, "name").unwrap_or("Unknown Project".to_string());
-			let description = extract_field_from_toml(&content, "description")
-				.unwrap_or("Python project".to_string());
+			let name = extract_field_from_toml(&content, "name").unwrap_or("Unknown Project".to_string());
+			let description = extract_field_from_toml(&content, "description").unwrap_or("Python project".to_string());
 			(name, description)
 		}
 		ProjectType::ChromeExtension(manifest_path) => {
@@ -822,16 +772,10 @@ async fn gather_project_context(project_type: &ProjectType) -> Result<(String, S
 					.to_string();
 				(name, description)
 			} else {
-				(
-					"Unknown Project".to_string(),
-					"Chrome extension".to_string(),
-				)
+				("Unknown Project".to_string(), "Chrome extension".to_string())
 			}
 		}
-		ProjectType::Unknown => (
-			"Unknown Project".to_string(),
-			"Software project".to_string(),
-		),
+		ProjectType::Unknown => ("Unknown Project".to_string(), "Software project".to_string()),
 	};
 	Ok((name, description))
 }
@@ -855,7 +799,8 @@ const LLM_TEMPERATURE: f32 = 0.1;
 /// Rounds of draft, audit, redraft-with-feedback before the release aborts.
 const MAX_AUDIT_ROUNDS: usize = 2;
 
-const SUMMARY_AUDIT_RULES: &str = "The source is the list of commit messages in this release, grouped by kind. A claim is unsupported when it:
+const SUMMARY_AUDIT_RULES: &str =
+	"The source is the list of commit messages in this release, grouped by kind. A claim is unsupported when it:
 - describes a change, capability or fix that no listed commit states;
 - calls something new, added or introduced although no commit under NEW FEATURES says so;
 - states a benefit, motivation or improvement that no commit message gives;
@@ -931,13 +876,8 @@ async fn generate_ai_changelog_summary(
 	let mut draft_prompt = prompt.clone();
 	let mut rejected = Vec::new();
 	for _ in 0..MAX_AUDIT_ROUNDS {
-		let messages = vec![
-			Message::system(SUMMARY_SYSTEM_PROMPT),
-			Message::user(&draft_prompt),
-		];
-		let value = client
-			.chat_completion_json(messages, Some(schema.clone()))
-			.await?;
+		let messages = vec![Message::system(SUMMARY_SYSTEM_PROMPT), Message::user(&draft_prompt)];
+		let value = client.chat_completion_json(messages, Some(schema.clone())).await?;
 		let summary = value
 			.get("summary")
 			.and_then(|s| s.as_str())
@@ -1058,10 +998,7 @@ async fn update_project_version(project_type: &ProjectType, new_version: &str) -
 			fs::write(&plist_path, updated)?;
 			println!(
 				"📱 Updated {}",
-				plist_path
-					.strip_prefix(&project_root)
-					.unwrap_or(&plist_path)
-					.display()
+				plist_path.strip_prefix(&project_root).unwrap_or(&plist_path).display()
 			);
 		}
 	}
@@ -1138,10 +1075,7 @@ async fn update_lock_files(project_type: &ProjectType) -> Result<()> {
 			// Update go.sum and go.mod
 			println!("🔄 Updating go.mod and go.sum...");
 			let dir = manifest.parent().unwrap_or(Path::new("."));
-			let output = Command::new("go")
-				.args(["mod", "tidy"])
-				.current_dir(dir)
-				.output()?;
+			let output = Command::new("go").args(["mod", "tidy"]).current_dir(dir).output()?;
 
 			if !output.status.success() {
 				return Err(anyhow::anyhow!(
@@ -1155,10 +1089,7 @@ async fn update_lock_files(project_type: &ProjectType) -> Result<()> {
 			println!("🔄 Updating Python lock file...");
 			let dir = manifest.parent().unwrap_or(Path::new("."));
 			if dir.join("uv.lock").exists() {
-				let output = Command::new("uv")
-					.args(["lock"])
-					.current_dir(dir)
-					.output()?;
+				let output = Command::new("uv").args(["lock"]).current_dir(dir).output()?;
 				if !output.status.success() {
 					return Err(anyhow::anyhow!(
 						"Failed to update uv.lock: {}",
@@ -1208,8 +1139,7 @@ fn update_pyproject_version(content: &str, new_version: &str) -> Result<String> 
 		} else if trimmed.starts_with('[') {
 			in_target_section = false;
 		}
-		if in_target_section && !replaced && trimmed.starts_with("version") && trimmed.contains('=')
-		{
+		if in_target_section && !replaced && trimmed.starts_with("version") && trimmed.contains('=') {
 			// Preserve indentation and quote style
 			if let Some(eq_pos) = line.find('=') {
 				let prefix = &line[..eq_pos + 1];
@@ -1280,9 +1210,7 @@ fn update_cargo_version(content: &str, new_version: &str) -> Result<String> {
 				// Find the end of the current version value
 				let value_end = if quote_char == ' ' {
 					// For unquoted values, find the end of the word
-					value_part
-						.find(char::is_whitespace)
-						.unwrap_or(value_part.len())
+					value_part.find(char::is_whitespace).unwrap_or(value_part.len())
 				} else {
 					// For quoted values, find the closing quote
 					if let Some(end_quote) = value_part[1..].find(quote_char) {
@@ -1295,10 +1223,7 @@ fn update_cargo_version(content: &str, new_version: &str) -> Result<String> {
 				// Construct the new line
 				let before_value = &suffix_part[..value_start];
 				let after_value = &suffix_part[value_start + value_end..];
-				let new_line = format!(
-					"{}{}{}{}",
-					prefix, before_value, new_value_part, after_value
-				);
+				let new_line = format!("{}{}{}{}", prefix, before_value, new_value_part, after_value);
 
 				// Replace the entire line in the result
 				let line_start = lines[..i].iter().map(|l| l.len() + 1).sum::<usize>();
@@ -1462,8 +1387,7 @@ async fn update_changelog(changelog_path: &str, new_content: &str) -> Result<()>
 		let existing_content = String::from_utf8_lossy(&existing_bytes);
 
 		// Detect original line ending style and file ending
-		let has_final_newline =
-			existing_content.ends_with('\n') || existing_content.ends_with("\r\n");
+		let has_final_newline = existing_content.ends_with('\n') || existing_content.ends_with("\r\n");
 		let line_ending = if existing_content.contains("\r\n") {
 			"\r\n"
 		} else {
@@ -1499,10 +1423,7 @@ async fn update_changelog(changelog_path: &str, new_content: &str) -> Result<()>
 
 		// Join with original line ending and preserve final newline if it existed
 		let mut updated_content = new_lines.join(line_ending);
-		if has_final_newline
-			&& !updated_content.ends_with('\n')
-			&& !updated_content.ends_with("\r\n")
-		{
+		if has_final_newline && !updated_content.ends_with('\n') && !updated_content.ends_with("\r\n") {
 			updated_content.push_str(line_ending);
 		}
 
@@ -1510,9 +1431,9 @@ async fn update_changelog(changelog_path: &str, new_content: &str) -> Result<()>
 	} else {
 		// Create new changelog with proper formatting
 		let content = format!(
-            "# Changelog\n\nAll notable changes to this project will be documented in this file.\n\n{}\n",
-            new_content.trim_end()
-        );
+			"# Changelog\n\nAll notable changes to this project will be documented in this file.\n\n{}\n",
+			new_content.trim_end()
+		);
 		fs::write(changelog_path, content)?;
 	}
 
@@ -1620,9 +1541,7 @@ async fn stage_release_files(changelog_path: &str, project_type: &ProjectType) -
 }
 
 async fn create_commit(message: &str) -> Result<()> {
-	let output = Command::new("git")
-		.args(["commit", "-m", message])
-		.output()?;
+	let output = Command::new("git").args(["commit", "-m", message]).output()?;
 
 	if !output.status.success() {
 		return Err(anyhow::anyhow!(

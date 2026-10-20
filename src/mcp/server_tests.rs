@@ -67,15 +67,7 @@ mod tests {
 	#[test]
 	fn a_note_is_prepended_and_a_diagnostic_appended() {
 		let matches = vec![grep_match("src/a.rs", 1, "fn a() {}")];
-		let out = format_structural_response(
-			&matches,
-			Some("note line"),
-			Some("diagnostic line"),
-			0,
-			50,
-			0,
-			&[],
-		);
+		let out = format_structural_response(&matches, Some("note line"), Some("diagnostic line"), 0, 50, 0, &[]);
 		assert!(out.starts_with("note line\n"), "{out}");
 		assert!(out.ends_with("diagnostic line"), "{out}");
 	}
@@ -84,10 +76,7 @@ mod tests {
 	fn a_truncated_page_points_at_the_next_offset() {
 		let matches: Vec<_> = (1..=10).map(|i| grep_match("src/a.rs", i, "hit")).collect();
 		let out = format_structural_response(&matches, None, None, 0, 3, 0, &[]);
-		assert!(
-			out.contains("Showing 1–3 of 10 matches across 1 files."),
-			"{out}"
-		);
+		assert!(out.contains("Showing 1–3 of 10 matches across 1 files."), "{out}");
 		assert!(out.contains("Next page: offset=3."), "{out}");
 	}
 
@@ -119,10 +108,7 @@ mod tests {
 			0,
 			50,
 			1,
-			&[
-				file_data("src/a.rs", content),
-				file_data("src/other.rs", "unused"),
-			],
+			&[file_data("src/a.rs", content), file_data("src/other.rs", "unused")],
 		);
 		assert!(out.contains("line one"), "{out}");
 		assert!(out.contains("line three"), "{out}");
@@ -136,14 +122,8 @@ mod tests {
 			}
 		});
 		strip_null_variants(&mut schema);
-		assert_eq!(
-			schema["properties"]["max_results"]["type"],
-			json!("integer")
-		);
-		assert_eq!(
-			schema["properties"]["max_results"]["description"],
-			json!("count")
-		);
+		assert_eq!(schema["properties"]["max_results"]["type"], json!("integer"));
+		assert_eq!(schema["properties"]["max_results"]["description"], json!("count"));
 	}
 
 	#[test]
@@ -170,10 +150,7 @@ mod tests {
 			}
 		});
 		strip_null_variants(&mut schema);
-		assert_eq!(
-			schema["properties"]["nested"]["items"][0]["type"],
-			json!("number")
-		);
+		assert_eq!(schema["properties"]["nested"]["items"][0]["type"], json!("number"));
 	}
 
 	#[test]
@@ -195,12 +172,10 @@ mod tests {
 
 	#[test]
 	fn view_signatures_accepts_a_bare_pattern_or_an_array() {
-		let single: ViewSignaturesParams =
-			serde_json::from_value(json!({"files": "src/*.rs"})).unwrap();
+		let single: ViewSignaturesParams = serde_json::from_value(json!({"files": "src/*.rs"})).unwrap();
 		assert_eq!(single.files, vec!["src/*.rs".to_string()]);
 
-		let many: ViewSignaturesParams =
-			serde_json::from_value(json!({"files": ["a.rs", "b.rs"]})).unwrap();
+		let many: ViewSignaturesParams = serde_json::from_value(json!({"files": ["a.rs", "b.rs"]})).unwrap();
 		assert_eq!(many.files, vec!["a.rs".to_string(), "b.rs".to_string()]);
 
 		assert!(serde_json::from_value::<ViewSignaturesParams>(json!({"files": 7})).is_err());
@@ -208,8 +183,7 @@ mod tests {
 
 	#[test]
 	fn semantic_search_params_default_the_optional_fields() {
-		let params: SemanticSearchParams =
-			serde_json::from_value(json!({"query": "how does indexing work"})).unwrap();
+		let params: SemanticSearchParams = serde_json::from_value(json!({"query": "how does indexing work"})).unwrap();
 		assert_eq!(params.query, json!("how does indexing work"));
 		assert!(params.max_results.is_none());
 		assert!(params.detail_level.is_none());
@@ -221,8 +195,7 @@ mod tests {
 	#[test]
 	fn find_references_includes_the_declaration_unless_told_otherwise() {
 		let default: LspFindReferencesParams =
-			serde_json::from_value(json!({"file_path": "a.rs", "line": 3, "symbol": "run"}))
-				.unwrap();
+			serde_json::from_value(json!({"file_path": "a.rs", "line": 3, "symbol": "run"})).unwrap();
 		assert!(default.include_declaration);
 
 		let explicit: LspFindReferencesParams = serde_json::from_value(json!({
@@ -238,19 +211,16 @@ mod tests {
 			serde_json::from_value(json!({"file_path": "a.rs", "line": 1, "symbol": "x"})).unwrap();
 		assert_eq!(position.line, 1);
 
-		let document: LspDocumentSymbolsParams =
-			serde_json::from_value(json!({"file_path": "a.rs"})).unwrap();
+		let document: LspDocumentSymbolsParams = serde_json::from_value(json!({"file_path": "a.rs"})).unwrap();
 		assert_eq!(document.file_path, "a.rs");
 
-		let workspace: LspWorkspaceSymbolsParams =
-			serde_json::from_value(json!({"query": "Store"})).unwrap();
+		let workspace: LspWorkspaceSymbolsParams = serde_json::from_value(json!({"query": "Store"})).unwrap();
 		assert_eq!(workspace.query, "Store");
 	}
 
 	#[test]
 	fn graphrag_parameters_require_only_the_operation() {
-		let params: GraphRagParams =
-			serde_json::from_value(json!({"operation": "overview"})).unwrap();
+		let params: GraphRagParams = serde_json::from_value(json!({"operation": "overview"})).unwrap();
 		assert_eq!(params.operation, "overview");
 	}
 
@@ -340,20 +310,11 @@ mod tests {
 	#[test]
 	fn a_repo_core_handler_exposes_every_tool_except_lsp() {
 		let (_dir, server) = repo_server(&[]);
-		let mut names: Vec<String> = server
-			.list_tool_defs()
-			.iter()
-			.map(|t| t.name.to_string())
-			.collect();
+		let mut names: Vec<String> = server.list_tool_defs().iter().map(|t| t.name.to_string()).collect();
 		names.sort();
 		assert_eq!(
 			names,
-			vec![
-				"graphrag",
-				"semantic_search",
-				"structural_search",
-				"view_signatures"
-			]
+			vec!["graphrag", "semantic_search", "structural_search", "view_signatures"]
 		);
 	}
 
@@ -468,10 +429,7 @@ mod tests {
 			.structural_search(structural(json!({"language": "go", "symbol": "a"})))
 			.await
 			.unwrap();
-		assert!(
-			out.starts_with("No go files found. Check that `language`"),
-			"{out}"
-		);
+		assert!(out.starts_with("No go files found. Check that `language`"), "{out}");
 
 		let out = server
 			.structural_search(structural(json!({
@@ -494,9 +452,7 @@ mod tests {
 		]);
 
 		let out = server
-			.structural_search(structural(
-				json!({"language": "rust", "symbol": "handle_*"}),
-			))
+			.structural_search(structural(json!({"language": "rust", "symbol": "handle_*"})))
 			.await
 			.unwrap();
 		assert!(out.contains("a.rs"), "{out}");
@@ -510,10 +466,7 @@ mod tests {
 		let (_dir, server) = repo_server(&[("a.rs", "fn handle_alpha() {}\n")]);
 		let arguments = json!({"language": "rust", "symbol": "handle_alpha"});
 
-		let first = server
-			.structural_search(structural(arguments.clone()))
-			.await
-			.unwrap();
+		let first = server.structural_search(structural(arguments.clone())).await.unwrap();
 		assert!(first.contains("a.rs"), "{first}");
 
 		// Swap the cached matches while leaving the fingerprint and repo stamp
@@ -526,10 +479,7 @@ mod tests {
 			entry.note = Some("replayed".to_string());
 		}
 
-		let second = server
-			.structural_search(structural(arguments))
-			.await
-			.unwrap();
+		let second = server.structural_search(structural(arguments)).await.unwrap();
 		assert!(second.starts_with("replayed\n"), "{second}");
 		assert!(second.contains("cached.rs"), "{second}");
 	}

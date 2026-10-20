@@ -141,10 +141,7 @@ pub fn beta() -> u32 {
 		let (_dir, store) = test_store().await;
 
 		let (_, off) = process_rust(&store, &Config::default(), RUST_SOURCE, false).await;
-		assert!(
-			off.is_empty(),
-			"the second AST walk must stay off by default"
-		);
+		assert!(off.is_empty(), "the second AST walk must stay off by default");
 
 		let mut config = Config::default();
 		config.index.contextual_descriptions = true;
@@ -194,16 +191,9 @@ pub fn beta() -> u32 {
 			.join("\n");
 
 		let mut batch: Vec<TextBlock> = Vec::new();
-		process_text_file_differential(
-			&store,
-			&contents,
-			"notes.txt",
-			&mut batch,
-			&config,
-			state(false),
-		)
-		.await
-		.unwrap();
+		process_text_file_differential(&store, &contents, "notes.txt", &mut batch, &config, state(false))
+			.await
+			.unwrap();
 
 		assert!(batch.len() > 1, "long text must be chunked");
 		assert!(batch.iter().all(|b| b.path == "notes.txt"));
@@ -224,16 +214,9 @@ pub fn beta() -> u32 {
 			.collect::<Vec<_>>()
 			.join("\n");
 		let mut batch = Vec::new();
-		process_text_file_differential(
-			&store,
-			&long,
-			"notes.txt",
-			&mut batch,
-			&config,
-			state(false),
-		)
-		.await
-		.unwrap();
+		process_text_file_differential(&store, &long, "notes.txt", &mut batch, &config, state(false))
+			.await
+			.unwrap();
 		let embeddings: Vec<_> = (0..batch.len()).map(|i| embedding(TEXT_DIM, i)).collect();
 		store.store_text_blocks(&batch, &embeddings).await.unwrap();
 		let stored = store
@@ -266,16 +249,9 @@ pub fn beta() -> u32 {
 		let (_dir, store) = test_store().await;
 		let config = Config::default();
 		let mut batch = Vec::new();
-		process_text_file_differential(
-			&store,
-			"a line",
-			"notes.txt",
-			&mut batch,
-			&config,
-			state(true),
-		)
-		.await
-		.unwrap();
+		process_text_file_differential(&store, "a line", "notes.txt", &mut batch, &config, state(true))
+			.await
+			.unwrap();
 		assert_eq!(batch.len(), 1);
 	}
 
@@ -283,19 +259,13 @@ pub fn beta() -> u32 {
 	async fn markdown_files_become_document_blocks_per_section() {
 		let (_dir, store) = test_store().await;
 		let config = Config::default();
-		let contents = "# Title\n\nIntro paragraph.\n\n## Install\n\nRun the installer.\n\n## Usage\n\nCall the binary.\n";
+		let contents =
+			"# Title\n\nIntro paragraph.\n\n## Install\n\nRun the installer.\n\n## Usage\n\nCall the binary.\n";
 
 		let mut batch: Vec<DocumentBlock> = Vec::new();
-		process_markdown_file_differential(
-			&store,
-			contents,
-			"README.md",
-			&mut batch,
-			&config,
-			state(false),
-		)
-		.await
-		.unwrap();
+		process_markdown_file_differential(&store, contents, "README.md", &mut batch, &config, state(false))
+			.await
+			.unwrap();
 
 		assert!(!batch.is_empty());
 		assert!(batch.iter().all(|b| b.path == "README.md"));
@@ -309,33 +279,16 @@ pub fn beta() -> u32 {
 		let contents = "# Title\n\nIntro paragraph.\n\n## Install\n\nRun the installer.\n";
 
 		let mut first = Vec::new();
-		process_markdown_file_differential(
-			&store,
-			contents,
-			"README.md",
-			&mut first,
-			&config,
-			state(false),
-		)
-		.await
-		.unwrap();
-		let embeddings: Vec<_> = (0..first.len()).map(|i| embedding(TEXT_DIM, i)).collect();
-		store
-			.store_document_blocks(&first, &embeddings)
+		process_markdown_file_differential(&store, contents, "README.md", &mut first, &config, state(false))
 			.await
 			.unwrap();
+		let embeddings: Vec<_> = (0..first.len()).map(|i| embedding(TEXT_DIM, i)).collect();
+		store.store_document_blocks(&first, &embeddings).await.unwrap();
 
 		let mut second = Vec::new();
-		process_markdown_file_differential(
-			&store,
-			contents,
-			"README.md",
-			&mut second,
-			&config,
-			state(false),
-		)
-		.await
-		.unwrap();
+		process_markdown_file_differential(&store, contents, "README.md", &mut second, &config, state(false))
+			.await
+			.unwrap();
 		assert!(second.is_empty(), "got {second:?}");
 	}
 
@@ -376,8 +329,7 @@ pub fn beta() -> u32 {
 		let mut config = Config::default();
 		config.graphrag.enabled = true;
 
-		let (batch, all_blocks, state) =
-			process_rust_full(&store, &config, RUST_SOURCE, "src/lib.rs").await;
+		let (batch, all_blocks, state) = process_rust_full(&store, &config, RUST_SOURCE, "src/lib.rs").await;
 
 		assert_eq!(all_blocks.len(), batch.len());
 		assert_eq!(state.read().graphrag_blocks, batch.len());
@@ -394,8 +346,7 @@ pub fn beta() -> u32 {
 		store.store_code_blocks(&first, &embeddings).await.unwrap();
 
 		config.graphrag.enabled = true;
-		let (batch, all_blocks, state) =
-			process_rust_full(&store, &config, RUST_SOURCE, "src/lib.rs").await;
+		let (batch, all_blocks, state) = process_rust_full(&store, &config, RUST_SOURCE, "src/lib.rs").await;
 
 		assert!(batch.is_empty(), "stored blocks must not be re-embedded");
 		assert_eq!(
@@ -530,11 +481,9 @@ pub fn beta() -> u32 {
 		config.index.chunk_size = 200;
 		config.index.chunk_overlap = 0;
 
-		let kept =
-			"# Title\n\nThe introduction paragraph is deliberately long enough that it fills \
+		let kept = "# Title\n\nThe introduction paragraph is deliberately long enough that it fills \
 			the chunk budget on its own and is never merged with the section that follows it here.\n";
-		let removed =
-			"\n## Removed\n\nThis second section is also long enough to stand on its own as \
+		let removed = "\n## Removed\n\nThis second section is also long enough to stand on its own as \
 			a separate chunk, so deleting it must delete exactly one stored document block.\n";
 
 		let mut first = Vec::new();
@@ -550,22 +499,12 @@ pub fn beta() -> u32 {
 		.unwrap();
 		assert!(first.len() >= 2, "got {} blocks", first.len());
 		let embeddings: Vec<_> = (0..first.len()).map(|i| embedding(TEXT_DIM, i)).collect();
-		store
-			.store_document_blocks(&first, &embeddings)
-			.await
-			.unwrap();
+		store.store_document_blocks(&first, &embeddings).await.unwrap();
 
 		let mut second = Vec::new();
-		process_markdown_file_differential(
-			&store,
-			kept,
-			"doc.md",
-			&mut second,
-			&config,
-			state(false),
-		)
-		.await
-		.unwrap();
+		process_markdown_file_differential(&store, kept, "doc.md", &mut second, &config, state(false))
+			.await
+			.unwrap();
 
 		let remaining = store
 			.get_file_blocks_metadata("doc.md", "document_blocks")

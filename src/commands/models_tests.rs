@@ -50,8 +50,7 @@ mod tests {
 		] {
 			parse_provider(name).unwrap_or_else(|e| panic!("{name} should resolve: {e}"));
 			// Matching is case-insensitive.
-			parse_provider(&name.to_uppercase())
-				.unwrap_or_else(|e| panic!("{name} uppercase should resolve: {e}"));
+			parse_provider(&name.to_uppercase()).unwrap_or_else(|e| panic!("{name} uppercase should resolve: {e}"));
 		}
 	}
 

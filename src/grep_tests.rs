@@ -32,57 +32,32 @@ mod tests {
 	}
 
 	fn sources(pairs: &[(&str, &str)]) -> HashMap<String, String> {
-		pairs
-			.iter()
-			.map(|(f, s)| (f.to_string(), s.to_string()))
-			.collect()
+		pairs.iter().map(|(f, s)| (f.to_string(), s.to_string())).collect()
 	}
 
 	// ---- format_matches_with_context ----
 
 	#[test]
 	fn context_lines_surround_the_match_and_only_it_is_marked() {
-		let out = format_matches_with_context(
-			&[hit("a.rs", 3, "line three")],
-			&sources(&[("a.rs", SOURCE)]),
-			1,
-		);
-		assert_eq!(
-			out,
-			"a.rs\n  2:  line two\n> 3:  line three\n  4:  line four\n---"
-		);
+		let out = format_matches_with_context(&[hit("a.rs", 3, "line three")], &sources(&[("a.rs", SOURCE)]), 1);
+		assert_eq!(out, "a.rs\n  2:  line two\n> 3:  line three\n  4:  line four\n---");
 	}
 
 	#[test]
 	fn a_zero_context_window_shows_only_the_matched_line() {
-		let out = format_matches_with_context(
-			&[hit("a.rs", 3, "line three")],
-			&sources(&[("a.rs", SOURCE)]),
-			0,
-		);
+		let out = format_matches_with_context(&[hit("a.rs", 3, "line three")], &sources(&[("a.rs", SOURCE)]), 0);
 		assert_eq!(out, "a.rs\n> 3:  line three\n---");
 	}
 
 	#[test]
 	fn a_match_on_the_first_line_clamps_the_leading_context() {
-		let out = format_matches_with_context(
-			&[hit("a.rs", 1, "line one")],
-			&sources(&[("a.rs", SOURCE)]),
-			2,
-		);
-		assert_eq!(
-			out,
-			"a.rs\n> 1:  line one\n  2:  line two\n  3:  line three\n---"
-		);
+		let out = format_matches_with_context(&[hit("a.rs", 1, "line one")], &sources(&[("a.rs", SOURCE)]), 2);
+		assert_eq!(out, "a.rs\n> 1:  line one\n  2:  line two\n  3:  line three\n---");
 	}
 
 	#[test]
 	fn a_context_window_past_the_end_of_the_file_is_clamped() {
-		let out = format_matches_with_context(
-			&[hit("a.rs", 5, "line five")],
-			&sources(&[("a.rs", SOURCE)]),
-			10,
-		);
+		let out = format_matches_with_context(&[hit("a.rs", 5, "line five")], &sources(&[("a.rs", SOURCE)]), 10);
 		assert_eq!(
 			out,
 			"a.rs\n  1:  line one\n  2:  line two\n  3:  line three\n  4:  line four\n> 5:  line five\n---"
@@ -119,10 +94,7 @@ mod tests {
 			&sources(&[("a.rs", SOURCE), ("z.rs", SOURCE)]),
 			0,
 		);
-		assert_eq!(
-			out,
-			"a.rs\n> 1:  line one\n---\n\nz.rs\n> 1:  line one\n---"
-		);
+		assert_eq!(out, "a.rs\n> 1:  line one\n---\n\nz.rs\n> 1:  line one\n---");
 	}
 
 	#[test]
@@ -145,10 +117,7 @@ mod tests {
 
 	#[test]
 	fn canonical_kind_separates_methods_from_free_functions() {
-		assert_eq!(
-			canonical_kind("method", "typescript"),
-			Some("method_definition")
-		);
+		assert_eq!(canonical_kind("method", "typescript"), Some("method_definition"));
 		assert_eq!(canonical_kind("method", "go"), Some("method_declaration"));
 		assert_eq!(canonical_kind("method", "java"), Some("method_declaration"));
 		assert_eq!(canonical_kind("method", "ruby"), Some("method"));
@@ -161,15 +130,9 @@ mod tests {
 		assert_eq!(canonical_kind("struct", "cpp"), Some("struct_specifier"));
 		assert_eq!(canonical_kind("trait", "rust"), Some("trait_item"));
 		assert_eq!(canonical_kind("impl", "rust"), Some("impl_item"));
-		assert_eq!(
-			canonical_kind("interface", "typescript"),
-			Some("interface_declaration")
-		);
+		assert_eq!(canonical_kind("interface", "typescript"), Some("interface_declaration"));
 		assert_eq!(canonical_kind("interface", "go"), Some("interface_type"));
-		assert_eq!(
-			canonical_kind("interface", "java"),
-			Some("interface_declaration")
-		);
+		assert_eq!(canonical_kind("interface", "java"), Some("interface_declaration"));
 		// Go has no `trait`, Rust has no `interface`.
 		assert_eq!(canonical_kind("trait", "go"), None);
 		assert_eq!(canonical_kind("interface", "rust"), None);
@@ -182,10 +145,7 @@ mod tests {
 		assert_eq!(canonical_kind("call", "ruby"), Some("call"));
 		// Java's call node is `method_invocation`, not a declaration kind.
 		assert_eq!(canonical_kind("call", "java"), Some("method_invocation"));
-		assert_eq!(
-			canonical_kind("method_invocation", "java"),
-			Some("method_invocation")
-		);
+		assert_eq!(canonical_kind("method_invocation", "java"), Some("method_invocation"));
 	}
 
 	#[test]
@@ -194,10 +154,7 @@ mod tests {
 		assert_eq!(canonical_kind("for", "rust"), Some("for_expression"));
 		assert_eq!(canonical_kind("loop", "rust"), Some("for_expression"));
 		assert_eq!(canonical_kind("if", "python"), Some("if_statement"));
-		assert_eq!(
-			canonical_kind("conditional", "typescript"),
-			Some("if_statement")
-		);
+		assert_eq!(canonical_kind("conditional", "typescript"), Some("if_statement"));
 		assert_eq!(canonical_kind("while", "go"), Some("while_statement"));
 		// Rust's loop kinds are named differently, so `while` has no mapping.
 		assert_eq!(canonical_kind("while", "rust"), None);
@@ -205,14 +162,8 @@ mod tests {
 
 	#[test]
 	fn canonical_kind_maps_variable_declarations_per_language() {
-		assert_eq!(
-			canonical_kind("const", "typescript"),
-			Some("variable_declaration")
-		);
-		assert_eq!(
-			canonical_kind("var", "javascript"),
-			Some("variable_declaration")
-		);
+		assert_eq!(canonical_kind("const", "typescript"), Some("variable_declaration"));
+		assert_eq!(canonical_kind("var", "javascript"), Some("variable_declaration"));
 		assert_eq!(canonical_kind("let", "rust"), Some("let_declaration"));
 		assert_eq!(canonical_kind("let", "go"), Some("var_declaration"));
 	}
@@ -233,33 +184,26 @@ mod tests {
 		assert_eq!(canonical_kind("return", "ruby"), Some("return"));
 		assert_eq!(canonical_kind("return", "python"), Some("return_statement"));
 		assert_eq!(canonical_kind("return", "go"), Some("return_statement"));
-		assert_eq!(
-			canonical_kind("return", "typescript"),
-			Some("return_statement")
-		);
+		assert_eq!(canonical_kind("return", "typescript"), Some("return_statement"));
 	}
 
 	#[test]
 	fn the_rust_return_kind_is_accepted_by_the_grammar() {
 		let source = "fn f(x: i32) -> i32 {\n    if x > 0 {\n        return 1;\n    }\n    0\n}\n";
 		let kind = canonical_kind("return", "rust").expect("rust `return` must map to a kind");
-		let matches = search_file_by_kind("f.rs", source, kind, "rust")
-			.expect("the mapped kind must exist in the rust grammar");
+		let matches =
+			search_file_by_kind("f.rs", source, kind, "rust").expect("the mapped kind must exist in the rust grammar");
 		assert_eq!(matches.len(), 1);
 		assert_eq!(matches[0].line, 3);
-		assert!(
-			matches[0].text.starts_with("return 1"),
-			"{}",
-			matches[0].text
-		);
+		assert!(matches[0].text.starts_with("return 1"), "{}", matches[0].text);
 	}
 
 	#[test]
 	fn the_ruby_return_kind_is_accepted_by_the_grammar() {
 		let source = "def f(x)\n  return 1\nend\n";
 		let kind = canonical_kind("return", "ruby").expect("ruby `return` must map to a kind");
-		let matches = search_file_by_kind("f.rb", source, kind, "ruby")
-			.expect("the mapped kind must exist in the ruby grammar");
+		let matches =
+			search_file_by_kind("f.rb", source, kind, "ruby").expect("the mapped kind must exist in the ruby grammar");
 		assert_eq!(matches.len(), 1);
 		assert_eq!(matches[0].line, 2);
 	}
@@ -335,10 +279,7 @@ mod tests {
 	#[test]
 	fn literal_tokens_skips_every_expando_prefixed_name() {
 		// `$`, `µ` and `#` all introduce metavariables.
-		assert_eq!(
-			literal_tokens("$VAR + µOTHER + #THIRD"),
-			Vec::<String>::new()
-		);
+		assert_eq!(literal_tokens("$VAR + µOTHER + #THIRD"), Vec::<String>::new());
 		// A single-character run is too short to be a useful prefilter token.
 		assert_eq!(literal_tokens("a + bb"), vec!["bb".to_string()]);
 	}
@@ -372,9 +313,6 @@ mod tests {
 			original_source: "one\ntwo\n".to_string(),
 			rewritten_source: "one\ntwo\nthree\n".to_string(),
 		};
-		assert_eq!(
-			format_rewrite_diff(&result),
-			"--- a.rs\n+++ a.rs\n-3:  \n+3:  three"
-		);
+		assert_eq!(format_rewrite_diff(&result), "--- a.rs\n+++ a.rs\n-3:  \n+3:  three");
 	}
 }

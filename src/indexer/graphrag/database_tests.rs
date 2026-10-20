@@ -16,9 +16,7 @@
 mod tests {
 	use crate::indexer::graphrag::database::DatabaseOperations;
 	use crate::indexer::graphrag::types::{FunctionInfo, RelationType};
-	use crate::store::mod_tests::{
-		embedding, graph_node, graph_relationship, test_store, CODE_DIM,
-	};
+	use crate::store::mod_tests::{embedding, graph_node, graph_relationship, test_store, CODE_DIM};
 	use std::path::Path;
 
 	#[tokio::test]
@@ -54,11 +52,7 @@ mod tests {
 
 		ops.save_graph_incremental(
 			&[node_a.clone(), node_b],
-			&[graph_relationship(
-				"src/a.rs",
-				"src/b.rs",
-				RelationType::Imports,
-			)],
+			&[graph_relationship("src/a.rs", "src/b.rs", RelationType::Imports)],
 		)
 		.await
 		.unwrap();
@@ -110,10 +104,7 @@ mod tests {
 		assert!(graph.nodes.contains_key("src/a.rs"));
 		assert!(graph.relationships.is_empty());
 
-		assert!(!store
-			.tables_exist(&["graphrag_relationships"])
-			.await
-			.unwrap());
+		assert!(!store.tables_exist(&["graphrag_relationships"]).await.unwrap());
 		assert_eq!(store.get_all_graph_nodes().await.unwrap().num_rows(), 1);
 	}
 
@@ -146,10 +137,7 @@ mod tests {
 		let (_dir, store) = test_store().await;
 		let ops = DatabaseOperations::new(&store);
 		ops.save_graph_incremental(
-			&[
-				graph_node("src/a.rs", "file", 0),
-				graph_node("src/b.rs", "file", 1),
-			],
+			&[graph_node("src/a.rs", "file", 0), graph_node("src/b.rs", "file", 1)],
 			&[],
 		)
 		.await
@@ -169,11 +157,7 @@ mod tests {
 		let ops = DatabaseOperations::new(&store);
 		ops.save_graph_incremental(
 			&[graph_node("src/a.rs", "file", 0)],
-			&[graph_relationship(
-				"src/a.rs",
-				"src/a.rs",
-				RelationType::Contains,
-			)],
+			&[graph_relationship("src/a.rs", "src/a.rs", RelationType::Contains)],
 		)
 		.await
 		.unwrap();

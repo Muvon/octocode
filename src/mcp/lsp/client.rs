@@ -25,8 +25,7 @@ use tokio::sync::{oneshot, Mutex, RwLock};
 use tracing::{debug, error, info, warn};
 
 use super::protocol::{
-	LspIncomingNotification, LspIncomingRequest, LspMessage, LspNotification, LspRequest,
-	LspResponse,
+	LspIncomingNotification, LspIncomingRequest, LspMessage, LspNotification, LspRequest, LspResponse,
 };
 
 /// Max time to wait for a response to an LSP request before giving up
@@ -261,12 +260,7 @@ impl LspClient {
 							}
 						}
 						LspMessage::Notification(notification) => {
-							Self::handle_notification(
-								&notification,
-								&progress_states,
-								&indexing_complete,
-							)
-							.await;
+							Self::handle_notification(&notification, &progress_states, &indexing_complete).await;
 						}
 						LspMessage::IncomingRequest(request) => {
 							Self::handle_incoming_request(&request).await;
@@ -300,10 +294,7 @@ impl LspClient {
 	/// this helper gives both normal shutdown and an unexpected LSP stdout EOF a
 	/// strict kill-and-wait path, so an exited language server cannot remain as a
 	/// zombie while the MCP server keeps running.
-	async fn terminate_and_reap(
-		process: &Arc<Mutex<Option<Child>>>,
-		stdin: &Arc<Mutex<Option<ChildStdin>>>,
-	) {
+	async fn terminate_and_reap(process: &Arc<Mutex<Option<Child>>>, stdin: &Arc<Mutex<Option<ChildStdin>>>) {
 		// Closing stdin first lets a protocol-aware server observe EOF. If it has
 		// already exited, `try_wait` below reaps it without sending a signal.
 		*stdin.lock().await = None;
@@ -344,12 +335,7 @@ impl LspClient {
 		match notification.method.as_str() {
 			"$/progress" => {
 				if let Some(params) = &notification.params {
-					if let Err(e) = Self::handle_progress_notification(
-						params,
-						progress_states,
-						indexing_complete,
-					)
-					.await
+					if let Err(e) = Self::handle_progress_notification(params, progress_states, indexing_complete).await
 					{
 						warn!("Failed to handle progress notification: {}", e);
 					}
@@ -362,9 +348,7 @@ impl LspClient {
 			}
 			"window/logMessage" => {
 				if let Some(params) = &notification.params {
-					if let Ok(log_params) =
-						serde_json::from_value::<lsp_types::LogMessageParams>(params.clone())
-					{
+					if let Ok(log_params) = serde_json::from_value::<lsp_types::LogMessageParams>(params.clone()) {
 						match log_params.typ {
 							lsp_types::MessageType::ERROR => error!("LSP: {}", log_params.message),
 							lsp_types::MessageType::WARNING => warn!("LSP: {}", log_params.message),
@@ -379,9 +363,7 @@ impl LspClient {
 			}
 			"window/showMessage" => {
 				if let Some(params) = &notification.params {
-					if let Ok(show_params) =
-						serde_json::from_value::<lsp_types::ShowMessageParams>(params.clone())
-					{
+					if let Ok(show_params) = serde_json::from_value::<lsp_types::ShowMessageParams>(params.clone()) {
 						match show_params.typ {
 							lsp_types::MessageType::ERROR => {
 								error!("LSP Message: {}", show_params.message)
@@ -403,10 +385,7 @@ impl LspClient {
 				}
 			}
 			_ => {
-				debug!(
-					"LSP notification {}: {:?}",
-					notification.method, notification.params
-				);
+				debug!("LSP notification {}: {:?}", notification.method, notification.params);
 			}
 		}
 	}
@@ -417,10 +396,7 @@ impl LspClient {
 			"window/workDoneProgress/create" => {
 				// Server is requesting to create a progress token
 				// We should respond with success to allow progress reporting
-				debug!(
-					"LSP server requesting progress token creation: {:?}",
-					request.params
-				);
+				debug!("LSP server requesting progress token creation: {:?}", request.params);
 
 				// For now, we just acknowledge - the actual progress will come via $/progress notifications
 				// In a full implementation, we'd send a response back, but since we're not tracking
@@ -466,14 +442,8 @@ impl LspClient {
 					.and_then(|t| t.as_str())
 					.unwrap_or("Unknown")
 					.to_string();
-				let message = value
-					.get("message")
-					.and_then(|m| m.as_str())
-					.map(String::from);
-				let percentage = value
-					.get("percentage")
-					.and_then(|p| p.as_u64())
-					.map(|p| p as u32);
+				let message = value.get("message").and_then(|m| m.as_str()).map(String::from);
+				let percentage = value.get("percentage").and_then(|p| p.as_u64()).map(|p| p as u32);
 
 				let state = ProgressState {
 					token: token.clone(),
@@ -491,14 +461,8 @@ impl LspClient {
 				info!("LSP Progress started: {} (token: {})", title, token);
 			}
 			"report" => {
-				let message = value
-					.get("message")
-					.and_then(|m| m.as_str())
-					.map(String::from);
-				let percentage = value
-					.get("percentage")
-					.and_then(|p| p.as_u64())
-					.map(|p| p as u32);
+				let message = value.get("message").and_then(|m| m.as_str()).map(String::from);
+				let percentage = value.get("percentage").and_then(|p| p.as_u64()).map(|p| p as u32);
 
 				{
 					let mut states = progress_states.write().await;
@@ -518,10 +482,7 @@ impl LspClient {
 				}
 			}
 			"end" => {
-				let message = value
-					.get("message")
-					.and_then(|m| m.as_str())
-					.map(String::from);
+				let message = value.get("message").and_then(|m| m.as_str()).map(String::from);
 
 				{
 					let mut states = progress_states.write().await;

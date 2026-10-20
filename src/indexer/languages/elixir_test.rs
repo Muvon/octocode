@@ -55,9 +55,7 @@ fn parse(source: &str) -> Tree {
 	parser
 		.set_language(&language.get_ts_language())
 		.expect("Elixir grammar should load");
-	parser
-		.parse(source, None)
-		.expect("Elixir source should parse")
+	parser.parse(source, None).expect("Elixir source should parse")
 }
 
 fn walk_calls<F>(node: Node, visit: &mut F)
@@ -107,21 +105,13 @@ fn chunks_declarations_without_chunking_ordinary_calls_or_whole_modules() {
 		"regions: {:?}",
 		regions.iter().map(|r| &r.content).collect::<Vec<_>>()
 	);
-	assert!(regions
-		.iter()
-		.any(|region| region.content.contains("def fetch_user")));
+	assert!(regions.iter().any(|region| region.content.contains("def fetch_user")));
 	assert!(regions
 		.iter()
 		.any(|region| region.content.starts_with("defmacro active")));
-	assert!(regions
-		.iter()
-		.any(|region| region.content.contains("defstruct")));
-	assert!(!regions
-		.iter()
-		.any(|region| region.content.starts_with("defmodule")));
-	assert!(!regions
-		.iter()
-		.any(|region| region.content.starts_with("Repo.get")));
+	assert!(regions.iter().any(|region| region.content.contains("defstruct")));
+	assert!(!regions.iter().any(|region| region.content.starts_with("defmodule")));
+	assert!(!regions.iter().any(|region| region.content.starts_with("Repo.get")));
 }
 
 #[test]
@@ -141,10 +131,7 @@ fn extracts_semantic_signatures_and_declaration_kinds() {
 	assert!(summary.contains(&("macro", "active")));
 	assert!(summary.contains(&("interface", "MyApp.Renderable")));
 	assert!(summary.contains(&("implementation", "MyApp.Renderable for MyApp.User")));
-	assert_eq!(
-		summary.iter().filter(|(_, name)| *name == "render").count(),
-		2
-	);
+	assert_eq!(summary.iter().filter(|(_, name)| *name == "render").count(), 2);
 }
 
 #[test]
@@ -166,11 +153,7 @@ fn extracts_imports_exports_calls_owners_and_protocol_relations() {
 			declarations.push((name, language.extract_symbol_owner(node, SOURCE)));
 		}
 		for (kind, target) in language.extract_type_relations(node, SOURCE) {
-			relations.push((
-				kind,
-				target,
-				language.extract_type_relation_source(node, SOURCE),
-			));
+			relations.push((kind, target, language.extract_type_relation_source(node, SOURCE)));
 		}
 	});
 
@@ -197,9 +180,7 @@ fn extracts_imports_exports_calls_owners_and_protocol_relations() {
 		name: "call".to_string(),
 		qualifier: Some("MyApp::Validation".to_string())
 	}));
-	assert!(!calls
-		.iter()
-		.any(|call| call.name == "fetch_user" || call.name == "def"));
+	assert!(!calls.iter().any(|call| call.name == "fetch_user" || call.name == "def"));
 	assert!(declarations.contains(&("fetch_user".to_string(), Some("MyApp.Accounts".to_string()))));
 	assert_eq!(
 		relations,
@@ -284,10 +265,7 @@ end
 	assert!(
 		describe_regions.is_empty(),
 		"describe block should not collapse into a single blob region, got: {:?}",
-		describe_regions
-			.iter()
-			.map(|r| &r.content)
-			.collect::<Vec<_>>()
+		describe_regions.iter().map(|r| &r.content).collect::<Vec<_>>()
 	);
 }
 
@@ -308,19 +286,16 @@ end
 	let mut regions = Vec::new();
 	extract_meaningful_regions(tree.root_node(), source, language.as_ref(), &mut regions);
 	assert_eq!(regions.len(), 1);
-	assert!(regions[0]
-		.content
-		.starts_with("test \"fetches an account\""));
+	assert!(regions[0].content.starts_with("test \"fetches an account\""));
 
 	let signatures = extract_signatures(tree.root_node(), source, language.as_ref());
-	assert!(signatures.iter().any(|signature| {
-		signature.kind == "function" && signature.name == "fetches an account"
-	}));
+	assert!(signatures
+		.iter()
+		.any(|signature| { signature.kind == "function" && signature.name == "fetches an account" }));
 
 	let mut declaration = None;
 	walk_calls(tree.root_node(), &mut |node| {
-		if language.extract_declaration_name(node, source).as_deref() == Some("fetches an account")
-		{
+		if language.extract_declaration_name(node, source).as_deref() == Some("fetches an account") {
 			declaration = Some((
 				language.extract_declaration_kind(node, source),
 				language.extract_symbol_owner(node, source),

@@ -35,14 +35,7 @@ pub async fn rerank_code_blocks_with_octolib(
 	let (provider, model) = parse_reranker_model(&config.model)?;
 	let documents: Vec<String> = blocks.iter().map(|b| b.content.clone()).collect();
 
-	let response = octolib::reranker::rerank(
-		query,
-		documents,
-		&provider,
-		&model,
-		Some(config.final_top_k),
-	)
-	.await?;
+	let response = octolib::reranker::rerank(query, documents, &provider, &model, Some(config.final_top_k)).await?;
 
 	let mut reranked: Vec<CodeBlock> = response
 		.results
@@ -81,19 +74,9 @@ pub async fn rerank_doc_blocks_with_octolib(
 
 	let (provider, model) = parse_reranker_model(&config.model)?;
 	// Use title + content for better reranking signal
-	let documents: Vec<String> = blocks
-		.iter()
-		.map(|b| format!("{}\n{}", b.title, b.content))
-		.collect();
+	let documents: Vec<String> = blocks.iter().map(|b| format!("{}\n{}", b.title, b.content)).collect();
 
-	let response = octolib::reranker::rerank(
-		query,
-		documents,
-		&provider,
-		&model,
-		Some(config.final_top_k),
-	)
-	.await?;
+	let response = octolib::reranker::rerank(query, documents, &provider, &model, Some(config.final_top_k)).await?;
 
 	let mut reranked: Vec<DocumentBlock> = response
 		.results
@@ -132,14 +115,7 @@ pub async fn rerank_text_blocks_with_octolib(
 	let (provider, model) = parse_reranker_model(&config.model)?;
 	let documents: Vec<String> = blocks.iter().map(|b| b.content.clone()).collect();
 
-	let response = octolib::reranker::rerank(
-		query,
-		documents,
-		&provider,
-		&model,
-		Some(config.final_top_k),
-	)
-	.await?;
+	let response = octolib::reranker::rerank(query, documents, &provider, &model, Some(config.final_top_k)).await?;
 
 	let mut reranked: Vec<TextBlock> = response
 		.results
@@ -178,14 +154,7 @@ pub async fn rerank_commit_blocks_with_octolib(
 	let (provider, model) = parse_reranker_model(&config.model)?;
 	let documents: Vec<String> = blocks.iter().map(|b| b.content.clone()).collect();
 
-	let response = octolib::reranker::rerank(
-		query,
-		documents,
-		&provider,
-		&model,
-		Some(config.final_top_k),
-	)
-	.await?;
+	let response = octolib::reranker::rerank(query, documents, &provider, &model, Some(config.final_top_k)).await?;
 
 	let mut reranked: Vec<CommitBlock> = response
 		.results

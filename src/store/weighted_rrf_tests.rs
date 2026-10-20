@@ -48,9 +48,7 @@ mod tests {
 	}
 
 	fn scores(batch: &RecordBatch) -> Vec<f32> {
-		let column = batch
-			.column_by_name("_relevance_score")
-			.expect("relevance column");
+		let column = batch.column_by_name("_relevance_score").expect("relevance column");
 		let values: Float32Array = downcast_array(column);
 		values.values().to_vec()
 	}
@@ -77,10 +75,7 @@ mod tests {
 	#[tokio::test]
 	async fn a_zero_keyword_weight_ignores_the_fts_ranking_entirely() {
 		let reranker = WeightedRRFReranker::new(60.0, 1.0, 0.0);
-		let fused = reranker
-			.rerank_hybrid("q", batch(&[1, 2]), batch(&[9]))
-			.await
-			.unwrap();
+		let fused = reranker.rerank_hybrid("q", batch(&[1, 2]), batch(&[9])).await.unwrap();
 
 		// The FTS-only row is still carried through, but scores nothing.
 		assert_eq!(row_ids(&fused), vec![1, 2, 9]);
@@ -92,10 +87,7 @@ mod tests {
 		// k below 1 would blow up the leading term; negative weights would invert
 		// the ranking. Both are clamped at construction.
 		let reranker = WeightedRRFReranker::new(0.0, -5.0, -5.0);
-		let fused = reranker
-			.rerank_hybrid("q", batch(&[1]), batch(&[2]))
-			.await
-			.unwrap();
+		let fused = reranker.rerank_hybrid("q", batch(&[1]), batch(&[2])).await.unwrap();
 		assert!(scores(&fused).iter().all(|s| *s == 0.0));
 	}
 
@@ -103,16 +95,10 @@ mod tests {
 	async fn an_empty_side_still_returns_the_other_sides_rows() {
 		let reranker = WeightedRRFReranker::new(60.0, 1.0, 1.0);
 
-		let vector_only = reranker
-			.rerank_hybrid("q", batch(&[5, 6]), batch(&[]))
-			.await
-			.unwrap();
+		let vector_only = reranker.rerank_hybrid("q", batch(&[5, 6]), batch(&[])).await.unwrap();
 		assert_eq!(row_ids(&vector_only), vec![5, 6]);
 
-		let fts_only = reranker
-			.rerank_hybrid("q", batch(&[]), batch(&[7, 8]))
-			.await
-			.unwrap();
+		let fts_only = reranker.rerank_hybrid("q", batch(&[]), batch(&[7, 8])).await.unwrap();
 		assert_eq!(row_ids(&fts_only), vec![7, 8]);
 	}
 
@@ -129,11 +115,8 @@ mod tests {
 	#[tokio::test]
 	async fn a_batch_without_a_row_id_column_is_rejected() {
 		let no_id_schema = Arc::new(Schema::new(vec![Field::new("text", DataType::Utf8, false)]));
-		let no_id = RecordBatch::try_new(
-			no_id_schema,
-			vec![Arc::new(StringArray::from(vec!["a".to_string()]))],
-		)
-		.unwrap();
+		let no_id =
+			RecordBatch::try_new(no_id_schema, vec![Arc::new(StringArray::from(vec!["a".to_string()]))]).unwrap();
 
 		let reranker = WeightedRRFReranker::new(60.0, 1.0, 1.0);
 		let err = reranker

@@ -50,11 +50,7 @@ pub struct IndexArgs {
 #[path = "index_tests.rs"]
 mod index_tests;
 
-pub async fn execute(
-	store: &Store,
-	config: &Config,
-	args: &IndexArgs,
-) -> Result<(), anyhow::Error> {
+pub async fn execute(store: &Store, config: &Config, args: &IndexArgs) -> Result<(), anyhow::Error> {
 	// Handle list-files option first
 	if args.list_files {
 		println!("Listing all files currently indexed in the database...");
@@ -251,10 +247,7 @@ pub async fn display_indexing_progress(state: Arc<RwLock<state::IndexState>>) {
 				}
 			} else {
 				// Fallback for when total is not known yet
-				print!(
-					"{} Indexing: {} files",
-					spinner_chars[spinner_idx], current_indexed
-				);
+				print!("{} Indexing: {} files", spinner_chars[spinner_idx], current_indexed);
 			}
 
 			// Add status message if there is one
@@ -290,10 +283,7 @@ pub async fn display_indexing_progress(state: Arc<RwLock<state::IndexState>>) {
 					print!(", GraphRAG: {} blocks", graphrag_blocks);
 				}
 			} else {
-				print!(
-					"{} Indexing: {} files",
-					spinner_chars[spinner_idx], current_indexed
-				);
+				print!("{} Indexing: {} files", spinner_chars[spinner_idx], current_indexed);
 			}
 
 			// Add status message if there is one
@@ -354,7 +344,11 @@ pub fn print_indexing_summary(state: &Arc<RwLock<state::IndexState>>) {
 	} else if final_skipped > 0 {
 		println!(
 			"✓ Indexing complete! {} of {} files processed ({} new, {} unchanged), GraphRAG: {} blocks",
-			final_indexed + final_skipped, final_total, final_indexed, final_skipped, final_graphrag_blocks
+			final_indexed + final_skipped,
+			final_total,
+			final_indexed,
+			final_skipped,
+			final_graphrag_blocks
 		);
 	} else {
 		println!(
@@ -435,11 +429,7 @@ async fn show_graphrag_connections(store: &Store, file_path: &str) -> Result<(),
 			|| ends_with_path_boundary(file_path, stored_path);
 
 		if matches {
-			file_nodes.push((
-				node_ids.value(i),
-				node_types.value(i),
-				descriptions.value(i),
-			));
+			file_nodes.push((node_ids.value(i), node_types.value(i), descriptions.value(i)));
 		}
 	}
 

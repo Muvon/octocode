@@ -221,10 +221,7 @@ async fn generate_descriptions_batch(
 			Some(c) if !c.exports.is_empty() => format!("Exports: {}\n", c.exports.join(", ")),
 			_ => String::new(),
 		};
-		let other_syms: Vec<&str> = match file_ctx
-			.map(|c| &c.all_symbols)
-			.or(siblings.get(&block.path))
-		{
+		let other_syms: Vec<&str> = match file_ctx.map(|c| &c.all_symbols).or(siblings.get(&block.path)) {
 			Some(syms) => syms
 				.iter()
 				.filter(|s| !block.symbols.contains(s))
@@ -265,10 +262,7 @@ async fn generate_descriptions_batch(
 		batch.len()
 	));
 
-	let messages = vec![
-		Message::system(CONTEXTUAL_SYSTEM_PROMPT),
-		Message::user(&prompt),
-	];
+	let messages = vec![Message::system(CONTEXTUAL_SYSTEM_PROMPT), Message::user(&prompt)];
 
 	let json = client.chat_completion_json(messages, None).await?;
 

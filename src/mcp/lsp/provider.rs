@@ -229,19 +229,13 @@ impl LspProvider {
 				}
 				changed
 			} else {
-				debug!(
-					"File {} has no stored content, treating as changed",
-					relative_path
-				);
+				debug!("File {} has no stored content, treating as changed", relative_path);
 				true // No existing content, so it's a change
 			}
 		};
 
 		if !content_changed {
-			debug!(
-				"File {} content unchanged, skipping LSP update",
-				relative_path
-			);
+			debug!("File {} content unchanged, skipping LSP update", relative_path);
 			return Ok(());
 		}
 
@@ -371,17 +365,11 @@ impl LspProvider {
 				}
 				lines[(line - 1) as usize].to_string()
 			} else {
-				return Err(anyhow::anyhow!(
-					"File {} not found in document contents",
-					file_path
-				));
+				return Err(anyhow::anyhow!("File {} not found in document contents", file_path));
 			}
 		};
 
-		debug!(
-			"Looking for symbol '{}' in line {}: '{}'",
-			symbol, line, line_content
-		);
+		debug!("Looking for symbol '{}' in line {}: '{}'", symbol, line, line_content);
 
 		// Strategy 1: Exact match with word boundaries
 		let symbol_regex = format!(r"\b{}\b", regex::escape(symbol));
@@ -398,21 +386,13 @@ impl LspProvider {
 
 		// Strategy 2: Exact substring match
 		if let Some(pos) = line_content.find(symbol) {
-			debug!(
-				"Found symbol '{}' as substring at position {}",
-				symbol,
-				pos + 1
-			);
+			debug!("Found symbol '{}' as substring at position {}", symbol, pos + 1);
 			return Ok((pos + 1) as u32);
 		}
 
 		// Strategy 3: Case-insensitive match
 		if let Some(pos) = line_content.to_lowercase().find(&symbol.to_lowercase()) {
-			debug!(
-				"Found symbol '{}' case-insensitive at position {}",
-				symbol,
-				pos + 1
-			);
+			debug!("Found symbol '{}' case-insensitive at position {}", symbol, pos + 1);
 			return Ok((pos + 1) as u32);
 		}
 
@@ -473,22 +453,14 @@ impl LspProvider {
 	}
 
 	/// Find completion position (end of symbol)
-	async fn find_completion_position(
-		&self,
-		file_path: &str,
-		line: u32,
-		symbol: &str,
-	) -> Result<u32> {
+	async fn find_completion_position(&self, file_path: &str, line: u32, symbol: &str) -> Result<u32> {
 		let start_pos = self.find_symbol_position(file_path, line, symbol).await?;
 		// For completion, position at the end of the symbol
 		Ok(start_pos + symbol.len() as u32)
 	}
 
 	/// Execute LSP goto definition tool with symbol resolution
-	pub async fn execute_goto_definition(
-		&mut self,
-		arguments: &serde_json::Value,
-	) -> Result<String, McpError> {
+	pub async fn execute_goto_definition(&mut self, arguments: &serde_json::Value) -> Result<String, McpError> {
 		// Check if LSP is ready (non-blocking)
 		if !self.is_ready() {
 			return Err(Self::lsp_not_ready_mcp_error("lsp_operation"));
@@ -497,27 +469,16 @@ impl LspProvider {
 		let file_path = arguments
 			.get("file_path")
 			.and_then(|v| v.as_str())
-			.ok_or_else(|| {
-				McpError::invalid_params(
-					"Missing required parameter: file_path",
-					"lsp_goto_definition",
-				)
-			})?;
+			.ok_or_else(|| McpError::invalid_params("Missing required parameter: file_path", "lsp_goto_definition"))?;
 		let line = arguments
 			.get("line")
 			.and_then(|v| v.as_u64())
-			.ok_or_else(|| {
-				McpError::invalid_params("Missing required parameter: line", "lsp_goto_definition")
-			})? as u32;
+			.ok_or_else(|| McpError::invalid_params("Missing required parameter: line", "lsp_goto_definition"))?
+			as u32;
 		let symbol = arguments
 			.get("symbol")
 			.and_then(|v| v.as_str())
-			.ok_or_else(|| {
-				McpError::invalid_params(
-					"Missing required parameter: symbol",
-					"lsp_goto_definition",
-				)
-			})?;
+			.ok_or_else(|| McpError::invalid_params("Missing required parameter: symbol", "lsp_goto_definition"))?;
 
 		// Clean the file path to handle formatted paths like "[Rust file: main.rs]"
 		let clean_file_path = Self::clean_file_path(file_path);
@@ -526,13 +487,9 @@ impl LspProvider {
 		self.ensure_file_opened(&clean_file_path).await?;
 
 		// Find the symbol position on the line
-		let character = self
-			.find_symbol_position(&clean_file_path, line, symbol)
-			.await?;
+		let character = self.find_symbol_position(&clean_file_path, line, symbol).await?;
 
-		let result = self
-			.goto_definition(&clean_file_path, line, character)
-			.await?;
+		let result = self.goto_definition(&clean_file_path, line, character).await?;
 		Ok(result)
 	}
 
@@ -552,10 +509,7 @@ impl LspProvider {
 	}
 
 	/// Execute LSP hover tool
-	pub async fn execute_hover(
-		&mut self,
-		arguments: &serde_json::Value,
-	) -> Result<String, McpError> {
+	pub async fn execute_hover(&mut self, arguments: &serde_json::Value) -> Result<String, McpError> {
 		// Check if LSP is ready (non-blocking)
 		if !self.is_ready() {
 			return Err(Self::lsp_not_ready_mcp_error("lsp_hover"));
@@ -564,21 +518,15 @@ impl LspProvider {
 		let file_path = arguments
 			.get("file_path")
 			.and_then(|v| v.as_str())
-			.ok_or_else(|| {
-				McpError::invalid_params("Missing required parameter: file_path", "lsp_hover")
-			})?;
+			.ok_or_else(|| McpError::invalid_params("Missing required parameter: file_path", "lsp_hover"))?;
 		let line = arguments
 			.get("line")
 			.and_then(|v| v.as_u64())
-			.ok_or_else(|| {
-				McpError::invalid_params("Missing required parameter: line", "lsp_hover")
-			})? as u32;
+			.ok_or_else(|| McpError::invalid_params("Missing required parameter: line", "lsp_hover"))? as u32;
 		let symbol = arguments
 			.get("symbol")
 			.and_then(|v| v.as_str())
-			.ok_or_else(|| {
-				McpError::invalid_params("Missing required parameter: symbol", "lsp_hover")
-			})?;
+			.ok_or_else(|| McpError::invalid_params("Missing required parameter: symbol", "lsp_hover"))?;
 
 		// Clean the file path to handle formatted paths like "[Rust file: main.rs]"
 		let clean_file_path = Self::clean_file_path(file_path);
@@ -587,19 +535,14 @@ impl LspProvider {
 		self.ensure_file_opened(&clean_file_path).await?;
 
 		// Find the symbol position on the line
-		let character = self
-			.find_symbol_position(&clean_file_path, line, symbol)
-			.await?;
+		let character = self.find_symbol_position(&clean_file_path, line, symbol).await?;
 
 		let result = self.hover(&clean_file_path, line, character).await?;
 		Ok(result)
 	}
 
 	/// Execute LSP find references tool
-	pub async fn execute_find_references(
-		&mut self,
-		arguments: &serde_json::Value,
-	) -> Result<String, McpError> {
+	pub async fn execute_find_references(&mut self, arguments: &serde_json::Value) -> Result<String, McpError> {
 		// Check if LSP is ready (non-blocking)
 		if !self.is_ready() {
 			return Err(Self::lsp_not_ready_mcp_error("lsp_operation"));
@@ -629,9 +572,7 @@ impl LspProvider {
 		self.ensure_file_opened(&clean_file_path).await?;
 
 		// Find the symbol position on the line
-		let character = self
-			.find_symbol_position(&clean_file_path, line, symbol)
-			.await?;
+		let character = self.find_symbol_position(&clean_file_path, line, symbol).await?;
 
 		let result = self
 			.find_references(&clean_file_path, line, character, include_declaration)
@@ -641,10 +582,7 @@ impl LspProvider {
 	}
 
 	/// Execute LSP document symbols tool
-	pub async fn execute_document_symbols(
-		&mut self,
-		arguments: &serde_json::Value,
-	) -> Result<String, McpError> {
+	pub async fn execute_document_symbols(&mut self, arguments: &serde_json::Value) -> Result<String, McpError> {
 		// Check if LSP is ready (non-blocking)
 		if !self.is_ready() {
 			return Err(Self::lsp_not_ready_mcp_error("lsp_operation"));
@@ -671,10 +609,7 @@ impl LspProvider {
 	}
 
 	/// Execute LSP workspace symbols tool
-	pub async fn execute_workspace_symbols(
-		&mut self,
-		arguments: &serde_json::Value,
-	) -> Result<String, McpError> {
+	pub async fn execute_workspace_symbols(&mut self, arguments: &serde_json::Value) -> Result<String, McpError> {
 		// Check if LSP is ready (non-blocking)
 		if !self.is_ready() {
 			return Err(Self::lsp_not_ready_mcp_error("lsp_operation"));
@@ -691,10 +626,7 @@ impl LspProvider {
 	}
 
 	/// Execute LSP completion tool
-	pub async fn execute_completion(
-		&mut self,
-		arguments: &serde_json::Value,
-	) -> Result<String, McpError> {
+	pub async fn execute_completion(&mut self, arguments: &serde_json::Value) -> Result<String, McpError> {
 		// Check if LSP is ready (non-blocking)
 		if !self.is_ready() {
 			return Err(Self::lsp_not_ready_mcp_error("lsp_operation"));
@@ -720,9 +652,7 @@ impl LspProvider {
 		self.ensure_file_opened(&clean_file_path).await?;
 
 		// Find the completion position (end of symbol)
-		let character = self
-			.find_completion_position(&clean_file_path, line, symbol)
-			.await?;
+		let character = self.find_completion_position(&clean_file_path, line, symbol).await?;
 
 		let result = self.completion(&clean_file_path, line, character).await?;
 
@@ -742,13 +672,9 @@ impl LspProvider {
 		info!("LSP server process started, sending initialize request...");
 
 		// Convert working directory to a directory URI (with trailing slash)
-		let workspace_uri =
-			url::Url::from_directory_path(&self.working_directory).map_err(|_| {
-				McpError::internal_error(
-					"Failed to convert workspace path to URI",
-					"lsp_workspace_symbols",
-				)
-			})?;
+		let workspace_uri = url::Url::from_directory_path(&self.working_directory).map_err(|_| {
+			McpError::internal_error("Failed to convert workspace path to URI", "lsp_workspace_symbols")
+		})?;
 
 		// Send initialize request with work done progress support
 		let client_capabilities = ClientCapabilities {
@@ -777,10 +703,7 @@ impl LspProvider {
 				}),
 				hover: Some(lsp_types::HoverClientCapabilities {
 					dynamic_registration: Some(false),
-					content_format: Some(vec![
-						lsp_types::MarkupKind::Markdown,
-						lsp_types::MarkupKind::PlainText,
-					]),
+					content_format: Some(vec![lsp_types::MarkupKind::Markdown, lsp_types::MarkupKind::PlainText]),
 				}),
 				definition: Some(lsp_types::GotoCapability {
 					dynamic_registration: Some(false),
@@ -824,10 +747,7 @@ impl LspProvider {
 			self.server_capabilities = Some(init_result.capabilities);
 			debug!("LSP server capabilities: {:?}", self.server_capabilities);
 		} else if let Some(error) = response.error {
-			error!(
-				"LSP initialize request failed: {} ({})",
-				error.message, error.code
-			);
+			error!("LSP initialize request failed: {} ({})", error.message, error.code);
 			return Err(anyhow::anyhow!(
 				"LSP initialize request failed: {} ({})",
 				error.message,
@@ -839,13 +759,10 @@ impl LspProvider {
 
 		// Send initialized notification
 		let notification = LspNotification::initialized()?;
-		self.client
-			.send_notification(notification)
-			.await
-			.map_err(|e| {
-				error!("Failed to send initialized notification: {}", e);
-				anyhow::anyhow!("Failed to send initialized notification: {}", e)
-			})?;
+		self.client.send_notification(notification).await.map_err(|e| {
+			error!("Failed to send initialized notification: {}", e);
+			anyhow::anyhow!("Failed to send initialized notification: {}", e)
+		})?;
 
 		// Mark as initialized - server readiness will be determined by progress notifications
 		self.initialized = true;
@@ -916,13 +833,9 @@ impl LspProvider {
 					"File {} content changed since last LSP update, updating...",
 					relative_path
 				);
-				self.update_file_content(relative_path, &current_content)
-					.await?;
+				self.update_file_content(relative_path, &current_content).await?;
 			} else {
-				debug!(
-					"File {} already opened in LSP with current content",
-					relative_path
-				);
+				debug!("File {} already opened in LSP with current content", relative_path);
 			}
 			return Ok(());
 		}
@@ -1009,10 +922,7 @@ impl LspProvider {
 	}
 
 	/// Create text document identifier from relative path
-	pub(crate) fn text_document_identifier(
-		&self,
-		relative_path: &str,
-	) -> Result<TextDocumentIdentifier> {
+	pub(crate) fn text_document_identifier(&self, relative_path: &str) -> Result<TextDocumentIdentifier> {
 		Ok(TextDocumentIdentifier {
 			uri: self.resolve_file_uri(relative_path)?,
 		})
@@ -1039,10 +949,7 @@ impl LspProvider {
 
 	/// Validate that a position is within document bounds
 	fn validate_position(&self, relative_path: &str, line: u32, character: u32) -> Result<()> {
-		debug!(
-			"Validating position {}:{}:{}",
-			relative_path, line, character
-		);
+		debug!("Validating position {}:{}:{}", relative_path, line, character);
 
 		let contents = self
 			.document_contents
@@ -1073,25 +980,24 @@ impl LspProvider {
 			if let Some(line_content) = lines.get(line_index) {
 				// LSP `character` is a count of UTF-16 code units, not UTF-8 bytes.
 				let line_utf16_len = line_content.encode_utf16().count();
-				debug!(
-					"Line {} has {} UTF-16 units: '{}'",
-					line, line_utf16_len, line_content
-				);
+				debug!("Line {} has {} UTF-16 units: '{}'", line, line_utf16_len, line_content);
 				if character > 0 && character as usize > line_utf16_len + 1 {
-					warn!("Character {} is out of bounds for line {} in file {} (line has {} UTF-16 units)",
-						character, line, relative_path, line_utf16_len);
-					return Err(anyhow::anyhow!(
+					warn!(
 						"Character {} is out of bounds for line {} in file {} (line has {} UTF-16 units)",
 						character, line, relative_path, line_utf16_len
+					);
+					return Err(anyhow::anyhow!(
+						"Character {} is out of bounds for line {} in file {} (line has {} UTF-16 units)",
+						character,
+						line,
+						relative_path,
+						line_utf16_len
 					));
 				}
 			}
 		} else {
 			warn!("File {} is not opened in LSP server", relative_path);
-			return Err(anyhow::anyhow!(
-				"File {} is not opened in LSP server",
-				relative_path
-			));
+			return Err(anyhow::anyhow!("File {} is not opened in LSP server", relative_path));
 		}
 
 		debug!(

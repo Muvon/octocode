@@ -61,16 +61,11 @@ fn private_function() {
 		println!("Extracted imports: {:?}", all_imports);
 		println!("Extracted exports: {:?}", all_exports);
 
-		assert!(
-			!all_imports.is_empty(),
-			"Should extract imports from Rust code"
-		);
+		assert!(!all_imports.is_empty(), "Should extract imports from Rust code");
 
 		// The Rust implementation now extracts the full import paths for GraphRAG
 		assert!(
-			all_imports
-				.iter()
-				.any(|imp| imp == "crate::utils::helper_function"),
+			all_imports.iter().any(|imp| imp == "crate::utils::helper_function"),
 			"Should extract full crate::utils::helper_function import"
 		);
 		assert!(
@@ -78,17 +73,12 @@ fn private_function() {
 			"Should extract full super::config::Config import"
 		);
 		assert!(
-			all_imports
-				.iter()
-				.any(|imp| imp == "std::collections::HashMap"),
+			all_imports.iter().any(|imp| imp == "std::collections::HashMap"),
 			"Should extract full std::collections::HashMap import"
 		);
 
 		// Verify exports are extracted
-		assert!(
-			!all_exports.is_empty(),
-			"Should extract exports from Rust code"
-		);
+		assert!(!all_exports.is_empty(), "Should extract exports from Rust code");
 		assert!(
 			all_exports.iter().any(|exp| exp == "main_function"),
 			"Should extract main_function as export"
@@ -125,8 +115,7 @@ function privateFunction() {
 }
 "#;
 
-		let lang_impl =
-			get_language("javascript").expect("JavaScript language should be available");
+		let lang_impl = get_language("javascript").expect("JavaScript language should be available");
 		let mut parser = Parser::new();
 		parser.set_language(&lang_impl.get_ts_language()).unwrap();
 		let tree = parser.parse(js_code, None).unwrap();
@@ -145,10 +134,7 @@ function privateFunction() {
 		// Verify imports are extracted
 		println!("DEBUG: JavaScript imports extracted: {:?}", all_imports);
 		println!("DEBUG: JavaScript exports extracted: {:?}", all_exports);
-		assert!(
-			!all_imports.is_empty(),
-			"Should extract imports from JavaScript code"
-		);
+		assert!(!all_imports.is_empty(), "Should extract imports from JavaScript code");
 		assert!(
 			all_imports.iter().any(|imp| imp.contains("./utils.js")),
 			"Should extract ./utils.js import"
@@ -159,10 +145,7 @@ function privateFunction() {
 		);
 
 		// Verify exports are extracted
-		assert!(
-			!all_exports.is_empty(),
-			"Should extract exports from JavaScript code"
-		);
+		assert!(!all_exports.is_empty(), "Should extract exports from JavaScript code");
 		assert!(
 			all_exports.iter().any(|exp| exp.contains("mainFunction")),
 			"Should extract mainFunction as export"
@@ -210,10 +193,7 @@ def _private_function():
 		);
 
 		// Verify imports are extracted
-		assert!(
-			!all_imports.is_empty(),
-			"Should extract imports from Python code"
-		);
+		assert!(!all_imports.is_empty(), "Should extract imports from Python code");
 		assert!(
 			all_imports.iter().any(|imp| imp.contains(".utils")),
 			"Should extract .utils import"
@@ -224,10 +204,7 @@ def _private_function():
 		);
 
 		// Python exports all public functions/classes by default
-		assert!(
-			!all_exports.is_empty(),
-			"Should extract exports from Python code"
-		);
+		assert!(!all_exports.is_empty(), "Should extract exports from Python code");
 		assert!(
 			all_exports.iter().any(|exp| exp.contains("main_function")),
 			"Should extract main_function as export"
@@ -258,8 +235,7 @@ def _private_function():
 		let all_files = crate::indexer::languages::resolution_utils::FileRegistry::new(&all_files);
 
 		// Test simple crate:: import resolution
-		let resolved =
-			rust_lang.resolve_import("crate::utils::helper_function", "src/main.rs", &all_files);
+		let resolved = rust_lang.resolve_import("crate::utils::helper_function", "src/main.rs", &all_files);
 		assert_eq!(
 			resolved,
 			Some("src/utils.rs".to_string()),
@@ -291,8 +267,7 @@ def _private_function():
 		);
 
 		// Test module directory pattern (utils as directory with mod.rs)
-		let resolved =
-			rust_lang.resolve_import("crate::utils::helper_function", "src/main.rs", &all_files);
+		let resolved = rust_lang.resolve_import("crate::utils::helper_function", "src/main.rs", &all_files);
 		// Should prefer single file over mod.rs when both exist
 		assert_eq!(
 			resolved,
@@ -309,13 +284,8 @@ def _private_function():
 			"src/config/features.rs".to_string(),
 			"src/main.rs".to_string(),
 		];
-		let files_with_mod_only =
-			crate::indexer::languages::resolution_utils::FileRegistry::new(&files_with_mod_only);
-		let resolved = rust_lang.resolve_import(
-			"crate::utils::helper_function",
-			"src/main.rs",
-			&files_with_mod_only,
-		);
+		let files_with_mod_only = crate::indexer::languages::resolution_utils::FileRegistry::new(&files_with_mod_only);
+		let resolved = rust_lang.resolve_import("crate::utils::helper_function", "src/main.rs", &files_with_mod_only);
 		assert_eq!(
 			resolved,
 			Some("src/utils/mod.rs".to_string()),
@@ -323,8 +293,7 @@ def _private_function():
 		);
 
 		// Test super:: import resolution
-		let resolved =
-			rust_lang.resolve_import("super::config::Config", "src/utils.rs", &all_files);
+		let resolved = rust_lang.resolve_import("super::config::Config", "src/utils.rs", &all_files);
 		assert_eq!(
 			resolved,
 			Some("src/config.rs".to_string()),
@@ -332,8 +301,7 @@ def _private_function():
 		);
 
 		// Test self:: import resolution
-		let resolved =
-			rust_lang.resolve_import("self::helper_function", "src/utils.rs", &all_files);
+		let resolved = rust_lang.resolve_import("self::helper_function", "src/utils.rs", &all_files);
 		assert_eq!(
 			resolved,
 			Some("src/utils.rs".to_string()),
@@ -651,8 +619,7 @@ def _private_function():
 		let all_files = crate::indexer::languages::resolution_utils::FileRegistry::new(&all_files);
 
 		// Test relative component import
-		let resolved =
-			svelte_lang.resolve_import("./components/Button.svelte", "src/App.svelte", &all_files);
+		let resolved = svelte_lang.resolve_import("./components/Button.svelte", "src/App.svelte", &all_files);
 		assert_eq!(
 			resolved,
 			Some("src/components/Button.svelte".to_string()),
@@ -755,17 +722,10 @@ def _private_function():
 		let mut relationships = Vec::new();
 
 		// Test relationship discovery
-		RelationshipDiscovery::discover_import_relationships(
-			&main_node,
-			&all_nodes,
-			&mut relationships,
-		);
+		RelationshipDiscovery::discover_import_relationships(&main_node, &all_nodes, &mut relationships);
 
 		// Verify relationships were created
-		assert!(
-			!relationships.is_empty(),
-			"Should discover relationships between nodes"
-		);
+		assert!(!relationships.is_empty(), "Should discover relationships between nodes");
 
 		// Check for specific relationships
 		let main_to_utils = relationships.iter().find(|r| {
@@ -773,20 +733,14 @@ def _private_function():
 				&& r.target == "src/utils.rs"
 				&& r.relation_type == crate::indexer::graphrag::types::RelationType::Imports
 		});
-		assert!(
-			main_to_utils.is_some(),
-			"Should create main -> utils relationship"
-		);
+		assert!(main_to_utils.is_some(), "Should create main -> utils relationship");
 
 		let main_to_config = relationships.iter().find(|r| {
 			r.source == "src/main.rs"
 				&& r.target == "src/config.rs"
 				&& r.relation_type == crate::indexer::graphrag::types::RelationType::Imports
 		});
-		assert!(
-			main_to_config.is_some(),
-			"Should create main -> config relationship"
-		);
+		assert!(main_to_config.is_some(), "Should create main -> config relationship");
 
 		// Check relationship confidence
 		if let Some(rel) = main_to_utils {
@@ -813,10 +767,7 @@ def _private_function():
 
 		// Test local include in same directory
 		let resolved = lang_impl.resolve_import("\"helper.h\"", "src/main.cpp", &files);
-		assert!(
-			resolved.is_some(),
-			"Should resolve local include in same directory"
-		);
+		assert!(resolved.is_some(), "Should resolve local include in same directory");
 
 		// Test system include that exists in project
 		let resolved = lang_impl.resolve_import("config.hpp", "src/main.cpp", &files);
@@ -824,10 +775,7 @@ def _private_function():
 
 		// Test non-existent include
 		let resolved = lang_impl.resolve_import("\"nonexistent.h\"", "src/main.cpp", &files);
-		assert!(
-			resolved.is_none(),
-			"Should not resolve non-existent include"
-		);
+		assert!(resolved.is_none(), "Should not resolve non-existent include");
 	}
 
 	/// Test edge cases for Ruby import resolution
@@ -845,8 +793,7 @@ def _private_function():
 		let files = crate::indexer::languages::resolution_utils::FileRegistry::new(&files);
 
 		// Test require_relative
-		let resolved =
-			lang_impl.resolve_import("relative:../config/database", "app/main.rb", &files);
+		let resolved = lang_impl.resolve_import("relative:../config/database", "app/main.rb", &files);
 		assert!(resolved.is_some(), "Should resolve require_relative");
 
 		// Test absolute require
@@ -873,23 +820,16 @@ def _private_function():
 		let files = crate::indexer::languages::resolution_utils::FileRegistry::new(&files);
 
 		// Test relative import with extension
-		let resolved =
-			lang_impl.resolve_import("./components/button.css", "styles/main.css", &files);
+		let resolved = lang_impl.resolve_import("./components/button.css", "styles/main.css", &files);
 		assert!(resolved.is_some(), "Should resolve relative CSS import");
 
 		// Test import without extension
 		let resolved = lang_impl.resolve_import("./utils/variables", "styles/main.css", &files);
-		assert!(
-			resolved.is_some(),
-			"Should resolve CSS import without extension"
-		);
+		assert!(resolved.is_some(), "Should resolve CSS import without extension");
 
 		// Test that the function handles unknown imports gracefully
 		let resolved = lang_impl.resolve_import("unknown-module", "styles/main.css", &files);
-		assert!(
-			resolved.is_none(),
-			"Should handle unknown imports gracefully"
-		);
+		assert!(resolved.is_none(), "Should handle unknown imports gracefully");
 	}
 
 	/// Test cross-platform path handling
@@ -906,10 +846,7 @@ def _private_function():
 		let files = crate::indexer::languages::resolution_utils::FileRegistry::new(&files);
 
 		let resolved = lang_impl.resolve_import("crate::utils::helper", "src/main.rs", &files);
-		assert!(
-			resolved.is_some(),
-			"Should handle path resolution correctly"
-		);
+		assert!(resolved.is_some(), "Should handle path resolution correctly");
 
 		// Test that the function doesn't crash with different path formats
 		let resolved = lang_impl.resolve_import("crate::config", "src/main.rs", &files);
@@ -919,8 +856,7 @@ def _private_function():
 	/// Test performance with large file lists
 	#[tokio::test]
 	async fn test_performance_large_filelist() {
-		let lang_impl =
-			get_language("javascript").expect("JavaScript language should be available");
+		let lang_impl = get_language("javascript").expect("JavaScript language should be available");
 
 		// Create a large file list (1000 files)
 		let mut files = Vec::new();
@@ -934,10 +870,7 @@ def _private_function():
 		let resolved = lang_impl.resolve_import("./utils/helper", "src/main.js", &files);
 		let duration = start.elapsed();
 
-		assert!(
-			resolved.is_some(),
-			"Should resolve import in large file list"
-		);
+		assert!(resolved.is_some(), "Should resolve import in large file list");
 		assert!(
 			duration.as_millis() < 100,
 			"Should resolve quickly even with large file list"
@@ -958,10 +891,7 @@ def _private_function():
 
 		// Test malformed relative import
 		let resolved = lang_impl.resolve_import("...invalid", "src/main.py", &files);
-		assert!(
-			resolved.is_none(),
-			"Should handle malformed relative import"
-		);
+		assert!(resolved.is_none(), "Should handle malformed relative import");
 
 		// Test very long import path
 		let long_path = "a/".repeat(100) + "module";
@@ -1021,31 +951,22 @@ fn helper_function(x: i32) -> i32 {
 		let callee_names: Vec<&str> = calls.iter().map(|(_, call)| call.name.as_str()).collect();
 		println!("Rust calls: {:?}", callee_names);
 
-		assert!(
-			callee_names.contains(&"new"),
-			"Should extract Config::new() call"
-		);
-		assert!(calls.iter().any(|(_, call)| {
-			call.name == "new" && call.qualifier.as_deref() == Some("Config")
-		}));
-		assert!(calls.iter().any(|(_, call)| {
-			call.name == "run" && call.qualifier.as_deref() == Some("config")
-		}));
-		assert!(calls.iter().any(|(_, call)| {
-			call.name == "process" && call.qualifier.as_deref() == Some("other_module")
-		}));
+		assert!(callee_names.contains(&"new"), "Should extract Config::new() call");
+		assert!(calls
+			.iter()
+			.any(|(_, call)| { call.name == "new" && call.qualifier.as_deref() == Some("Config") }));
+		assert!(calls
+			.iter()
+			.any(|(_, call)| { call.name == "run" && call.qualifier.as_deref() == Some("config") }));
+		assert!(calls
+			.iter()
+			.any(|(_, call)| { call.name == "process" && call.qualifier.as_deref() == Some("other_module") }));
 		assert!(
 			callee_names.contains(&"helper_function"),
 			"Should extract helper_function() call"
 		);
-		assert!(
-			callee_names.contains(&"println"),
-			"Should extract println! macro call"
-		);
-		assert!(
-			callee_names.contains(&"run"),
-			"Should extract config.run() method call"
-		);
+		assert!(callee_names.contains(&"println"), "Should extract println! macro call");
+		assert!(callee_names.contains(&"run"), "Should extract config.run() method call");
 		assert!(
 			callee_names.contains(&"process"),
 			"Should extract other_module::process() call"
@@ -1077,21 +998,15 @@ def helper(x):
 		let callee_names: Vec<&str> = calls.iter().map(|(_, call)| call.name.as_str()).collect();
 		println!("Python calls: {:?}", callee_names);
 
-		assert!(
-			callee_names.contains(&"helper"),
-			"Should extract helper() call"
-		);
-		assert!(
-			callee_names.contains(&"print"),
-			"Should extract print() call"
-		);
+		assert!(callee_names.contains(&"helper"), "Should extract helper() call");
+		assert!(callee_names.contains(&"print"), "Should extract print() call");
 		assert!(
 			callee_names.contains(&"process_data"),
 			"Should extract process_data() call"
 		);
-		assert!(calls.iter().any(|(_, call)| {
-			call.name == "join" && call.qualifier.as_deref() == Some("os::path")
-		}));
+		assert!(calls
+			.iter()
+			.any(|(_, call)| { call.name == "join" && call.qualifier.as_deref() == Some("os::path") }));
 	}
 
 	#[test]
@@ -1117,21 +1032,15 @@ function main() {
 		let callee_names: Vec<&str> = calls.iter().map(|(_, call)| call.name.as_str()).collect();
 		println!("JavaScript calls: {:?}", callee_names);
 
-		assert!(
-			callee_names.contains(&"helper"),
-			"Should extract helper() call"
-		);
-		assert!(
-			callee_names.contains(&"log"),
-			"Should extract console.log() call"
-		);
+		assert!(callee_names.contains(&"helper"), "Should extract helper() call");
+		assert!(callee_names.contains(&"log"), "Should extract console.log() call");
 		assert!(
 			callee_names.contains(&"MyClass"),
 			"Should extract new MyClass() constructor"
 		);
-		assert!(calls.iter().any(|(_, call)| {
-			call.name == "log" && call.qualifier.as_deref() == Some("console")
-		}));
+		assert!(calls
+			.iter()
+			.any(|(_, call)| { call.name == "log" && call.qualifier.as_deref() == Some("console") }));
 	}
 
 	#[test]
@@ -1162,21 +1071,12 @@ func helper(x int) int {
 		let callee_names: Vec<&str> = calls.iter().map(|(_, call)| call.name.as_str()).collect();
 		println!("Go calls: {:?}", callee_names);
 
-		assert!(
-			callee_names.contains(&"helper"),
-			"Should extract helper() call"
-		);
-		assert!(
-			callee_names.contains(&"Println"),
-			"Should extract fmt.Println() call"
-		);
-		assert!(
-			callee_names.contains(&"process"),
-			"Should extract process() call"
-		);
-		assert!(calls.iter().any(|(_, call)| {
-			call.name == "Println" && call.qualifier.as_deref() == Some("fmt")
-		}));
+		assert!(callee_names.contains(&"helper"), "Should extract helper() call");
+		assert!(callee_names.contains(&"Println"), "Should extract fmt.Println() call");
+		assert!(callee_names.contains(&"process"), "Should extract process() call");
+		assert!(calls
+			.iter()
+			.any(|(_, call)| { call.name == "Println" && call.qualifier.as_deref() == Some("fmt") }));
 	}
 
 	#[test]
@@ -1260,21 +1160,12 @@ public class Main {
 		let callee_names: Vec<&str> = calls.iter().map(|(_, call)| call.name.as_str()).collect();
 		println!("Java calls: {:?}", callee_names);
 
-		assert!(
-			callee_names.contains(&"helper"),
-			"Should extract helper() call"
-		);
-		assert!(
-			callee_names.contains(&"println"),
-			"Should extract println call"
-		);
-		assert!(
-			callee_names.contains(&"MyClass"),
-			"Should extract new MyClass()"
-		);
-		assert!(calls.iter().any(|(_, call)| {
-			call.name == "println" && call.qualifier.as_deref() == Some("System::out")
-		}));
+		assert!(callee_names.contains(&"helper"), "Should extract helper() call");
+		assert!(callee_names.contains(&"println"), "Should extract println call");
+		assert!(callee_names.contains(&"MyClass"), "Should extract new MyClass()");
+		assert!(calls
+			.iter()
+			.any(|(_, call)| { call.name == "println" && call.qualifier.as_deref() == Some("System::out") }));
 	}
 
 	#[test]
@@ -1320,16 +1211,13 @@ function main() {
 		let callee_names: Vec<&str> = calls.iter().map(|(_, call)| call.name.as_str()).collect();
 		println!("PHP calls: {:?}", callee_names);
 
-		assert!(
-			callee_names.contains(&"helper"),
-			"Should extract helper() call"
-		);
-		assert!(calls.iter().any(|(_, call)| {
-			call.name == "method" && call.qualifier.as_deref() == Some("$obj")
-		}));
-		assert!(calls.iter().any(|(_, call)| {
-			call.name == "staticMethod" && call.qualifier.as_deref() == Some("ClassName")
-		}));
+		assert!(callee_names.contains(&"helper"), "Should extract helper() call");
+		assert!(calls
+			.iter()
+			.any(|(_, call)| { call.name == "method" && call.qualifier.as_deref() == Some("$obj") }));
+		assert!(calls
+			.iter()
+			.any(|(_, call)| { call.name == "staticMethod" && call.qualifier.as_deref() == Some("ClassName") }));
 	}
 
 	#[test]
@@ -1352,17 +1240,11 @@ end
 		println!("Ruby calls: {:?}", callee_names);
 
 		// Should have some calls, but not require/require_relative (filtered)
-		assert!(
-			!callee_names.is_empty(),
-			"Should extract at least some Ruby calls"
-		);
-		assert!(
-			!callee_names.contains(&"require"),
-			"Should filter out require"
-		);
-		assert!(calls.iter().any(|(_, call)| {
-			call.name == "method" && call.qualifier.as_deref() == Some("obj")
-		}));
+		assert!(!callee_names.is_empty(), "Should extract at least some Ruby calls");
+		assert!(!callee_names.contains(&"require"), "Should filter out require");
+		assert!(calls
+			.iter()
+			.any(|(_, call)| { call.name == "method" && call.qualifier.as_deref() == Some("obj") }));
 	}
 
 	#[test]
@@ -1384,22 +1266,13 @@ end
 		let callee_names: Vec<&str> = calls.iter().map(|(_, call)| call.name.as_str()).collect();
 		println!("Lua calls: {:?}", callee_names);
 
-		assert!(
-			callee_names.contains(&"helper"),
-			"Should extract helper() call"
-		);
-		assert!(
-			callee_names.contains(&"print"),
-			"Should extract print() call"
-		);
+		assert!(callee_names.contains(&"helper"), "Should extract helper() call");
+		assert!(callee_names.contains(&"print"), "Should extract print() call");
 		// require should be filtered
-		assert!(
-			!callee_names.contains(&"require"),
-			"Should filter out require"
-		);
-		assert!(calls.iter().any(|(_, call)| {
-			call.name == "method" && call.qualifier.as_deref() == Some("other")
-		}));
+		assert!(!callee_names.contains(&"require"), "Should filter out require");
+		assert!(calls
+			.iter()
+			.any(|(_, call)| { call.name == "method" && call.qualifier.as_deref() == Some("other") }));
 	}
 
 	#[test]
@@ -1420,19 +1293,13 @@ my_function() {
 		let callee_names: Vec<&str> = calls.iter().map(|(_, call)| call.name.as_str()).collect();
 		println!("Bash calls: {:?}", callee_names);
 
-		assert!(
-			callee_names.contains(&"echo"),
-			"Should extract echo command"
-		);
+		assert!(callee_names.contains(&"echo"), "Should extract echo command");
 		assert!(
 			callee_names.contains(&"other_func"),
 			"Should extract other_func command"
 		);
 		// source/. should be filtered
-		assert!(
-			!callee_names.contains(&"source"),
-			"Should filter out source"
-		);
+		assert!(!callee_names.contains(&"source"), "Should filter out source");
 	}
 
 	#[test]
@@ -1456,17 +1323,11 @@ function main(): void {
 		let callee_names: Vec<&str> = calls.iter().map(|(_, call)| call.name.as_str()).collect();
 		println!("TypeScript calls: {:?}", callee_names);
 
-		assert!(
-			callee_names.contains(&"helper"),
-			"Should extract helper() call"
-		);
-		assert!(
-			callee_names.contains(&"log"),
-			"Should extract console.log() call"
-		);
-		assert!(calls.iter().any(|(_, call)| {
-			call.name == "log" && call.qualifier.as_deref() == Some("console")
-		}));
+		assert!(callee_names.contains(&"helper"), "Should extract helper() call");
+		assert!(callee_names.contains(&"log"), "Should extract console.log() call");
+		assert!(calls
+			.iter()
+			.any(|(_, call)| { call.name == "log" && call.qualifier.as_deref() == Some("console") }));
 	}
 
 	/// Helper function to extract imports/exports recursively (same as in builder.rs)
@@ -1552,10 +1413,9 @@ function main(): void {
 		let new_files = vec![source.clone()];
 
 		// Call the SAME function used at runtime
-		let relationships =
-			RelationshipDiscovery::discover_relationships_efficiently(&new_files, &all_nodes)
-				.await
-				.expect("relationship discovery should succeed");
+		let relationships = RelationshipDiscovery::discover_relationships_efficiently(&new_files, &all_nodes)
+			.await
+			.expect("relationship discovery should succeed");
 
 		// Find References relationships (not just sibling_module)
 		let refs: Vec<_> = relationships
@@ -1618,11 +1478,7 @@ function main(): void {
 		.unwrap();
 		std::fs::write(root.join("b.py"), "def target():\n    return 2\n").unwrap();
 		// Positive control: an explicit import must still project to a file edge.
-		std::fs::write(
-			root.join("c.py"),
-			"from b import target\n\ndef run():\n    target()\n",
-		)
-		.unwrap();
+		std::fs::write(root.join("c.py"), "from b import target\n\ndef run():\n    target()\n").unwrap();
 
 		let graph = RuntimeGraphCache::default().graph(&root).await.unwrap();
 		std::fs::remove_dir_all(&root).unwrap();
@@ -1637,9 +1493,7 @@ function main(): void {
 			.collect();
 
 		assert!(
-			!calls
-				.iter()
-				.any(|r| r.source == "a.py" && r.target == "b.py"),
+			!calls.iter().any(|r| r.source == "a.py" && r.target == "b.py"),
 			"call to locally-defined target() must not resolve to b.py: {:?}",
 			shown
 		);
@@ -1731,10 +1585,9 @@ function main(): void {
 		};
 
 		let all = vec![api.clone(), auth.clone(), base.clone()];
-		let relationships =
-			RelationshipDiscovery::discover_relationships_efficiently(&[api, auth], &all)
-				.await
-				.unwrap();
+		let relationships = RelationshipDiscovery::discover_relationships_efficiently(&[api, auth], &all)
+			.await
+			.unwrap();
 
 		let imports: Vec<_> = relationships
 			.iter()

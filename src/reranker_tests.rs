@@ -155,10 +155,7 @@ mod tests {
 			.await
 			.expect_err("a model string without ':' must not reach the provider");
 		let message = err.to_string();
-		assert!(
-			message.contains("Invalid reranker model format"),
-			"{message}"
-		);
+		assert!(message.contains("Invalid reranker model format"), "{message}");
 		assert!(message.contains("provider:model"), "{message}");
 	}
 
@@ -178,9 +175,7 @@ mod tests {
 		let cfg = config(false, "voyage:rerank-2.5");
 
 		let docs = document_blocks(3);
-		let out = rerank_doc_blocks_with_octolib("q", docs.clone(), &cfg)
-			.await
-			.unwrap();
+		let out = rerank_doc_blocks_with_octolib("q", docs.clone(), &cfg).await.unwrap();
 		assert_eq!(
 			out.iter().map(|b| b.path.as_str()).collect::<Vec<_>>(),
 			docs.iter().map(|b| b.path.as_str()).collect::<Vec<_>>()
@@ -188,9 +183,7 @@ mod tests {
 		assert!(out.iter().all(|b| b.distance.is_none()));
 
 		let texts = text_blocks(3);
-		let out = rerank_text_blocks_with_octolib("q", texts.clone(), &cfg)
-			.await
-			.unwrap();
+		let out = rerank_text_blocks_with_octolib("q", texts.clone(), &cfg).await.unwrap();
 		assert_eq!(out[0].content, texts[0].content);
 		assert_eq!(out[2].content, texts[2].content);
 
@@ -223,15 +216,11 @@ mod tests {
 		assert!(rerank_text_blocks_with_octolib("q", text_blocks(1), &cfg)
 			.await
 			.is_err());
-		assert!(
-			rerank_doc_blocks_with_octolib("q", document_blocks(1), &cfg)
-				.await
-				.is_err()
-		);
-		assert!(
-			rerank_commit_blocks_with_octolib("q", commit_blocks(1), &cfg)
-				.await
-				.is_err()
-		);
+		assert!(rerank_doc_blocks_with_octolib("q", document_blocks(1), &cfg)
+			.await
+			.is_err());
+		assert!(rerank_commit_blocks_with_octolib("q", commit_blocks(1), &cfg)
+			.await
+			.is_err());
 	}
 }

@@ -39,9 +39,7 @@ mod tests {
 		config.search.reasoning.enabled = false;
 
 		let input = blocks(3);
-		let out = reason_rank_code_blocks("query", input.clone(), &config)
-			.await
-			.unwrap();
+		let out = reason_rank_code_blocks("query", input.clone(), &config).await.unwrap();
 		assert_eq!(out.len(), 3);
 		assert_eq!(out[0].path, input[0].path);
 		assert_eq!(out[0].distance, input[0].distance);
@@ -66,14 +64,8 @@ mod tests {
 		config.search.reasoning.model = "no-provider-prefix".to_string();
 		config.search.reasoning.max_candidates = 2;
 
-		let out = reason_rank_code_blocks("query", blocks(5), &config)
-			.await
-			.unwrap();
-		assert_eq!(
-			out.len(),
-			2,
-			"the candidate pool is truncated before the call"
-		);
+		let out = reason_rank_code_blocks("query", blocks(5), &config).await.unwrap();
+		assert_eq!(out.len(), 2, "the candidate pool is truncated before the call");
 		assert_eq!(out[0].path, "src/f0.rs");
 		assert_eq!(out[1].path, "src/f1.rs");
 	}
@@ -85,9 +77,7 @@ mod tests {
 		config.search.reasoning.model = "no-provider-prefix".to_string();
 		config.search.reasoning.max_candidates = 0;
 
-		let out = reason_rank_code_blocks("query", blocks(3), &config)
-			.await
-			.unwrap();
+		let out = reason_rank_code_blocks("query", blocks(3), &config).await.unwrap();
 		assert_eq!(out.len(), 1);
 	}
 
@@ -115,14 +105,9 @@ mod tests {
 		config.search.reasoning.model = "no-provider-prefix".to_string();
 
 		let input = blocks(3);
-		let out = reason_rank_code_blocks("query", input.clone(), &config)
-			.await
-			.unwrap();
+		let out = reason_rank_code_blocks("query", input.clone(), &config).await.unwrap();
 		let distances: Vec<_> = out.iter().map(|b| b.distance).collect();
-		assert_eq!(
-			distances,
-			input.iter().map(|b| b.distance).collect::<Vec<_>>()
-		);
+		assert_eq!(distances, input.iter().map(|b| b.distance).collect::<Vec<_>>());
 	}
 
 	#[tokio::test]
@@ -135,9 +120,7 @@ mod tests {
 		config.search.reasoning.max_candidates = 10;
 		config.search.reasoning.final_top_k = 1;
 
-		let out = reason_rank_code_blocks("query", blocks(4), &config)
-			.await
-			.unwrap();
+		let out = reason_rank_code_blocks("query", blocks(4), &config).await.unwrap();
 		assert_eq!(out.len(), 4);
 	}
 
@@ -148,9 +131,7 @@ mod tests {
 		config.search.reasoning.model = "no-provider-prefix".to_string();
 		config.search.reasoning.max_candidates = 100;
 
-		let out = reason_rank_code_blocks("query", blocks(3), &config)
-			.await
-			.unwrap();
+		let out = reason_rank_code_blocks("query", blocks(3), &config).await.unwrap();
 		assert_eq!(out.len(), 3);
 		assert_eq!(out[2].path, "src/f2.rs");
 	}
@@ -163,9 +144,7 @@ mod tests {
 
 		let mut input = blocks(1);
 		input[0].symbols.clear();
-		let out = reason_rank_code_blocks("query", input, &config)
-			.await
-			.unwrap();
+		let out = reason_rank_code_blocks("query", input, &config).await.unwrap();
 		assert_eq!(out.len(), 1);
 	}
 }

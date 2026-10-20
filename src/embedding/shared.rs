@@ -49,9 +49,7 @@ use super::InputType;
 
 /// Deferred construction of the real provider — only the election winner
 /// runs it, so clients never pay the model load.
-type BuildInner = Box<
-	dyn FnOnce() -> Pin<Box<dyn Future<Output = Result<Box<dyn EmbeddingProvider>>> + Send>> + Send,
->;
+type BuildInner = Box<dyn FnOnce() -> Pin<Box<dyn Future<Output = Result<Box<dyn EmbeddingProvider>>> + Send>> + Send>;
 
 /// Endpoint descriptor written by the owner, read by clients.
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq)]
@@ -80,13 +78,8 @@ struct Auth {
 #[derive(Serialize, Deserialize)]
 #[serde(tag = "kind")]
 enum Request {
-	Single {
-		text: String,
-	},
-	Batch {
-		texts: Vec<String>,
-		input_type: String,
-	},
+	Single { text: String },
+	Batch { texts: Vec<String>, input_type: String },
 }
 
 #[derive(Serialize, Deserialize)]
@@ -97,16 +90,11 @@ struct Response {
 }
 
 /// Join the machine-wide sharing service for `model_key`.
-pub(super) async fn join(
-	model_key: &str,
-	provider: EmbeddingProviderType,
-	model: &str,
-) -> Result<SharedProvider> {
+pub(super) async fn join(model_key: &str, provider: EmbeddingProviderType, model: &str) -> Result<SharedProvider> {
 	let dir = crate::storage::get_system_storage_dir()?.join("run");
 	let model = model.to_string();
-	let build: BuildInner = Box::new(move || {
-		Box::pin(async move { create_embedding_provider_from_parts(&provider, &model).await })
-	});
+	let build: BuildInner =
+		Box::new(move || Box::pin(async move { create_embedding_provider_from_parts(&provider, &model).await }));
 	join_in(&dir, model_key, build).await
 }
 
@@ -126,8 +114,7 @@ async fn join_in(dir: &Path, model_key: &str, build: BuildInner) -> Result<Share
 		// not listening, or a fast client would get a refusal and evict a
 		// live owner. Connections made during the model load queue in the
 		// accept backlog until the serve loop starts.
-		let listener =
-			TcpListener::bind(SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0))).await?;
+		let listener = TcpListener::bind(SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0))).await?;
 		let port = listener.local_addr()?.port();
 		let token = format!("{}{}", uuid::Uuid::new_v4(), uuid::Uuid::new_v4()).replace('-', "");
 		let endpoint = Endpoint {
@@ -152,14 +139,8 @@ async fn join_in(dir: &Path, model_key: &str, build: BuildInner) -> Result<Share
 				let dim = inner.get_dimension();
 				let revision = inner.model_revision().await.unwrap_or(None);
 				serve(listener, token, Arc::clone(&inner), revision.clone(), dim);
-				tracing::debug!(
-					"embedding service: elected owner for '{model_key}' on port {port}"
-				);
-				return Ok(SharedProvider::Owner {
-					inner,
-					revision,
-					dim,
-				});
+				tracing::debug!("embedding service: elected owner for '{model_key}' on port {port}");
+				return Ok(SharedProvider::Owner { inner, revision, dim });
 			}
 			Ok(false) => {
 				drop(listener);
@@ -215,11 +196,7 @@ impl EmbeddingProvider for SharedProvider {
 		match self {
 			SharedProvider::Owner { inner, .. } => inner.generate_embedding(text).await,
 			SharedProvider::Client { client, .. } => {
-				let resp = client
-					.request(&Request::Single {
-						text: text.to_string(),
-					})
-					.await?;
+				let resp = client.request(&Request::Single { text: text.to_string() }).await?;
 				let vector = resp
 					.vectors
 					.filter(|v| v.len() == 1)
@@ -247,9 +224,7 @@ impl EmbeddingProvider for SharedProvider {
 		input_type: InputType,
 	) -> Result<(Vec<Vec<f32>>, EmbeddingUsage)> {
 		match self {
-			SharedProvider::Owner { inner, .. } => {
-				inner.generate_embeddings_batch(texts, input_type).await
-			}
+			SharedProvider::Owner { inner, .. } => inner.generate_embeddings_batch(texts, input_type).await,
 			SharedProvider::Client { client, .. } => {
 				let resp = client
 					.request(&Request::Batch {
@@ -258,10 +233,7 @@ impl EmbeddingProvider for SharedProvider {
 					})
 					.await?;
 				let vectors = resp.vectors.ok_or_else(|| {
-					anyhow::anyhow!(
-						"embedding service batch failed: {}",
-						resp.error.unwrap_or_default()
-					)
+					anyhow::anyhow!("embedding service batch failed: {}", resp.error.unwrap_or_default())
 				})?;
 				Ok((
 					vectors,
@@ -373,10 +345,9 @@ fn claim(path: &Path, endpoint: &Endpoint) -> Result<bool> {
 }
 
 fn read_endpoint(path: &Path, model_key: &str) -> Result<Endpoint> {
-	let raw = std::fs::read_to_string(path)
-		.with_context(|| format!("failed to read {}", path.display()))?;
-	let endpoint: Endpoint = serde_json::from_str(&raw)
-		.with_context(|| format!("malformed endpoint file {}", path.display()))?;
+	let raw = std::fs::read_to_string(path).with_context(|| format!("failed to read {}", path.display()))?;
+	let endpoint: Endpoint =
+		serde_json::from_str(&raw).with_context(|| format!("malformed endpoint file {}", path.display()))?;
 	if endpoint.model != model_key {
 		bail!("endpoint file advertises model {}", endpoint.model);
 	}
@@ -424,12 +395,7 @@ fn serve(
 	});
 }
 
-async fn handle(
-	stream: TcpStream,
-	token: &str,
-	hello: &str,
-	inner: &dyn EmbeddingProvider,
-) -> Result<()> {
+async fn handle(stream: TcpStream, token: &str, hello: &str, inner: &dyn EmbeddingProvider) -> Result<()> {
 	stream.set_nodelay(true)?;
 	let mut reader = BufReader::new(stream);
 	let mut line = String::new();

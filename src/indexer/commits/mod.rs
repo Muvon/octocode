@@ -57,11 +57,7 @@ pub async fn index_commits(
 	}
 
 	if !quiet {
-		eprintln!(
-			"📝 Indexing {} commits from branch '{}'...",
-			commits.len(),
-			branch
-		);
+		eprintln!("📝 Indexing {} commits from branch '{}'...", commits.len(), branch);
 	}
 
 	{
@@ -88,9 +84,7 @@ pub async fn index_commits(
 	for entry in &commits {
 		let files = match batched_files.as_mut() {
 			Some(map) => map.remove(&entry.hash).unwrap_or_default(),
-			None => {
-				GitUtils::get_changed_files_for_commit(repo_path, &entry.hash).unwrap_or_default()
-			}
+			None => GitUtils::get_changed_files_for_commit(repo_path, &entry.hash).unwrap_or_default(),
 		};
 		let files_json = serde_json::to_string(&files).unwrap_or_else(|_| "[]".to_string());
 
@@ -200,8 +194,7 @@ async fn generate_descriptions(
 		let mut prompt = String::new();
 
 		for (i, entry) in chunk.iter().enumerate() {
-			let diff = GitUtils::get_commit_diff(repo_path, &entry.hash, MAX_DIFF_CHARS)
-				.unwrap_or_default();
+			let diff = GitUtils::get_commit_diff(repo_path, &entry.hash, MAX_DIFF_CHARS).unwrap_or_default();
 
 			prompt.push_str(&format!(
 				"=== COMMIT {} ===\nHash: {}\nMessage: {}\nDiff:\n{}\n\n",
@@ -241,11 +234,7 @@ async fn generate_descriptions(
 			}
 			Err(e) => {
 				if !quiet {
-					eprintln!(
-						"⚠️  AI description batch failed for {} commits: {}",
-						chunk.len(),
-						e
-					);
+					eprintln!("⚠️  AI description batch failed for {} commits: {}", chunk.len(), e);
 				}
 			}
 		}

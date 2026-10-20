@@ -128,10 +128,7 @@ pub fn signatures_to_markdown(signatures: &[FileSignature]) -> String {
 		return markdown;
 	}
 
-	markdown.push_str(&format!(
-		"# Found signatures in {} files\n\n",
-		signatures.len()
-	));
+	markdown.push_str(&format!("# Found signatures in {} files\n\n", signatures.len()));
 
 	for file in signatures {
 		markdown.push_str(&format!("## File: {}\n", file.path));
@@ -308,14 +305,10 @@ pub fn code_blocks_to_markdown_with_config(blocks: &[CodeBlock], config: &Config
 	markdown.push_str(&format!("# Found {} code blocks\n\n", blocks.len()));
 
 	// Group blocks by file path for better organization
-	let mut blocks_by_file: std::collections::HashMap<String, Vec<&CodeBlock>> =
-		std::collections::HashMap::new();
+	let mut blocks_by_file: std::collections::HashMap<String, Vec<&CodeBlock>> = std::collections::HashMap::new();
 
 	for block in blocks {
-		blocks_by_file
-			.entry(block.path.clone())
-			.or_default()
-			.push(block);
+		blocks_by_file.entry(block.path.clone()).or_default().push(block);
 	}
 
 	// Print results organized by file
@@ -325,10 +318,7 @@ pub fn code_blocks_to_markdown_with_config(blocks: &[CodeBlock], config: &Config
 		for (idx, block) in file_blocks.iter().enumerate() {
 			markdown.push_str(&format!("### Block {} of {}\n", idx + 1, file_blocks.len()));
 			markdown.push_str(&format!("**Language:** {}  ", block.language));
-			markdown.push_str(&format!(
-				"**Lines:** {}-{}  ",
-				block.start_line, block.end_line
-			));
+			markdown.push_str(&format!("**Lines:** {}-{}  ", block.start_line, block.end_line));
 
 			// Show similarity score if available
 			if let Some(distance) = block.distance {
@@ -369,10 +359,7 @@ pub fn code_blocks_to_markdown_with_config(blocks: &[CodeBlock], config: &Config
 
 			// Add note if content was truncated
 			if was_truncated {
-				markdown.push_str(&format!(
-					"// Content truncated (limit: {} chars)\n",
-					max_chars
-				));
+				markdown.push_str(&format!("// Content truncated (limit: {} chars)\n", max_chars));
 			}
 
 			markdown.push_str("```\n\n");
@@ -401,14 +388,10 @@ pub fn text_blocks_to_markdown_with_config(blocks: &[TextBlock], config: &Config
 	markdown.push_str(&format!("# Found {} text blocks\n\n", blocks.len()));
 
 	// Group blocks by file path for better organization
-	let mut blocks_by_file: std::collections::HashMap<String, Vec<&TextBlock>> =
-		std::collections::HashMap::new();
+	let mut blocks_by_file: std::collections::HashMap<String, Vec<&TextBlock>> = std::collections::HashMap::new();
 
 	for block in blocks {
-		blocks_by_file
-			.entry(block.path.clone())
-			.or_default()
-			.push(block);
+		blocks_by_file.entry(block.path.clone()).or_default().push(block);
 	}
 
 	// Print results organized by file
@@ -418,10 +401,7 @@ pub fn text_blocks_to_markdown_with_config(blocks: &[TextBlock], config: &Config
 		for (idx, block) in file_blocks.iter().enumerate() {
 			markdown.push_str(&format!("### Block {} of {}\n", idx + 1, file_blocks.len()));
 			markdown.push_str(&format!("**Language:** {}  ", block.language));
-			markdown.push_str(&format!(
-				"**Lines:** {}-{}  ",
-				block.start_line, block.end_line
-			));
+			markdown.push_str(&format!("**Lines:** {}-{}  ", block.start_line, block.end_line));
 
 			// Show relevance score if available
 			if let Some(distance) = block.distance {
@@ -440,10 +420,7 @@ pub fn text_blocks_to_markdown_with_config(blocks: &[TextBlock], config: &Config
 
 			// Add note if content was truncated
 			if was_truncated {
-				markdown.push_str(&format!(
-					"\n*Content truncated (limit: {} chars)*\n",
-					max_chars
-				));
+				markdown.push_str(&format!("\n*Content truncated (limit: {} chars)*\n", max_chars));
 			}
 
 			markdown.push('\n');
@@ -461,10 +438,7 @@ pub fn document_blocks_to_markdown(blocks: &[DocumentBlock]) -> String {
 }
 
 /// Render document blocks (documentation search results) as markdown string with configuration
-pub fn document_blocks_to_markdown_with_config(
-	blocks: &[DocumentBlock],
-	config: &Config,
-) -> String {
+pub fn document_blocks_to_markdown_with_config(blocks: &[DocumentBlock], config: &Config) -> String {
 	let mut markdown = String::new();
 
 	if blocks.is_empty() {
@@ -472,20 +446,13 @@ pub fn document_blocks_to_markdown_with_config(
 		return markdown;
 	}
 
-	markdown.push_str(&format!(
-		"# Found {} documentation sections\n\n",
-		blocks.len()
-	));
+	markdown.push_str(&format!("# Found {} documentation sections\n\n", blocks.len()));
 
 	// Group blocks by file path for better organization
-	let mut blocks_by_file: std::collections::HashMap<String, Vec<&DocumentBlock>> =
-		std::collections::HashMap::new();
+	let mut blocks_by_file: std::collections::HashMap<String, Vec<&DocumentBlock>> = std::collections::HashMap::new();
 
 	for block in blocks {
-		blocks_by_file
-			.entry(block.path.clone())
-			.or_default()
-			.push(block);
+		blocks_by_file.entry(block.path.clone()).or_default().push(block);
 	}
 
 	// Print results organized by file
@@ -500,10 +467,7 @@ pub fn document_blocks_to_markdown_with_config(
 				file_blocks.len()
 			));
 			markdown.push_str(&format!("**Level:** {}  ", block.level));
-			markdown.push_str(&format!(
-				"**Lines:** {}-{}  ",
-				block.start_line, block.end_line
-			));
+			markdown.push_str(&format!("**Lines:** {}-{}  ", block.start_line, block.end_line));
 
 			// Show relevance score if available
 			if let Some(distance) = block.distance {
@@ -522,10 +486,7 @@ pub fn document_blocks_to_markdown_with_config(
 
 			// Add note if content was truncated
 			if was_truncated {
-				markdown.push_str(&format!(
-					"\n*Content truncated (limit: {} chars)*\n",
-					max_chars
-				));
+				markdown.push_str(&format!("\n*Content truncated (limit: {} chars)*\n", max_chars));
 			}
 
 			markdown.push('\n');
@@ -573,10 +534,7 @@ pub fn render_signatures_cli(signatures: &[FileSignature]) {
 					format!("{}-{}", signature.start_line, signature.end_line)
 				};
 
-				println!(
-					"║ {} `{}` (line {})",
-					signature.kind, signature.name, line_display
-				);
+				println!("║ {} `{}` (line {})", signature.kind, signature.name, line_display);
 
 				// Show description if available
 				if let Some(desc) = &signature.description {

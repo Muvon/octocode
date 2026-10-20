@@ -71,10 +71,7 @@ pub fn render_code_blocks_with_config(blocks: &[CodeBlock], config: &Config, det
 
 	// Display results in their sorted order (most relevant first)
 	for (idx, block) in blocks.iter().enumerate() {
-		println!(
-			"╔══════════════════ File: {} ══════════════════",
-			block.path
-		);
+		println!("╔══════════════════ File: {} ══════════════════", block.path);
 		println!("║");
 		println!("║ Result {} of {}", idx + 1, blocks.len());
 		println!("║ Language: {}", block.language);
@@ -137,11 +134,7 @@ pub fn render_code_blocks_with_config(blocks: &[CodeBlock], config: &Config, det
 					// Last 3 lines
 					let last_3_start = lines.len() - 3;
 					for (i, line) in lines.iter().skip(last_3_start).enumerate() {
-						println!(
-							"║ │ {:4} │ {}",
-							block.start_line + last_3_start + i + 1,
-							line
-						);
+						println!("║ │ {:4} │ {}", block.start_line + last_3_start + i + 1, line);
 					}
 				}
 			}
@@ -149,17 +142,13 @@ pub fn render_code_blocks_with_config(blocks: &[CodeBlock], config: &Config, det
 				// Show full content with line numbers (fallback to config-based truncation if too large)
 				let max_chars = config.search.search_block_max_characters;
 				if max_chars > 0 && display_content.len() > max_chars {
-					let (content, was_truncated) =
-						crate::indexer::truncate_content_smartly(display_content, max_chars);
+					let (content, was_truncated) = crate::indexer::truncate_content_smartly(display_content, max_chars);
 					// Add line numbers to truncated content with │ format
 					for (i, line) in content.lines().enumerate() {
 						println!("║ │ {:4} │ {}", block.start_line + i, line);
 					}
 					if was_truncated {
-						println!(
-							"║ │      │ [Content truncated - limit: {} chars]",
-							max_chars
-						);
+						println!("║ │      │ [Content truncated - limit: {} chars]", max_chars);
 					}
 				} else {
 					// Show full content with line numbers using │ format
@@ -189,11 +178,7 @@ pub fn render_code_blocks_with_config(blocks: &[CodeBlock], config: &Config, det
 					// Last 3 lines
 					let last_3_start = lines.len() - 3;
 					for (i, line) in lines.iter().skip(last_3_start).enumerate() {
-						println!(
-							"║ │ {:4} │ {}",
-							block.start_line + last_3_start + i + 1,
-							line
-						);
+						println!("║ │ {:4} │ {}", block.start_line + last_3_start + i + 1, line);
 					}
 				}
 			}
@@ -212,10 +197,7 @@ pub fn render_results_json(results: &[CodeBlock]) -> Result<(), anyhow::Error> {
 }
 
 // Expand symbols in code blocks to include related code while maintaining relevance order
-pub async fn expand_symbols(
-	store: &Store,
-	code_blocks: Vec<CodeBlock>,
-) -> Result<Vec<CodeBlock>, anyhow::Error> {
+pub async fn expand_symbols(store: &Store, code_blocks: Vec<CodeBlock>) -> Result<Vec<CodeBlock>, anyhow::Error> {
 	// We'll keep original blocks at the top with their original order
 	let mut expanded_blocks = Vec::new();
 	let mut original_hashes = HashSet::new();
@@ -322,11 +304,7 @@ pub async fn expand_code_blocks_via_graph(
 	const MAX_NEIGHBOR_FILES: usize = 8;
 	const BLOCKS_PER_FILE: usize = 3;
 
-	if !config.graphrag.enabled
-		|| !config.search.graph_expansion
-		|| code_blocks.is_empty()
-		|| max_add == 0
-	{
+	if !config.graphrag.enabled || !config.search.graph_expansion || code_blocks.is_empty() || max_add == 0 {
 		return code_blocks;
 	}
 
@@ -334,8 +312,7 @@ pub async fn expand_code_blocks_via_graph(
 	let mut seen_hashes: HashSet<String> = code_blocks.iter().map(|b| b.hash.clone()).collect();
 
 	// Accumulate neighbor-file -> structural score across all seed files.
-	let mut neighbor_scores: std::collections::HashMap<String, f32> =
-		std::collections::HashMap::new();
+	let mut neighbor_scores: std::collections::HashMap<String, f32> = std::collections::HashMap::new();
 	for block in code_blocks.iter().take(SEED_LIMIT) {
 		let rels = match store
 			.get_node_relationships(&block.path, RelationshipDirection::Both)
@@ -343,11 +320,7 @@ pub async fn expand_code_blocks_via_graph(
 		{
 			Ok(rels) => rels,
 			Err(e) => {
-				tracing::debug!(
-					"graph expansion: relationships for {} failed: {}",
-					block.path,
-					e
-				);
+				tracing::debug!("graph expansion: relationships for {} failed: {}", block.path, e);
 				continue;
 			}
 		};
@@ -434,8 +407,7 @@ pub fn format_code_search_results_as_text(blocks: &[CodeBlock], detail_level: &s
 		match detail_level {
 			"signatures" => {
 				// Extract just function/class signatures
-				let preview =
-					get_code_preview_with_lines(display_content, block.start_line, &block.language);
+				let preview = get_code_preview_with_lines(display_content, block.start_line, &block.language);
 				if !preview.is_empty() {
 					if let Some(first_line) = preview.lines().next() {
 						output.push_str(&format!("{}\n", first_line));
@@ -444,8 +416,7 @@ pub fn format_code_search_results_as_text(blocks: &[CodeBlock], detail_level: &s
 			}
 			"partial" => {
 				// Smart truncated content with line numbers
-				let preview =
-					get_code_preview_with_lines(display_content, block.start_line, &block.language);
+				let preview = get_code_preview_with_lines(display_content, block.start_line, &block.language);
 				output.push_str(&preview);
 				if !preview.ends_with('\n') {
 					output.push('\n');
@@ -473,10 +444,7 @@ pub fn format_code_search_results_as_text(blocks: &[CodeBlock], detail_level: &s
 }
 
 // Format text search results as text for MCP with detail level control
-pub fn format_text_search_results_as_text(
-	blocks: &[crate::store::TextBlock],
-	detail_level: &str,
-) -> String {
+pub fn format_text_search_results_as_text(blocks: &[crate::store::TextBlock], detail_level: &str) -> String {
 	if blocks.is_empty() {
 		return "No text results found.".to_string();
 	}
@@ -538,10 +506,7 @@ pub fn format_text_search_results_as_text(
 }
 
 // Format document search results as text for MCP with detail level control
-pub fn format_doc_search_results_as_text(
-	blocks: &[crate::store::DocumentBlock],
-	detail_level: &str,
-) -> String {
+pub fn format_doc_search_results_as_text(blocks: &[crate::store::DocumentBlock], detail_level: &str) -> String {
 	if blocks.is_empty() {
 		return "No documentation results found.".to_string();
 	}
@@ -602,10 +567,7 @@ pub fn format_doc_search_results_as_text(
 }
 
 // Format combined search results as text for MCP with detail level control
-pub fn format_commit_search_results_as_text(
-	blocks: &[crate::store::CommitBlock],
-	detail_level: &str,
-) -> String {
+pub fn format_commit_search_results_as_text(blocks: &[crate::store::CommitBlock], detail_level: &str) -> String {
 	if blocks.is_empty() {
 		return "No commit results found.".to_string();
 	}
@@ -699,19 +661,13 @@ pub fn format_combined_search_results_as_text(
 
 	// Code Results with detail level
 	if !code_blocks.is_empty() {
-		output.push_str(&format_code_search_results_as_text(
-			code_blocks,
-			detail_level,
-		));
+		output.push_str(&format_code_search_results_as_text(code_blocks, detail_level));
 		output.push('\n');
 	}
 
 	// Text Results
 	if !text_blocks.is_empty() {
-		output.push_str(&format_text_search_results_as_text(
-			text_blocks,
-			detail_level,
-		));
+		output.push_str(&format_text_search_results_as_text(text_blocks, detail_level));
 	}
 
 	output
@@ -746,9 +702,7 @@ pub async fn detect_branch_search_context(
 		return None;
 	}
 
-	let branch_store = Store::new_for_branch_at(working_directory, &branch_name)
-		.await
-		.ok()?;
+	let branch_store = Store::new_for_branch_at(working_directory, &branch_name).await.ok()?;
 	Some(BranchSearchContext {
 		store: branch_store,
 		manifest,
@@ -861,10 +815,7 @@ pub struct DetailSearchOptions<'a> {
 	pub working_directory: &'a std::path::Path,
 }
 
-pub async fn search_codebase_with_details_text(
-	query: &str,
-	options: &DetailSearchOptions<'_>,
-) -> Result<String> {
+pub async fn search_codebase_with_details_text(query: &str, options: &DetailSearchOptions<'_>) -> Result<String> {
 	search_codebase_with_details_multi_query_text(&[query.to_string()], options).await
 }
 
@@ -960,8 +911,7 @@ pub async fn search_codebase_with_details_multi_query_text(
 	let reasoning_on = config.search.reasoning.enabled && !queries.is_empty();
 	if reasoning_on {
 		let query = queries.join(" ");
-		code_blocks =
-			crate::reasoning::reason_rank_code_blocks(&query, code_blocks, config).await?;
+		code_blocks = crate::reasoning::reason_rank_code_blocks(&query, code_blocks, config).await?;
 	}
 
 	// Apply reranker if enabled, then filter by similarity threshold
@@ -996,19 +946,10 @@ pub async fn search_codebase_with_details_multi_query_text(
 
 	// Format results based on mode with detail level control
 	match mode {
-		"code" => Ok(format_code_search_results_as_text(
-			&code_blocks,
-			detail_level,
-		)),
-		"text" => Ok(format_text_search_results_as_text(
-			&text_blocks,
-			detail_level,
-		)),
+		"code" => Ok(format_code_search_results_as_text(&code_blocks, detail_level)),
+		"text" => Ok(format_text_search_results_as_text(&text_blocks, detail_level)),
 		"docs" => Ok(format_doc_search_results_as_text(&doc_blocks, detail_level)),
-		"commits" => Ok(format_commit_search_results_as_text(
-			&commit_blocks,
-			detail_level,
-		)),
+		"commits" => Ok(format_commit_search_results_as_text(&commit_blocks, detail_level)),
 		"all" => Ok(format_combined_search_results_as_text(
 			&code_blocks,
 			&text_blocks,
@@ -1071,11 +1012,7 @@ fn get_text_preview_with_lines(content: &str, start_line: usize) -> String {
 		} else {
 			// Just add the remaining lines with line numbers
 			for (i, line) in lines.iter().skip(start_idx + preview_start).enumerate() {
-				result.push(format!(
-					"{}: {}",
-					start_line + start_idx + preview_start + i,
-					line
-				));
+				result.push(format!("{}: {}", start_line + start_idx + preview_start + i, line));
 			}
 		}
 	}
@@ -1132,11 +1069,7 @@ fn get_doc_preview_with_lines(content: &str, start_line: usize) -> String {
 		} else {
 			// Just add the remaining lines with line numbers
 			for (i, line) in lines.iter().skip(start_idx + preview_start).enumerate() {
-				result.push(format!(
-					"{}: {}",
-					start_line + start_idx + preview_start + i,
-					line
-				));
+				result.push(format!("{}: {}", start_line + start_idx + preview_start + i, line));
 			}
 		}
 	}
@@ -1214,11 +1147,7 @@ fn get_code_preview_with_lines(content: &str, start_line: usize, _language: &str
 		} else {
 			// Just add the remaining lines with line numbers
 			for (i, line) in lines.iter().skip(start_idx + preview_start).enumerate() {
-				result.push(format!(
-					"{}: {}",
-					start_line + start_idx + preview_start + i,
-					line
-				));
+				result.push(format!("{}: {}", start_line + start_idx + preview_start + i, line));
 			}
 		}
 	}
@@ -1319,12 +1248,10 @@ pub async fn generate_batch_embeddings_for_queries(
 				Ok(code_embeddings
 					.into_iter()
 					.zip(text_embeddings)
-					.map(
-						|(code_emb, text_emb)| crate::embedding::SearchModeEmbeddings {
-							code_embeddings: Some(code_emb),
-							text_embeddings: Some(text_emb),
-						},
-					)
+					.map(|(code_emb, text_emb)| crate::embedding::SearchModeEmbeddings {
+						code_embeddings: Some(code_emb),
+						text_embeddings: Some(text_emb),
+					})
 					.collect())
 			}
 		}
@@ -1364,11 +1291,7 @@ pub async fn execute_single_search_with_embeddings(
 	// `distance_threshold` is a distance value (lower=better); HybridSearchQuery
 	// expects similarity (higher=better), so invert: similarity = 1.0 - distance.
 	let use_hybrid = params.hybrid_enabled && query.is_some_and(|q| !q.trim().is_empty());
-	let keywords: Option<String> = if use_hybrid {
-		query.map(str::to_string)
-	} else {
-		None
-	};
+	let keywords: Option<String> = if use_hybrid { query.map(str::to_string) } else { None };
 	let min_relevance = params.distance_threshold.map(|d| 1.0 - d);
 	let limit = params.limit;
 	let distance_threshold = params.distance_threshold;
@@ -1412,9 +1335,7 @@ pub async fn execute_single_search_with_embeddings(
 						min_relevance,
 						language_filter: None,
 					};
-					store
-						.hybrid_search::<crate::store::DocumentBlock>(&hq)
-						.await?
+					store.hybrid_search::<crate::store::DocumentBlock>(&hq).await?
 				} else {
 					store
 						.get_document_blocks_with_config(text_emb, Some(limit), distance_threshold)
@@ -1454,9 +1375,7 @@ pub async fn execute_single_search_with_embeddings(
 						min_relevance,
 						language_filter: None,
 					};
-					store
-						.hybrid_search::<crate::store::CommitBlock>(&hq)
-						.await?
+					store.hybrid_search::<crate::store::CommitBlock>(&hq).await?
 				} else {
 					store
 						.get_commit_blocks_with_config(text_emb, Some(limit), distance_threshold)
@@ -1531,11 +1450,7 @@ pub async fn execute_single_search_with_embeddings(
 						Ok((t, d))
 					} else {
 						let (text_result, doc_result) = tokio::try_join!(
-							store.get_text_blocks_with_config(
-								text_emb,
-								Some(per_type_limit),
-								distance_threshold,
-							),
+							store.get_text_blocks_with_config(text_emb, Some(per_type_limit), distance_threshold,),
 							store.get_document_blocks_with_config(
 								text_emb_clone,
 								Some(per_type_limit),
@@ -1548,8 +1463,7 @@ pub async fn execute_single_search_with_embeddings(
 					Ok((Vec::new(), Vec::new()))
 				}
 			};
-			let (code_result, (text_result, doc_result)) =
-				tokio::try_join!(code_fut, text_doc_fut)?;
+			let (code_result, (text_result, doc_result)) = tokio::try_join!(code_fut, text_doc_fut)?;
 			code_blocks = code_result;
 			text_blocks = text_result;
 			doc_blocks = doc_result;
@@ -1624,10 +1538,7 @@ pub async fn execute_parallel_searches(
 				vector_weight,
 				keyword_weight,
 			};
-			async move {
-				execute_single_search_with_embeddings(store, emb, &mp, index, Some(q.as_str()))
-					.await
-			}
+			async move { execute_single_search_with_embeddings(store, emb, &mp, index, Some(q.as_str())).await }
 		})
 		.collect();
 
@@ -1657,16 +1568,7 @@ pub async fn execute_parallel_searches(
 				vector_weight,
 				keyword_weight,
 			};
-			async move {
-				execute_single_search_with_embeddings(
-					&branch.store,
-					emb,
-					&bp,
-					index,
-					Some(q.as_str()),
-				)
-				.await
-			}
+			async move { execute_single_search_with_embeddings(&branch.store, emb, &bp, index, Some(q.as_str())).await }
 		})
 		.collect();
 
@@ -1679,9 +1581,7 @@ pub async fn execute_parallel_searches(
 	let merged: Vec<QuerySearchResult> = main_results
 		.drain(..)
 		.zip(branch_results)
-		.map(|(main, branch_r)| {
-			merge_branch_query_results(main, branch_r, &branch.manifest, per_query_limit)
-		})
+		.map(|(main, branch_r)| merge_branch_query_results(main, branch_r, &branch.manifest, per_query_limit))
 		.collect();
 
 	Ok(merged)
@@ -1790,22 +1690,12 @@ pub fn deduplicate_and_merge_results(
 	// Dedup + rank each modality by cross-query Reciprocal Rank Fusion. The
 	// per-query lists arrive best-first (vector or hybrid RRF order), so their
 	// position is the rank the fusion consumes. See `fuse_query_lists`.
-	let code_lists: Vec<&[crate::store::CodeBlock]> = search_results
-		.iter()
-		.map(|r| r.code_blocks.as_slice())
-		.collect();
-	let doc_lists: Vec<&[crate::store::DocumentBlock]> = search_results
-		.iter()
-		.map(|r| r.doc_blocks.as_slice())
-		.collect();
-	let text_lists: Vec<&[crate::store::TextBlock]> = search_results
-		.iter()
-		.map(|r| r.text_blocks.as_slice())
-		.collect();
-	let commit_lists: Vec<&[crate::store::CommitBlock]> = search_results
-		.iter()
-		.map(|r| r.commit_blocks.as_slice())
-		.collect();
+	let code_lists: Vec<&[crate::store::CodeBlock]> = search_results.iter().map(|r| r.code_blocks.as_slice()).collect();
+	let doc_lists: Vec<&[crate::store::DocumentBlock]> =
+		search_results.iter().map(|r| r.doc_blocks.as_slice()).collect();
+	let text_lists: Vec<&[crate::store::TextBlock]> = search_results.iter().map(|r| r.text_blocks.as_slice()).collect();
+	let commit_lists: Vec<&[crate::store::CommitBlock]> =
+		search_results.iter().map(|r| r.commit_blocks.as_slice()).collect();
 
 	(
 		fuse_query_lists(&code_lists, distance_threshold),
@@ -1824,15 +1714,9 @@ fn merge_branch_code_blocks(
 	overridden: &HashSet<&str>,
 	limit: usize,
 ) -> Vec<CodeBlock> {
-	let filtered_main = main
-		.into_iter()
-		.filter(|b| !overridden.contains(b.path.as_str()));
+	let filtered_main = main.into_iter().filter(|b| !overridden.contains(b.path.as_str()));
 	let mut combined: Vec<CodeBlock> = branch.into_iter().chain(filtered_main).collect();
-	combined.sort_by(|a, b| {
-		a.distance
-			.partial_cmp(&b.distance)
-			.unwrap_or(std::cmp::Ordering::Equal)
-	});
+	combined.sort_by(|a, b| a.distance.partial_cmp(&b.distance).unwrap_or(std::cmp::Ordering::Equal));
 	combined.truncate(limit);
 	combined
 }
@@ -1843,15 +1727,9 @@ fn merge_branch_text_blocks(
 	overridden: &HashSet<&str>,
 	limit: usize,
 ) -> Vec<TextBlock> {
-	let filtered_main = main
-		.into_iter()
-		.filter(|b| !overridden.contains(b.path.as_str()));
+	let filtered_main = main.into_iter().filter(|b| !overridden.contains(b.path.as_str()));
 	let mut combined: Vec<TextBlock> = branch.into_iter().chain(filtered_main).collect();
-	combined.sort_by(|a, b| {
-		a.distance
-			.partial_cmp(&b.distance)
-			.unwrap_or(std::cmp::Ordering::Equal)
-	});
+	combined.sort_by(|a, b| a.distance.partial_cmp(&b.distance).unwrap_or(std::cmp::Ordering::Equal));
 	combined.truncate(limit);
 	combined
 }
@@ -1862,15 +1740,9 @@ fn merge_branch_doc_blocks(
 	overridden: &HashSet<&str>,
 	limit: usize,
 ) -> Vec<DocumentBlock> {
-	let filtered_main = main
-		.into_iter()
-		.filter(|b| !overridden.contains(b.path.as_str()));
+	let filtered_main = main.into_iter().filter(|b| !overridden.contains(b.path.as_str()));
 	let mut combined: Vec<DocumentBlock> = branch.into_iter().chain(filtered_main).collect();
-	combined.sort_by(|a, b| {
-		a.distance
-			.partial_cmp(&b.distance)
-			.unwrap_or(std::cmp::Ordering::Equal)
-	});
+	combined.sort_by(|a, b| a.distance.partial_cmp(&b.distance).unwrap_or(std::cmp::Ordering::Equal));
 	combined.truncate(limit);
 	combined
 }
@@ -1886,24 +1758,9 @@ fn merge_branch_query_results(
 
 	QuerySearchResult {
 		query_index: main.query_index,
-		code_blocks: merge_branch_code_blocks(
-			main.code_blocks,
-			branch.code_blocks,
-			&overridden,
-			per_query_limit,
-		),
-		doc_blocks: merge_branch_doc_blocks(
-			main.doc_blocks,
-			branch.doc_blocks,
-			&overridden,
-			per_query_limit,
-		),
-		text_blocks: merge_branch_text_blocks(
-			main.text_blocks,
-			branch.text_blocks,
-			&overridden,
-			per_query_limit,
-		),
+		code_blocks: merge_branch_code_blocks(main.code_blocks, branch.code_blocks, &overridden, per_query_limit),
+		doc_blocks: merge_branch_doc_blocks(main.doc_blocks, branch.doc_blocks, &overridden, per_query_limit),
+		text_blocks: merge_branch_text_blocks(main.text_blocks, branch.text_blocks, &overridden, per_query_limit),
 		// Commits are global — no branch override needed
 		commit_blocks: main.commit_blocks,
 	}
@@ -1948,11 +1805,7 @@ mod tests {
 
 	#[test]
 	fn test_format_symbols_for_display_sorts() {
-		let symbols = vec![
-			"zebra".to_string(),
-			"apple".to_string(),
-			"mango".to_string(),
-		];
+		let symbols = vec!["zebra".to_string(), "apple".to_string(), "mango".to_string()];
 		let result = format_symbols_for_display(&symbols);
 		assert_eq!(result, "apple, mango, zebra");
 	}
@@ -2033,7 +1886,7 @@ mod tests {
 		// hybrid/vector search produced), NOT re-sort by cosine distance —
 		// this is the RRF-preservation fix.
 		let q0 = vec![
-			make_code_block("first", 0.90), // retriever rank #1 (e.g. exact BM25 hit)
+			make_code_block("first", 0.90),  // retriever rank #1 (e.g. exact BM25 hit)
 			make_code_block("second", 0.10), // better cosine but retriever rank #2
 		];
 		let fused = fuse_query_lists(&[q0.as_slice()], None);
@@ -2107,10 +1960,7 @@ mod tests {
 
 	#[test]
 	fn test_merge_branch_code_blocks_deleted_files_excluded() {
-		let main = vec![
-			make_code_block("src/a.rs", 0.1),
-			make_code_block("src/deleted.rs", 0.2),
-		];
+		let main = vec![make_code_block("src/a.rs", 0.1), make_code_block("src/deleted.rs", 0.2)];
 		let branch: Vec<CodeBlock> = vec![];
 		let overridden: HashSet<&str> = ["src/deleted.rs"].into_iter().collect();
 
@@ -2137,10 +1987,7 @@ mod tests {
 
 	#[test]
 	fn test_merge_branch_code_blocks_empty_branch() {
-		let main = vec![
-			make_code_block("src/a.rs", 0.1),
-			make_code_block("src/b.rs", 0.2),
-		];
+		let main = vec![make_code_block("src/a.rs", 0.1), make_code_block("src/b.rs", 0.2)];
 		let branch: Vec<CodeBlock> = vec![];
 		let overridden: HashSet<&str> = HashSet::new();
 
@@ -2161,10 +2008,7 @@ mod tests {
 
 	#[test]
 	fn test_merge_branch_doc_blocks() {
-		let main = vec![
-			make_doc_block("README.md", 0.1),
-			make_doc_block("CHANGELOG.md", 0.3),
-		];
+		let main = vec![make_doc_block("README.md", 0.1), make_doc_block("CHANGELOG.md", 0.3)];
 		let branch = vec![make_doc_block("README.md", 0.2)];
 		let overridden: HashSet<&str> = ["README.md"].into_iter().collect();
 

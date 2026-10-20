@@ -41,10 +41,7 @@ mod tests {
 	#[test]
 	fn structural_context_omits_the_defines_line_without_symbols() {
 		let b = block("src/utils.rs", &[], "const V: u8 = 1;");
-		assert_eq!(
-			build_structural_context(&b),
-			"# File: src/utils.rs\n# Language: rust"
-		);
+		assert_eq!(build_structural_context(&b), "# File: src/utils.rs\n# Language: rust");
 	}
 
 	#[test]
@@ -92,11 +89,7 @@ mod tests {
 
 	#[test]
 	fn stripping_returns_the_code_from_an_undescribed_block() {
-		let b = block(
-			"src/main.rs",
-			&["main"],
-			"fn main() {\n    println!(\"hi\");\n}",
-		);
+		let b = block("src/main.rs", &["main"], "fn main() {\n    println!(\"hi\");\n}");
 		let enriched = build_enriched_embedding_input(&b, None);
 		assert_eq!(
 			strip_enriched_preamble(&enriched),
@@ -108,10 +101,7 @@ mod tests {
 	fn stripping_handles_the_text_block_preamble() {
 		// Matches the format process_text_blocks_batch writes.
 		let enriched = "# File: README.md\n\nThis is content.\nSecond line.";
-		assert_eq!(
-			strip_enriched_preamble(enriched),
-			"This is content.\nSecond line."
-		);
+		assert_eq!(strip_enriched_preamble(enriched), "This is content.\nSecond line.");
 	}
 
 	#[test]
@@ -130,8 +120,7 @@ mod tests {
 	#[test]
 	fn stripping_keys_off_the_file_marker_not_any_hash_comment() {
 		// First substantive line of stored code can start with `#` (Python comment).
-		let enriched =
-			"# File: app.py\n# Language: python\n\n# TODO: refactor\ndef main():\n    pass";
+		let enriched = "# File: app.py\n# Language: python\n\n# TODO: refactor\ndef main():\n    pass";
 		assert_eq!(
 			strip_enriched_preamble(enriched),
 			"# TODO: refactor\ndef main():\n    pass"
@@ -162,16 +151,9 @@ mod tests {
 		let siblings = build_siblings_map(&blocks);
 		assert_eq!(
 			siblings.get("src/auth.rs").unwrap(),
-			&vec![
-				"verify".to_string(),
-				"decode".to_string(),
-				"refresh".to_string()
-			]
+			&vec!["verify".to_string(), "decode".to_string(), "refresh".to_string()]
 		);
-		assert_eq!(
-			siblings.get("src/db.rs").unwrap(),
-			&vec!["connect".to_string()]
-		);
+		assert_eq!(siblings.get("src/db.rs").unwrap(), &vec!["connect".to_string()]);
 	}
 
 	#[test]

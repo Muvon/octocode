@@ -40,11 +40,7 @@ to least relevant, INCLUDING ONLY those that are genuinely relevant.";
 /// from the reasoning rank so downstream sorting/formatting stays consistent.
 /// Irrelevant candidates the model omits are dropped (precision). On any error
 /// the original order is returned unchanged.
-pub async fn reason_rank_code_blocks(
-	query: &str,
-	blocks: Vec<CodeBlock>,
-	config: &Config,
-) -> Result<Vec<CodeBlock>> {
+pub async fn reason_rank_code_blocks(query: &str, blocks: Vec<CodeBlock>, config: &Config) -> Result<Vec<CodeBlock>> {
 	let rc = &config.search.reasoning;
 	if !rc.enabled || blocks.is_empty() {
 		return Ok(blocks);
@@ -99,10 +95,7 @@ pub async fn reason_rank_code_blocks(
 		"required": ["ranked"]
 	});
 
-	let messages = vec![
-		Message::system(REASONING_SYSTEM_PROMPT),
-		Message::user(&prompt),
-	];
+	let messages = vec![Message::system(REASONING_SYSTEM_PROMPT), Message::user(&prompt)];
 	let json = match client.chat_completion_json(messages, Some(schema)).await {
 		Ok(v) => v,
 		Err(e) => {
@@ -116,12 +109,7 @@ pub async fn reason_rank_code_blocks(
 		.get("ranked")
 		.and_then(|v| v.as_array())
 		.or_else(|| json.as_array())
-		.map(|a| {
-			a.iter()
-				.filter_map(|x| x.as_u64())
-				.map(|n| n as usize)
-				.collect()
-		})
+		.map(|a| a.iter().filter_map(|x| x.as_u64()).map(|n| n as usize).collect())
 		.unwrap_or_default();
 
 	if ranked.is_empty() {
@@ -148,11 +136,7 @@ pub async fn reason_rank_code_blocks(
 		}
 	}
 	let mut order: Vec<usize> = (0..n).collect();
-	order.sort_by(|&a, &b| {
-		score[b]
-			.partial_cmp(&score[a])
-			.unwrap_or(std::cmp::Ordering::Equal)
-	});
+	order.sort_by(|&a, &b| score[b].partial_cmp(&score[a]).unwrap_or(std::cmp::Ordering::Equal));
 	let mut out: Vec<CodeBlock> = order
 		.iter()
 		.enumerate()

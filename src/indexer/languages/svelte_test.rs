@@ -80,10 +80,7 @@ fn test_script_block_splits_into_individual_functions() {
 		regions.iter().map(|r| &r.node_kind).collect::<Vec<_>>()
 	);
 
-	let script_blob_regions: Vec<_> = regions
-		.iter()
-		.filter(|r| r.node_kind == "script_element")
-		.collect();
+	let script_blob_regions: Vec<_> = regions.iter().filter(|r| r.node_kind == "script_element").collect();
 	assert!(
 		script_blob_regions.is_empty(),
 		"script content should not collapse into a single script_element blob region"
@@ -114,10 +111,7 @@ fn test_plain_wrappers_around_single_component_produce_no_region_of_their_own() 
 	}
 
 	// Exactly the inner Button element should have become its own region.
-	let button_regions: Vec<_> = regions
-		.iter()
-		.filter(|r| r.content.contains("on:click"))
-		.collect();
+	let button_regions: Vec<_> = regions.iter().filter(|r| r.content.contains("on:click")).collect();
 	assert_eq!(
 		button_regions.len(),
 		1,
@@ -146,10 +140,7 @@ fn test_meaningful_wrapper_with_nested_meaningful_child_only_keeps_the_inner_reg
 
 	let regions = parse_regions(source);
 
-	let element_regions: Vec<_> = regions
-		.iter()
-		.filter(|r| r.node_kind == "element")
-		.collect();
+	let element_regions: Vec<_> = regions.iter().filter(|r| r.node_kind == "element").collect();
 
 	assert_eq!(
 		element_regions.len(),
@@ -179,10 +170,7 @@ fn test_plain_wrapper_with_no_meaningful_descendant_falls_back_to_one_region() {
 
 	let regions = parse_regions(source);
 
-	let element_regions: Vec<_> = regions
-		.iter()
-		.filter(|r| r.node_kind == "element")
-		.collect();
+	let element_regions: Vec<_> = regions.iter().filter(|r| r.node_kind == "element").collect();
 
 	assert_eq!(
 		element_regions.len(),
@@ -217,10 +205,7 @@ fn test_style_block_splits_into_individual_rules() {
 
 	let regions = parse_regions(source);
 
-	let rule_regions: Vec<_> = regions
-		.iter()
-		.filter(|r| r.node_kind == "rule_set")
-		.collect();
+	let rule_regions: Vec<_> = regions.iter().filter(|r| r.node_kind == "rule_set").collect();
 
 	assert!(
 		rule_regions.len() >= 2,
@@ -229,10 +214,7 @@ fn test_style_block_splits_into_individual_rules() {
 		regions.iter().map(|r| &r.node_kind).collect::<Vec<_>>()
 	);
 
-	let style_blob_regions: Vec<_> = regions
-		.iter()
-		.filter(|r| r.node_kind == "style_element")
-		.collect();
+	let style_blob_regions: Vec<_> = regions.iter().filter(|r| r.node_kind == "style_element").collect();
 	assert!(
 		style_blob_regions.is_empty(),
 		"style content should not collapse into a single style_element blob region"
@@ -259,53 +241,28 @@ fn language_metadata_matches_the_svelte_grammar() {
 fn node_type_descriptions_cover_every_svelte_group() {
 	let svelte = Svelte {};
 
-	for kind in [
-		"function_declaration",
-		"method_definition",
-		"arrow_function",
-	] {
-		assert_eq!(
-			svelte.get_node_type_description(kind),
-			"function declarations"
-		);
+	for kind in ["function_declaration", "method_definition", "arrow_function"] {
+		assert_eq!(svelte.get_node_type_description(kind), "function declarations");
 	}
 	for kind in ["variable_declaration", "lexical_declaration"] {
-		assert_eq!(
-			svelte.get_node_type_description(kind),
-			"variable declarations"
-		);
+		assert_eq!(svelte.get_node_type_description(kind), "variable declarations");
 	}
 	for kind in ["reactive_statement", "reactive_declaration"] {
-		assert_eq!(
-			svelte.get_node_type_description(kind),
-			"reactive declarations"
-		);
+		assert_eq!(svelte.get_node_type_description(kind), "reactive declarations");
 	}
 	assert_eq!(
 		svelte.get_node_type_description("class_declaration"),
 		"class declarations"
 	);
 	for kind in ["component", "element"] {
-		assert_eq!(
-			svelte.get_node_type_description(kind),
-			"component declarations"
-		);
+		assert_eq!(svelte.get_node_type_description(kind), "component declarations");
 	}
-	assert_eq!(
-		svelte.get_node_type_description("script_element"),
-		"script blocks"
-	);
-	assert_eq!(
-		svelte.get_node_type_description("style_element"),
-		"style blocks"
-	);
+	assert_eq!(svelte.get_node_type_description("script_element"), "script blocks");
+	assert_eq!(svelte.get_node_type_description("style_element"), "style blocks");
 	// Unknown kinds fall back rather than borrowing the shared trait default,
 	// so even "function"-containing kinds land on the generic label here.
 	assert_eq!(svelte.get_node_type_description("raw_text"), "declarations");
-	assert_eq!(
-		svelte.get_node_type_description("function_expression"),
-		"declarations"
-	);
+	assert_eq!(svelte.get_node_type_description("function_expression"), "declarations");
 }
 
 #[test]
@@ -351,14 +308,7 @@ fn script_symbols_come_from_line_based_javascript_patterns() {
 	// name instead of a real identifier.
 	assert_eq!(
 		as_strs(&symbols),
-		[
-			"count",
-			"doubled",
-			"greet",
-			"reactive_if",
-			"title",
-			"version"
-		]
+		["count", "doubled", "greet", "reactive_if", "title", "version"]
 	);
 }
 
@@ -474,10 +424,7 @@ fn identifier_fallback_collects_attribute_names_but_not_tag_names() {
 	// `start_tag` is not one of the three handled kinds, so extract_symbols
 	// falls through to the generic identifier walk. `class` is filtered out as a
 	// JavaScript keyword, so only `id` survives.
-	assert_eq!(
-		as_strs(&Svelte {}.extract_symbols(start_tag, source)),
-		["id"]
-	);
+	assert_eq!(as_strs(&Svelte {}.extract_symbols(start_tag, source)), ["id"]);
 }
 
 #[test]
@@ -544,12 +491,10 @@ fn imports_and_exports_are_only_read_from_script_elements() {
 	let tree = parse_tree(source);
 	let svelte = Svelte {};
 
-	let (style_imports, style_exports) =
-		svelte.extract_imports_exports(first_of_kind(&tree, "style_element"), source);
+	let (style_imports, style_exports) = svelte.extract_imports_exports(first_of_kind(&tree, "style_element"), source);
 	assert!(style_imports.is_empty() && style_exports.is_empty());
 
-	let (el_imports, el_exports) =
-		svelte.extract_imports_exports(first_of_kind(&tree, "element"), source);
+	let (el_imports, el_exports) = svelte.extract_imports_exports(first_of_kind(&tree, "element"), source);
 	assert!(el_imports.is_empty() && el_exports.is_empty());
 }
 
@@ -598,12 +543,7 @@ fn empty_script_blocks_expand_to_no_regions() {
 	let source = "<script></script>\n";
 	let tree = parse_tree(source);
 	let script = first_of_kind(&tree, "script_element");
-	assert_eq!(
-		svelte
-			.expand_meaningful_node(script, source)
-			.map(|r| r.len()),
-		Some(0)
-	);
+	assert_eq!(svelte.expand_meaningful_node(script, source).map(|r| r.len()), Some(0));
 	assert!(parse_regions(source).is_empty());
 
 	// An empty script still reports an (empty) embedded source, because
@@ -750,8 +690,5 @@ fn barrel_imports_resolve_to_the_index_file() {
 fn third_party_imports_that_match_no_indexed_file_stay_unresolved() {
 	let registry = svelte_registry();
 
-	assert_eq!(
-		Svelte {}.resolve_import("svelte", "src/App.svelte", &registry),
-		None
-	);
+	assert_eq!(Svelte {}.resolve_import("svelte", "src/App.svelte", &registry), None);
 }

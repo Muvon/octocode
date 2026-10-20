@@ -81,11 +81,7 @@ impl Language for Swift {
 				}
 			}
 		}
-		super::extract_symbol_by_kinds(
-			node,
-			contents,
-			&["simple_identifier", "type_identifier", "user_type"],
-		)
+		super::extract_symbol_by_kinds(node, contents, &["simple_identifier", "type_identifier", "user_type"])
 	}
 
 	fn extract_symbols(&self, node: Node, contents: &str) -> Vec<String> {
@@ -100,11 +96,7 @@ impl Language for Swift {
 				if let Some(owner) = super::find_enclosing_container_name(
 					node,
 					contents,
-					&[
-						"class_declaration",
-						"protocol_declaration",
-						"extension_declaration",
-					],
+					&["class_declaration", "protocol_declaration", "extension_declaration"],
 					&["type_identifier", "simple_identifier", "user_type"],
 				) {
 					symbols.push(owner);
@@ -126,11 +118,7 @@ impl Language for Swift {
 				if let Some(owner) = super::find_enclosing_container_name(
 					node,
 					contents,
-					&[
-						"class_declaration",
-						"protocol_declaration",
-						"extension_declaration",
-					],
+					&["class_declaration", "protocol_declaration", "extension_declaration"],
 					&["type_identifier", "simple_identifier", "user_type"],
 				) {
 					symbols.push(owner);
@@ -147,11 +135,7 @@ impl Language for Swift {
 				if let Some(owner) = super::find_enclosing_container_name(
 					node,
 					contents,
-					&[
-						"class_declaration",
-						"protocol_declaration",
-						"extension_declaration",
-					],
+					&["class_declaration", "protocol_declaration", "extension_declaration"],
 					&["type_identifier", "simple_identifier", "user_type"],
 				) {
 					symbols.push(owner);
@@ -165,11 +149,7 @@ impl Language for Swift {
 				if let Some(owner) = super::find_enclosing_container_name(
 					node,
 					contents,
-					&[
-						"class_declaration",
-						"protocol_declaration",
-						"extension_declaration",
-					],
+					&["class_declaration", "protocol_declaration", "extension_declaration"],
 					&["type_identifier", "simple_identifier", "user_type"],
 				) {
 					symbols.push(owner);
@@ -311,11 +291,7 @@ impl Language for Swift {
 		Vec::new()
 	}
 
-	fn extract_type_relations(
-		&self,
-		node: Node,
-		contents: &str,
-	) -> Vec<(super::TypeRelationKind, String)> {
+	fn extract_type_relations(&self, node: Node, contents: &str) -> Vec<(super::TypeRelationKind, String)> {
 		let mut out = Vec::new();
 
 		match node.kind() {
@@ -383,13 +359,7 @@ impl Language for Swift {
 
 impl Swift {
 	/// Extract all `simple_identifier` nodes from a named field of `node`.
-	fn extract_names_from_field(
-		&self,
-		node: Node,
-		contents: &str,
-		field: &str,
-		symbols: &mut Vec<String>,
-	) {
+	fn extract_names_from_field(&self, node: Node, contents: &str, field: &str, symbols: &mut Vec<String>) {
 		// Field "name" may have multiple types; collect all simple_identifier children.
 		let mut cursor = node.walk();
 		for child in node.children_by_field_name(field, &mut cursor) {
@@ -458,12 +428,7 @@ impl Swift {
 	}
 
 	/// Resolve a relative path import.
-	fn resolve_relative_import(
-		&self,
-		import_path: &str,
-		source_file: &str,
-		swift_files: &[String],
-	) -> Option<String> {
+	fn resolve_relative_import(&self, import_path: &str, source_file: &str, swift_files: &[String]) -> Option<String> {
 		use super::resolution_utils::resolve_relative_path;
 		let base_path = resolve_relative_path(source_file, import_path)?;
 		let base_str = base_path.to_string_lossy();

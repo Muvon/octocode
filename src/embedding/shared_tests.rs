@@ -63,19 +63,12 @@ fn fake_build() -> BuildInner {
 async fn second_participant_becomes_a_client_of_the_owner() {
 	let dir = tempfile::tempdir().unwrap();
 	let key = format!("test-shared-{}", std::process::id());
-	let first = join_in(dir.path(), &key, fake_build())
-		.await
-		.expect("owner elected");
-	let second = join_in(dir.path(), &key, fake_build())
-		.await
-		.expect("client attaches");
+	let first = join_in(dir.path(), &key, fake_build()).await.expect("owner elected");
+	let second = join_in(dir.path(), &key, fake_build()).await.expect("client attaches");
 	assert!(matches!(second, SharedProvider::Client { .. }));
 
 	// Client round-trips through the owner's FakeProvider.
-	let (vector, usage) = second
-		.generate_embedding("abcd")
-		.await
-		.expect("remote embed");
+	let (vector, usage) = second.generate_embedding("abcd").await.expect("remote embed");
 	assert_eq!(vector, vec![4.0, 1.0]);
 	assert_eq!(usage.input_tokens, 3);
 
@@ -87,10 +80,7 @@ async fn second_participant_becomes_a_client_of_the_owner() {
 
 	// Dimension and revision come from the handshake, not local weights.
 	assert_eq!(second.get_dimension(), 2);
-	assert_eq!(
-		second.model_revision().await.unwrap(),
-		Some("fakerev".to_string())
-	);
+	assert_eq!(second.model_revision().await.unwrap(), Some("fakerev".to_string()));
 
 	// Owner answers locally, identically.
 	let (local, _) = first.generate_embedding("abcd").await.expect("owner embed");

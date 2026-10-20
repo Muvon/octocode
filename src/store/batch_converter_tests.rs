@@ -101,9 +101,7 @@ mod tests {
 	fn a_document_with_no_heading_context_decodes_to_an_empty_list() {
 		let mut block = document_block("README.md", "d1");
 		block.context = Vec::new();
-		let batch = converter()
-			.document_block_to_batch(&[block], &[vector(0.0)])
-			.unwrap();
+		let batch = converter().document_block_to_batch(&[block], &[vector(0.0)]).unwrap();
 		let decoded = converter().batch_to_document_blocks(&batch, None).unwrap();
 		assert!(decoded[0].context.is_empty());
 	}
@@ -140,9 +138,7 @@ mod tests {
 		assert!(err.contains("must match"), "{err}");
 
 		assert!(c.text_block_to_batch(&[text_block("a", "h")], &[]).is_err());
-		assert!(c
-			.document_block_to_batch(&[document_block("a", "h")], &[])
-			.is_err());
+		assert!(c.document_block_to_batch(&[document_block("a", "h")], &[]).is_err());
 		assert!(c.commit_block_to_batch(&[commit_block("h")], &[]).is_err());
 	}
 
@@ -156,25 +152,16 @@ mod tests {
 			.to_string();
 		assert!(err.contains("dimension 5 but expected 4"), "{err}");
 
-		assert!(c
-			.text_block_to_batch(&[text_block("a", "h")], &wrong)
-			.is_err());
-		assert!(c
-			.document_block_to_batch(&[document_block("a", "h")], &wrong)
-			.is_err());
-		assert!(c
-			.commit_block_to_batch(&[commit_block("h")], &wrong)
-			.is_err());
+		assert!(c.text_block_to_batch(&[text_block("a", "h")], &wrong).is_err());
+		assert!(c.document_block_to_batch(&[document_block("a", "h")], &wrong).is_err());
+		assert!(c.commit_block_to_batch(&[commit_block("h")], &wrong).is_err());
 	}
 
 	#[test]
 	fn decoding_a_batch_that_is_missing_a_column_is_an_error() {
 		let schema = Arc::new(Schema::new(vec![Field::new("path", DataType::Utf8, false)]));
-		let batch = RecordBatch::try_new(
-			schema,
-			vec![Arc::new(StringArray::from(vec!["src/a.rs"])) as ArrayRef],
-		)
-		.unwrap();
+		let batch =
+			RecordBatch::try_new(schema, vec![Arc::new(StringArray::from(vec!["src/a.rs"])) as ArrayRef]).unwrap();
 
 		let c = converter();
 		assert!(c.batch_to_code_blocks(&batch, None).is_err());
@@ -198,21 +185,14 @@ mod tests {
 	#[test]
 	fn a_batch_without_an_embedding_column_yields_no_embeddings() {
 		let schema = Arc::new(Schema::new(vec![Field::new("path", DataType::Utf8, false)]));
-		let batch = RecordBatch::try_new(
-			schema,
-			vec![Arc::new(StringArray::from(vec!["src/a.rs"])) as ArrayRef],
-		)
-		.unwrap();
+		let batch =
+			RecordBatch::try_new(schema, vec![Arc::new(StringArray::from(vec!["src/a.rs"])) as ArrayRef]).unwrap();
 		assert!(extract_embeddings_from_batch(&batch).is_none());
 	}
 
 	#[test]
 	fn a_mistyped_embedding_column_yields_no_embeddings() {
-		let schema = Arc::new(Schema::new(vec![Field::new(
-			"embedding",
-			DataType::Utf8,
-			false,
-		)]));
+		let schema = Arc::new(Schema::new(vec![Field::new("embedding", DataType::Utf8, false)]));
 		let batch = RecordBatch::try_new(
 			schema,
 			vec![Arc::new(StringArray::from(vec!["not a vector"])) as ArrayRef],
@@ -241,9 +221,7 @@ mod tests {
 	fn a_block_with_no_symbols_decodes_to_an_empty_list() {
 		let mut block = code_block("src/a.rs", "h1");
 		block.symbols = Vec::new();
-		let batch = converter()
-			.code_block_to_batch(&[block], &[vector(0.0)])
-			.unwrap();
+		let batch = converter().code_block_to_batch(&[block], &[vector(0.0)]).unwrap();
 		let decoded = converter().batch_to_code_blocks(&batch, None).unwrap();
 		assert!(decoded[0].symbols.is_empty());
 	}

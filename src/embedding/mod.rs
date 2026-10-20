@@ -22,8 +22,8 @@ use std::time::Duration;
 
 // Re-export core functionality from octolib::embedding
 pub use octolib::embedding::{
-	count_tokens, create_embedding_provider_from_parts, split_texts_into_token_limited_batches,
-	truncate_output, EmbeddingProvider, InputType,
+	count_tokens, create_embedding_provider_from_parts, split_texts_into_token_limited_batches, truncate_output,
+	EmbeddingProvider, InputType,
 };
 
 // Re-export types for backward compatibility
@@ -71,21 +71,15 @@ pub async fn create_shared_provider(model_string: &str) -> Result<Arc<dyn Embedd
 		return Ok(cached.clone());
 	}
 
-	let built: Arc<dyn EmbeddingProvider> =
-		match shared::join(model_string, provider.clone(), &model).await {
-			Ok(shared) => Arc::new(shared),
-			Err(e) => {
-				tracing::warn!(
-					"shared embedding service unavailable ({e:#}); loading a private model"
-				);
-				Arc::from(create_embedding_provider_from_parts(&provider, &model).await?)
-			}
-		};
+	let built: Arc<dyn EmbeddingProvider> = match shared::join(model_string, provider.clone(), &model).await {
+		Ok(shared) => Arc::new(shared),
+		Err(e) => {
+			tracing::warn!("shared embedding service unavailable ({e:#}); loading a private model");
+			Arc::from(create_embedding_provider_from_parts(&provider, &model).await?)
+		}
+	};
 	let mut cache = SHARED_PROVIDERS.lock().unwrap();
-	Ok(cache
-		.entry(model_string.to_string())
-		.or_insert(built)
-		.clone())
+	Ok(cache.entry(model_string.to_string()).or_insert(built).clone())
 }
 
 /// Configuration for embedding generation (octocode-specific)
@@ -130,11 +124,7 @@ const MAX_EMBEDDING_RETRIES: u32 = 3;
 /// Generate embeddings based on configured provider (supports provider:model format)
 /// Uses Query input_type for search queries (asymmetric retrieval)
 /// Compatibility wrapper for octocode Config
-pub async fn generate_embeddings(
-	contents: &str,
-	is_code: bool,
-	config: &Config,
-) -> Result<Vec<f32>> {
+pub async fn generate_embeddings(contents: &str, is_code: bool, config: &Config) -> Result<Vec<f32>> {
 	let embedding_config = EmbeddingGenerationConfig::from(config);
 
 	// Get the model string from config
@@ -223,8 +213,7 @@ pub async fn generate_embeddings_batch(
 		}
 	}
 
-	Err(last_error
-		.unwrap_or_else(|| anyhow::anyhow!("Embedding batch generation failed after retries")))
+	Err(last_error.unwrap_or_else(|| anyhow::anyhow!("Embedding batch generation failed after retries")))
 }
 
 /// One shared-provider attempt: token-limited batching over a provider that
@@ -241,9 +230,7 @@ async fn embed_batches(
 	let batches = split_texts_into_token_limited_batches(texts, batch_size, max_tokens_per_batch);
 	let mut all_embeddings = Vec::new();
 	for batch in batches {
-		let (batch_embeddings, _usage) = provider
-			.generate_embeddings_batch(batch, input_type.clone())
-			.await?;
+		let (batch_embeddings, _usage) = provider.generate_embeddings_batch(batch, input_type.clone()).await?;
 		all_embeddings.extend(batch_embeddings);
 	}
 	Ok(all_embeddings)

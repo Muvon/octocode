@@ -91,8 +91,7 @@ use std::sync::OnceLock;
 pub struct NoindexWalker;
 
 /// Cache for .noindex file detection results to avoid repeated file system checks
-static NOINDEX_CACHE: OnceLock<parking_lot::RwLock<HashMap<std::path::PathBuf, bool>>> =
-	OnceLock::new();
+static NOINDEX_CACHE: OnceLock<parking_lot::RwLock<HashMap<std::path::PathBuf, bool>>> = OnceLock::new();
 
 fn markdown_graphrag_block(file_path: &str, contents: &str) -> CodeBlock {
 	CodeBlock {
@@ -256,10 +255,7 @@ pub mod git {
 	}
 
 	/// Get files changed between two commits (committed changes only, no unstaged)
-	pub fn get_changed_files_since_commit(
-		repo_path: &Path,
-		since_commit: &str,
-	) -> Result<Vec<String>> {
+	pub fn get_changed_files_since_commit(repo_path: &Path, since_commit: &str) -> Result<Vec<String>> {
 		GitUtils::get_changed_files_since_commit(repo_path, since_commit)
 	}
 
@@ -292,11 +288,7 @@ pub fn detect_language(path: &std::path::Path) -> Option<&'static str> {
 // All DocumentHierarchy implementation and markdown functions moved to markdown_processor module
 
 /// Optimized cleanup function that only processes files that actually need cleanup
-async fn cleanup_deleted_files_optimized(
-	store: &Store,
-	current_dir: &std::path::Path,
-	quiet: bool,
-) -> Result<()> {
+async fn cleanup_deleted_files_optimized(store: &Store, current_dir: &std::path::Path, quiet: bool) -> Result<()> {
 	// Get all indexed file paths from the database
 	let indexed_files = store.get_all_indexed_file_paths().await?;
 
@@ -354,12 +346,7 @@ async fn cleanup_deleted_files_optimized(
 
 /// Helper function to perform intelligent flushing based on configuration
 /// Returns true if a flush was performed
-async fn flush_if_needed(
-	store: &Store,
-	batches_processed: &mut usize,
-	config: &Config,
-	force: bool,
-) -> Result<bool> {
+async fn flush_if_needed(store: &Store, batches_processed: &mut usize, config: &Config, force: bool) -> Result<bool> {
 	if force || *batches_processed >= config.index.flush_frequency {
 		store.flush().await?;
 		*batches_processed = 0; // Reset counter
@@ -517,12 +504,7 @@ fn log_current_file(state: &SharedState, file_path: &str) {
 	if guard.verbose {
 		let processed = guard.indexed_files + guard.skipped_files;
 		if guard.total_files > 0 {
-			println!(
-				"Indexing ({}/{}): {}",
-				processed + 1,
-				guard.total_files,
-				file_path
-			);
+			println!("Indexing ({}/{}): {}", processed + 1, guard.total_files, file_path);
 		} else {
 			println!("Indexing: {}", file_path);
 		}
@@ -554,9 +536,7 @@ pub async fn index_branch_delta(
 	// If the baseline itself fails, the error propagates and the branch index
 	// is not written, so we never end up with a branch DB anchored to a missing
 	// main snapshot.
-	let master_state =
-		branch::reconcile_master_state(main_store, state.clone(), config, git_repo_root, quiet)
-			.await?;
+	let master_state = branch::reconcile_master_state(main_store, state.clone(), config, git_repo_root, quiet).await?;
 
 	let default_branch = master_state.branch_name.clone();
 	// Anchor to the commit the main DB actually holds — that's what the
@@ -623,8 +603,7 @@ pub async fn index_branch_delta(
 	// today — but pinning to the SHA we resolved in reconcile means a ref
 	// move during indexing can't shift the diff base out from under us, and
 	// the call site matches what the v2 manifest claims (`fork_point`).
-	let (changed_files, deleted_files) =
-		branch::compute_branch_delta(git_repo_root, &master_state.fork_point)?;
+	let (changed_files, deleted_files) = branch::compute_branch_delta(git_repo_root, &master_state.fork_point)?;
 
 	if !quiet {
 		println!(
@@ -644,10 +623,7 @@ pub async fn index_branch_delta(
 	// Check if we can skip (same branch commit, no working changes)
 	if !force_rebuild {
 		if let Some(ref manifest) = existing_manifest {
-			if manifest.branch_commit == branch_commit
-				&& changed_files.is_empty()
-				&& deleted_files.is_empty()
-			{
+			if manifest.branch_commit == branch_commit && changed_files.is_empty() && deleted_files.is_empty() {
 				if !quiet {
 					println!("✅ Branch delta unchanged, skipping reindex");
 				}
@@ -665,8 +641,7 @@ pub async fn index_branch_delta(
 		if let Some(ref manifest) = existing_manifest {
 			let old_changed: std::collections::HashSet<&str> =
 				manifest.changed_paths.iter().map(|s| s.as_str()).collect();
-			let new_changed: std::collections::HashSet<&str> =
-				changed_files.iter().map(|s| s.as_str()).collect();
+			let new_changed: std::collections::HashSet<&str> = changed_files.iter().map(|s| s.as_str()).collect();
 
 			// Files no longer in delta (reverted to match main) — remove from branch DB
 			let mut removed_any = false;
@@ -698,15 +673,12 @@ pub async fn index_branch_delta(
 		let branch_meta = branch_store.get_all_file_metadata().await?;
 		changed_files
 			.into_iter()
-			.filter(|f| {
-				match (
-					get_file_mtime(&current_dir.join(f)),
-					branch_meta.get(f.as_str()),
-				) {
+			.filter(
+				|f| match (get_file_mtime(&current_dir.join(f)), branch_meta.get(f.as_str())) {
 					(Ok(actual), Some(stored)) => actual > *stored,
 					_ => true,
-				}
-			})
+				},
+			)
 			.collect()
 	} else {
 		// Force rebuild — process everything
@@ -751,10 +723,7 @@ pub async fn index_branch_delta(
 			let mut state_guard = state.write();
 			state_guard.total_files = files_to_process.len();
 			state_guard.counting_files = false;
-			state_guard.status_message = format!(
-				"Indexing branch delta ({} files)...",
-				files_to_process.len()
-			);
+			state_guard.status_message = format!("Indexing branch delta ({} files)...", files_to_process.len());
 			state_guard.graphrag_enabled = config.graphrag.enabled;
 		}
 
@@ -830,8 +799,7 @@ pub async fn index_branch_delta(
 						state.write().indexed_files = files_processed;
 
 						// Process batches when ready
-						if should_process_batch(&code_blocks_batch, |b| &b.content, &branch_config)
-						{
+						if should_process_batch(&code_blocks_batch, |b| &b.content, &branch_config) {
 							embedding_calls += code_blocks_batch.len();
 							process_code_blocks_batch(
 								branch_store,
@@ -841,24 +809,19 @@ pub async fn index_branch_delta(
 								&file_context_map,
 							)
 							.await
-							.map_err(|e| anyhow::anyhow!(
+							.map_err(|e| {
+								anyhow::anyhow!(
 								"Failed to process code blocks batch: {}. Aborting indexing — partial state retained, rerun to resume.",
 								e
-							))?;
-							batches_processed += 1;
-							flush_if_needed(
-								branch_store,
-								&mut batches_processed,
-								&branch_config,
-								false,
 							)
-							.await?;
+							})?;
+							batches_processed += 1;
+							flush_if_needed(branch_store, &mut batches_processed, &branch_config, false).await?;
 							code_blocks_batch.clear();
 							code_file_metadata.clear();
 							file_context_map.clear();
 						}
-						if should_process_batch(&text_blocks_batch, |b| &b.content, &branch_config)
-						{
+						if should_process_batch(&text_blocks_batch, |b| &b.content, &branch_config) {
 							embedding_calls += text_blocks_batch.len();
 							process_text_blocks_batch(
 								branch_store,
@@ -867,26 +830,18 @@ pub async fn index_branch_delta(
 								&text_file_metadata,
 							)
 							.await
-							.map_err(|e| anyhow::anyhow!(
+							.map_err(|e| {
+								anyhow::anyhow!(
 								"Failed to process text blocks batch: {}. Aborting indexing — partial state retained, rerun to resume.",
 								e
-							))?;
-							batches_processed += 1;
-							flush_if_needed(
-								branch_store,
-								&mut batches_processed,
-								&branch_config,
-								false,
 							)
-							.await?;
+							})?;
+							batches_processed += 1;
+							flush_if_needed(branch_store, &mut batches_processed, &branch_config, false).await?;
 							text_blocks_batch.clear();
 							text_file_metadata.clear();
 						}
-						if should_process_batch(
-							&document_blocks_batch,
-							|b| &b.content,
-							&branch_config,
-						) {
+						if should_process_batch(&document_blocks_batch, |b| &b.content, &branch_config) {
 							embedding_calls += document_blocks_batch.len();
 							process_document_blocks_batch(
 								branch_store,
@@ -895,18 +850,14 @@ pub async fn index_branch_delta(
 								&document_file_metadata,
 							)
 							.await
-							.map_err(|e| anyhow::anyhow!(
+							.map_err(|e| {
+								anyhow::anyhow!(
 								"Failed to process document blocks batch: {}. Aborting indexing — partial state retained, rerun to resume.",
 								e
-							))?;
-							batches_processed += 1;
-							flush_if_needed(
-								branch_store,
-								&mut batches_processed,
-								&branch_config,
-								false,
 							)
-							.await?;
+							})?;
+							batches_processed += 1;
+							flush_if_needed(branch_store, &mut batches_processed, &branch_config, false).await?;
 							document_blocks_batch.clear();
 							document_file_metadata.clear();
 						}
@@ -936,8 +887,7 @@ pub async fn index_branch_delta(
 						files_processed += 1;
 						state.write().indexed_files = files_processed;
 
-						if should_process_batch(&text_blocks_batch, |b| &b.content, &branch_config)
-						{
+						if should_process_batch(&text_blocks_batch, |b| &b.content, &branch_config) {
 							embedding_calls += text_blocks_batch.len();
 							process_text_blocks_batch(
 								branch_store,
@@ -949,13 +899,7 @@ pub async fn index_branch_delta(
 							text_blocks_batch.clear();
 							text_file_metadata.clear();
 							batches_processed += 1;
-							flush_if_needed(
-								branch_store,
-								&mut batches_processed,
-								&branch_config,
-								false,
-							)
-							.await?;
+							flush_if_needed(branch_store, &mut batches_processed, &branch_config, false).await?;
 						}
 					}
 				}
@@ -972,23 +916,22 @@ pub async fn index_branch_delta(
 				&file_context_map,
 			)
 			.await
-			.map_err(|e| anyhow::anyhow!(
+			.map_err(|e| {
+				anyhow::anyhow!(
 				"Failed to process remaining code blocks batch: {}. Aborting indexing — partial state retained, rerun to resume.",
 				e
-			))?;
+			)
+			})?;
 		}
 		if !text_blocks_batch.is_empty() {
-			process_text_blocks_batch(
-				branch_store,
-				&text_blocks_batch,
-				&branch_config,
-				&text_file_metadata,
-			)
-			.await
-			.map_err(|e| anyhow::anyhow!(
+			process_text_blocks_batch(branch_store, &text_blocks_batch, &branch_config, &text_file_metadata)
+				.await
+				.map_err(|e| {
+					anyhow::anyhow!(
 				"Failed to process remaining text blocks batch: {}. Aborting indexing — partial state retained, rerun to resume.",
 				e
-			))?;
+			)
+				})?;
 		}
 		if !document_blocks_batch.is_empty() {
 			process_document_blocks_batch(
@@ -1014,13 +957,8 @@ pub async fn index_branch_delta(
 			}
 
 			let graph_store = Store::new_for_branch(branch_name).await?;
-			let graph_builder = graphrag::GraphBuilder::new_with_store(
-				config.clone(),
-				&current_dir,
-				graph_store,
-				quiet,
-			)
-			.await?;
+			let graph_builder =
+				graphrag::GraphBuilder::new_with_store(config.clone(), &current_dir, graph_store, quiet).await?;
 			graph_builder
 				.process_code_blocks(&all_code_blocks, Some(state.clone()))
 				.await?;
@@ -1075,10 +1013,7 @@ fn validate_llm_structured_output(config: &Config, quiet: bool) -> Result<()> {
 	let mut models_to_check: Vec<(&str, &str)> = Vec::new();
 
 	if config.graphrag.enabled && config.graphrag.use_llm {
-		models_to_check.push((
-			&config.graphrag.llm.description_model,
-			"graphrag.llm.description_model",
-		));
+		models_to_check.push((&config.graphrag.llm.description_model, "graphrag.llm.description_model"));
 	}
 
 	if config.index.contextual_descriptions {
@@ -1134,13 +1069,7 @@ pub async fn index_files_with_quiet(
 	let mut batches_processed = 0; // Track batches for intelligent flushing
 
 	// Log indexing start
-	log_indexing_progress(
-		"indexing_start",
-		0,
-		0,
-		Some(&current_dir.display().to_string()),
-		0,
-	);
+	log_indexing_progress("indexing_start", 0, 0, Some(&current_dir.display().to_string()), 0);
 
 	// Validate LLM models support structured output before starting any work
 	validate_llm_structured_output(config, quiet)?;
@@ -1222,18 +1151,11 @@ pub async fn index_files_with_quiet(
 									);
 								}
 
-								Some(
-									changed_files
-										.into_iter()
-										.collect::<std::collections::HashSet<_>>(),
-								)
+								Some(changed_files.into_iter().collect::<std::collections::HashSet<_>>())
 							}
 							Err(e) => {
 								if !quiet {
-									eprintln!(
-										"Warning: Could not get git changes, indexing all files: {}",
-										e
-									);
+									eprintln!("Warning: Could not get git changes, indexing all files: {}", e);
 								}
 								None
 							}
@@ -1248,12 +1170,9 @@ pub async fn index_files_with_quiet(
 						// This prevents stale entries from causing errors in GraphRAG processing
 						{
 							let mut state_guard = state.write();
-							state_guard.status_message =
-								"Checking for deleted files...".to_string();
+							state_guard.status_message = "Checking for deleted files...".to_string();
 						}
-						if let Err(e) =
-							cleanup_deleted_files_optimized(store, &current_dir, quiet).await
-						{
+						if let Err(e) = cleanup_deleted_files_optimized(store, &current_dir, quiet).await {
 							if !quiet {
 								eprintln!("Warning: Failed to clean up deleted files: {}", e);
 							}
@@ -1265,31 +1184,24 @@ pub async fn index_files_with_quiet(
 
 						// Check if GraphRAG needs to be built from existing database even when no files changed
 						if config.graphrag.enabled {
-							let needs_graphrag_from_existing =
-								match store.graphrag_needs_indexing().await {
-									Ok(v) => v,
-									Err(e) => {
-										tracing::warn!(
-											error = %e,
-											"Failed to check if GraphRAG needs indexing, assuming false"
-										);
-										false
-									}
-								};
+							let needs_graphrag_from_existing = match store.graphrag_needs_indexing().await {
+								Ok(v) => v,
+								Err(e) => {
+									tracing::warn!(
+										error = %e,
+										"Failed to check if GraphRAG needs indexing, assuming false"
+									);
+									false
+								}
+							};
 							if needs_graphrag_from_existing {
 								if !quiet {
 									println!("🔗 Building GraphRAG from existing database...");
 								}
 								log_indexing_progress("graphrag_build", 0, 0, None, 0);
-								let graph_builder = graphrag::GraphBuilder::new_with_quiet(
-									config.clone(),
-									&current_dir,
-									quiet,
-								)
-								.await?;
-								graph_builder
-									.build_from_existing_database(Some(state.clone()))
-									.await?;
+								let graph_builder =
+									graphrag::GraphBuilder::new_with_quiet(config.clone(), &current_dir, quiet).await?;
+								graph_builder.build_from_existing_database(Some(state.clone())).await?;
 
 								// CRITICAL: Persist data and store git metadata after GraphRAG build
 								// This prevents infinite rebuilding on subsequent runs
@@ -1305,10 +1217,7 @@ pub async fn index_files_with_quiet(
 						}
 
 						// Index commits before returning
-						if let Err(e) =
-							commits::index_commits(config, store, git_root, state.clone(), quiet)
-								.await
-						{
+						if let Err(e) = commits::index_commits(config, store, git_root, state.clone(), quiet).await {
 							tracing::warn!("Commit indexing failed: {}", e);
 						}
 
@@ -1378,10 +1287,7 @@ pub async fn index_files_with_quiet(
 
 	let file_metadata_map = store.get_all_file_metadata().await?;
 	if !quiet {
-		println!(
-			"📊 Loaded metadata for {} files from database",
-			file_metadata_map.len()
-		);
+		println!("📊 Loaded metadata for {} files from database", file_metadata_map.len());
 	}
 
 	// Progressive processing: Skip separate counting phase and count during processing
@@ -1524,10 +1430,12 @@ pub async fn index_files_with_quiet(
 								&file_context_map,
 							)
 							.await
-							.map_err(|e| anyhow::anyhow!(
+							.map_err(|e| {
+								anyhow::anyhow!(
 								"Failed to process code blocks batch: {}. Aborting indexing — partial state retained, rerun to resume.",
 								e
-							))?;
+							)
+							})?;
 							batches_processed += 1;
 							flush_if_needed(store, &mut batches_processed, config, false).await?;
 							code_blocks_batch.clear();
@@ -1537,17 +1445,14 @@ pub async fn index_files_with_quiet(
 						// Only process text_blocks_batch if we have any (from unsupported files)
 						if should_process_batch(&text_blocks_batch, |b| &b.content, config) {
 							embedding_calls += text_blocks_batch.len();
-							process_text_blocks_batch(
-								store,
-								&text_blocks_batch,
-								config,
-								&text_file_metadata,
-							)
-							.await
-							.map_err(|e| anyhow::anyhow!(
+							process_text_blocks_batch(store, &text_blocks_batch, config, &text_file_metadata)
+								.await
+								.map_err(|e| {
+									anyhow::anyhow!(
 								"Failed to process text blocks batch: {}. Aborting indexing — partial state retained, rerun to resume.",
 								e
-							))?;
+							)
+								})?;
 							batches_processed += 1;
 							flush_if_needed(store, &mut batches_processed, config, false).await?;
 							text_blocks_batch.clear();
@@ -1562,10 +1467,12 @@ pub async fn index_files_with_quiet(
 								&document_file_metadata,
 							)
 							.await
-							.map_err(|e| anyhow::anyhow!(
+							.map_err(|e| {
+								anyhow::anyhow!(
 								"Failed to process document blocks batch: {}. Aborting indexing — partial state retained, rerun to resume.",
 								e
-							))?;
+							)
+							})?;
 							batches_processed += 1;
 							flush_if_needed(store, &mut batches_processed, config, false).await?;
 							document_blocks_batch.clear();
@@ -1619,20 +1526,16 @@ pub async fn index_files_with_quiet(
 							// Process batch when it reaches the batch size or token limit
 							if should_process_batch(&text_blocks_batch, |b| &b.content, config) {
 								embedding_calls += text_blocks_batch.len();
-								process_text_blocks_batch(
-									store,
-									&text_blocks_batch,
-									config,
-									&text_file_metadata,
-								)
-								.await
-								.map_err(|e| anyhow::anyhow!(
+								process_text_blocks_batch(store, &text_blocks_batch, config, &text_file_metadata)
+									.await
+									.map_err(|e| {
+										anyhow::anyhow!(
 									"Failed to process text blocks batch: {}. Aborting indexing — partial state retained, rerun to resume.",
 									e
-								))?;
+								)
+									})?;
 								batches_processed += 1;
-								flush_if_needed(store, &mut batches_processed, config, false)
-									.await?;
+								flush_if_needed(store, &mut batches_processed, config, false).await?;
 								text_blocks_batch.clear();
 								text_file_metadata.clear();
 							}
@@ -1654,9 +1557,7 @@ pub async fn index_files_with_quiet(
 			.collect();
 		total_files_found = file_entries
 			.iter()
-			.filter(|entry| {
-				detect_language(entry.path()).is_some() || is_allowed_text_extension(entry.path())
-			})
+			.filter(|entry| detect_language(entry.path()).is_some() || is_allowed_text_extension(entry.path()))
 			.count();
 
 		// Update state with the total count immediately
@@ -1711,8 +1612,7 @@ pub async fn index_files_with_quiet(
 
 							// Also create a synthetic CodeBlock for GraphRAG
 							if config.graphrag.enabled {
-								all_code_blocks
-									.push(markdown_graphrag_block(&file_path, &contents));
+								all_code_blocks.push(markdown_graphrag_block(&file_path, &contents));
 							}
 
 							true
@@ -1774,10 +1674,12 @@ pub async fn index_files_with_quiet(
 								&file_context_map,
 							)
 							.await
-							.map_err(|e| anyhow::anyhow!(
+							.map_err(|e| {
+								anyhow::anyhow!(
 								"Failed to process code blocks batch: {}. Aborting indexing — partial state retained, rerun to resume.",
 								e
-							))?;
+							)
+							})?;
 							batches_processed += 1;
 							flush_if_needed(store, &mut batches_processed, config, false).await?;
 							code_blocks_batch.clear();
@@ -1787,17 +1689,14 @@ pub async fn index_files_with_quiet(
 						// Only process text_blocks_batch if we have any (from unsupported files)
 						if should_process_batch(&text_blocks_batch, |b| &b.content, config) {
 							embedding_calls += text_blocks_batch.len();
-							process_text_blocks_batch(
-								store,
-								&text_blocks_batch,
-								config,
-								&text_file_metadata,
-							)
-							.await
-							.map_err(|e| anyhow::anyhow!(
+							process_text_blocks_batch(store, &text_blocks_batch, config, &text_file_metadata)
+								.await
+								.map_err(|e| {
+									anyhow::anyhow!(
 								"Failed to process text blocks batch: {}. Aborting indexing — partial state retained, rerun to resume.",
 								e
-							))?;
+							)
+								})?;
 							batches_processed += 1;
 							flush_if_needed(store, &mut batches_processed, config, false).await?;
 							text_blocks_batch.clear();
@@ -1812,10 +1711,12 @@ pub async fn index_files_with_quiet(
 								&document_file_metadata,
 							)
 							.await
-							.map_err(|e| anyhow::anyhow!(
+							.map_err(|e| {
+								anyhow::anyhow!(
 								"Failed to process document blocks batch: {}. Aborting indexing — partial state retained, rerun to resume.",
 								e
-							))?;
+							)
+							})?;
 							batches_processed += 1;
 							flush_if_needed(store, &mut batches_processed, config, false).await?;
 							document_blocks_batch.clear();
@@ -1869,20 +1770,16 @@ pub async fn index_files_with_quiet(
 							// Process batch when it reaches the batch size or token limit
 							if should_process_batch(&text_blocks_batch, |b| &b.content, config) {
 								embedding_calls += text_blocks_batch.len();
-								process_text_blocks_batch(
-									store,
-									&text_blocks_batch,
-									config,
-									&text_file_metadata,
-								)
-								.await
-								.map_err(|e| anyhow::anyhow!(
+								process_text_blocks_batch(store, &text_blocks_batch, config, &text_file_metadata)
+									.await
+									.map_err(|e| {
+										anyhow::anyhow!(
 									"Failed to process text blocks batch: {}. Aborting indexing — partial state retained, rerun to resume.",
 									e
-								))?;
+								)
+									})?;
 								batches_processed += 1;
-								flush_if_needed(store, &mut batches_processed, config, false)
-									.await?;
+								flush_if_needed(store, &mut batches_processed, config, false).await?;
 								text_blocks_batch.clear();
 								text_file_metadata.clear();
 							}
@@ -1904,10 +1801,12 @@ pub async fn index_files_with_quiet(
 			&file_context_map,
 		)
 		.await
-		.map_err(|e| anyhow::anyhow!(
+		.map_err(|e| {
+			anyhow::anyhow!(
 			"Failed to process remaining code blocks batch: {}. Aborting indexing — partial state retained, rerun to resume.",
 			e
-		))?;
+		)
+		})?;
 		batches_processed += 1;
 	}
 	// Only process text_blocks_batch if we have any (from unsupported files)
@@ -1915,10 +1814,12 @@ pub async fn index_files_with_quiet(
 		embedding_calls += text_blocks_batch.len();
 		process_text_blocks_batch(store, &text_blocks_batch, config, &text_file_metadata)
 			.await
-			.map_err(|e| anyhow::anyhow!(
+			.map_err(|e| {
+				anyhow::anyhow!(
 				"Failed to process remaining text blocks batch: {}. Aborting indexing — partial state retained, rerun to resume.",
 				e
-			))?;
+			)
+			})?;
 		batches_processed += 1;
 	}
 	if !document_blocks_batch.is_empty() {
@@ -1972,8 +1873,7 @@ pub async fn index_files_with_quiet(
 			{
 				let mut state_guard = state.write();
 				if needs_graphrag_from_existing {
-					state_guard.status_message =
-						"Building GraphRAG from existing database...".to_string();
+					state_guard.status_message = "Building GraphRAG from existing database...".to_string();
 				} else {
 					state_guard.status_message = "Building GraphRAG knowledge graph...".to_string();
 				}
@@ -1989,14 +1889,11 @@ pub async fn index_files_with_quiet(
 			);
 
 			// Initialize GraphBuilder
-			let graph_builder =
-				graphrag::GraphBuilder::new_with_quiet(config.clone(), &current_dir, quiet).await?;
+			let graph_builder = graphrag::GraphBuilder::new_with_quiet(config.clone(), &current_dir, quiet).await?;
 
 			if needs_graphrag_from_existing {
 				// Build GraphRAG from existing database (critical fix for the reported issue)
-				graph_builder
-					.build_from_existing_database(Some(state.clone()))
-					.await?;
+				graph_builder.build_from_existing_database(Some(state.clone())).await?;
 			} else {
 				// Process new code blocks to build/update the graph
 				graph_builder
@@ -2023,18 +1920,11 @@ pub async fn index_files_with_quiet(
 	// Log indexing completion
 	let final_files = state.read().indexed_files;
 	let final_total = state.read().total_files;
-	log_indexing_progress(
-		"indexing_complete",
-		final_files,
-		final_total,
-		None,
-		embedding_calls,
-	);
+	log_indexing_progress("indexing_complete", final_files, final_total, None, embedding_calls);
 
 	// Index commits from default branch
 	if let Some(repo_root) = git_repo_root {
-		if let Err(e) = commits::index_commits(config, store, repo_root, state.clone(), quiet).await
-		{
+		if let Err(e) = commits::index_commits(config, store, repo_root, state.clone(), quiet).await {
 			tracing::warn!("Commit indexing failed: {}", e);
 		}
 	}
@@ -2087,10 +1977,7 @@ pub async fn handle_file_change(store: &Store, file_path: &str, config: &Config)
 		if let Ok(matcher) = NoindexWalker::create_matcher(&current_dir, true) {
 			// Use quiet=true for watcher
 			// Check if the file should be ignored
-			if matcher
-				.matched(&absolute_path, absolute_path.is_dir())
-				.is_ignore()
-			{
+			if matcher.matched(&absolute_path, absolute_path.is_dir()).is_ignore() {
 				// File is in ignore patterns, so don't index it
 				return Ok(());
 			}
@@ -2100,8 +1987,7 @@ pub async fn handle_file_change(store: &Store, file_path: &str, config: &Config)
 		if let Some(language) = detect_language(&absolute_path) {
 			if let Ok(contents) = fs::read_to_string(&absolute_path) {
 				// Ensure we use relative path for storage
-				let relative_file_path =
-					path_utils::PathUtils::to_relative_string(&absolute_path, &current_dir);
+				let relative_file_path = path_utils::PathUtils::to_relative_string(&absolute_path, &current_dir);
 
 				if language == "markdown" {
 					// Handle markdown files specially
@@ -2123,25 +2009,15 @@ pub async fn handle_file_change(store: &Store, file_path: &str, config: &Config)
 					}
 
 					if !document_blocks_batch.is_empty() {
-						process_document_blocks_batch(
-							store,
-							&document_blocks_batch,
-							config,
-							&document_file_metadata,
-						)
-						.await?;
+						process_document_blocks_batch(store, &document_blocks_batch, config, &document_file_metadata)
+							.await?;
 					}
 
 					// Update GraphRAG for this markdown file
 					if config.graphrag.enabled {
-						let md_blocks =
-							vec![markdown_graphrag_block(&relative_file_path, &contents)];
-						let graph_builder = graphrag::GraphBuilder::new_with_quiet(
-							config.clone(),
-							&current_dir,
-							true,
-						)
-						.await?;
+						let md_blocks = vec![markdown_graphrag_block(&relative_file_path, &contents)];
+						let graph_builder =
+							graphrag::GraphBuilder::new_with_quiet(config.clone(), &current_dir, true).await?;
 						graph_builder
 							.process_code_blocks(&md_blocks, Some(state.clone()))
 							.await?;
@@ -2190,8 +2066,7 @@ pub async fn handle_file_change(store: &Store, file_path: &str, config: &Config)
 
 					// Update GraphRAG if enabled and we have new blocks
 					if config.graphrag.enabled && !all_code_blocks.is_empty() {
-						let graph_builder =
-							graphrag::GraphBuilder::new(config.clone(), &current_dir).await?;
+						let graph_builder = graphrag::GraphBuilder::new(config.clone(), &current_dir).await?;
 						graph_builder
 							.process_code_blocks(&all_code_blocks, Some(state.clone()))
 							.await?;
@@ -2229,13 +2104,7 @@ pub async fn handle_file_change(store: &Store, file_path: &str, config: &Config)
 						}
 
 						if !text_blocks_batch.is_empty() {
-							process_text_blocks_batch(
-								store,
-								&text_blocks_batch,
-								config,
-								&text_file_metadata,
-							)
-							.await?;
+							process_text_blocks_batch(store, &text_blocks_batch, config, &text_file_metadata).await?;
 						}
 
 						// Explicitly flush to ensure all data is persisted

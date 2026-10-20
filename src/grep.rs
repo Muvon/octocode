@@ -44,9 +44,7 @@ macro_rules! define_ast_grep_lang {
 			}
 
 			fn field_to_id(&self, field: &str) -> Option<u16> {
-				self.get_ts_language()
-					.field_id_for_name(field)
-					.map(|f| f.get())
+				self.get_ts_language().field_id_for_name(field).map(|f| f.get())
 			}
 
 			fn build_pattern(&self, builder: &PatternBuilder) -> Result<Pattern, PatternError> {
@@ -64,11 +62,7 @@ macro_rules! define_ast_grep_lang {
 
 define_ast_grep_lang!(AstRust, tree_sitter_rust::LANGUAGE, '$');
 define_ast_grep_lang!(AstJavaScript, tree_sitter_javascript::LANGUAGE, '$');
-define_ast_grep_lang!(
-	AstTypeScript,
-	tree_sitter_typescript::LANGUAGE_TYPESCRIPT,
-	'$'
-);
+define_ast_grep_lang!(AstTypeScript, tree_sitter_typescript::LANGUAGE_TYPESCRIPT, '$');
 define_ast_grep_lang!(AstPython, tree_sitter_python::LANGUAGE, 'µ');
 define_ast_grep_lang!(AstGo, tree_sitter_go::LANGUAGE, 'µ');
 define_ast_grep_lang!(AstJava, tree_sitter_java::LANGUAGE, '$');
@@ -99,9 +93,7 @@ impl AstGrepLanguage for AstElixir {
 	}
 
 	fn field_to_id(&self, field: &str) -> Option<u16> {
-		self.get_ts_language()
-			.field_id_for_name(field)
-			.map(|field| field.get())
+		self.get_ts_language().field_id_for_name(field).map(|field| field.get())
 	}
 
 	fn build_pattern(&self, builder: &PatternBuilder) -> Result<Pattern, PatternError> {
@@ -247,8 +239,8 @@ fn search_kind_with_lang<L: LanguageExt + AstGrepLanguage + Clone>(
 	containers: &[(&str, &str)],
 ) -> Result<Vec<RawMatch>> {
 	let grep = lang.ast_grep(source);
-	let kind = KindMatcher::try_new(kind_str, lang)
-		.map_err(|e| anyhow::anyhow!("Invalid AST kind '{}': {}", kind_str, e))?;
+	let kind =
+		KindMatcher::try_new(kind_str, lang).map_err(|e| anyhow::anyhow!("Invalid AST kind '{}': {}", kind_str, e))?;
 	Ok(collect_matches(&grep, &kind, containers, &[]))
 }
 
@@ -270,12 +262,8 @@ fn search_contextual_with_lang<L: LanguageExt + AstGrepLanguage + Clone>(
 
 /// Inspect the root AST kind a pattern parses to, plus parse-error flag and metavars.
 /// Used to build diagnostics when a search yields zero matches.
-fn pattern_info_with_lang<L: LanguageExt + AstGrepLanguage + Clone>(
-	lang: L,
-	pattern_str: &str,
-) -> Result<PatternInfo> {
-	let pattern = Pattern::try_new(pattern_str, lang.clone())
-		.map_err(|e| anyhow::anyhow!("Invalid pattern: {}", e))?;
+fn pattern_info_with_lang<L: LanguageExt + AstGrepLanguage + Clone>(lang: L, pattern_str: &str) -> Result<PatternInfo> {
+	let pattern = Pattern::try_new(pattern_str, lang.clone()).map_err(|e| anyhow::anyhow!("Invalid pattern: {}", e))?;
 	let has_error = pattern.has_error();
 	let root_kind = match &pattern.node {
 		PatternNode::Terminal { kind_id, .. } | PatternNode::Internal { kind_id, .. } => {
@@ -284,11 +272,7 @@ fn pattern_info_with_lang<L: LanguageExt + AstGrepLanguage + Clone>(
 		}
 		PatternNode::MetaVar { .. } => None,
 	};
-	let mut defined_vars: Vec<String> = pattern
-		.defined_vars()
-		.into_iter()
-		.map(|s| s.to_string())
-		.collect();
+	let mut defined_vars: Vec<String> = pattern.defined_vars().into_iter().map(|s| s.to_string()).collect();
 	defined_vars.sort();
 	Ok(PatternInfo {
 		root_kind,
@@ -311,8 +295,9 @@ pub fn language_from_extension(path: &Path) -> Option<&'static str> {
 		"py" | "pyi" => Some("python"),
 		"go" => Some("go"),
 		"java" => Some("java"),
-		"c" | "cc" | "cpp" | "cxx" | "c++" | "h" | "hpp" | "hxx" | "cppm" | "ixx" | "mxx"
-		| "ccm" | "cxxm" => Some("cpp"),
+		"c" | "cc" | "cpp" | "cxx" | "c++" | "h" | "hpp" | "hxx" | "cppm" | "ixx" | "mxx" | "ccm" | "cxxm" => {
+			Some("cpp")
+		}
 		"php" => Some("php"),
 		"rb" => Some("ruby"),
 		"swift" => Some("swift"),
@@ -337,10 +322,7 @@ pub fn container_kinds(language: &str) -> &'static [(&'static str, &'static str)
 			("enum_item", "enum"),
 			("mod_item", "mod"),
 		],
-		"python" => &[
-			("function_definition", "def"),
-			("class_definition", "class"),
-		],
+		"python" => &[("function_definition", "def"), ("class_definition", "class")],
 		"javascript" | "typescript" => &[
 			("function_declaration", "function"),
 			("generator_function_declaration", "function"),
@@ -463,11 +445,7 @@ pub fn definition_kinds(language: &str) -> &'static [&'static str] {
 		"ruby" => &["method", "singleton_method", "class", "module"],
 		"lua" => &["function_declaration"],
 		"bash" => &["function_definition"],
-		"swift" => &[
-			"function_declaration",
-			"class_declaration",
-			"protocol_declaration",
-		],
+		"swift" => &["function_declaration", "class_declaration", "protocol_declaration"],
 		"elixir" => &["call"],
 		_ => &[],
 	}
@@ -485,10 +463,7 @@ impl NameMatcher {
 		if spec.contains('*') {
 			let re = format!(
 				"^{}$",
-				spec.split('*')
-					.map(regex::escape)
-					.collect::<Vec<_>>()
-					.join(".*")
+				spec.split('*').map(regex::escape).collect::<Vec<_>>().join(".*")
 			);
 			Ok(NameMatcher::Wildcard(regex::Regex::new(&re)?))
 		} else {
@@ -584,9 +559,7 @@ fn elixir_declaration_name<D: Doc>(node: &Node<'_, D>) -> Option<String> {
 	let text = node.text().to_string();
 	let remainder = text.strip_prefix(&macro_name)?.trim_start();
 	if macro_name == "defimpl" {
-		let protocol = remainder
-			.split([',', ' ', '\n'])
-			.find(|part| !part.is_empty())?;
+		let protocol = remainder.split([',', ' ', '\n']).find(|part| !part.is_empty())?;
 		let implementation = remainder
 			.split_once("for:")
 			.map(|(_, tail)| tail.trim_start())
@@ -596,9 +569,7 @@ fn elixir_declaration_name<D: Doc>(node: &Node<'_, D>) -> Option<String> {
 			.or_else(|| Some(protocol.to_string()));
 	}
 	let name = remainder
-		.split(|character: char| {
-			character.is_whitespace() || matches!(character, '(' | ',' | '[' | '{')
-		})
+		.split(|character: char| character.is_whitespace() || matches!(character, '(' | ',' | '[' | '{'))
 		.find(|part| !part.is_empty())?;
 	Some(name.trim_start_matches(':').to_string())
 }
@@ -631,14 +602,10 @@ fn find_refs_with_lang<L: LanguageExt + AstGrepLanguage + Clone>(
 		}
 		let pos = node.start_pos();
 		let range = node.range();
-		let line_text = lines
-			.get(pos.line())
-			.map(|l| l.trim().to_string())
-			.unwrap_or_default();
+		let line_text = lines.get(pos.line()).map(|l| l.trim().to_string()).unwrap_or_default();
 		let is_def = if language == "elixir" {
-			node.ancestors().any(|ancestor| {
-				elixir_declaration_name(&ancestor).as_deref() == Some(text.as_ref())
-			})
+			node.ancestors()
+				.any(|ancestor| elixir_declaration_name(&ancestor).as_deref() == Some(text.as_ref()))
 		} else {
 			node.parent()
 				.map(|p| {
@@ -678,11 +645,7 @@ pub fn literal_tokens(pattern: &str) -> Vec<String> {
 				i += 1;
 			}
 			// Skip metavariable names: preceded by an expando char ($, µ, #).
-			let prev = if start > 0 {
-				Some(chars[start - 1])
-			} else {
-				None
-			};
+			let prev = if start > 0 { Some(chars[start - 1]) } else { None };
 			let is_metavar = matches!(prev, Some('$') | Some('µ') | Some('#'));
 			if !is_metavar && i - start >= 2 {
 				tokens.push(chars[start..i].iter().collect());
@@ -833,12 +796,7 @@ fn wrap_matches(file_path: &str, raw: Vec<RawMatch>) -> Vec<GrepMatch> {
 
 /// Search a single file with the default `Smart` strictness. Equivalent to
 /// `search_file_strict(.., MatchStrictness::Smart)`.
-pub fn search_file(
-	file_path: &str,
-	source: &str,
-	pattern: &str,
-	language: &str,
-) -> Result<Vec<GrepMatch>> {
+pub fn search_file(file_path: &str, source: &str, pattern: &str, language: &str) -> Result<Vec<GrepMatch>> {
 	search_file_strict(file_path, source, pattern, language, MatchStrictness::Smart)
 }
 
@@ -879,16 +837,9 @@ pub fn search_file_constrained(
 /// Search a single file using a tree-sitter node kind as the matcher.
 /// Use this when you want to match all nodes of a given kind (e.g. all
 /// `function_declaration` or `call_expression`) without writing a body pattern.
-pub fn search_file_by_kind(
-	file_path: &str,
-	source: &str,
-	kind: &str,
-	language: &str,
-) -> Result<Vec<GrepMatch>> {
+pub fn search_file_by_kind(file_path: &str, source: &str, kind: &str, language: &str) -> Result<Vec<GrepMatch>> {
 	let containers = container_kinds(language);
-	let raw = dispatch_lang!(language, |lang| search_kind_with_lang(
-		lang, source, kind, containers
-	))?;
+	let raw = dispatch_lang!(language, |lang| search_kind_with_lang(lang, source, kind, containers))?;
 	Ok(wrap_matches(file_path, raw))
 }
 
@@ -930,17 +881,12 @@ pub fn search_file_contextual_constrained(
 /// Find symbol definitions by name in a single file (no pattern required).
 /// Matches the per-language definition kinds (functions, types, classes, …)
 /// whose name satisfies the matcher. Supports `*` wildcards via NameMatcher.
-pub fn find_symbol_defs(
-	file_path: &str,
-	source: &str,
-	name: &NameMatcher,
-	language: &str,
-) -> Result<Vec<GrepMatch>> {
+pub fn find_symbol_defs(file_path: &str, source: &str, name: &NameMatcher, language: &str) -> Result<Vec<GrepMatch>> {
 	let def_kinds = definition_kinds(language);
 	let containers = container_kinds(language);
-	let raw: Vec<RawMatch> = dispatch_lang!(language, |lang| Ok::<_, anyhow::Error>(
-		find_defs_with_lang(lang, source, name, language, def_kinds, containers)
-	))?;
+	let raw: Vec<RawMatch> = dispatch_lang!(language, |lang| Ok::<_, anyhow::Error>(find_defs_with_lang(
+		lang, source, name, language, def_kinds, containers
+	)))?;
 	Ok(wrap_matches(file_path, raw))
 }
 
@@ -955,10 +901,7 @@ pub enum SearchSpec {
 	/// Bare tree-sitter kind name.
 	Kind { kind: String },
 	/// Contextual pattern (context source + selector kind).
-	Contextual {
-		context_src: String,
-		selector: String,
-	},
+	Contextual { context_src: String, selector: String },
 	/// Kind name if valid in the grammar, else ast-grep pattern.
 	/// Used for `inside`/`has` relational specs where either shape is accepted.
 	KindOrPattern { spec: String },
@@ -978,28 +921,17 @@ fn search_multi_with_lang<L: LanguageExt + AstGrepLanguage + Clone>(
 	specs
 		.iter()
 		.map(|spec| match spec {
-			SearchSpec::Pattern {
-				pattern,
-				strictness,
-			} => Pattern::try_new(pattern, lang.clone())
-				.map(|p| {
-					collect_matches(
-						&grep,
-						&p.with_strictness(strictness.clone()),
-						containers,
-						constraints,
-					)
-				})
+			SearchSpec::Pattern { pattern, strictness } => Pattern::try_new(pattern, lang.clone())
+				.map(|p| collect_matches(&grep, &p.with_strictness(strictness.clone()), containers, constraints))
 				.unwrap_or_default(),
 			SearchSpec::Kind { kind } => KindMatcher::try_new(kind, lang.clone())
 				.map(|k| collect_matches(&grep, &k, containers, &[]))
 				.unwrap_or_default(),
-			SearchSpec::Contextual {
-				context_src,
-				selector,
-			} => Pattern::contextual(context_src, selector, lang.clone())
-				.map(|p| collect_matches(&grep, &p, containers, constraints))
-				.unwrap_or_default(),
+			SearchSpec::Contextual { context_src, selector } => {
+				Pattern::contextual(context_src, selector, lang.clone())
+					.map(|p| collect_matches(&grep, &p, containers, constraints))
+					.unwrap_or_default()
+			}
 			SearchSpec::KindOrPattern { spec } => match KindMatcher::try_new(spec, lang.clone()) {
 				Ok(k) => collect_matches(&grep, &k, containers, &[]),
 				Err(_) => Pattern::try_new(spec, lang.clone())
@@ -1020,28 +952,24 @@ pub fn search_file_multi(
 	constraints: &[MetavarConstraint],
 ) -> Result<Vec<Vec<GrepMatch>>> {
 	let containers = container_kinds(language);
-	let raw = dispatch_lang!(language, |lang| Ok::<_, anyhow::Error>(
-		search_multi_with_lang(lang, source, specs, containers, constraints)
-	))?;
-	Ok(raw
-		.into_iter()
-		.map(|v| wrap_matches(file_path, v))
-		.collect())
+	let raw = dispatch_lang!(language, |lang| Ok::<_, anyhow::Error>(search_multi_with_lang(
+		lang,
+		source,
+		specs,
+		containers,
+		constraints
+	)))?;
+	Ok(raw.into_iter().map(|v| wrap_matches(file_path, v)).collect())
 }
 
 /// Find symbol references (identifier usages) by name in a single file.
 /// Each hit reports the trimmed source line; definition sites are tagged `[def]`.
-pub fn find_symbol_refs(
-	file_path: &str,
-	source: &str,
-	name: &NameMatcher,
-	language: &str,
-) -> Result<Vec<GrepMatch>> {
+pub fn find_symbol_refs(file_path: &str, source: &str, name: &NameMatcher, language: &str) -> Result<Vec<GrepMatch>> {
 	let def_kinds = definition_kinds(language);
 	let containers = container_kinds(language);
-	let raw: Vec<RawMatch> = dispatch_lang!(language, |lang| Ok::<_, anyhow::Error>(
-		find_refs_with_lang(lang, source, name, language, def_kinds, containers)
-	))?;
+	let raw: Vec<RawMatch> = dispatch_lang!(language, |lang| Ok::<_, anyhow::Error>(find_refs_with_lang(
+		lang, source, name, language, def_kinds, containers
+	)))?;
 	Ok(wrap_matches(file_path, raw))
 }
 
@@ -1065,9 +993,7 @@ pub fn canonical_kind(intent: &str, language: &str) -> Option<&'static str> {
 		("function" | "func" | "fn" | "function_declaration", "javascript" | "typescript") => {
 			Some("function_declaration")
 		}
-		("function" | "func" | "fn" | "function_definition", "python") => {
-			Some("function_definition")
-		}
+		("function" | "func" | "fn" | "function_definition", "python") => Some("function_definition"),
 		("function" | "func" | "fn" | "function_item", "rust") => Some("function_item"),
 		("function" | "func" | "fn" | "function_declaration", "go") => Some("function_declaration"),
 		("function" | "func" | "fn", "java") => Some("method_declaration"),
@@ -1108,9 +1034,7 @@ pub fn canonical_kind(intent: &str, language: &str) -> Option<&'static str> {
 		// ---- import-like ----
 		("import" | "import_statement", "javascript" | "typescript") => Some("import_statement"),
 		("import" | "import_statement", "python") => Some("import_statement"),
-		("from_import" | "import_from" | "import_from_statement", "python") => {
-			Some("import_from_statement")
-		}
+		("from_import" | "import_from" | "import_from_statement", "python") => Some("import_from_statement"),
 		("import" | "use" | "use_declaration", "rust") => Some("use_declaration"),
 		("import" | "import_declaration", "go") => Some("import_declaration"),
 		("import", "java") => Some("import_declaration"),
@@ -1126,9 +1050,7 @@ pub fn canonical_kind(intent: &str, language: &str) -> Option<&'static str> {
 		("call", "ruby") => Some("call"),
 
 		// ---- control flow ----
-		("if" | "if_statement" | "conditional", "javascript" | "typescript") => {
-			Some("if_statement")
-		}
+		("if" | "if_statement" | "conditional", "javascript" | "typescript") => Some("if_statement"),
 		("if" | "if_statement", "python") => Some("if_statement"),
 		("if" | "if_expression", "rust") => Some("if_expression"),
 		("if" | "if_statement", "go") => Some("if_statement"),
@@ -1138,9 +1060,7 @@ pub fn canonical_kind(intent: &str, language: &str) -> Option<&'static str> {
 		("for" | "for_statement", "python") => Some("for_statement"),
 		("for" | "loop" | "for_expression", "rust") => Some("for_expression"),
 		("for" | "for_statement", "go") => Some("for_statement"),
-		("while" | "while_statement", "javascript" | "typescript" | "python" | "go") => {
-			Some("while_statement")
-		}
+		("while" | "while_statement", "javascript" | "typescript" | "python" | "go") => Some("while_statement"),
 
 		// ---- return / try ----
 		// Rust and Ruby do not have a `return_statement` kind: Rust's grammar is
@@ -1150,14 +1070,10 @@ pub fn canonical_kind(intent: &str, language: &str) -> Option<&'static str> {
 		("return" | "return_expression", "rust") => Some("return_expression"),
 		("return", "ruby") => Some("return"),
 		("return" | "return_statement", _) => Some("return_statement"),
-		("try" | "try_statement", "javascript" | "typescript" | "java" | "python") => {
-			Some("try_statement")
-		}
+		("try" | "try_statement", "javascript" | "typescript" | "java" | "python") => Some("try_statement"),
 
 		// ---- assignment / variable declarations ----
-		("variable" | "let" | "const" | "var", "javascript" | "typescript") => {
-			Some("variable_declaration")
-		}
+		("variable" | "let" | "const" | "var", "javascript" | "typescript") => Some("variable_declaration"),
 		("let" | "let_declaration", "rust") => Some("let_declaration"),
 		("variable" | "let" | "let_statement", "go") => Some("var_declaration"),
 
@@ -1183,8 +1099,7 @@ fn rewrite_file_with_lang<L: LanguageExt + AstGrepLanguage + Clone>(
 	rewrite_str: &str,
 ) -> Result<Option<(usize, String)>> {
 	let grep = lang.ast_grep(source);
-	let pattern = Pattern::try_new(pattern_str, lang)
-		.map_err(|e| anyhow::anyhow!("Invalid pattern: {}", e))?;
+	let pattern = Pattern::try_new(pattern_str, lang).map_err(|e| anyhow::anyhow!("Invalid pattern: {}", e))?;
 	let edits = grep.root().replace_all(&pattern, rewrite_str);
 	if edits.is_empty() {
 		return Ok(None);
@@ -1200,10 +1115,7 @@ fn apply_edits(source: &str, edits: Vec<AstEdit<String>>) -> String {
 	// Edits from replace_all are sorted by position ascending.
 	// Apply in reverse so earlier positions remain valid.
 	for edit in edits.into_iter().rev() {
-		bytes.splice(
-			edit.position..edit.position + edit.deleted_length,
-			edit.inserted_text,
-		);
+		bytes.splice(edit.position..edit.position + edit.deleted_length, edit.inserted_text);
 	}
 	String::from_utf8(bytes).expect("rewritten source should be valid UTF-8")
 }
@@ -1216,18 +1128,14 @@ pub fn rewrite_file(
 	rewrite: &str,
 	language: &str,
 ) -> Result<Option<RewriteResult>> {
-	let result = dispatch_lang!(language, |lang| rewrite_file_with_lang(
-		lang, source, pattern, rewrite
-	))?;
+	let result = dispatch_lang!(language, |lang| rewrite_file_with_lang(lang, source, pattern, rewrite))?;
 
-	Ok(
-		result.map(|(replacements, rewritten_source)| RewriteResult {
-			file: file_path.to_string(),
-			replacements,
-			original_source: source.to_string(),
-			rewritten_source,
-		}),
-	)
+	Ok(result.map(|(replacements, rewritten_source)| RewriteResult {
+		file: file_path.to_string(),
+		replacements,
+		original_source: source.to_string(),
+		rewritten_source,
+	}))
 }
 
 /// Generate a unified-diff-style preview of rewrite changes.
@@ -1262,11 +1170,7 @@ pub fn truncate_match_text(text: &str, max_lines: usize) -> String {
 		return text.to_string();
 	}
 	let head: Vec<&str> = text.lines().take(max_lines).collect();
-	format!(
-		"{}\n... ({} more lines)",
-		head.join("\n"),
-		line_count - max_lines
-	)
+	format!("{}\n... ({} more lines)", head.join("\n"), line_count - max_lines)
 }
 
 /// Format matches grouped by file (token-efficient output).
@@ -1287,9 +1191,7 @@ pub fn format_matches_grouped(matches: &[GrepMatch]) -> String {
 		for m in file_matches {
 			let text = truncate_match_text(&m.text, 4);
 			match &m.breadcrumb {
-				Some(bc) => {
-					output.push_str(&format!("{}:{} [{}]:  {}\n", m.line, m.column, bc, text))
-				}
+				Some(bc) => output.push_str(&format!("{}:{} [{}]:  {}\n", m.line, m.column, bc, text)),
 				None => output.push_str(&format!("{}:{}:  {}\n", m.line, m.column, text)),
 			}
 		}
@@ -1335,9 +1237,7 @@ pub fn format_matches_with_context(
 			for m in file_matches {
 				let text = truncate_match_text(&m.text, 4);
 				match &m.breadcrumb {
-					Some(bc) => {
-						output.push_str(&format!("{}:{} [{}]:  {}\n", m.line, m.column, bc, text))
-					}
+					Some(bc) => output.push_str(&format!("{}:{} [{}]:  {}\n", m.line, m.column, bc, text)),
 					None => output.push_str(&format!("{}:{}:  {}\n", m.line, m.column, text)),
 				}
 			}
@@ -1397,16 +1297,10 @@ function main() {
 	#[test]
 	fn test_language_from_extension() {
 		assert_eq!(language_from_extension(Path::new("foo.rs")), Some("rust"));
-		assert_eq!(
-			language_from_extension(Path::new("bar.ts")),
-			Some("typescript")
-		);
+		assert_eq!(language_from_extension(Path::new("bar.ts")), Some("typescript"));
 		assert_eq!(language_from_extension(Path::new("baz.py")), Some("python"));
 		assert_eq!(language_from_extension(Path::new("qux.go")), Some("go"));
-		assert_eq!(
-			language_from_extension(Path::new("mix.exs")),
-			Some("elixir")
-		);
+		assert_eq!(language_from_extension(Path::new("mix.exs")), Some("elixir"));
 		assert_eq!(language_from_extension(Path::new("nope.txt")), None);
 	}
 
@@ -1450,8 +1344,7 @@ public class Main {
     }
 }
 "#;
-		let matches =
-			search_file("Test.java", source, r#"System.out.println($ARG)"#, "java").unwrap();
+		let matches = search_file("Test.java", source, r#"System.out.println($ARG)"#, "java").unwrap();
 		assert_eq!(matches.len(), 2, "Java: Should find two println calls");
 	}
 
@@ -1627,14 +1520,7 @@ fn main() {
     let z = baz.expect("msg");
 }
 "#;
-		let result = rewrite_file(
-			"test.rs",
-			source,
-			"$VAR.unwrap()",
-			r#"$VAR.expect("reason")"#,
-			"rust",
-		)
-		.unwrap();
+		let result = rewrite_file("test.rs", source, "$VAR.unwrap()", r#"$VAR.expect("reason")"#, "rust").unwrap();
 		assert!(result.is_some(), "Should have matches to rewrite");
 		let result = result.unwrap();
 		assert_eq!(result.replacements, 2);
@@ -1647,14 +1533,7 @@ fn main() {
 	#[test]
 	fn test_rewrite_no_match() {
 		let source = "fn main() { let x = 1; }";
-		let result = rewrite_file(
-			"test.rs",
-			source,
-			"$VAR.unwrap()",
-			"$VAR.expect(\"r\")",
-			"rust",
-		)
-		.unwrap();
+		let result = rewrite_file("test.rs", source, "$VAR.unwrap()", "$VAR.expect(\"r\")", "rust").unwrap();
 		assert!(result.is_none(), "Should return None when no matches");
 	}
 
@@ -1679,15 +1558,9 @@ fn main() {
 	#[test]
 	fn test_rewrite_preserves_unmatched() {
 		let source = "let a = 1;\nlet b = foo.unwrap();\nlet c = 3;\n";
-		let result = rewrite_file(
-			"test.rs",
-			source,
-			"$VAR.unwrap()",
-			r#"$VAR.expect("x")"#,
-			"rust",
-		)
-		.unwrap()
-		.unwrap();
+		let result = rewrite_file("test.rs", source, "$VAR.unwrap()", r#"$VAR.expect("x")"#, "rust")
+			.unwrap()
+			.unwrap();
 		assert_eq!(result.replacements, 1);
 		assert!(result.rewritten_source.contains("let a = 1;"));
 		assert!(result.rewritten_source.contains("let c = 3;"));
@@ -1729,14 +1602,8 @@ fn main() {
 		// `console.log('x')` with surrounding comments: Smart can struggle when
 		// comments are inside the matched region; Relaxed ignores them.
 		let source = "// note\nconsole.log('hello');\n// trailing\nconsole.log('world');\n";
-		let smart = search_file_strict(
-			"a.js",
-			source,
-			"console.log($A)",
-			"javascript",
-			MatchStrictness::Smart,
-		)
-		.unwrap();
+		let smart =
+			search_file_strict("a.js", source, "console.log($A)", "javascript", MatchStrictness::Smart).unwrap();
 		let relaxed = search_file_strict(
 			"a.js",
 			source,
@@ -1753,8 +1620,7 @@ fn main() {
 	#[test]
 	fn test_kind_search_finds_function_declarations() {
 		let source = "function foo() {}\nfunction bar() {}\nconst x = 1;\n";
-		let matches =
-			search_file_by_kind("a.js", source, "function_declaration", "javascript").unwrap();
+		let matches = search_file_by_kind("a.js", source, "function_declaration", "javascript").unwrap();
 		assert_eq!(matches.len(), 2, "Should find both function declarations");
 	}
 
@@ -1770,10 +1636,7 @@ fn main() {
 		let source = "fn main() { println!(\"hi\"); foo(); bar(1, 2); }";
 		let matches = search_file_by_kind("a.rs", source, "call_expression", "rust").unwrap();
 		// Rust has println! as macro_invocation, but foo() and bar(1,2) are call_expression.
-		assert!(
-			matches.len() >= 2,
-			"Should find at least foo() and bar(1,2)"
-		);
+		assert!(matches.len() >= 2, "Should find at least foo() and bar(1,2)");
 	}
 
 	#[test]
@@ -1792,11 +1655,7 @@ func main() {
 		// Contextual patterns can be version-sensitive; kind-based search
 		// for call_expression is the robust fallback.
 		let matches = search_file_by_kind("a.go", source, "call_expression", "go").unwrap();
-		assert_eq!(
-			matches.len(),
-			2,
-			"Kind-based selector should find both calls"
-		);
+		assert_eq!(matches.len(), 2, "Kind-based selector should find both calls");
 	}
 
 	#[test]
@@ -1809,21 +1668,13 @@ class User {
 }
 "#;
 		let context = "class _ { $NAME = $VAL }";
-		let matches = search_file_contextual(
-			"a.ts",
-			source,
-			context,
-			"public_field_definition",
-			"typescript",
-		);
+		let matches = search_file_contextual("a.ts", source, context, "public_field_definition", "typescript");
 		// Some grammars use `public_field_definition`, others `field_definition` — accept either.
 		let count = match matches {
 			Ok(m) => m.len(),
-			Err(_) => {
-				search_file_contextual("a.ts", source, context, "field_definition", "typescript")
-					.map(|m| m.len())
-					.unwrap_or(0)
-			}
+			Err(_) => search_file_contextual("a.ts", source, context, "field_definition", "typescript")
+				.map(|m| m.len())
+				.unwrap_or(0),
 		};
 		assert!(count >= 1, "Should find at least one class field");
 	}
@@ -1977,13 +1828,7 @@ const id = <T>(x: T): T => x;
 async function load() { return await fetch('/x'); }
 async function save() { return await fetch('/y'); }
 "#;
-		let matches = search_file(
-			"a.ts",
-			source,
-			"async function $NAME($$$) { $$$ }",
-			"typescript",
-		)
-		.unwrap();
+		let matches = search_file("a.ts", source, "async function $NAME($$$) { $$$ }", "typescript").unwrap();
 		assert_eq!(matches.len(), 2);
 	}
 
@@ -2007,8 +1852,7 @@ import bar from './bar';
 import * as baz from './baz';
 "#;
 		// Use kind-based matching since import forms vary widely.
-		let matches =
-			search_file_by_kind("a.ts", source, "import_statement", "typescript").unwrap();
+		let matches = search_file_by_kind("a.ts", source, "import_statement", "typescript").unwrap();
 		assert_eq!(matches.len(), 3);
 	}
 
@@ -2023,13 +1867,7 @@ function f() {
 	}
 }
 "#;
-		let matches = search_file(
-			"a.ts",
-			source,
-			"try { $$$ } catch ($E) { $$$ }",
-			"typescript",
-		)
-		.unwrap();
+		let matches = search_file("a.ts", source, "try { $$$ } catch ($E) { $$$ }", "typescript").unwrap();
 		assert_eq!(matches.len(), 1);
 	}
 
@@ -2037,11 +1875,7 @@ function f() {
 	fn test_llm_javascript_console_method_chain() {
 		let source = "console.log('a'); console.error('b'); console.warn('c');";
 		let matches = search_file("a.js", source, "console.$M($ARG)", "javascript").unwrap();
-		assert_eq!(
-			matches.len(),
-			3,
-			"Should find log/error/warn via $M metavar"
-		);
+		assert_eq!(matches.len(), 3, "Should find log/error/warn via $M metavar");
 	}
 
 	#[test]
@@ -2056,8 +1890,7 @@ def slow_two():
 	return compute()
 "#;
 		// Python decorators are part of decorated_definition — kind search is robust.
-		let matches =
-			search_file_by_kind("a.py", source, "decorated_definition", "python").unwrap();
+		let matches = search_file_by_kind("a.py", source, "decorated_definition", "python").unwrap();
 		assert_eq!(matches.len(), 2);
 	}
 
@@ -2081,8 +1914,7 @@ async def save(x):
 	#[test]
 	fn test_llm_python_from_import() {
 		let source = "from os import path\nfrom typing import List, Dict\nimport sys\n";
-		let imports =
-			search_file_by_kind("a.py", source, "import_from_statement", "python").unwrap();
+		let imports = search_file_by_kind("a.py", source, "import_from_statement", "python").unwrap();
 		assert_eq!(imports.len(), 2);
 		let plain = search_file_by_kind("a.py", source, "import_statement", "python").unwrap();
 		assert_eq!(plain.len(), 1);
@@ -2119,11 +1951,7 @@ func two(x int) int { return x }
 func (s *S) three() {}
 "#;
 		let matches = search_file_by_kind("a.go", source, "function_declaration", "go").unwrap();
-		assert_eq!(
-			matches.len(),
-			2,
-			"Two free funcs (method is method_declaration)"
-		);
+		assert_eq!(matches.len(), 2, "Two free funcs (method is method_declaration)");
 		let methods = search_file_by_kind("a.go", source, "method_declaration", "go").unwrap();
 		assert_eq!(methods.len(), 1);
 	}
@@ -2187,16 +2015,8 @@ class User {
 		// Pattern alone may miss. Contextual should hit.
 		let direct = search_file("a.ts", source, "$NAME = $VAL", "typescript").unwrap();
 		let context = "class _ { $NAME = $VAL }";
-		let via_ctx = search_file_contextual(
-			"a.ts",
-			source,
-			context,
-			"public_field_definition",
-			"typescript",
-		)
-		.or_else(|_| {
-			search_file_contextual("a.ts", source, context, "field_definition", "typescript")
-		});
+		let via_ctx = search_file_contextual("a.ts", source, context, "public_field_definition", "typescript")
+			.or_else(|_| search_file_contextual("a.ts", source, context, "field_definition", "typescript"));
 		assert!(
 			via_ctx.is_ok() && !via_ctx.unwrap().is_empty(),
 			"Contextual fallback should find class fields even if direct does not. direct={}",
@@ -2215,22 +2035,8 @@ class User {
 	#[test]
 	fn test_smart_then_relaxed_consistency_on_simple_pattern() {
 		let source = "fn main() { let x = foo.unwrap(); }";
-		let smart = search_file_strict(
-			"a.rs",
-			source,
-			"$X.unwrap()",
-			"rust",
-			MatchStrictness::Smart,
-		)
-		.unwrap();
-		let relaxed = search_file_strict(
-			"a.rs",
-			source,
-			"$X.unwrap()",
-			"rust",
-			MatchStrictness::Relaxed,
-		)
-		.unwrap();
+		let smart = search_file_strict("a.rs", source, "$X.unwrap()", "rust", MatchStrictness::Smart).unwrap();
+		let relaxed = search_file_strict("a.rs", source, "$X.unwrap()", "rust", MatchStrictness::Relaxed).unwrap();
 		assert_eq!(smart.len(), 1);
 		assert_eq!(relaxed.len(), 1);
 	}
@@ -2243,8 +2049,7 @@ import { a } from './a';
 import b from './b';
 const x = 1;
 "#;
-		let matches =
-			search_file_by_kind("a.ts", source, "import_statement", "typescript").unwrap();
+		let matches = search_file_by_kind("a.ts", source, "import_statement", "typescript").unwrap();
 		assert_eq!(matches.len(), 2);
 	}
 
@@ -2262,40 +2067,19 @@ const x = 1;
 	#[test]
 	fn test_canonical_kind_function_per_language() {
 		// Same LLM intent word should map to the right grammar kind in each lang.
-		assert_eq!(
-			canonical_kind("function", "javascript"),
-			Some("function_declaration")
-		);
-		assert_eq!(
-			canonical_kind("function", "typescript"),
-			Some("function_declaration")
-		);
-		assert_eq!(
-			canonical_kind("function", "python"),
-			Some("function_definition")
-		);
+		assert_eq!(canonical_kind("function", "javascript"), Some("function_declaration"));
+		assert_eq!(canonical_kind("function", "typescript"), Some("function_declaration"));
+		assert_eq!(canonical_kind("function", "python"), Some("function_definition"));
 		assert_eq!(canonical_kind("function", "rust"), Some("function_item"));
-		assert_eq!(
-			canonical_kind("function", "go"),
-			Some("function_declaration")
-		);
-		assert_eq!(
-			canonical_kind("function", "java"),
-			Some("method_declaration")
-		);
+		assert_eq!(canonical_kind("function", "go"), Some("function_declaration"));
+		assert_eq!(canonical_kind("function", "java"), Some("method_declaration"));
 	}
 
 	#[test]
 	fn test_canonical_kind_normalizes_input() {
 		// Lowercases + strips leading $
-		assert_eq!(
-			canonical_kind("Function", "python"),
-			Some("function_definition")
-		);
-		assert_eq!(
-			canonical_kind("$Function", "python"),
-			Some("function_definition")
-		);
+		assert_eq!(canonical_kind("Function", "python"), Some("function_definition"));
+		assert_eq!(canonical_kind("$Function", "python"), Some("function_definition"));
 		assert_eq!(canonical_kind("  fn  ", "rust"), Some("function_item"));
 	}
 
@@ -2308,18 +2092,12 @@ const x = 1;
 			"Don't pretend a JS kind exists in Python; let strategy 3 try raw first"
 		);
 		// But the canonical 'function' word does map.
-		assert_eq!(
-			canonical_kind("function", "python"),
-			Some("function_definition")
-		);
+		assert_eq!(canonical_kind("function", "python"), Some("function_definition"));
 	}
 
 	#[test]
 	fn test_canonical_kind_imports_per_language() {
-		assert_eq!(
-			canonical_kind("import", "javascript"),
-			Some("import_statement")
-		);
+		assert_eq!(canonical_kind("import", "javascript"), Some("import_statement"));
 		assert_eq!(canonical_kind("import", "python"), Some("import_statement"));
 		assert_eq!(canonical_kind("import", "rust"), Some("use_declaration"));
 		assert_eq!(canonical_kind("import", "go"), Some("import_declaration"));
@@ -2327,10 +2105,7 @@ const x = 1;
 
 	#[test]
 	fn test_canonical_kind_class_per_language() {
-		assert_eq!(
-			canonical_kind("class", "javascript"),
-			Some("class_declaration")
-		);
+		assert_eq!(canonical_kind("class", "javascript"), Some("class_declaration"));
 		assert_eq!(canonical_kind("class", "python"), Some("class_definition"));
 		assert_eq!(canonical_kind("class", "cpp"), Some("class_specifier"));
 		assert_eq!(canonical_kind("class", "rust"), None); // Rust has struct/trait, not class
@@ -2365,10 +2140,7 @@ const x = 1;
 	fn test_format_matches_grouped_truncates_long_body() {
 		// A kind-based match might capture an entire impl block. Ensure the
 		// formatter doesn't dump the whole thing.
-		let long = (1..=20)
-			.map(|i| format!("line{}", i))
-			.collect::<Vec<_>>()
-			.join("\n");
+		let long = (1..=20).map(|i| format!("line{}", i)).collect::<Vec<_>>().join("\n");
 		let matches = vec![GrepMatch {
 			file: "a.rs".to_string(),
 			line: 1,
@@ -2542,9 +2314,7 @@ end
 
 		let references = find_symbol_refs("accounts.ex", source, &name, "elixir").unwrap();
 		assert_eq!(references.len(), 2);
-		assert!(references
-			.iter()
-			.any(|reference| reference.text.starts_with("[def]")));
+		assert!(references.iter().any(|reference| reference.text.starts_with("[def]")));
 	}
 
 	#[test]
@@ -2555,11 +2325,7 @@ end
 		assert_eq!(matches.len(), 2);
 		assert!(matches[0].text.starts_with("[def]"), "{}", matches[0].text);
 		assert!(!matches[1].text.starts_with("[def]"));
-		assert!(matches[1]
-			.breadcrumb
-			.as_deref()
-			.unwrap()
-			.contains("fn main"));
+		assert!(matches[1].breadcrumb.as_deref().unwrap().contains("fn main"));
 	}
 
 	#[test]
@@ -2593,10 +2359,7 @@ end
 		assert_eq!(buckets.len(), 3);
 		assert_eq!(buckets[0].len(), 1, "pattern bucket");
 		assert_eq!(buckets[1].len(), 2, "kind bucket");
-		assert!(
-			buckets[2].is_empty(),
-			"invalid kind yields empty, not error"
-		);
+		assert!(buckets[2].is_empty(), "invalid kind yields empty, not error");
 	}
 
 	#[test]
@@ -2639,10 +2402,7 @@ end
 
 	#[test]
 	fn test_language_from_extension_swift() {
-		assert_eq!(
-			language_from_extension(Path::new("App.swift")),
-			Some("swift")
-		);
+		assert_eq!(language_from_extension(Path::new("App.swift")), Some("swift"));
 	}
 
 	// ---- formatter shows breadcrumbs ----
@@ -2659,11 +2419,7 @@ end
 			breadcrumb: Some("impl Store › fn flush".to_string()),
 		}];
 		let out = format_matches_grouped(&matches);
-		assert!(
-			out.contains("[impl Store › fn flush]"),
-			"breadcrumb shown: {}",
-			out
-		);
+		assert!(out.contains("[impl Store › fn flush]"), "breadcrumb shown: {}", out);
 	}
 }
 

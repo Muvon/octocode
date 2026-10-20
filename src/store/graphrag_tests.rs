@@ -18,8 +18,7 @@ mod tests {
 	use crate::indexer::graphrag::types::{RelationType, RelationshipDirection};
 	use crate::store::graphrag::{CacheStats, GraphRagOperations};
 	use crate::store::mod_tests::{
-		code_block, embedding, graph_node, graph_relationship, test_store, use_offline_test_config,
-		CODE_DIM,
+		code_block, embedding, graph_node, graph_relationship, test_store, use_offline_test_config, CODE_DIM,
 	};
 	use crate::store::Store;
 	use std::collections::HashMap;
@@ -98,11 +97,7 @@ mod tests {
 	#[tokio::test]
 	async fn code_blocks_are_collected_for_graph_building() {
 		let (_dir, store) = test_store().await;
-		assert!(store
-			.get_all_code_blocks_for_graphrag()
-			.await
-			.unwrap()
-			.is_empty());
+		assert!(store.get_all_code_blocks_for_graphrag().await.unwrap().is_empty());
 
 		store
 			.store_code_blocks(
@@ -137,20 +132,14 @@ mod tests {
 			.map(|n| n.id.clone())
 			.collect();
 		seen.sort();
-		assert_eq!(
-			seen,
-			vec!["src/a.rs", "src/b.rs", "src/c.rs", "src/lonely.rs"]
-		);
+		assert_eq!(seen, vec!["src/a.rs", "src/b.rs", "src/c.rs", "src/lonely.rs"]);
 	}
 
 	#[tokio::test]
 	async fn a_vector_search_ranks_the_closest_node_first() {
 		let dir = TempDir::new().unwrap();
 		let store = populated_store(&dir).await;
-		let batch = store
-			.search_graph_nodes(&embedding(CODE_DIM, 2), 2)
-			.await
-			.unwrap();
+		let batch = store.search_graph_nodes(&embedding(CODE_DIM, 2), 2).await.unwrap();
 		assert!(batch.num_rows() >= 1);
 	}
 
@@ -160,24 +149,13 @@ mod tests {
 		let store = populated_store(&dir).await;
 
 		assert_eq!(store.get_graph_relationships().await.unwrap().num_rows(), 3);
-		assert_eq!(
-			store.get_all_relationships_efficient().await.unwrap().len(),
-			3
-		);
+		assert_eq!(store.get_all_relationships_efficient().await.unwrap().len(), 3);
 
-		let imports = store
-			.get_relationships_by_type(&RelationType::Imports)
-			.await
-			.unwrap();
+		let imports = store.get_relationships_by_type(&RelationType::Imports).await.unwrap();
 		assert_eq!(imports.len(), 2);
-		assert!(imports
-			.iter()
-			.all(|r| r.relation_type == RelationType::Imports));
+		assert!(imports.iter().all(|r| r.relation_type == RelationType::Imports));
 
-		let extends = store
-			.get_relationships_by_type(&RelationType::Extends)
-			.await
-			.unwrap();
+		let extends = store.get_relationships_by_type(&RelationType::Extends).await.unwrap();
 		assert!(extends.is_empty());
 	}
 
@@ -218,10 +196,7 @@ mod tests {
 		let dir = TempDir::new().unwrap();
 		let store = populated_store(&dir).await;
 
-		assert_eq!(
-			store.remove_graph_nodes_by_path("src/a.rs").await.unwrap(),
-			1
-		);
+		assert_eq!(store.remove_graph_nodes_by_path("src/a.rs").await.unwrap(), 1);
 		assert_eq!(store.get_all_graph_nodes().await.unwrap().num_rows(), 3);
 
 		assert_eq!(
@@ -257,10 +232,7 @@ mod tests {
 
 		// The return value counts matched *nodes*, not edges — it is documented as
 		// an approximation that avoids a second full scan.
-		let removed = store
-			.remove_graph_relationships_by_path("src/b.rs")
-			.await
-			.unwrap();
+		let removed = store.remove_graph_relationships_by_path("src/b.rs").await.unwrap();
 		assert_eq!(removed, 1);
 
 		// Both the incoming (a -> b) and outgoing (b -> c) edge are gone; only
@@ -379,10 +351,7 @@ mod tests {
 			.traverse_path_cached("src/a.rs", &[RelationType::Imports], 1)
 			.await
 			.unwrap();
-		assert_eq!(
-			depth_one,
-			vec!["src/a.rs".to_string(), "src/b.rs".to_string()]
-		);
+		assert_eq!(depth_one, vec!["src/a.rs".to_string(), "src/b.rs".to_string()]);
 
 		let depth_two = ops
 			.traverse_path_cached("src/a.rs", &[RelationType::Imports], 2)
@@ -390,11 +359,7 @@ mod tests {
 			.unwrap();
 		assert_eq!(
 			depth_two,
-			vec![
-				"src/a.rs".to_string(),
-				"src/b.rs".to_string(),
-				"src/c.rs".to_string()
-			]
+			vec!["src/a.rs".to_string(), "src/b.rs".to_string(), "src/c.rs".to_string()]
 		);
 
 		// Depth 0 never leaves the starting node.
@@ -424,11 +389,7 @@ mod tests {
 		assert_eq!(components[0], vec!["src/lonely.rs".to_string()]);
 		assert_eq!(
 			components[1],
-			vec![
-				"src/a.rs".to_string(),
-				"src/b.rs".to_string(),
-				"src/c.rs".to_string()
-			]
+			vec!["src/a.rs".to_string(), "src/b.rs".to_string(), "src/c.rs".to_string()]
 		);
 	}
 }

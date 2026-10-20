@@ -85,12 +85,9 @@ impl Language for Rust {
 					}
 				}
 			}
-			"struct_item" | "enum_item" | "trait_item" | "mod_item" | "const_item"
-			| "macro_definition" => {
+			"struct_item" | "enum_item" | "trait_item" | "mod_item" | "const_item" | "macro_definition" => {
 				// Extract type/module/const name - can be "identifier" or contain "name"
-				if let Some(name) =
-					super::extract_symbol_by_kinds(node, contents, &["identifier", "name"])
-				{
+				if let Some(name) = super::extract_symbol_by_kinds(node, contents, &["identifier", "name"]) {
 					symbols.push(name);
 				}
 			}
@@ -160,9 +157,7 @@ impl Language for Rust {
 				// like `mod foo;` or `pub mod foo;` — it creates a direct dependency
 				// on src/foo.rs or src/foo/mod.rs. Emit as a self-relative import so
 				// resolve_import can find the actual file.
-				let has_body = node
-					.children(&mut node.walk())
-					.any(|c| c.kind() == "declaration_list");
+				let has_body = node.children(&mut node.walk()).any(|c| c.kind() == "declaration_list");
 				if !has_body {
 					// Extract the module name identifier
 					for child in node.children(&mut node.walk()) {
@@ -182,8 +177,7 @@ impl Language for Rust {
 							if vis_text.contains("pub") {
 								for name_child in node.children(&mut node.walk()) {
 									if name_child.kind() == "identifier" {
-										if let Ok(name) = name_child.utf8_text(contents.as_bytes())
-										{
+										if let Ok(name) = name_child.utf8_text(contents.as_bytes()) {
 											exports.push(name.to_string());
 										}
 										break;
@@ -195,8 +189,7 @@ impl Language for Rust {
 					}
 				}
 			}
-			"function_item" | "struct_item" | "enum_item" | "trait_item" | "const_item"
-			| "macro_definition" => {
+			"function_item" | "struct_item" | "enum_item" | "trait_item" | "const_item" | "macro_definition" => {
 				// Check if this item is public (exported)
 				let mut cursor = node.walk();
 				for child in node.children(&mut cursor) {
@@ -206,11 +199,8 @@ impl Language for Rust {
 								// Extract the item name as an export. struct/enum/trait names
 								// are `type_identifier`; function/const/macro names are `identifier`.
 								for name_child in node.children(&mut node.walk()) {
-									if name_child.kind() == "identifier"
-										|| name_child.kind() == "type_identifier"
-									{
-										if let Ok(name) = name_child.utf8_text(contents.as_bytes())
-										{
+									if name_child.kind() == "identifier" || name_child.kind() == "type_identifier" {
+										if let Ok(name) = name_child.utf8_text(contents.as_bytes()) {
 											exports.push(name.to_string());
 											break;
 										}
@@ -256,11 +246,7 @@ impl Language for Rust {
 		}
 	}
 
-	fn extract_type_relations(
-		&self,
-		node: Node,
-		contents: &str,
-	) -> Vec<(super::TypeRelationKind, String)> {
+	fn extract_type_relations(&self, node: Node, contents: &str) -> Vec<(super::TypeRelationKind, String)> {
 		let mut out = Vec::new();
 		match node.kind() {
 			// `impl Trait for Type` → Type implements Trait.
@@ -375,10 +361,7 @@ fn expand_rust_use_paths(use_text: &str) -> Vec<String> {
 		.map(|rest| {
 			let rest = rest.trim_start();
 			match rest.strip_prefix('(') {
-				Some(inner) => inner
-					.split_once(')')
-					.map_or(rest, |(_, tail)| tail)
-					.trim_start(),
+				Some(inner) => inner.split_once(')').map_or(rest, |(_, tail)| tail).trim_start(),
 				None => rest,
 			}
 		})
@@ -402,11 +385,7 @@ fn expand_use_tree(fragment: &str, prefix: &str, out: &mut Vec<String>) {
 		let new_prefix = if prefix.is_empty() {
 			fragment[..brace_start].trim_end_matches(':').to_string()
 		} else {
-			format!(
-				"{}::{}",
-				prefix,
-				fragment[..brace_start].trim_end_matches(':')
-			)
+			format!("{}::{}", prefix, fragment[..brace_start].trim_end_matches(':'))
 		};
 
 		// Find the matching closing brace (handles nesting)
@@ -484,12 +463,7 @@ fn split_top_level_commas(s: &str) -> Vec<&str> {
 
 impl Rust {
 	/// Resolve crate-relative imports like crate::module::Item
-	fn resolve_crate_import(
-		&self,
-		module_path: &str,
-		source_file: &str,
-		rust_files: &[String],
-	) -> Option<String> {
+	fn resolve_crate_import(&self, module_path: &str, source_file: &str, rust_files: &[String]) -> Option<String> {
 		let parts: Vec<&str> = module_path.split("::").collect();
 		if parts.is_empty() {
 			return None;
@@ -534,11 +508,7 @@ impl Rust {
 	}
 
 	/// Find matching file with both exact and normalized path comparison
-	fn find_matching_file(
-		&self,
-		target_path: &std::path::Path,
-		rust_files: &[String],
-	) -> Option<String> {
+	fn find_matching_file(&self, target_path: &std::path::Path, rust_files: &[String]) -> Option<String> {
 		let target_str = target_path.to_string_lossy().to_string();
 
 		// Try exact string match first (fastest)
@@ -547,9 +517,7 @@ impl Rust {
 		}
 
 		// Try cross-platform string comparison using PathNormalizer
-		if let Some(found) =
-			crate::utils::path::PathNormalizer::find_path_in_collection(&target_str, rust_files)
-		{
+		if let Some(found) = crate::utils::path::PathNormalizer::find_path_in_collection(&target_str, rust_files) {
 			return Some(found.to_string());
 		}
 
@@ -597,12 +565,7 @@ impl Rust {
 	}
 
 	/// Resolve super:: imports (parent module)
-	fn resolve_super_import(
-		&self,
-		module_path: &str,
-		source_file: &str,
-		rust_files: &[String],
-	) -> Option<String> {
+	fn resolve_super_import(&self, module_path: &str, source_file: &str, rust_files: &[String]) -> Option<String> {
 		let source_path = std::path::Path::new(source_file);
 		let source_dir = source_path.parent()?;
 
@@ -613,12 +576,7 @@ impl Rust {
 	}
 
 	/// Resolve self:: imports (current module)
-	fn resolve_self_import(
-		&self,
-		_module_path: &str,
-		source_file: &str,
-		rust_files: &[String],
-	) -> Option<String> {
+	fn resolve_self_import(&self, _module_path: &str, source_file: &str, rust_files: &[String]) -> Option<String> {
 		// For self::item, we want to resolve to the current file
 		// since self:: refers to the current module
 		if rust_files.iter().any(|f| f == source_file) {
@@ -629,12 +587,7 @@ impl Rust {
 	}
 
 	/// Resolve simple imports in same directory
-	fn resolve_simple_import(
-		&self,
-		import_path: &str,
-		source_file: &str,
-		rust_files: &[String],
-	) -> Option<String> {
+	fn resolve_simple_import(&self, import_path: &str, source_file: &str, rust_files: &[String]) -> Option<String> {
 		let source_path = std::path::Path::new(source_file);
 		let source_dir = source_path.parent()?;
 		let target_file = source_dir.join(format!("{}.rs", import_path));
@@ -709,10 +662,9 @@ impl Rust {
 				// the registry holds the `/` form; compare them normalized, and
 				// answer with the registry's own spelling.
 				let root_path_str = root_path.to_string_lossy().to_string();
-				if let Some(found) = crate::utils::path::PathNormalizer::find_path_in_collection(
-					&root_path_str,
-					rust_files,
-				) {
+				if let Some(found) =
+					crate::utils::path::PathNormalizer::find_path_in_collection(&root_path_str, rust_files)
+				{
 					return Some(found.to_string());
 				}
 

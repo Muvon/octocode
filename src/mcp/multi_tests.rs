@@ -32,10 +32,7 @@ mod tests {
 	}
 
 	fn tool(name: &str, schema: Value) -> Tool {
-		let object = schema
-			.as_object()
-			.expect("schema must be an object")
-			.clone();
+		let object = schema.as_object().expect("schema must be an object").clone();
 		Tool::new(
 			name.to_string(),
 			"base description".to_string(),
@@ -75,10 +72,7 @@ mod tests {
 	#[test]
 	fn an_unreadable_root_is_an_error() {
 		assert!(discover_repos(std::path::Path::new("/no/such/root"), false).is_err());
-		assert!(!has_child_repos(
-			std::path::Path::new("/no/such/root"),
-			false
-		));
+		assert!(!has_child_repos(std::path::Path::new("/no/such/root"), false));
 	}
 
 	#[test]
@@ -111,10 +105,7 @@ mod tests {
 
 		let schema = &tools[0].input_schema;
 		let properties = schema["properties"].as_object().unwrap();
-		assert!(
-			properties.contains_key("query"),
-			"existing properties must survive"
-		);
+		assert!(properties.contains_key("query"), "existing properties must survive");
 		assert_eq!(properties["project"]["type"], json!("string"));
 		assert_eq!(properties["project"]["enum"], json!(["alpha", "beta"]));
 
@@ -129,10 +120,7 @@ mod tests {
 
 	#[test]
 	fn a_schema_without_properties_or_required_gets_both() {
-		let tools = inject_project_arg(
-			vec![tool("noop", json!({"type": "object"}))],
-			&["alpha".to_string()],
-		);
+		let tools = inject_project_arg(vec![tool("noop", json!({"type": "object"}))], &["alpha".to_string()]);
 		let schema = &tools[0].input_schema;
 		assert!(schema["properties"]["project"].is_object());
 		assert_eq!(schema["required"], json!(["project"]));
@@ -141,10 +129,7 @@ mod tests {
 	#[test]
 	fn injecting_twice_does_not_duplicate_the_requirement() {
 		let once = inject_project_arg(
-			vec![tool(
-				"noop",
-				json!({"type": "object", "required": ["project"]}),
-			)],
+			vec![tool("noop", json!({"type": "object", "required": ["project"]}))],
 			&["alpha".to_string()],
 		);
 		assert_eq!(once[0].input_schema["required"], json!(["project"]));
@@ -154,15 +139,8 @@ mod tests {
 	fn with_no_discovered_projects_the_argument_is_unconstrained() {
 		let tools = inject_project_arg(vec![tool("noop", json!({"type": "object"}))], &[]);
 		let project = &tools[0].input_schema["properties"]["project"];
-		assert!(
-			project.get("enum").is_none(),
-			"an empty enum would reject every call"
-		);
-		assert!(tools[0]
-			.description
-			.as_deref()
-			.unwrap()
-			.contains("(none discovered)"));
+		assert!(project.get("enum").is_none(), "an empty enum would reject every call");
+		assert!(tools[0].description.as_deref().unwrap().contains("(none discovered)"));
 	}
 
 	#[test]
@@ -185,10 +163,7 @@ mod tests {
 
 		let mut sorted: Vec<String> = repos.keys().cloned().collect();
 		sorted.sort();
-		let tools = inject_project_arg(
-			vec![tool("semantic_search", json!({"type": "object"}))],
-			&sorted,
-		);
+		let tools = inject_project_arg(vec![tool("semantic_search", json!({"type": "object"}))], &sorted);
 
 		let mut config = Config::default();
 		config.index.mcp_index = false;
@@ -201,12 +176,8 @@ mod tests {
 	}
 
 	fn call(project: &str) -> CallToolRequestParams {
-		CallToolRequestParams::new("semantic_search").with_arguments(
-			json!({"project": project, "query": "q"})
-				.as_object()
-				.unwrap()
-				.clone(),
-		)
+		CallToolRequestParams::new("semantic_search")
+			.with_arguments(json!({"project": project, "query": "q"}).as_object().unwrap().clone())
 	}
 
 	#[test]
@@ -266,10 +237,7 @@ mod tests {
 		let found = server.get_tool("semantic_search").expect("injected tool");
 		assert_eq!(found.name.as_ref(), "semantic_search");
 		assert_eq!(found.input_schema["required"], json!(["project"]));
-		assert_eq!(
-			found.input_schema["properties"]["project"]["enum"],
-			json!(["alpha"])
-		);
+		assert_eq!(found.input_schema["properties"]["project"]["enum"], json!(["alpha"]));
 
 		assert!(server.get_tool("semantic_searc").is_none());
 	}
@@ -283,11 +251,7 @@ mod tests {
 			panic!("an unknown project must not resolve to a repository");
 		};
 		assert_eq!(err.code, rmcp::model::ErrorCode::INVALID_PARAMS);
-		assert!(
-			err.message.contains("Unknown project 'gamma'"),
-			"{}",
-			err.message
-		);
+		assert!(err.message.contains("Unknown project 'gamma'"), "{}", err.message);
 		assert!(
 			err.message.contains("Available repositories: alpha, beta"),
 			"{}",

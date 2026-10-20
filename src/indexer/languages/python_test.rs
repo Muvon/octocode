@@ -50,9 +50,7 @@ mod tests {
 	fn first_node<'a>(tree: &'a Tree, kind: &str) -> Node<'a> {
 		let mut found = Vec::new();
 		nodes_of_kind(tree.root_node(), kind, &mut found);
-		*found
-			.first()
-			.unwrap_or_else(|| panic!("no {kind} node in source"))
+		*found.first().unwrap_or_else(|| panic!("no {kind} node in source"))
 	}
 
 	fn registry(files: &[&str]) -> FileRegistry {
@@ -79,10 +77,7 @@ mod tests {
 			lang.get_node_type_description("function_definition"),
 			"function declarations"
 		);
-		assert_eq!(
-			lang.get_node_type_description("class_definition"),
-			"class declarations"
-		);
+		assert_eq!(lang.get_node_type_description("class_definition"), "class declarations");
 		assert_eq!(
 			lang.get_node_type_description("import_from_statement"),
 			"import statements"
@@ -148,10 +143,7 @@ def run(flag):
 		for name in [
 			"first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth", "ninth",
 		] {
-			assert!(
-				symbols.contains(&name.to_string()),
-				"{name} missing from {symbols:?}"
-			);
+			assert!(symbols.contains(&name.to_string()), "{name} missing from {symbols:?}");
 		}
 	}
 
@@ -176,8 +168,7 @@ def run(flag):
 	fn plain_imports_keep_the_full_dotted_path() {
 		let source = "import os.path as p, json\n";
 		let tree = parse(source);
-		let (imports, exports) =
-			Python {}.extract_imports_exports(first_node(&tree, "import_statement"), source);
+		let (imports, exports) = Python {}.extract_imports_exports(first_node(&tree, "import_statement"), source);
 		assert_eq!(imports, vec!["os.path".to_string(), "json".to_string()]);
 		assert!(exports.is_empty());
 	}
@@ -186,8 +177,7 @@ def run(flag):
 	fn from_imports_record_the_module_not_the_items() {
 		let source = "from pkg.sub import alpha, beta\n";
 		let tree = parse(source);
-		let (imports, _) =
-			Python {}.extract_imports_exports(first_node(&tree, "import_from_statement"), source);
+		let (imports, _) = Python {}.extract_imports_exports(first_node(&tree, "import_from_statement"), source);
 		assert_eq!(imports, vec!["pkg.sub".to_string()]);
 	}
 
@@ -195,8 +185,7 @@ def run(flag):
 	fn relative_from_imports_keep_their_leading_dots() {
 		let source = "from ..pkg import thing\n";
 		let tree = parse(source);
-		let (imports, _) =
-			Python {}.extract_imports_exports(first_node(&tree, "import_from_statement"), source);
+		let (imports, _) = Python {}.extract_imports_exports(first_node(&tree, "import_from_statement"), source);
 		assert_eq!(imports, vec!["..pkg".to_string()]);
 	}
 
@@ -215,8 +204,7 @@ def run(flag):
 		let (_, inner_exports) = lang.extract_imports_exports(functions[1], source);
 		assert!(inner_exports.is_empty());
 
-		let (_, class_exports) =
-			lang.extract_imports_exports(first_node(&tree, "class_definition"), source);
+		let (_, class_exports) = lang.extract_imports_exports(first_node(&tree, "class_definition"), source);
 		assert_eq!(class_exports, vec!["Top".to_string()]);
 	}
 
@@ -224,8 +212,7 @@ def run(flag):
 	fn decorated_module_level_functions_are_still_exported() {
 		let source = "@app.route('/')\ndef handler():\n    pass\n";
 		let tree = parse(source);
-		let (_, exports) =
-			Python {}.extract_imports_exports(first_node(&tree, "function_definition"), source);
+		let (_, exports) = Python {}.extract_imports_exports(first_node(&tree, "function_definition"), source);
 		assert_eq!(
 			exports,
 			vec!["handler".to_string()],
@@ -252,17 +239,14 @@ def run(flag):
 		assert!(bare[0].qualifier.is_none());
 
 		// Nodes that are not calls yield nothing.
-		assert!(lang
-			.extract_function_calls(tree.root_node(), source)
-			.is_empty());
+		assert!(lang.extract_function_calls(tree.root_node(), source).is_empty());
 	}
 
 	#[test]
 	fn class_bases_are_all_extends_never_implements() {
 		let source = "class Child(Base, mixins.Loggable):\n    pass\n";
 		let tree = parse(source);
-		let relations =
-			Python {}.extract_type_relations(first_node(&tree, "class_definition"), source);
+		let relations = Python {}.extract_type_relations(first_node(&tree, "class_definition"), source);
 		let names: Vec<_> = relations
 			.iter()
 			.map(|(kind, name)| {
@@ -285,11 +269,7 @@ def run(flag):
 
 	#[test]
 	fn single_dot_relative_imports_resolve_within_the_package() {
-		let resolved = Python {}.resolve_import(
-			".helper",
-			"pkg/app.py",
-			&registry(&["pkg/app.py", "pkg/helper.py"]),
-		);
+		let resolved = Python {}.resolve_import(".helper", "pkg/app.py", &registry(&["pkg/app.py", "pkg/helper.py"]));
 		assert_eq!(resolved.as_deref(), Some("pkg/helper.py"));
 	}
 
@@ -305,31 +285,21 @@ def run(flag):
 
 	#[test]
 	fn a_package_directory_resolves_through_its_init_file() {
-		let resolved = Python {}.resolve_import(
-			".sub",
-			"pkg/app.py",
-			&registry(&["pkg/app.py", "pkg/sub/__init__.py"]),
-		);
+		let resolved =
+			Python {}.resolve_import(".sub", "pkg/app.py", &registry(&["pkg/app.py", "pkg/sub/__init__.py"]));
 		assert_eq!(resolved.as_deref(), Some("pkg/sub/__init__.py"));
 	}
 
 	#[test]
 	fn absolute_imports_resolve_against_the_sibling_package() {
-		let resolved = Python {}.resolve_import(
-			"sub.deep",
-			"pkg/app.py",
-			&registry(&["pkg/app.py", "pkg/sub/deep.py"]),
-		);
+		let resolved =
+			Python {}.resolve_import("sub.deep", "pkg/app.py", &registry(&["pkg/app.py", "pkg/sub/deep.py"]));
 		assert_eq!(resolved.as_deref(), Some("pkg/sub/deep.py"));
 	}
 
 	#[test]
 	fn third_party_imports_do_not_resolve_to_a_local_file() {
-		let resolved = Python {}.resolve_import(
-			"requests",
-			"pkg/app.py",
-			&registry(&["pkg/app.py", "pkg/helper.py"]),
-		);
+		let resolved = Python {}.resolve_import("requests", "pkg/app.py", &registry(&["pkg/app.py", "pkg/helper.py"]));
 		assert_eq!(resolved, None);
 	}
 
@@ -352,10 +322,7 @@ class Service:
         return third
 ";
 		let found = regions(source);
-		let functions: Vec<_> = found
-			.iter()
-			.filter(|r| r.node_kind == "function_definition")
-			.collect();
+		let functions: Vec<_> = found.iter().filter(|r| r.node_kind == "function_definition").collect();
 		assert_eq!(
 			functions.len(),
 			2,

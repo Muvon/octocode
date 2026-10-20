@@ -74,34 +74,28 @@ impl Reranker for WeightedRRFReranker {
 		let mut rrf_scores: HashMap<u64, f32> = HashMap::new();
 
 		if vector_results.num_rows() > 0 {
-			let vec_ids = vector_results.column_by_name(ROW_ID).ok_or_else(|| {
-				lancedb::error::Error::InvalidInput {
+			let vec_ids = vector_results
+				.column_by_name(ROW_ID)
+				.ok_or_else(|| lancedb::error::Error::InvalidInput {
 					message: format!("missing {} column on vector results", ROW_ID),
-				}
-			})?;
+				})?;
 			let vec_ids: UInt64Array = downcast_array(&vec_ids);
 			for (i, id) in vec_ids.values().iter().enumerate() {
 				let score = self.vector_weight / (i as f32 + self.k);
-				rrf_scores
-					.entry(*id)
-					.and_modify(|e| *e += score)
-					.or_insert(score);
+				rrf_scores.entry(*id).and_modify(|e| *e += score).or_insert(score);
 			}
 		}
 
 		if fts_results.num_rows() > 0 {
-			let fts_ids = fts_results.column_by_name(ROW_ID).ok_or_else(|| {
-				lancedb::error::Error::InvalidInput {
+			let fts_ids = fts_results
+				.column_by_name(ROW_ID)
+				.ok_or_else(|| lancedb::error::Error::InvalidInput {
 					message: format!("missing {} column on fts results", ROW_ID),
-				}
-			})?;
+				})?;
 			let fts_ids: UInt64Array = downcast_array(&fts_ids);
 			for (i, id) in fts_ids.values().iter().enumerate() {
 				let score = self.keyword_weight / (i as f32 + self.k);
-				rrf_scores
-					.entry(*id)
-					.and_modify(|e| *e += score)
-					.or_insert(score);
+				rrf_scores.entry(*id).and_modify(|e| *e += score).or_insert(score);
 			}
 		}
 
@@ -111,12 +105,11 @@ impl Reranker for WeightedRRFReranker {
 		let combined = merge_dedup(vector_results, fts_results)?;
 
 		// Pull row ids in combined order and look up their fused scores.
-		let combined_row_ids =
-			combined
-				.column_by_name(ROW_ID)
-				.ok_or_else(|| lancedb::error::Error::InvalidInput {
-					message: format!("missing {} on combined batch", ROW_ID),
-				})?;
+		let combined_row_ids = combined
+			.column_by_name(ROW_ID)
+			.ok_or_else(|| lancedb::error::Error::InvalidInput {
+				message: format!("missing {} on combined batch", ROW_ID),
+			})?;
 		let combined_row_ids: UInt64Array = downcast_array(combined_row_ids);
 		let relevance_scores = Float32Array::from_iter_values(
 			combined_row_ids
@@ -150,49 +143,38 @@ impl Reranker for WeightedRRFReranker {
 			.collect::<lancedb::error::Result<Vec<_>>>()?;
 
 		let mut fields = combined.schema().fields().to_vec();
-		fields.push(Arc::new(Field::new(
-			RELEVANCE_SCORE,
-			DataType::Float32,
-			false,
-		)));
+		fields.push(Arc::new(Field::new(RELEVANCE_SCORE, DataType::Float32, false)));
 		let schema = Schema::new(fields);
 
-		RecordBatch::try_new(Arc::new(schema), columns).map_err(|e| {
-			lancedb::error::Error::InvalidInput {
-				message: format!("rebuild record batch failed: {e}"),
-			}
+		RecordBatch::try_new(Arc::new(schema), columns).map_err(|e| lancedb::error::Error::InvalidInput {
+			message: format!("rebuild record batch failed: {e}"),
 		})
 	}
 }
 
-fn merge_dedup(
-	vector_results: RecordBatch,
-	fts_results: RecordBatch,
-) -> lancedb::error::Result<RecordBatch> {
+fn merge_dedup(vector_results: RecordBatch, fts_results: RecordBatch) -> lancedb::error::Result<RecordBatch> {
 	use arrow::array::BooleanArray;
 	use arrow::compute::{concat_batches, filter_record_batch};
 	use std::collections::HashSet;
 
-	let combined = concat_batches(&fts_results.schema(), [vector_results, fts_results].iter())
-		.map_err(|e| lancedb::error::Error::InvalidInput {
+	let combined = concat_batches(&fts_results.schema(), [vector_results, fts_results].iter()).map_err(|e| {
+		lancedb::error::Error::InvalidInput {
 			message: format!("concat failed: {e}"),
-		})?;
+		}
+	})?;
 
 	let mut mask = BooleanArray::builder(combined.num_rows());
 	let mut seen: HashSet<u64> = HashSet::new();
-	let row_ids =
-		combined
-			.column_by_name(ROW_ID)
-			.ok_or_else(|| lancedb::error::Error::InvalidInput {
-				message: format!("missing {} on combined batch", ROW_ID),
-			})?;
+	let row_ids = combined
+		.column_by_name(ROW_ID)
+		.ok_or_else(|| lancedb::error::Error::InvalidInput {
+			message: format!("missing {} on combined batch", ROW_ID),
+		})?;
 	let row_ids: UInt64Array = downcast_array(row_ids);
 	for id in row_ids.values().iter() {
 		mask.append_value(seen.insert(*id));
 	}
-	filter_record_batch(&combined, &mask.finish()).map_err(|e| {
-		lancedb::error::Error::InvalidInput {
-			message: format!("filter failed: {e}"),
-		}
+	filter_record_batch(&combined, &mask.finish()).map_err(|e| lancedb::error::Error::InvalidInput {
+		message: format!("filter failed: {e}"),
 	})
 }

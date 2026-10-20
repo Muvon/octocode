@@ -57,10 +57,7 @@ public class Animal {
 		let mut regions = Vec::new();
 		extract_meaningful_regions(tree.root_node(), code, lang.as_ref(), &mut regions);
 
-		assert!(
-			!regions.is_empty(),
-			"Should extract regions from class file"
-		);
+		assert!(!regions.is_empty(), "Should extract regions from class file");
 
 		let has_import = regions.iter().any(|r| r.node_kind == "import_declaration");
 		assert!(has_import, "Should extract import declarations");
@@ -117,9 +114,7 @@ enum Direction {
 
 		assert!(!regions.is_empty(), "Should extract regions");
 
-		let has_protocol = regions
-			.iter()
-			.any(|r| r.node_kind == "protocol_declaration");
+		let has_protocol = regions.iter().any(|r| r.node_kind == "protocol_declaration");
 		assert!(has_protocol, "Should extract protocol declaration");
 
 		// struct and enum parse as class_declaration in tree-sitter-swift, but with
@@ -132,13 +127,8 @@ enum Direction {
 			regions.iter().map(|r| &r.node_kind).collect::<Vec<_>>()
 		);
 
-		let has_func = regions
-			.iter()
-			.any(|r| r.node_kind == "function_declaration");
-		assert!(
-			has_func,
-			"Should extract draw/opposite as function_declaration regions"
-		);
+		let has_func = regions.iter().any(|r| r.node_kind == "function_declaration");
+		assert!(has_func, "Should extract draw/opposite as function_declaration regions");
 	}
 
 	#[test]
@@ -163,19 +153,13 @@ extension String {
 		let mut regions = Vec::new();
 		extract_meaningful_regions(tree.root_node(), code, lang.as_ref(), &mut regions);
 
-		assert!(
-			!regions.is_empty(),
-			"Should extract regions from extension file"
-		);
+		assert!(!regions.is_empty(), "Should extract regions from extension file");
 
 		let typealias_regions: Vec<_> = regions
 			.iter()
 			.filter(|r| r.node_kind == "typealias_declaration")
 			.collect();
-		assert!(
-			!typealias_regions.is_empty(),
-			"Should extract typealias declarations"
-		);
+		assert!(!typealias_regions.is_empty(), "Should extract typealias declarations");
 
 		// The extension has a real trimmed() func and an isEmpty computed property,
 		// so it now splits trimmed() out instead of collapsing the whole extension
@@ -187,13 +171,8 @@ extension String {
 			regions.iter().map(|r| &r.node_kind).collect::<Vec<_>>()
 		);
 
-		let has_func = regions
-			.iter()
-			.any(|r| r.node_kind == "function_declaration");
-		assert!(
-			has_func,
-			"Should extract trimmed() as function_declaration region"
-		);
+		let has_func = regions.iter().any(|r| r.node_kind == "function_declaration");
+		assert!(has_func, "Should extract trimmed() as function_declaration region");
 	}
 
 	#[test]
@@ -241,10 +220,7 @@ class Foo {
 		let mut regions = Vec::new();
 		extract_meaningful_regions(tree.root_node(), code, lang.as_ref(), &mut regions);
 
-		let class_regions: Vec<_> = regions
-			.iter()
-			.filter(|r| r.node_kind == "class_declaration")
-			.collect();
+		let class_regions: Vec<_> = regions.iter().filter(|r| r.node_kind == "class_declaration").collect();
 		assert_eq!(
 			class_regions.len(),
 			0,
@@ -256,11 +232,7 @@ class Foo {
 			.iter()
 			.filter(|r| r.node_kind == "function_declaration")
 			.collect();
-		assert_eq!(
-			function_regions.len(),
-			2,
-			"expected a region per method inside class"
-		);
+		assert_eq!(function_regions.len(), 2, "expected a region per method inside class");
 	}
 
 	#[test]
@@ -271,10 +243,7 @@ class Foo {
 		let mut regions = Vec::new();
 		extract_meaningful_regions(tree.root_node(), code, lang.as_ref(), &mut regions);
 
-		let class_regions: Vec<_> = regions
-			.iter()
-			.filter(|r| r.node_kind == "class_declaration")
-			.collect();
+		let class_regions: Vec<_> = regions.iter().filter(|r| r.node_kind == "class_declaration").collect();
 		assert_eq!(
 			class_regions.len(),
 			1,
@@ -399,10 +368,7 @@ import SwiftUI
 		let tree = parser.parse(code, None).unwrap();
 
 		let mut all_imports = Vec::new();
-		for node in tree
-			.root_node()
-			.named_children(&mut tree.root_node().walk())
-		{
+		for node in tree.root_node().named_children(&mut tree.root_node().walk()) {
 			if node.kind() == "import_declaration" {
 				let (imports, _) = lang.extract_imports_exports(node, code);
 				all_imports.extend(imports);
@@ -479,19 +445,15 @@ func test() {
 		collect_calls(tree.root_node(), code, lang.as_ref(), &mut calls);
 
 		// Should capture at least "print" and "doWork"
-		assert!(
-			!calls.is_empty(),
-			"Should extract function calls: got {:?}",
-			calls
-		);
+		assert!(!calls.is_empty(), "Should extract function calls: got {:?}", calls);
 		assert!(
 			calls.iter().any(|call| call.name == "print"),
 			"Should contain 'print' call: got {:?}",
 			calls
 		);
-		assert!(calls.iter().any(|call| {
-			call.name == "process" && call.qualifier.as_deref() == Some("someObject")
-		}));
+		assert!(calls
+			.iter()
+			.any(|call| { call.name == "process" && call.qualifier.as_deref() == Some("someObject") }));
 	}
 
 	fn collect_calls(
@@ -532,9 +494,7 @@ func test() {
 
 		// All should be Implements (we conservatively treat all specifiers as Implements)
 		assert!(
-			relations
-				.iter()
-				.all(|(k, _)| *k == TypeRelationKind::Implements),
+			relations.iter().all(|(k, _)| *k == TypeRelationKind::Implements),
 			"Class specifiers should produce Implements relations"
 		);
 
@@ -568,9 +528,7 @@ func test() {
 		);
 
 		assert!(
-			relations
-				.iter()
-				.any(|(k, _)| *k == TypeRelationKind::Extends),
+			relations.iter().any(|(k, _)| *k == TypeRelationKind::Extends),
 			"Protocol inheritance should use Extends"
 		);
 
@@ -595,10 +553,7 @@ func test() {
 			.expect("Should have function_declaration");
 
 		let relations = lang.extract_type_relations(func_node, code);
-		assert!(
-			relations.is_empty(),
-			"Plain function should have no type relations"
-		);
+		assert!(relations.is_empty(), "Plain function should have no type relations");
 	}
 
 	// ── resolve_import ───────────────────────────────────────────────────────
@@ -617,15 +572,8 @@ func test() {
 		let all_files = languages::resolution_utils::FileRegistry::new(&all_files);
 
 		// Relative import from UserService.swift
-		let result = lang.resolve_import(
-			"./Models/User",
-			"Sources/App/Services/UserService.swift",
-			&all_files,
-		);
-		assert!(
-			result.is_some(),
-			"Should resolve relative import to User.swift"
-		);
+		let result = lang.resolve_import("./Models/User", "Sources/App/Services/UserService.swift", &all_files);
+		assert!(result.is_some(), "Should resolve relative import to User.swift");
 	}
 
 	#[test]
@@ -684,8 +632,7 @@ func test() {
 			"function declarations"
 		);
 		assert!(
-			lang.get_node_type_description("class_declaration")
-				.contains("class"),
+			lang.get_node_type_description("class_declaration").contains("class"),
 			"class_declaration description should mention class"
 		);
 		assert_eq!(

@@ -101,11 +101,7 @@ impl FileRegistry {
 	}
 
 	/// Find a file with multiple possible extensions
-	pub fn find_file_with_extensions(
-		&self,
-		base_path: &Path,
-		extensions: &[&str],
-	) -> Option<String> {
+	pub fn find_file_with_extensions(&self, base_path: &Path, extensions: &[&str]) -> Option<String> {
 		for ext in extensions {
 			let file_path = if ext.is_empty() {
 				base_path.to_path_buf()
@@ -132,9 +128,7 @@ impl FileRegistry {
 	/// First registry file byte-equal to `target`. Same result as
 	/// `self.get_all_files().iter().find(|f| *f == target)`, as a hash lookup.
 	pub fn find_verbatim(&self, target: &str) -> Option<&str> {
-		self.exact_index
-			.get(target)
-			.map(|&idx| self.all_files[idx].as_str())
+		self.exact_index.get(target).map(|&idx| self.all_files[idx].as_str())
 	}
 
 	/// Find exact file match with cross-platform path comparison
@@ -327,8 +321,9 @@ pub fn detect_language_from_path(file_path: &str) -> Option<String> {
 		"py" => Some("python".to_string()),
 		"go" => Some("go".to_string()),
 		"php" => Some("php".to_string()),
-		"cpp" | "cc" | "cxx" | "c++" | "c" | "h" | "hpp" | "hxx" | "cppm" | "ixx" | "mxx"
-		| "ccm" | "cxxm" => Some("cpp".to_string()),
+		"cpp" | "cc" | "cxx" | "c++" | "c" | "h" | "hpp" | "hxx" | "cppm" | "ixx" | "mxx" | "ccm" | "cxxm" => {
+			Some("cpp".to_string())
+		}
 		"rb" => Some("ruby".to_string()),
 		"sh" | "bash" => Some("bash".to_string()),
 		"json" => Some("json".to_string()),
@@ -353,11 +348,7 @@ pub fn resolve_relative_path(source_file: &str, relative_path: &str) -> Option<P
 }
 
 /// Helper to find files in a specific directory
-pub fn find_files_in_directory(
-	directory: &Path,
-	registry: &FileRegistry,
-	extensions: &[&str],
-) -> Vec<String> {
+pub fn find_files_in_directory(directory: &Path, registry: &FileRegistry, extensions: &[&str]) -> Vec<String> {
 	let dir_str = directory.to_string_lossy();
 	registry
 		.get_files_with_extensions(extensions)
@@ -400,18 +391,9 @@ mod tests {
 
 	#[test]
 	fn test_detect_language_from_path() {
-		assert_eq!(
-			detect_language_from_path("main.rs"),
-			Some("rust".to_string())
-		);
-		assert_eq!(
-			detect_language_from_path("index.js"),
-			Some("javascript".to_string())
-		);
-		assert_eq!(
-			detect_language_from_path("app.py"),
-			Some("python".to_string())
-		);
+		assert_eq!(detect_language_from_path("main.rs"), Some("rust".to_string()));
+		assert_eq!(detect_language_from_path("index.js"), Some("javascript".to_string()));
+		assert_eq!(detect_language_from_path("app.py"), Some("python".to_string()));
 		assert_eq!(detect_language_from_path("unknown.xyz"), None);
 	}
 
@@ -444,20 +426,14 @@ mod tests {
 	#[test]
 	fn test_normalize_path_separators() {
 		// Test Windows to Unix normalization
-		assert_eq!(
-			PathNormalizer::normalize_separators("src\\main.rs"),
-			"src/main.rs"
-		);
+		assert_eq!(PathNormalizer::normalize_separators("src\\main.rs"), "src/main.rs");
 		assert_eq!(
 			PathNormalizer::normalize_separators("src\\utils\\helper.rs"),
 			"src/utils/helper.rs"
 		);
 
 		// Test Unix paths remain unchanged
-		assert_eq!(
-			PathNormalizer::normalize_separators("src/main.rs"),
-			"src/main.rs"
-		);
+		assert_eq!(PathNormalizer::normalize_separators("src/main.rs"), "src/main.rs");
 		assert_eq!(
 			PathNormalizer::normalize_separators("src/utils/helper.rs"),
 			"src/utils/helper.rs"

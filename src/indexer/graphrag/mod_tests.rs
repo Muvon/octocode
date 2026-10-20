@@ -17,9 +17,7 @@ mod tests {
 	use crate::indexer::graphrag::database::DatabaseOperations;
 	use crate::indexer::graphrag::types::RelationType;
 	use crate::indexer::graphrag::GraphRAG;
-	use crate::store::mod_tests::{
-		graph_node, graph_relationship, offline_config, use_offline_test_config,
-	};
+	use crate::store::mod_tests::{graph_node, graph_relationship, offline_config, use_offline_test_config};
 	use crate::store::Store;
 	use tempfile::TempDir;
 
@@ -77,10 +75,7 @@ mod tests {
 	async fn relationships_are_listed_by_direction() {
 		let (_dir, graphrag) = project().await;
 		let out = graphrag.get_relationships("src/b.rs").await.unwrap();
-		assert!(
-			out.contains("Relationships for src/b.rs (2 total)"),
-			"{out}"
-		);
+		assert!(out.contains("Relationships for src/b.rs (2 total)"), "{out}");
 		assert!(out.contains("Outgoing:"), "{out}");
 		assert!(out.contains("Incoming:"), "{out}");
 		assert!(out.contains("c.rs (src/c.rs)"), "{out}");
@@ -111,10 +106,7 @@ mod tests {
 	#[tokio::test]
 	async fn an_unreachable_target_reports_no_path() {
 		let (_dir, graphrag) = project().await;
-		let out = graphrag
-			.find_path("src/a.rs", "src/lonely.rs", 4)
-			.await
-			.unwrap();
+		let out = graphrag.find_path("src/a.rs", "src/lonely.rs", 4).await.unwrap();
 		assert!(out.starts_with("No paths found"), "{out}");
 	}
 
@@ -122,26 +114,17 @@ mod tests {
 	async fn a_path_endpoint_that_does_not_exist_is_an_error() {
 		let (_dir, graphrag) = project().await;
 		let source = graphrag.find_path("src/nope.rs", "src/a.rs", 3).await;
-		assert!(source
-			.unwrap_err()
-			.to_string()
-			.contains("Source node not found"));
+		assert!(source.unwrap_err().to_string().contains("Source node not found"));
 
 		let target = graphrag.find_path("src/a.rs", "src/nope.rs", 3).await;
-		assert!(target
-			.unwrap_err()
-			.to_string()
-			.contains("Target node not found"));
+		assert!(target.unwrap_err().to_string().contains("Target node not found"));
 	}
 
 	#[tokio::test]
 	async fn the_overview_counts_nodes_and_relationships_by_kind() {
 		let (_dir, graphrag) = project().await;
 		let out = graphrag.overview().await.unwrap();
-		assert!(
-			out.starts_with("GraphRAG Overview: 4 nodes, 2 relationships"),
-			"{out}"
-		);
+		assert!(out.starts_with("GraphRAG Overview: 4 nodes, 2 relationships"), "{out}");
 		assert!(out.contains("  file: 3"), "{out}");
 		assert!(out.contains("  module: 1"), "{out}");
 		assert!(out.contains("  imports: 1"), "{out}");

@@ -115,14 +115,8 @@ fn node_type_descriptions_cover_every_arm() {
 	assert_eq!(json.get_node_type_description("true"), "JSON booleans");
 	assert_eq!(json.get_node_type_description("false"), "JSON booleans");
 	assert_eq!(json.get_node_type_description("null"), "JSON null values");
-	assert_eq!(
-		json.get_node_type_description("pair"),
-		"JSON key-value pairs"
-	);
-	assert_eq!(
-		json.get_node_type_description("whatever"),
-		"JSON structures"
-	);
+	assert_eq!(json.get_node_type_description("pair"), "JSON key-value pairs");
+	assert_eq!(json.get_node_type_description("whatever"), "JSON structures");
 }
 
 #[test]
@@ -196,8 +190,5 @@ fn an_empty_key_is_dropped() {
 fn json_declares_no_imports_to_resolve() {
 	let files = vec!["a.json".to_string()];
 	let registry = crate::indexer::languages::resolution_utils::FileRegistry::new(&files);
-	assert_eq!(
-		Json {}.resolve_import("./b.json", "a.json", &registry),
-		None
-	);
+	assert_eq!(Json {}.resolve_import("./b.json", "a.json", &registry), None);
 }

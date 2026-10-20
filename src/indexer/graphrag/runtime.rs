@@ -17,9 +17,7 @@
 //! watcher or a repository stamp. Optional persisted GraphRAG data only enriches
 //! this live base graph.
 
-use super::symbols::{
-	discover_symbol_relationships, extract_symbols_from_file, symbol_node_ids, SymbolFileData,
-};
+use super::symbols::{discover_symbol_relationships, extract_symbols_from_file, symbol_node_ids, SymbolFileData};
 use super::types::{CodeGraph, CodeNode, CodeRelationship, Provenance, RelationType};
 use crate::indexer::{languages, NoindexWalker};
 use anyhow::{Context, Result};
@@ -150,9 +148,7 @@ fn scan_sources(root: &Path) -> (Vec<SourceFile>, RepositoryStamp) {
 
 fn supported_source_language(path: &Path) -> Option<&'static str> {
 	let language = crate::indexer::detect_language(path)?;
-	languages::get_language(language)
-		.is_some()
-		.then_some(language)
+	languages::get_language(language).is_some().then_some(language)
 }
 
 fn build_graph(files: Vec<SourceFile>) -> CodeGraph {
@@ -194,23 +190,14 @@ fn build_graph(files: Vec<SourceFile>) -> CodeGraph {
 			.and_then(|name| name.to_str())
 			.unwrap_or(&file.relative_path)
 			.to_string();
-		let size_lines = ast
-			.symbols
-			.iter()
-			.map(|symbol| symbol.end_line + 1)
-			.max()
-			.unwrap_or(0);
+		let size_lines = ast.symbols.iter().map(|symbol| symbol.end_line + 1).max().unwrap_or(0);
 		let file_node = CodeNode {
 			id: file.relative_path.clone(),
 			name: file_name,
 			kind: "source_file".to_string(),
 			path: file.relative_path.clone(),
 			description: String::new(),
-			symbols: ast
-				.symbols
-				.iter()
-				.map(|symbol| symbol.name.clone())
-				.collect(),
+			symbols: ast.symbols.iter().map(|symbol| symbol.name.clone()).collect(),
 			hash: String::new(),
 			embedding: Vec::new(),
 			imports: ast.imports.clone(),
@@ -278,10 +265,7 @@ fn build_graph(files: Vec<SourceFile>) -> CodeGraph {
 		));
 	}
 
-	let all_paths: Vec<String> = parsed
-		.iter()
-		.map(|(file, _)| file.relative_path.clone())
-		.collect();
+	let all_paths: Vec<String> = parsed.iter().map(|(file, _)| file.relative_path.clone()).collect();
 	let registry = languages::resolution_utils::FileRegistry::new(&all_paths);
 	for file in &symbol_files {
 		let Some(language) = languages::get_language(&file.language) else {
@@ -302,15 +286,13 @@ fn build_graph(files: Vec<SourceFile>) -> CodeGraph {
 		}
 	}
 
-	graph
-		.relationships
-		.extend(discover_symbol_relationships(&symbol_files));
+	graph.relationships.extend(discover_symbol_relationships(&symbol_files));
 	graph.relationships.sort_unstable_by(|a, b| {
 		(&a.source, &a.target, &a.relation_type).cmp(&(&b.source, &b.target, &b.relation_type))
 	});
-	graph.relationships.dedup_by(|a, b| {
-		a.source == b.source && a.target == b.target && a.relation_type == b.relation_type
-	});
+	graph
+		.relationships
+		.dedup_by(|a, b| a.source == b.source && a.target == b.target && a.relation_type == b.relation_type);
 	graph
 }
 
@@ -340,18 +322,16 @@ pub fn merge_enrichment(base: &CodeGraph, enriched: &CodeGraph, root: &Path) -> 
 		if relationship.source.contains("::") || relationship.target.contains("::") {
 			continue;
 		}
-		if graph.nodes.contains_key(&relationship.source)
-			&& graph.nodes.contains_key(&relationship.target)
-		{
+		if graph.nodes.contains_key(&relationship.source) && graph.nodes.contains_key(&relationship.target) {
 			graph.relationships.push(relationship.clone());
 		}
 	}
 	graph.relationships.sort_unstable_by(|a, b| {
 		(&a.source, &a.target, &a.relation_type).cmp(&(&b.source, &b.target, &b.relation_type))
 	});
-	graph.relationships.dedup_by(|a, b| {
-		a.source == b.source && a.target == b.target && a.relation_type == b.relation_type
-	});
+	graph
+		.relationships
+		.dedup_by(|a, b| a.source == b.source && a.target == b.target && a.relation_type == b.relation_type);
 	graph
 }
 
@@ -387,9 +367,7 @@ pub fn file_level_relationships(graph: &CodeGraph) -> Vec<CodeRelationship> {
 	projected.sort_unstable_by(|a, b| {
 		(&a.source, &a.target, &a.relation_type).cmp(&(&b.source, &b.target, &b.relation_type))
 	});
-	projected.dedup_by(|a, b| {
-		a.source == b.source && a.target == b.target && a.relation_type == b.relation_type
-	});
+	projected.dedup_by(|a, b| a.source == b.source && a.target == b.target && a.relation_type == b.relation_type);
 	projected
 }
 
@@ -397,8 +375,8 @@ pub fn file_level_relationships(graph: &CodeGraph) -> Vec<CodeRelationship> {
 /// are ignored so `what calls parse_config` seeds `parse_config`, not noise.
 pub fn search_nodes(graph: &CodeGraph, query: &str, limit: usize) -> Vec<CodeNode> {
 	const STOPWORDS: &[&str] = &[
-		"a", "an", "and", "are", "by", "calls", "does", "for", "from", "how", "in", "is", "of",
-		"or", "the", "to", "uses", "what", "where", "who",
+		"a", "an", "and", "are", "by", "calls", "does", "for", "from", "how", "in", "is", "of", "or", "the", "to",
+		"uses", "what", "where", "who",
 	];
 	let terms: Vec<String> = query
 		.split(|character: char| !character.is_alphanumeric() && character != '_')
@@ -414,11 +392,7 @@ pub fn search_nodes(graph: &CodeGraph, query: &str, limit: usize) -> Vec<CodeNod
 		let name = node.name.to_lowercase();
 		let id = node.id.to_lowercase();
 		let path = node.path.to_lowercase();
-		let aliases: Vec<String> = node
-			.symbols
-			.iter()
-			.map(|symbol| symbol.to_lowercase())
-			.collect();
+		let aliases: Vec<String> = node.symbols.iter().map(|symbol| symbol.to_lowercase()).collect();
 		let mut score = 0u32;
 		for term in &terms {
 			if name == *term {
@@ -446,22 +420,13 @@ pub fn search_nodes(graph: &CodeGraph, query: &str, limit: usize) -> Vec<CodeNod
 			.then_with(|| node_a.id.len().cmp(&node_b.id.len()))
 			.then_with(|| node_a.id.cmp(&node_b.id))
 	});
-	scored
-		.into_iter()
-		.take(limit)
-		.map(|(_, node)| node.clone())
-		.collect()
+	scored.into_iter().take(limit).map(|(_, node)| node.clone()).collect()
 }
 
 /// Bounded directed path search shared by runtime graph operations. A hard
 /// result cap prevents highly connected symbol graphs from enumerating an
 /// unbounded number of simple paths.
-pub fn find_paths(
-	graph: &CodeGraph,
-	source_id: &str,
-	target_id: &str,
-	max_depth: usize,
-) -> Vec<Vec<String>> {
+pub fn find_paths(graph: &CodeGraph, source_id: &str, target_id: &str, max_depth: usize) -> Vec<Vec<String>> {
 	use std::collections::{HashMap, VecDeque};
 
 	const MAX_PATHS: usize = 20;
@@ -518,18 +483,9 @@ mod tests {
 
 	#[test]
 	fn runtime_source_detection_covers_embedded_and_document_languages() {
-		assert_eq!(
-			supported_source_language(Path::new("src/App.svelte")),
-			Some("svelte")
-		);
-		assert_eq!(
-			supported_source_language(Path::new("docs/design.md")),
-			Some("markdown")
-		);
-		assert_eq!(
-			supported_source_language(Path::new("lib/accounts.ex")),
-			Some("elixir")
-		);
+		assert_eq!(supported_source_language(Path::new("src/App.svelte")), Some("svelte"));
+		assert_eq!(supported_source_language(Path::new("docs/design.md")), Some("markdown"));
+		assert_eq!(supported_source_language(Path::new("lib/accounts.ex")), Some("elixir"));
 	}
 
 	fn graph_node(id: &str, name: &str, kind: &str, path: &str) -> CodeNode {
@@ -556,10 +512,9 @@ mod tests {
 			("src/parse_config.rs", "parse_config.rs"),
 			("src/config.rs::parse_config", "parse_config"),
 		] {
-			graph.nodes.insert(
-				id.to_string(),
-				graph_node(id, name, "function", "src/config.rs"),
-			);
+			graph
+				.nodes
+				.insert(id.to_string(), graph_node(id, name, "function", "src/config.rs"));
 		}
 
 		let results = search_nodes(&graph, "what calls parse_config", 5);
@@ -605,8 +560,7 @@ mod tests {
 	fn persisted_enrichment_adds_file_edges_but_not_stale_symbols() {
 		let mut base = CodeGraph::default();
 		for id in ["src/a.rs", "src/b.rs"] {
-			base.nodes
-				.insert(id.to_string(), graph_node(id, id, "source_file", id));
+			base.nodes.insert(id.to_string(), graph_node(id, id, "source_file", id));
 		}
 		base.nodes.insert(
 			"src/a.rs::run".to_string(),
@@ -622,11 +576,7 @@ mod tests {
 			graph_node("src/a.rs::old", "old", "function", "src/a.rs"),
 		);
 		for (source, target, relation_type) in [
-			(
-				"src/a.rs",
-				"src/b.rs",
-				RelationType::ArchitecturalDependency,
-			),
+			("src/a.rs", "src/b.rs", RelationType::ArchitecturalDependency),
 			("src/a.rs::old", "src/a.rs::run", RelationType::Calls),
 		] {
 			enriched.relationships.push(CodeRelationship {
@@ -641,14 +591,12 @@ mod tests {
 		}
 
 		let graph = merge_enrichment(&base, &enriched, Path::new("."));
-		assert_eq!(
-			graph.nodes["src/a.rs"].description,
-			"Enriched file description"
-		);
+		assert_eq!(graph.nodes["src/a.rs"].description, "Enriched file description");
 		assert!(!graph.nodes.contains_key("src/a.rs::old"));
-		assert!(graph.relationships.iter().any(|relationship| {
-			relationship.relation_type == RelationType::ArchitecturalDependency
-		}));
+		assert!(graph
+			.relationships
+			.iter()
+			.any(|relationship| { relationship.relation_type == RelationType::ArchitecturalDependency }));
 		assert!(!graph
 			.relationships
 			.iter()
@@ -666,11 +614,8 @@ mod tests {
 				.as_nanos()
 		));
 		std::fs::create_dir_all(&root).expect("temporary source directory should be created");
-		std::fs::write(
-			root.join("lib.rs"),
-			"fn helper() {}\nfn run() { helper(); }\n",
-		)
-		.expect("temporary Rust source should be written");
+		std::fs::write(root.join("lib.rs"), "fn helper() {}\nfn run() { helper(); }\n")
+			.expect("temporary Rust source should be written");
 
 		let (files, _) = scan_sources(&root);
 		let graph = build_graph(files);
@@ -737,9 +682,7 @@ mod tests {
 		assert_eq!(projected[0].target, "src/config.rs");
 		assert!(
 			projected[0].description.contains("src/main.rs::")
-				&& projected[0]
-					.description
-					.contains("src/config.rs::Config::new"),
+				&& projected[0].description.contains("src/config.rs::Config::new"),
 			"{}",
 			projected[0].description
 		);
@@ -790,10 +733,8 @@ mod tests {
 		let renderable_protocol = "lib/fixture/renderable.ex::Fixture.Renderable".to_string();
 		let accounts_fetch = "lib/fixture/accounts.ex::Fixture.Accounts::fetch".to_string();
 		let repo_get = "lib/fixture/repo.ex::Fixture.Repo::get".to_string();
-		let impl_renderable =
-			"lib/fixture/renderable.ex::Fixture.Renderable for Fixture.User".to_string();
-		let test_fetch =
-			"lib/fixture/accounts_test.exs::Fixture.AccountsTest::fetches an account".to_string();
+		let impl_renderable = "lib/fixture/renderable.ex::Fixture.Renderable for Fixture.User".to_string();
+		let test_fetch = "lib/fixture/accounts_test.exs::Fixture.AccountsTest::fetches an account".to_string();
 
 		assert!(graph.nodes.contains_key(&accounts));
 		assert!(graph.nodes.contains_key(&accounts_fetch));

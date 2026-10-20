@@ -38,12 +38,7 @@ public class SimpleTest {
 
 		// Extract regions
 		let mut regions = Vec::new();
-		code_region_extractor::extract_meaningful_regions(
-			tree.root_node(),
-			contents,
-			lang_impl.as_ref(),
-			&mut regions,
-		);
+		code_region_extractor::extract_meaningful_regions(tree.root_node(), contents, lang_impl.as_ref(), &mut regions);
 
 		println!("Extracted {} regions:", regions.len());
 		for (i, region) in regions.iter().enumerate() {
@@ -65,10 +60,7 @@ public class SimpleTest {
 
 		// class with a constructor and a method inside should not collapse into
 		// one region, got {:?}
-		let class_regions: Vec<_> = regions
-			.iter()
-			.filter(|r| r.node_kind == "class_declaration")
-			.collect();
+		let class_regions: Vec<_> = regions.iter().filter(|r| r.node_kind == "class_declaration").collect();
 		assert_eq!(
 			class_regions.len(),
 			0,
@@ -81,15 +73,9 @@ public class SimpleTest {
 			.iter()
 			.filter(|r| r.node_kind == "constructor_declaration")
 			.collect();
-		assert!(
-			!constructor_regions.is_empty(),
-			"Should have constructor declaration"
-		);
+		assert!(!constructor_regions.is_empty(), "Should have constructor declaration");
 
-		let method_regions: Vec<_> = regions
-			.iter()
-			.filter(|r| r.node_kind == "method_declaration")
-			.collect();
+		let method_regions: Vec<_> = regions.iter().filter(|r| r.node_kind == "method_declaration").collect();
 		assert!(!method_regions.is_empty(), "Should have method declaration");
 	}
 
@@ -106,17 +92,9 @@ public class SimpleTest {
 		parser.set_language(&lang_impl.get_ts_language()).unwrap();
 		let tree = parser.parse(contents, None).unwrap();
 		let mut regions = Vec::new();
-		code_region_extractor::extract_meaningful_regions(
-			tree.root_node(),
-			contents,
-			lang_impl.as_ref(),
-			&mut regions,
-		);
+		code_region_extractor::extract_meaningful_regions(tree.root_node(), contents, lang_impl.as_ref(), &mut regions);
 
-		let record_regions: Vec<_> = regions
-			.iter()
-			.filter(|r| r.node_kind == "record_declaration")
-			.collect();
+		let record_regions: Vec<_> = regions.iter().filter(|r| r.node_kind == "record_declaration").collect();
 		assert_eq!(
 			record_regions.len(),
 			0,
@@ -124,10 +102,7 @@ public class SimpleTest {
 			regions.iter().map(|r| &r.node_kind).collect::<Vec<_>>()
 		);
 
-		let method_regions: Vec<_> = regions
-			.iter()
-			.filter(|r| r.node_kind == "method_declaration")
-			.collect();
+		let method_regions: Vec<_> = regions.iter().filter(|r| r.node_kind == "method_declaration").collect();
 		assert_eq!(
 			method_regions.len(),
 			1,
@@ -144,17 +119,9 @@ public class SimpleTest {
 		parser.set_language(&lang_impl.get_ts_language()).unwrap();
 		let tree = parser.parse(contents, None).unwrap();
 		let mut regions = Vec::new();
-		code_region_extractor::extract_meaningful_regions(
-			tree.root_node(),
-			contents,
-			lang_impl.as_ref(),
-			&mut regions,
-		);
+		code_region_extractor::extract_meaningful_regions(tree.root_node(), contents, lang_impl.as_ref(), &mut regions);
 
-		let record_regions: Vec<_> = regions
-			.iter()
-			.filter(|r| r.node_kind == "record_declaration")
-			.collect();
+		let record_regions: Vec<_> = regions.iter().filter(|r| r.node_kind == "record_declaration").collect();
 		assert_eq!(
 			record_regions.len(),
 			1,
@@ -165,9 +132,7 @@ public class SimpleTest {
 
 	fn parse(source: &str) -> Tree {
 		let mut parser = Parser::new();
-		parser
-			.set_language(&Java {}.get_ts_language())
-			.expect("java grammar");
+		parser.set_language(&Java {}.get_ts_language()).expect("java grammar");
 		parser.parse(source, None).expect("parse")
 	}
 
@@ -175,12 +140,7 @@ public class SimpleTest {
 		let tree = parse(source);
 		let lang = Java {};
 		let mut out = Vec::new();
-		code_region_extractor::extract_meaningful_regions(
-			tree.root_node(),
-			source,
-			&lang,
-			&mut out,
-		);
+		code_region_extractor::extract_meaningful_regions(tree.root_node(), source, &lang, &mut out);
 		out
 	}
 
@@ -198,9 +158,7 @@ public class SimpleTest {
 	fn first_node<'a>(tree: &'a Tree, kind: &str) -> Node<'a> {
 		let mut found = Vec::new();
 		nodes_of_kind(tree.root_node(), kind, &mut found);
-		*found
-			.first()
-			.unwrap_or_else(|| panic!("no {kind} node in source"))
+		*found.first().unwrap_or_else(|| panic!("no {kind} node in source"))
 	}
 
 	fn registry(files: &[&str]) -> FileRegistry {
@@ -255,10 +213,7 @@ public class SimpleTest {
 			("method_declaration", "Java method definition"),
 			("constructor_declaration", "Java constructor definition"),
 			("field_declaration", "Java field declaration"),
-			(
-				"annotation_type_declaration",
-				"Java annotation type definition",
-			),
+			("annotation_type_declaration", "Java annotation type definition"),
 			("record_declaration", "Java record definition (Java 14+)"),
 			("import_declaration", "Java import statement"),
 			("package_declaration", "Java package declaration"),
@@ -289,20 +244,14 @@ public class SimpleTest {
 			("package_declaration", "package_declaration"),
 			("method_declaration", "method_declaration"),
 		] {
-			assert!(
-				lang.are_node_types_equivalent(first, second),
-				"{first} vs {second}"
-			);
+			assert!(lang.are_node_types_equivalent(first, second), "{first} vs {second}");
 		}
 		for (first, second) in [
 			("method_declaration", "constructor_declaration"),
 			("annotation_type_declaration", "record_declaration"),
 			("method_declaration", "field_declaration"),
 		] {
-			assert!(
-				!lang.are_node_types_equivalent(first, second),
-				"{first} vs {second}"
-			);
+			assert!(!lang.are_node_types_equivalent(first, second), "{first} vs {second}");
 		}
 	}
 
@@ -326,16 +275,12 @@ public class SimpleTest {
 		let source = "class Service {\n\tpublic void run() {\n\t\tint x = 1;\n\t}\n}\n";
 		let tree = parse(source);
 		let node = first_node(&tree, "method_declaration");
-		assert_eq!(
-			Java {}.extract_symbols(node, source),
-			vec!["Service", "run"]
-		);
+		assert_eq!(Java {}.extract_symbols(node, source), vec!["Service", "run"]);
 	}
 
 	#[test]
 	fn a_constructor_name_deduplicates_against_its_owning_class() {
-		let source =
-			"class Service {\n\tpublic Service(String name) {\n\t\tthis.name = name;\n\t}\n}\n";
+		let source = "class Service {\n\tpublic Service(String name) {\n\t\tthis.name = name;\n\t}\n}\n";
 		let tree = parse(source);
 		let node = first_node(&tree, "constructor_declaration");
 		assert_eq!(Java {}.extract_symbols(node, source), vec!["Service"]);
@@ -355,16 +300,8 @@ public class SimpleTest {
 			("class Service {}\n", "class_declaration", "Service"),
 			("interface Shape {}\n", "interface_declaration", "Shape"),
 			("enum Status { OK }\n", "enum_declaration", "Status"),
-			(
-				"record Point(int x, int y) {}\n",
-				"record_declaration",
-				"Point",
-			),
-			(
-				"@interface Marker {}\n",
-				"annotation_type_declaration",
-				"Marker",
-			),
+			("record Point(int x, int y) {}\n", "record_declaration", "Point"),
+			("@interface Marker {}\n", "annotation_type_declaration", "Marker"),
 		] {
 			let tree = parse(source);
 			let node = first_node(&tree, kind);
@@ -426,10 +363,7 @@ public class SimpleTest {
 	fn imports_are_stripped_down_to_their_dotted_path() {
 		for (source, expected) in [
 			("import java.util.List;\n", "java.util.List"),
-			(
-				"import static java.util.Arrays.asList;\n",
-				"java.util.Arrays.asList",
-			),
+			("import static java.util.Arrays.asList;\n", "java.util.Arrays.asList"),
 			("import java.util.*;\n", "java.util.*"),
 		] {
 			let tree = parse(source);
@@ -453,21 +387,13 @@ public class SimpleTest {
 	#[test]
 	fn only_public_types_are_exported_and_the_kind_prefixes_the_name() {
 		for (source, kind, expected) in [
-			(
-				"public class Service {}\n",
-				"class_declaration",
-				vec!["class:Service"],
-			),
+			("public class Service {}\n", "class_declaration", vec!["class:Service"]),
 			(
 				"public interface Shape {}\n",
 				"interface_declaration",
 				vec!["interface:Shape"],
 			),
-			(
-				"public enum Status { OK }\n",
-				"enum_declaration",
-				vec!["enum:Status"],
-			),
+			("public enum Status { OK }\n", "enum_declaration", vec!["enum:Status"]),
 			(
 				"public record Point(int x, int y) {}\n",
 				"record_declaration",
@@ -505,8 +431,7 @@ public class SimpleTest {
 
 	#[test]
 	fn method_invocations_keep_their_receiver_as_a_qualifier() {
-		let source =
-			"class Service {\n\tvoid run() {\n\t\thelper();\n\t\tthis.repo.save(name);\n\t}\n}\n";
+		let source = "class Service {\n\tvoid run() {\n\t\thelper();\n\t\tthis.repo.save(name);\n\t}\n}\n";
 		let tree = parse(source);
 		let mut invocations = Vec::new();
 		nodes_of_kind(tree.root_node(), "method_invocation", &mut invocations);
@@ -656,10 +581,7 @@ public class SimpleTest {
 
 		// The multi-line method is never folded into the merged header block.
 		assert_eq!(
-			extracted
-				.iter()
-				.filter(|r| r.node_kind == "method_declaration")
-				.count(),
+			extracted.iter().filter(|r| r.node_kind == "method_declaration").count(),
 			1
 		);
 	}

@@ -120,13 +120,8 @@ mod tests {
 
 	#[test]
 	fn markdown_signatures_elide_the_middle_of_long_bodies() {
-		let body = (1..=9)
-			.map(|i| format!("body{i}"))
-			.collect::<Vec<_>>()
-			.join("\n");
-		let md = signatures_to_markdown(&[file_signature(vec![signature(
-			"function", "long", &body, 1, 9,
-		)])]);
+		let body = (1..=9).map(|i| format!("body{i}")).collect::<Vec<_>>().join("\n");
+		let md = signatures_to_markdown(&[file_signature(vec![signature("function", "long", &body, 1, 9)])]);
 		assert!(md.contains("// ... 5 more lines"));
 		assert!(md.contains("body1"));
 		assert!(md.contains("body9"));
@@ -167,13 +162,8 @@ mod tests {
 
 	#[test]
 	fn text_signatures_elide_long_bodies_but_keep_the_tail_numbering() {
-		let body = (0..8)
-			.map(|i| format!("l{i}"))
-			.collect::<Vec<_>>()
-			.join("\n");
-		let text = render_signatures_text(&[file_signature(vec![signature(
-			"function", "long", &body, 100, 107,
-		)])]);
+		let body = (0..8).map(|i| format!("l{i}")).collect::<Vec<_>>().join("\n");
+		let text = render_signatures_text(&[file_signature(vec![signature("function", "long", &body, 100, 107)])]);
 		assert!(text.contains("// ... 4 more lines"));
 		assert!(text.contains("100: l0"));
 		assert!(text.contains("107: l7"));
@@ -181,14 +171,8 @@ mod tests {
 
 	#[test]
 	fn empty_block_lists_render_their_own_placeholders() {
-		assert_eq!(
-			code_blocks_to_markdown(&[]),
-			"No code blocks found for the query."
-		);
-		assert_eq!(
-			text_blocks_to_markdown(&[]),
-			"No text blocks found for the query."
-		);
+		assert_eq!(code_blocks_to_markdown(&[]), "No code blocks found for the query.");
+		assert_eq!(text_blocks_to_markdown(&[]), "No text blocks found for the query.");
 		assert_eq!(
 			document_blocks_to_markdown(&[]),
 			"No documentation found for the query."
@@ -276,10 +260,7 @@ mod tests {
 	fn cli_and_json_renderers_run_without_panicking() {
 		let mut item = signature("function", "cli", "fn cli() {\n}", 1, 2);
 		item.description = Some("desc".to_string());
-		let long = (0..8)
-			.map(|i| format!("x{i}"))
-			.collect::<Vec<_>>()
-			.join("\n");
+		let long = (0..8).map(|i| format!("x{i}")).collect::<Vec<_>>().join("\n");
 		let mut fs = file_signature(vec![
 			item,
 			signature("function", "one_liner", "fn one_liner();", 5, 5),

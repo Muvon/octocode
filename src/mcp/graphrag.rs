@@ -81,13 +81,10 @@ pub struct GraphRagProvider {
 impl GraphRagProvider {
 	pub fn new(config: Config, working_directory: std::path::PathBuf) -> Self {
 		let branch_manifest = if config.graphrag.enabled {
-			crate::indexer::branch::detect_branch_context(&working_directory).and_then(
-				|branch_name| {
-					let branch_dir =
-						crate::storage::get_branch_dir(&working_directory, &branch_name).ok()?;
-					crate::indexer::branch::load_manifest(&branch_dir).ok()?
-				},
-			)
+			crate::indexer::branch::detect_branch_context(&working_directory).and_then(|branch_name| {
+				let branch_dir = crate::storage::get_branch_dir(&working_directory, &branch_name).ok()?;
+				crate::indexer::branch::load_manifest(&branch_dir).ok()?
+			})
 		} else {
 			None
 		};
@@ -133,10 +130,7 @@ impl GraphRagProvider {
 					.ok_or_else(|| McpError::invalid_params("Missing required parameter 'query' for search operation: must be a detailed question about code relationships or architecture", "graphrag"))?;
 
 				if query.trim().is_empty() {
-					return Err(McpError::invalid_params(
-						"Invalid query: must not be empty",
-						"graphrag",
-					));
+					return Err(McpError::invalid_params("Invalid query: must not be empty", "graphrag"));
 				}
 				if query.len() > 1000 {
 					return Err(McpError::invalid_params(
@@ -148,13 +142,13 @@ impl GraphRagProvider {
 				(Some(query.to_string()), None, None, None)
 			}
 			GraphRAGOperation::GetNode | GraphRAGOperation::GetRelationships => {
-				let node_id = arguments
-					.get("node_id")
-					.and_then(|v| v.as_str())
-					.ok_or_else(|| McpError::invalid_params(
+				let node_id =
+					arguments.get("node_id").and_then(|v| v.as_str()).ok_or_else(|| {
+						McpError::invalid_params(
 						format!("Missing required parameter 'node_id' for {} operation: must be a valid node identifier", operation_str),
 						"graphrag"
-					))?;
+					)
+					})?;
 
 				(None, Some(node_id.to_string()), None, None)
 			}
@@ -169,21 +163,13 @@ impl GraphRagProvider {
 					.and_then(|v| v.as_str())
 					.ok_or_else(|| McpError::invalid_params("Missing required parameter 'target_id' for find-path operation: must be a valid node identifier", "graphrag"))?;
 
-				(
-					None,
-					None,
-					Some(source_id.to_string()),
-					Some(target_id.to_string()),
-				)
+				(None, None, Some(source_id.to_string()), Some(target_id.to_string()))
 			}
 			GraphRAGOperation::Overview => (None, None, None, None),
 		};
 
 		// Parse optional parameters
-		let max_depth = arguments
-			.get("max_depth")
-			.and_then(|v| v.as_u64())
-			.unwrap_or(3);
+		let max_depth = arguments.get("max_depth").and_then(|v| v.as_u64()).unwrap_or(3);
 		if !(1..=10).contains(&max_depth) {
 			return Err(McpError::invalid_params(
 				"Invalid max_depth: must be between 1 and 10",
@@ -192,10 +178,7 @@ impl GraphRagProvider {
 		}
 		let max_depth = max_depth as usize;
 
-		let format_str = arguments
-			.get("format")
-			.and_then(|v| v.as_str())
-			.unwrap_or("text");
+		let format_str = arguments.get("format").and_then(|v| v.as_str()).unwrap_or("text");
 
 		let format = match format_str {
 			"text" => OutputFormat::Text,
@@ -232,9 +215,10 @@ impl GraphRagProvider {
 
 		// Execute the GraphRAG operation. All stores are resolved from
 		// `self.working_directory`, so there's no process-wide CWD change.
-		let result = self.execute_graphrag_operation(&args).await.map_err(|e| {
-			McpError::internal_error(format!("GraphRAG operation failed: {}", e), "graphrag")
-		})?;
+		let result = self
+			.execute_graphrag_operation(&args)
+			.await
+			.map_err(|e| McpError::internal_error(format!("GraphRAG operation failed: {}", e), "graphrag"))?;
 
 		Ok(result)
 	}
@@ -243,35 +227,22 @@ impl GraphRagProvider {
 	async fn execute_graphrag_operation(&self, args: &GraphRAGArgs) -> Result<String> {
 		let config = self.graphrag.config();
 		let graph_builder = if config.graphrag.enabled {
-			match indexer::GraphBuilder::new_with_quiet(
-				config.clone(),
-				&self.working_directory,
-				true,
-			)
-			.await
-			{
+			match indexer::GraphBuilder::new_with_quiet(config.clone(), &self.working_directory, true).await {
 				Ok(builder) => {
 					// Branch-aware persisted enrichment.
 					if let Some(ref manifest) = self.branch_manifest {
-						let main_commit =
-							match crate::store::Store::new_at(&self.working_directory).await {
-								Ok(store) => store.get_last_commit_hash().await.ok().flatten(),
-								Err(_) => None,
-							};
-						if crate::indexer::branch::manifest_is_coherent_with(
-							manifest,
-							main_commit.as_deref(),
-						) {
+						let main_commit = match crate::store::Store::new_at(&self.working_directory).await {
+							Ok(store) => store.get_last_commit_hash().await.ok().flatten(),
+							Err(_) => None,
+						};
+						if crate::indexer::branch::manifest_is_coherent_with(manifest, main_commit.as_deref()) {
 							let overridden = manifest.overridden_paths();
 							builder.apply_branch_filter(&overridden).await;
-							if let Ok(branch_store) = crate::store::Store::new_for_branch_at(
-								&self.working_directory,
-								&manifest.branch_name,
-							)
-							.await
+							if let Ok(branch_store) =
+								crate::store::Store::new_for_branch_at(&self.working_directory, &manifest.branch_name)
+									.await
 							{
-								if let Err(error) = builder.merge_branch_graph(&branch_store).await
-								{
+								if let Err(error) = builder.merge_branch_graph(&branch_store).await {
 									tracing::warn!(%error, "Failed to merge branch GraphRAG data");
 								}
 							}
@@ -301,11 +272,7 @@ impl GraphRagProvider {
 				.with_graph(|enriched| {
 					let active = !enriched.nodes.is_empty() || !enriched.relationships.is_empty();
 					(
-						runtime::merge_enrichment(
-							&runtime_graph,
-							enriched,
-							&self.working_directory,
-						),
+						runtime::merge_enrichment(&runtime_graph, enriched, &self.working_directory),
 						active,
 					)
 				})
@@ -348,10 +315,7 @@ impl GraphRagProvider {
 					let mut nodes = runtime::search_nodes(&graph, query, 20);
 					let mut seen: std::collections::HashSet<String> =
 						nodes.iter().map(|node| node.id.clone()).collect();
-					for node in semantic_nodes
-						.into_iter()
-						.filter(|node| !node.is_symbol_node())
-					{
+					for node in semantic_nodes.into_iter().filter(|node| !node.is_symbol_node()) {
 						if seen.insert(node.id.clone()) {
 							nodes.push(node);
 						}
@@ -385,12 +349,9 @@ impl GraphRagProvider {
 					Some(resolved_id) => {
 						let node = &graph.nodes[resolved_id];
 						match args.format {
-							OutputFormat::Json => {
-								Ok(serde_json::to_string_pretty(node)
-									.map_err(|e| anyhow::anyhow!("JSON serialization failed: {}", e))?)
-							},
-							OutputFormat::Md => {
-								Ok(format!(
+							OutputFormat::Json => Ok(serde_json::to_string_pretty(node)
+								.map_err(|e| anyhow::anyhow!("JSON serialization failed: {}", e))?),
+							OutputFormat::Md => Ok(format!(
 									"# Node: {}\n\n**ID:** {}\n**Kind:** {}\n**Path:** {}\n**Description:** {}\n\n**Symbols:**\n{}\n",
 									node.name,
 									node.id,
@@ -398,8 +359,7 @@ impl GraphRagProvider {
 									node.path,
 									node.description,
 									node.symbols.iter().map(|s| format!("- {}", s)).collect::<Vec<_>>().join("\n")
-								))
-							},
+								)),
 							_ => {
 								// Text format for token efficiency
 								Ok(format!(
@@ -424,8 +384,8 @@ impl GraphRagProvider {
 					.ok_or_else(|| anyhow::anyhow!("Node id is missing"))?;
 
 				// Resolve node ID with fuzzy matching
-				let resolved_id = find_node_id(&graph, node_id)
-					.ok_or_else(|| anyhow::anyhow!("Node not found: {}", node_id))?;
+				let resolved_id =
+					find_node_id(&graph, node_id).ok_or_else(|| anyhow::anyhow!("Node not found: {}", node_id))?;
 
 				// Find relationships
 				let relationships: Vec<_> = graph
@@ -445,10 +405,7 @@ impl GraphRagProvider {
 						let mut output = format!("# Relationships for {}\n\n", resolved_id);
 
 						// Outgoing relationships
-						let outgoing: Vec<_> = relationships
-							.iter()
-							.filter(|rel| rel.source == resolved_id)
-							.collect();
+						let outgoing: Vec<_> = relationships.iter().filter(|rel| rel.source == resolved_id).collect();
 						if !outgoing.is_empty() {
 							output.push_str("## Outgoing Relationships\n\n");
 							for rel in outgoing {
@@ -466,10 +423,7 @@ impl GraphRagProvider {
 						}
 
 						// Incoming relationships
-						let incoming: Vec<_> = relationships
-							.iter()
-							.filter(|rel| rel.target == resolved_id)
-							.collect();
+						let incoming: Vec<_> = relationships.iter().filter(|rel| rel.target == resolved_id).collect();
 						if !incoming.is_empty() {
 							output.push_str("## Incoming Relationships\n\n");
 							for rel in incoming {
@@ -488,17 +442,11 @@ impl GraphRagProvider {
 					}
 					_ => {
 						// Text format for token efficiency
-						let mut output = format!(
-							"Relationships for {} ({} total):\n\n",
-							resolved_id,
-							relationships.len()
-						);
+						let mut output =
+							format!("Relationships for {} ({} total):\n\n", resolved_id, relationships.len());
 
 						// Outgoing relationships
-						let outgoing: Vec<_> = relationships
-							.iter()
-							.filter(|rel| rel.source == resolved_id)
-							.collect();
+						let outgoing: Vec<_> = relationships.iter().filter(|rel| rel.source == resolved_id).collect();
 						if !outgoing.is_empty() {
 							output.push_str("Outgoing:\n");
 							for rel in outgoing {
@@ -516,10 +464,7 @@ impl GraphRagProvider {
 						}
 
 						// Incoming relationships
-						let incoming: Vec<_> = relationships
-							.iter()
-							.filter(|rel| rel.target == resolved_id)
-							.collect();
+						let incoming: Vec<_> = relationships.iter().filter(|rel| rel.target == resolved_id).collect();
 						if !incoming.is_empty() {
 							output.push_str("Incoming:\n");
 							for rel in incoming {
@@ -615,9 +560,7 @@ impl GraphRagProvider {
 									.unwrap_or_else(|| node_id.clone());
 								if j > 0 {
 									let prev_id = &path[j - 1];
-									let rel = edge_index
-										.get(&(prev_id.as_str(), node_id.as_str()))
-										.copied();
+									let rel = edge_index.get(&(prev_id.as_str(), node_id.as_str())).copied();
 									if let Some(rel) = rel {
 										output.push_str(&format!(" --{}-> ", rel.relation_type));
 									} else {
@@ -632,12 +575,8 @@ impl GraphRagProvider {
 					}
 					_ => {
 						// Text format for token efficiency
-						let mut output = format!(
-							"Paths from {} to {} ({} found):\n\n",
-							source_id,
-							target_id,
-							paths.len()
-						);
+						let mut output =
+							format!("Paths from {} to {} ({} found):\n\n", source_id, target_id, paths.len());
 						for (i, path) in paths.iter().enumerate() {
 							output.push_str(&format!("Path {}:\n", i + 1));
 							for (j, node_id) in path.iter().enumerate() {
@@ -648,9 +587,7 @@ impl GraphRagProvider {
 									.unwrap_or_else(|| node_id.clone());
 								if j > 0 {
 									let prev_id = &path[j - 1];
-									let rel = edge_index
-										.get(&(prev_id.as_str(), node_id.as_str()))
-										.copied();
+									let rel = edge_index.get(&(prev_id.as_str(), node_id.as_str())).copied();
 									if let Some(rel) = rel {
 										output.push_str(&format!(" --{}-> ", rel.relation_type));
 									} else {
@@ -709,10 +646,7 @@ impl GraphRagProvider {
 
 						output.push_str("\n## Relationship Types\n\n");
 						for (rel_type, count) in rel_types.iter() {
-							output.push_str(&format!(
-								"- **{}**: {} relationships\n",
-								rel_type, count
-							));
+							output.push_str(&format!("- **{}**: {} relationships\n", rel_type, count));
 						}
 						Ok(output)
 					}

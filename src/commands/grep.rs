@@ -166,13 +166,7 @@ fn execute_rewrite(
 			.to_string_lossy()
 			.to_string();
 
-		match grep::rewrite_file(
-			&display_path,
-			&source,
-			&args.pattern,
-			rewrite_template,
-			language,
-		) {
+		match grep::rewrite_file(&display_path, &source, &args.pattern, rewrite_template, language) {
 			Ok(Some(result)) => {
 				total_replacements += result.replacements;
 				results.push((file_path.clone(), result));
@@ -225,11 +219,7 @@ fn execute_rewrite(
 }
 
 /// Collect files to search based on paths/globs and language filter.
-fn collect_files(
-	base_dir: &Path,
-	paths: &[String],
-	language: Option<&str>,
-) -> Result<Vec<String>, anyhow::Error> {
+fn collect_files(base_dir: &Path, paths: &[String], language: Option<&str>) -> Result<Vec<String>, anyhow::Error> {
 	let mut files = Vec::new();
 
 	if paths.is_empty() {

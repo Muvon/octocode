@@ -133,11 +133,7 @@ impl Language for Lua {
 				// Extract what's being returned as exports
 				for child in node.children(&mut node.walk()) {
 					if child.kind() == "expression_list" {
-						self.extract_lua_exports_from_expression_list(
-							child,
-							contents,
-							&mut exports,
-						);
+						self.extract_lua_exports_from_expression_list(child, contents, &mut exports);
 					} else if child.kind() == "table_constructor" {
 						self.extract_lua_exports_from_table(child, contents, &mut exports);
 					} else if child.kind() == "identifier" {
@@ -325,8 +321,8 @@ impl Lua {
 
 		// Lua keywords that should be excluded
 		const LUA_KEYWORDS: &[&str] = &[
-			"and", "break", "do", "else", "elseif", "end", "false", "for", "function", "if", "in",
-			"local", "nil", "not", "or", "repeat", "return", "then", "true", "until", "while",
+			"and", "break", "do", "else", "elseif", "end", "false", "for", "function", "if", "in", "local", "nil",
+			"not", "or", "repeat", "return", "then", "true", "until", "while",
 		];
 
 		if LUA_KEYWORDS.contains(&text) {
@@ -340,9 +336,7 @@ impl Lua {
 		}
 
 		// Rest must be alphanumeric or underscore
-		text.chars()
-			.skip(1)
-			.all(|c| c.is_ascii_alphanumeric() || c == '_')
+		text.chars().skip(1).all(|c| c.is_ascii_alphanumeric() || c == '_')
 	}
 
 	/// Get the function name from a function call node
@@ -395,12 +389,7 @@ impl Lua {
 	}
 
 	/// Extract exports from expression list in return statement
-	fn extract_lua_exports_from_expression_list(
-		&self,
-		node: Node,
-		contents: &str,
-		exports: &mut Vec<String>,
-	) {
+	fn extract_lua_exports_from_expression_list(&self, node: Node, contents: &str, exports: &mut Vec<String>) {
 		for child in node.children(&mut node.walk()) {
 			match child.kind() {
 				"identifier" => {
@@ -417,12 +406,7 @@ impl Lua {
 	}
 
 	/// Extract exports from table constructor in return statement
-	fn extract_lua_exports_from_table(
-		&self,
-		node: Node,
-		contents: &str,
-		exports: &mut Vec<String>,
-	) {
+	fn extract_lua_exports_from_table(&self, node: Node, contents: &str, exports: &mut Vec<String>) {
 		for child in node.children(&mut node.walk()) {
 			if child.kind() == "field" {
 				for grandchild in child.children(&mut child.walk()) {

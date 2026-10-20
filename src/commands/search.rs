@@ -53,10 +53,7 @@ fn validate_queries(queries: &[String]) -> Result<(), anyhow::Error> {
 	for (i, query) in queries.iter().enumerate() {
 		let query = query.trim();
 		if query.len() < 3 {
-			return Err(anyhow::anyhow!(
-				"Query {} must be at least 3 characters long",
-				i + 1
-			));
+			return Err(anyhow::anyhow!("Query {} must be at least 3 characters long", i + 1));
 		}
 		if query.len() > 500 {
 			return Err(anyhow::anyhow!(
@@ -100,11 +97,7 @@ pub struct SearchArgs {
 	pub language: Option<String>,
 }
 
-pub async fn execute(
-	store: &Store,
-	args: &SearchArgs,
-	config: &Config,
-) -> Result<(), anyhow::Error> {
+pub async fn execute(store: &Store, args: &SearchArgs, config: &Config) -> Result<(), anyhow::Error> {
 	let current_dir = std::env::current_dir()?;
 
 	// Use the new storage system to check for index
@@ -171,9 +164,7 @@ pub async fn execute(
 	let effective_detail_level = args.detail_level.as_deref().unwrap_or("partial");
 
 	// Generate batch embeddings for all queries
-	let embeddings =
-		indexer::search::generate_batch_embeddings_for_queries(&args.queries, search_mode, config)
-			.await?;
+	let embeddings = indexer::search::generate_batch_embeddings_for_queries(&args.queries, search_mode, config).await?;
 
 	// Zip queries with embeddings
 	let query_embeddings: Vec<_> = args.queries.iter().cloned().zip(embeddings).collect();
@@ -190,10 +181,7 @@ pub async fn execute(
 			match indexer::branch::load_manifest(&branch_dir) {
 				Ok(Some(manifest)) => {
 					let main_commit = store.get_last_commit_hash().await.ok().flatten();
-					if !indexer::branch::manifest_is_coherent_with(
-						&manifest,
-						main_commit.as_deref(),
-					) {
+					if !indexer::branch::manifest_is_coherent_with(&manifest, main_commit.as_deref()) {
 						eprintln!(
 							"⚠️  Branch '{}' index was built against main at {}, but main is now at {}. \
 							 Skipping branch overlay — re-run `octocode index` to refresh.",
@@ -273,13 +261,9 @@ pub async fn execute(
 		let cap = config.search.reranker.top_k_candidates;
 		let reserved = (cap / 5).max(1);
 		code_blocks.truncate(cap.saturating_sub(reserved).max(1));
-		code_blocks =
-			indexer::search::expand_code_blocks_via_graph(store, config, code_blocks, reserved)
-				.await;
+		code_blocks = indexer::search::expand_code_blocks_via_graph(store, config, code_blocks, reserved).await;
 	} else {
-		code_blocks =
-			indexer::search::expand_code_blocks_via_graph(store, config, code_blocks, usize::MAX)
-				.await;
+		code_blocks = indexer::search::expand_code_blocks_via_graph(store, config, code_blocks, usize::MAX).await;
 	}
 
 	// PageIndex-style reasoning selection over CODE candidates (gated). Mirrors
@@ -288,8 +272,7 @@ pub async fn execute(
 	let reasoning_on = config.search.reasoning.enabled && !args.queries.is_empty();
 	if reasoning_on {
 		let query = args.queries.join(" ");
-		code_blocks =
-			octocode::reasoning::reason_rank_code_blocks(&query, code_blocks, config).await?;
+		code_blocks = octocode::reasoning::reason_rank_code_blocks(&query, code_blocks, config).await?;
 	}
 
 	// Apply reranker if enabled, then filter by similarity threshold
@@ -338,17 +321,11 @@ pub async fn execute(
 				println!("{}", markdown);
 			} else if args.format.is_text() {
 				// Use text formatting function for token efficiency
-				let text_output = indexer::search::format_code_search_results_as_text(
-					&code_blocks,
-					effective_detail_level,
-				);
+				let text_output =
+					indexer::search::format_code_search_results_as_text(&code_blocks, effective_detail_level);
 				println!("{}", text_output);
 			} else {
-				indexer::render_code_blocks_with_config(
-					&code_blocks,
-					config,
-					effective_detail_level,
-				);
+				indexer::render_code_blocks_with_config(&code_blocks, config, effective_detail_level);
 			}
 		}
 		"docs" => {
@@ -356,15 +333,12 @@ pub async fn execute(
 				let json = serde_json::to_string_pretty(&doc_blocks)?;
 				println!("{}", json);
 			} else if args.format.is_md() {
-				let markdown =
-					indexer::document_blocks_to_markdown_with_config(&doc_blocks, config);
+				let markdown = indexer::document_blocks_to_markdown_with_config(&doc_blocks, config);
 				println!("{}", markdown);
 			} else if args.format.is_text() {
 				// Use text formatting function for token efficiency
-				let text_output = indexer::search::format_doc_search_results_as_text(
-					&doc_blocks,
-					effective_detail_level,
-				);
+				let text_output =
+					indexer::search::format_doc_search_results_as_text(&doc_blocks, effective_detail_level);
 				println!("{}", text_output);
 			} else {
 				render_document_blocks_with_config(&doc_blocks, config, effective_detail_level);
@@ -379,20 +353,15 @@ pub async fn execute(
 				println!("{}", markdown);
 			} else if args.format.is_text() {
 				// Use text formatting function for token efficiency
-				let text_output = indexer::search::format_text_search_results_as_text(
-					&text_blocks,
-					effective_detail_level,
-				);
+				let text_output =
+					indexer::search::format_text_search_results_as_text(&text_blocks, effective_detail_level);
 				println!("{}", text_output);
 			} else {
 				render_text_blocks_with_config(&text_blocks, config, effective_detail_level);
 			}
 		}
 		"commits" => {
-			let output = indexer::search::format_commit_search_results_as_text(
-				&commit_blocks,
-				effective_detail_level,
-			);
+			let output = indexer::search::format_commit_search_results_as_text(&commit_blocks, effective_detail_level);
 			if args.format.is_json() {
 				let json = serde_json::to_string_pretty(&commit_blocks)?;
 				println!("{}", json);
@@ -418,10 +387,7 @@ pub async fn execute(
 
 				if !doc_blocks.is_empty() {
 					combined_markdown.push_str("# Documentation Results\n\n");
-					combined_markdown.push_str(&indexer::document_blocks_to_markdown_with_config(
-						&doc_blocks,
-						config,
-					));
+					combined_markdown.push_str(&indexer::document_blocks_to_markdown_with_config(&doc_blocks, config));
 					combined_markdown.push('\n');
 				}
 
@@ -436,10 +402,7 @@ pub async fn execute(
 
 				if !text_blocks.is_empty() {
 					combined_markdown.push_str("# Text Results\n\n");
-					combined_markdown.push_str(&indexer::text_blocks_to_markdown_with_config(
-						&text_blocks,
-						config,
-					));
+					combined_markdown.push_str(&indexer::text_blocks_to_markdown_with_config(&text_blocks, config));
 				}
 
 				if combined_markdown.is_empty() {
@@ -465,11 +428,7 @@ pub async fn execute(
 
 				if !final_code_results.is_empty() {
 					println!("=== CODE RESULTS ===\n");
-					indexer::render_code_blocks_with_config(
-						&final_code_results,
-						config,
-						effective_detail_level,
-					);
+					indexer::render_code_blocks_with_config(&final_code_results, config, effective_detail_level);
 					println!("\n");
 				}
 
@@ -478,8 +437,7 @@ pub async fn execute(
 					render_text_blocks_with_config(&text_blocks, config, effective_detail_level);
 				}
 
-				if doc_blocks.is_empty() && final_code_results.is_empty() && text_blocks.is_empty()
-				{
+				if doc_blocks.is_empty() && final_code_results.is_empty() && text_blocks.is_empty() {
 					println!("No results found for the query.");
 				}
 			}
@@ -490,11 +448,7 @@ pub async fn execute(
 	Ok(())
 }
 
-fn render_text_blocks_with_config(
-	blocks: &[octocode::store::TextBlock],
-	_config: &Config,
-	detail_level: &str,
-) {
+fn render_text_blocks_with_config(blocks: &[octocode::store::TextBlock], _config: &Config, detail_level: &str) {
 	if blocks.is_empty() {
 		println!("No text blocks found.");
 		return;
@@ -513,10 +467,7 @@ fn render_text_blocks_with_config(
 		if !blocks_by_file.contains_key(&block.path) {
 			file_order.push(block.path.clone());
 		}
-		blocks_by_file
-			.entry(block.path.clone())
-			.or_default()
-			.push(block);
+		blocks_by_file.entry(block.path.clone()).or_default().push(block);
 	}
 
 	// Print results organized by file
@@ -538,8 +489,7 @@ fn render_text_blocks_with_config(
 
 			// Stored content includes the embedding-input preamble — strip it
 			// before iterating so line numbers and previews align with source.
-			let display_content =
-				octocode::indexer::contextual::strip_enriched_preamble(&block.content);
+			let display_content = octocode::indexer::contextual::strip_enriched_preamble(&block.content);
 
 			// Add content based on detail level (consistent with MCP smart truncation)
 			match detail_level {
@@ -620,11 +570,7 @@ fn render_text_blocks_with_config(
 	}
 }
 
-fn render_document_blocks_with_config(
-	blocks: &[octocode::store::DocumentBlock],
-	_config: &Config,
-	detail_level: &str,
-) {
+fn render_document_blocks_with_config(blocks: &[octocode::store::DocumentBlock], _config: &Config, detail_level: &str) {
 	if blocks.is_empty() {
 		println!("No document blocks found.");
 		return;
@@ -636,19 +582,14 @@ fn render_document_blocks_with_config(
 	// relevance-ranked order files first appear in (HashMap iteration order
 	// is randomized per-process and would otherwise reorder results printed).
 	let mut file_order: Vec<String> = Vec::new();
-	let mut blocks_by_file: std::collections::HashMap<
-		String,
-		Vec<&octocode::store::DocumentBlock>,
-	> = std::collections::HashMap::new();
+	let mut blocks_by_file: std::collections::HashMap<String, Vec<&octocode::store::DocumentBlock>> =
+		std::collections::HashMap::new();
 
 	for block in blocks {
 		if !blocks_by_file.contains_key(&block.path) {
 			file_order.push(block.path.clone());
 		}
-		blocks_by_file
-			.entry(block.path.clone())
-			.or_default()
-			.push(block);
+		blocks_by_file.entry(block.path.clone()).or_default().push(block);
 	}
 
 	// Print results organized by file
@@ -658,11 +599,7 @@ fn render_document_blocks_with_config(
 
 		for (idx, block) in file_blocks.iter().enumerate() {
 			println!("║");
-			println!(
-				"║ Block {} of {}: Document Block",
-				idx + 1,
-				file_blocks.len()
-			);
+			println!("║ Block {} of {}: Document Block", idx + 1, file_blocks.len());
 			println!("║ Lines: {}-{}", block.start_line, block.end_line);
 
 			// Show similarity score if available
@@ -674,8 +611,7 @@ fn render_document_blocks_with_config(
 
 			// Strip the embedding-input preamble so the rendered document
 			// shows raw markdown content with correct line numbers.
-			let display_content =
-				octocode::indexer::contextual::strip_enriched_preamble(&block.content);
+			let display_content = octocode::indexer::contextual::strip_enriched_preamble(&block.content);
 
 			// Add content based on detail level (consistent with smart truncation)
 			match detail_level {

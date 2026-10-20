@@ -87,7 +87,11 @@ impl AIEnhancements {
 		all_nodes: &[CodeNode],
 	) -> Result<Vec<CodeRelationship>> {
 		// Start with rule-based relationships (fast and reliable)
-		let mut relationships = crate::indexer::graphrag::relationships::RelationshipDiscovery::discover_relationships_efficiently(new_files, all_nodes).await?;
+		let mut relationships =
+			crate::indexer::graphrag::relationships::RelationshipDiscovery::discover_relationships_efficiently(
+				new_files, all_nodes,
+			)
+			.await?;
 
 		// Add AI-enhanced relationship discovery for complex architectural patterns
 		let ai_relationships = self
@@ -100,9 +104,8 @@ impl AIEnhancements {
 		relationships.sort_unstable_by(|a, b| {
 			(&a.source, &a.target, &a.relation_type).cmp(&(&b.source, &b.target, &b.relation_type))
 		});
-		relationships.dedup_by(|a, b| {
-			a.source == b.source && a.target == b.target && a.relation_type == b.relation_type
-		});
+		relationships
+			.dedup_by(|a, b| a.source == b.source && a.target == b.target && a.relation_type == b.relation_type);
 
 		Ok(relationships)
 	}
@@ -138,9 +141,7 @@ impl AIEnhancements {
 		// Process in small batches to avoid overwhelming the AI
 		let ai_batch_size = self.config.graphrag.llm.ai_batch_size;
 		for batch in complex_files.chunks(ai_batch_size) {
-			let batch_relationships = self
-				.analyze_architectural_relationships_batch(batch, all_nodes)
-				.await?;
+			let batch_relationships = self.analyze_architectural_relationships_batch(batch, all_nodes).await?;
 			ai_relationships.extend(batch_relationships);
 		}
 
@@ -185,18 +186,8 @@ impl AIEnhancements {
 				"File: {}\nLanguage: {}\nKey symbols: {}\nExports: {}\n\n",
 				node.path,
 				node.language,
-				node.symbols
-					.iter()
-					.take(8)
-					.cloned()
-					.collect::<Vec<_>>()
-					.join(", "),
-				node.exports
-					.iter()
-					.take(5)
-					.cloned()
-					.collect::<Vec<_>>()
-					.join(", ")
+				node.symbols.iter().take(8).cloned().collect::<Vec<_>>().join(", "),
+				node.exports.iter().take(5).cloned().collect::<Vec<_>>().join(", ")
 			));
 		}
 
@@ -214,12 +205,7 @@ impl AIEnhancements {
 				"File: {}\nLanguage: {}\nExports: {}\n\n",
 				node.path,
 				node.language,
-				node.exports
-					.iter()
-					.take(3)
-					.cloned()
-					.collect::<Vec<_>>()
-					.join(", ")
+				node.exports.iter().take(3).cloned().collect::<Vec<_>>().join(", ")
 			));
 		}
 
@@ -257,9 +243,7 @@ impl AIEnhancements {
 			})?;
 
 		// Parse AI response
-		let ai_relationships = self
-			.parse_ai_architectural_relationships(&response)
-			.unwrap_or_default();
+		let ai_relationships = self.parse_ai_architectural_relationships(&response).unwrap_or_default();
 
 		// Filter and validate relationships
 		let valid_relationships: Vec<CodeRelationship> = ai_relationships
@@ -276,10 +260,7 @@ impl AIEnhancements {
 	}
 
 	// Parse AI response for architectural relationships
-	fn parse_ai_architectural_relationships(
-		&self,
-		response: &serde_json::Value,
-	) -> Result<Vec<CodeRelationship>> {
+	fn parse_ai_architectural_relationships(&self, response: &serde_json::Value) -> Result<Vec<CodeRelationship>> {
 		#[derive(Deserialize)]
 		struct AiRelationship {
 			source_path: String,
@@ -318,12 +299,7 @@ impl AIEnhancements {
 	}
 
 	// Use AI for description when AI is configured, language is supported, and file has symbols.
-	pub fn should_use_ai_for_description(
-		&self,
-		symbols: &[String],
-		_lines: u32,
-		language: &str,
-	) -> bool {
+	pub fn should_use_ai_for_description(&self, symbols: &[String], _lines: u32, language: &str) -> bool {
 		let is_supported_language = crate::indexer::languages::get_language(language).is_some();
 		!symbols.is_empty() && is_supported_language
 	}
@@ -377,10 +353,7 @@ impl AIEnhancements {
 	const MAX_BATCH_RETRIES: u32 = 3;
 
 	// Extract AI-powered descriptions for multiple files in a single batch call
-	pub async fn extract_ai_descriptions_batch(
-		&self,
-		files: &[FileForAI],
-	) -> Result<HashMap<String, String>> {
+	pub async fn extract_ai_descriptions_batch(&self, files: &[FileForAI]) -> Result<HashMap<String, String>> {
 		if files.is_empty() {
 			return Ok(HashMap::new());
 		}
@@ -457,12 +430,7 @@ impl AIEnhancements {
 			));
 			message.push_str(&format!(
 				"Key symbols: {}\n",
-				file.symbols
-					.iter()
-					.take(5)
-					.cloned()
-					.collect::<Vec<_>>()
-					.join(", ")
+				file.symbols.iter().take(5).cloned().collect::<Vec<_>>().join(", ")
 			));
 			message.push_str(&format!("Code sample:\n{}\n\n", file.content_sample));
 		}
@@ -514,19 +482,13 @@ impl AIEnhancements {
 			// Validate that file_id exists in our request
 			if files.iter().any(|f| f.file_id == desc.file_id) {
 				let cleaned_desc = if desc.description.len() > 300 {
-					format!(
-						"{}...",
-						crate::utils::truncate_at_char_boundary(&desc.description, 297)
-					)
+					format!("{}...", crate::utils::truncate_at_char_boundary(&desc.description, 297))
 				} else {
 					desc.description
 				};
 				results.insert(desc.file_id, cleaned_desc);
 			} else if !self.quiet {
-				eprintln!(
-					"⚠️  Received description for unknown file: {}",
-					desc.file_id
-				);
+				eprintln!("⚠️  Received description for unknown file: {}", desc.file_id);
 			}
 		}
 
@@ -596,7 +558,10 @@ impl AIEnhancements {
 		// Separate system prompt from file data for better LLM handling
 		let user_message = format!(
 			"File: {}\nLanguage: {}\nStats: {} functions, {} classes/structs\nKey symbols: {}\n\nCode sample:\n{}",
-			std::path::Path::new(file_path).file_name().and_then(|s| s.to_str()).unwrap_or("unknown"),
+			std::path::Path::new(file_path)
+				.file_name()
+				.and_then(|s| s.to_str())
+				.unwrap_or("unknown"),
 			language,
 			function_count,
 			class_count,
@@ -615,10 +580,7 @@ impl AIEnhancements {
 			Ok(description) => {
 				let cleaned = description.trim();
 				if cleaned.len() > 300 {
-					Ok(format!(
-						"{}...",
-						crate::utils::truncate_at_char_boundary(cleaned, 297)
-					))
+					Ok(format!("{}...", crate::utils::truncate_at_char_boundary(cleaned, 297)))
 				} else {
 					Ok(cleaned.to_string())
 				}

@@ -37,9 +37,8 @@ mod tests;
 pub use builder::GraphBuilder;
 pub use types::{CodeGraph, CodeNode, CodeRelationship, FunctionInfo};
 pub use utils::{
-	cosine_similarity, detect_project_root, detect_project_root_from, find_node_id,
-	graphrag_nodes_to_markdown, graphrag_nodes_to_text, normalize_node_id,
-	render_graphrag_nodes_json, to_relative_path,
+	cosine_similarity, detect_project_root, detect_project_root_from, find_node_id, graphrag_nodes_to_markdown,
+	graphrag_nodes_to_text, normalize_node_id, render_graphrag_nodes_json, to_relative_path,
 };
 
 // GraphRAG implementation for all operations (backward compatibility + new operations)
@@ -55,24 +54,19 @@ pub struct GraphRAG {
 
 impl GraphRAG {
 	pub fn new(config: Config, working_dir: PathBuf) -> Self {
-		Self {
-			config,
-			working_dir,
-		}
+		Self { config, working_dir }
 	}
 
 	/// Search for nodes (backward compatibility)
 	pub async fn search(&self, query: &str) -> Result<String> {
-		let builder =
-			GraphBuilder::new_with_quiet(self.config.clone(), &self.working_dir, true).await?;
+		let builder = GraphBuilder::new_with_quiet(self.config.clone(), &self.working_dir, true).await?;
 		let nodes = builder.search_nodes(query).await?;
 		Ok(graphrag_nodes_to_text(&nodes))
 	}
 
 	/// Get node details by ID
 	pub async fn get_node(&self, node_id: &str) -> Result<String> {
-		let builder =
-			GraphBuilder::new_with_quiet(self.config.clone(), &self.working_dir, true).await?;
+		let builder = GraphBuilder::new_with_quiet(self.config.clone(), &self.working_dir, true).await?;
 		let graph = builder.get_graph().await?;
 		match find_node_id(&graph, node_id) {
 			Some(resolved_id) => {
@@ -93,12 +87,11 @@ impl GraphRAG {
 
 	/// Get relationships for a node
 	pub async fn get_relationships(&self, node_id: &str) -> Result<String> {
-		let builder =
-			GraphBuilder::new_with_quiet(self.config.clone(), &self.working_dir, true).await?;
+		let builder = GraphBuilder::new_with_quiet(self.config.clone(), &self.working_dir, true).await?;
 		let graph = builder.get_graph().await?;
 
-		let resolved_id = find_node_id(&graph, node_id)
-			.ok_or_else(|| anyhow::anyhow!("Node not found: {}", node_id))?;
+		let resolved_id =
+			find_node_id(&graph, node_id).ok_or_else(|| anyhow::anyhow!("Node not found: {}", node_id))?;
 
 		let relationships: Vec<_> = graph
 			.relationships
@@ -110,17 +103,10 @@ impl GraphRAG {
 			return Ok(format!("No relationships found for node: {}", resolved_id));
 		}
 
-		let mut output = format!(
-			"Relationships for {} ({} total):\n\n",
-			resolved_id,
-			relationships.len()
-		);
+		let mut output = format!("Relationships for {} ({} total):\n\n", resolved_id, relationships.len());
 
 		// Outgoing relationships
-		let outgoing: Vec<_> = relationships
-			.iter()
-			.filter(|rel| rel.source == resolved_id)
-			.collect();
+		let outgoing: Vec<_> = relationships.iter().filter(|rel| rel.source == resolved_id).collect();
 		if !outgoing.is_empty() {
 			output.push_str("Outgoing:\n");
 			for rel in outgoing {
@@ -138,10 +124,7 @@ impl GraphRAG {
 		}
 
 		// Incoming relationships
-		let incoming: Vec<_> = relationships
-			.iter()
-			.filter(|rel| rel.target == resolved_id)
-			.collect();
+		let incoming: Vec<_> = relationships.iter().filter(|rel| rel.target == resolved_id).collect();
 		if !incoming.is_empty() {
 			output.push_str("Incoming:\n");
 			for rel in incoming {
@@ -160,25 +143,17 @@ impl GraphRAG {
 	}
 
 	/// Find paths between two nodes
-	pub async fn find_path(
-		&self,
-		source_id: &str,
-		target_id: &str,
-		max_depth: usize,
-	) -> Result<String> {
-		let builder =
-			GraphBuilder::new_with_quiet(self.config.clone(), &self.working_dir, true).await?;
+	pub async fn find_path(&self, source_id: &str, target_id: &str, max_depth: usize) -> Result<String> {
+		let builder = GraphBuilder::new_with_quiet(self.config.clone(), &self.working_dir, true).await?;
 		let graph = builder.get_graph().await?;
 
 		// Resolve node IDs with fuzzy matching
-		let resolved_source = find_node_id(&graph, source_id)
-			.ok_or_else(|| anyhow::anyhow!("Source node not found: {}", source_id))?;
-		let resolved_target = find_node_id(&graph, target_id)
-			.ok_or_else(|| anyhow::anyhow!("Target node not found: {}", target_id))?;
+		let resolved_source =
+			find_node_id(&graph, source_id).ok_or_else(|| anyhow::anyhow!("Source node not found: {}", source_id))?;
+		let resolved_target =
+			find_node_id(&graph, target_id).ok_or_else(|| anyhow::anyhow!("Target node not found: {}", target_id))?;
 
-		let paths = builder
-			.find_paths(resolved_source, resolved_target, max_depth)
-			.await?;
+		let paths = builder.find_paths(resolved_source, resolved_target, max_depth).await?;
 
 		if paths.is_empty() {
 			return Ok(format!(
@@ -187,12 +162,7 @@ impl GraphRAG {
 			));
 		}
 
-		let mut output = format!(
-			"Paths from {} to {} ({} found):\n\n",
-			source_id,
-			target_id,
-			paths.len()
-		);
+		let mut output = format!("Paths from {} to {} ({} found):\n\n", source_id, target_id, paths.len());
 		for (i, path) in paths.iter().enumerate() {
 			output.push_str(&format!("Path {}:\n", i + 1));
 			for (j, node_id) in path.iter().enumerate() {
@@ -222,8 +192,7 @@ impl GraphRAG {
 
 	/// Get graph overview
 	pub async fn overview(&self) -> Result<String> {
-		let builder =
-			GraphBuilder::new_with_quiet(self.config.clone(), &self.working_dir, true).await?;
+		let builder = GraphBuilder::new_with_quiet(self.config.clone(), &self.working_dir, true).await?;
 		let graph = builder.get_graph().await?;
 
 		let node_count = graph.nodes.len();

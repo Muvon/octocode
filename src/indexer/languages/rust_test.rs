@@ -37,10 +37,7 @@ mod foo {
 
 	let regions = parse_regions(source);
 
-	let function_regions: Vec<_> = regions
-		.iter()
-		.filter(|r| r.node_kind == "function_item")
-		.collect();
+	let function_regions: Vec<_> = regions.iter().filter(|r| r.node_kind == "function_item").collect();
 	assert_eq!(
 		function_regions.len(),
 		2,
@@ -49,10 +46,7 @@ mod foo {
 		regions.iter().map(|r| &r.content).collect::<Vec<_>>()
 	);
 
-	let mod_regions: Vec<_> = regions
-		.iter()
-		.filter(|r| r.node_kind == "mod_item")
-		.collect();
+	let mod_regions: Vec<_> = regions.iter().filter(|r| r.node_kind == "mod_item").collect();
 	assert!(
 		mod_regions.is_empty(),
 		"mod body should not collapse into a single mod_item blob region, got: {:?}",
@@ -89,10 +83,7 @@ trait Greeter {
 
 	let regions = parse_regions(source);
 
-	let function_regions: Vec<_> = regions
-		.iter()
-		.filter(|r| r.node_kind == "function_item")
-		.collect();
+	let function_regions: Vec<_> = regions.iter().filter(|r| r.node_kind == "function_item").collect();
 	assert_eq!(
 		function_regions.len(),
 		1,
@@ -101,10 +92,7 @@ trait Greeter {
 		regions.iter().map(|r| &r.content).collect::<Vec<_>>()
 	);
 
-	let trait_regions: Vec<_> = regions
-		.iter()
-		.filter(|r| r.node_kind == "trait_item")
-		.collect();
+	let trait_regions: Vec<_> = regions.iter().filter(|r| r.node_kind == "trait_item").collect();
 	assert!(
 		trait_regions.is_empty(),
 		"trait with a default method should not also collapse into a whole-trait region, got: {:?}",
@@ -145,10 +133,7 @@ fn foo() {
 "#;
 
 	let regions = parse_regions(source);
-	let function_regions: Vec<_> = regions
-		.iter()
-		.filter(|r| r.node_kind == "function_item")
-		.collect();
+	let function_regions: Vec<_> = regions.iter().filter(|r| r.node_kind == "function_item").collect();
 	assert_eq!(
 		function_regions.len(),
 		1,
@@ -157,9 +142,7 @@ fn foo() {
 		regions.iter().map(|r| &r.content).collect::<Vec<_>>()
 	);
 	assert!(
-		function_regions[0]
-			.content
-			.contains("// This function does the thing"),
+		function_regions[0].content.contains("// This function does the thing"),
 		"preceding doc comment should be attached to the function region, got: {:?}",
 		function_regions[0].content
 	);
@@ -182,10 +165,7 @@ fn baz() {
 "#;
 
 	let regions = parse_regions(source);
-	let function_regions: Vec<_> = regions
-		.iter()
-		.filter(|r| r.node_kind == "function_item")
-		.collect();
+	let function_regions: Vec<_> = regions.iter().filter(|r| r.node_kind == "function_item").collect();
 	assert_eq!(
 		function_regions.len(),
 		2,
@@ -207,9 +187,7 @@ fn baz() {
 
 fn parse(source: &str) -> Tree {
 	let mut parser = Parser::new();
-	parser
-		.set_language(&Rust {}.get_ts_language())
-		.expect("rust grammar");
+	parser.set_language(&Rust {}.get_ts_language()).expect("rust grammar");
 	parser.parse(source, None).expect("parse")
 }
 
@@ -227,9 +205,7 @@ fn nodes_of_kind<'a>(node: Node<'a>, kind: &str, out: &mut Vec<Node<'a>>) {
 fn first_node<'a>(tree: &'a Tree, kind: &str) -> Node<'a> {
 	let mut found = Vec::new();
 	nodes_of_kind(tree.root_node(), kind, &mut found);
-	*found
-		.first()
-		.unwrap_or_else(|| panic!("no {kind} node in source"))
+	*found.first().unwrap_or_else(|| panic!("no {kind} node in source"))
 }
 
 fn registry(files: &[&str]) -> FileRegistry {
@@ -331,10 +307,7 @@ fn an_inherent_impl_method_carries_only_the_receiver_type() {
 	let source = "impl Widget {\n\tfn paint(&self) {\n\t\tlet _ = 1;\n\t}\n}\n";
 	let tree = parse(source);
 	let node = first_node(&tree, "function_item");
-	assert_eq!(
-		Rust {}.extract_symbols(node, source),
-		vec!["Widget", "paint"]
-	);
+	assert_eq!(Rust {}.extract_symbols(node, source), vec!["Widget", "paint"]);
 }
 
 #[test]
@@ -348,24 +321,12 @@ fn a_free_function_has_only_its_own_name_as_a_symbol() {
 #[test]
 fn type_module_const_and_macro_declarations_yield_their_declared_name() {
 	for (source, kind, expected) in [
-		(
-			"pub struct Widget { pub id: u32 }\n",
-			"struct_item",
-			"Widget",
-		),
+		("pub struct Widget { pub id: u32 }\n", "struct_item", "Widget"),
 		("pub enum Color { Red }\n", "enum_item", "Color"),
-		(
-			"pub trait Render { fn go(&self); }\n",
-			"trait_item",
-			"Render",
-		),
+		("pub trait Render { fn go(&self); }\n", "trait_item", "Render"),
 		("mod helpers;\n", "mod_item", "helpers"),
 		("pub const LIMIT: usize = 10;\n", "const_item", "LIMIT"),
-		(
-			"macro_rules! shout { () => {} }\n",
-			"macro_definition",
-			"shout",
-		),
+		("macro_rules! shout { () => {} }\n", "macro_definition", "shout"),
 	] {
 		let tree = parse(source);
 		let node = first_node(&tree, kind);
@@ -387,10 +348,7 @@ fn an_unhandled_node_kind_falls_back_to_identifier_extraction() {
 	// `scoped_identifier` itself matches the "contains identifier" filter.
 	assert!(symbols.contains(&"Config".to_string()), "{symbols:?}");
 	assert!(symbols.contains(&"config".to_string()), "{symbols:?}");
-	assert!(
-		symbols.contains(&"crate::config::Config".to_string()),
-		"{symbols:?}"
-	);
+	assert!(symbols.contains(&"crate::config::Config".to_string()), "{symbols:?}");
 }
 
 #[test]
@@ -526,14 +484,8 @@ fn a_node_that_is_not_a_call_reports_no_calls() {
 #[test]
 fn use_statements_expand_into_one_fully_qualified_import_per_leaf() {
 	for (source, expected) in [
-		(
-			"use crate::config::Config;\n",
-			vec!["crate::config::Config"],
-		),
-		(
-			"use crate::a::{B, c::D};\n",
-			vec!["crate::a::B", "crate::a::c::D"],
-		),
+		("use crate::config::Config;\n", vec!["crate::config::Config"]),
+		("use crate::a::{B, c::D};\n", vec!["crate::a::B", "crate::a::c::D"]),
 		(
 			"use crate::a::{b::{C, D}, E};\n",
 			vec!["crate::a::b::C", "crate::a::b::D", "crate::a::E"],
@@ -553,10 +505,7 @@ fn use_statements_expand_into_one_fully_qualified_import_per_leaf() {
 fn a_pub_use_reexport_still_produces_an_import() {
 	// The visibility modifier in front of `use` must be skipped, or the whole
 	// re-export expands to nothing and creates no GraphRAG edge.
-	for source in [
-		"pub use crate::api::Client;\n",
-		"pub(crate) use crate::api::Client;\n",
-	] {
+	for source in ["pub use crate::api::Client;\n", "pub(crate) use crate::api::Client;\n"] {
 		let tree = parse(source);
 		let node = first_node(&tree, "use_declaration");
 		let (imports, _) = Rust {}.extract_imports_exports(node, source);
@@ -590,17 +539,9 @@ fn a_bodyless_mod_becomes_a_self_relative_import_while_a_mod_body_does_not() {
 #[test]
 fn only_pub_items_are_reported_as_exports() {
 	for (source, kind, expected) in [
-		(
-			"pub struct Widget { id: u32 }\n",
-			"struct_item",
-			vec!["Widget"],
-		),
+		("pub struct Widget { id: u32 }\n", "struct_item", vec!["Widget"]),
 		("pub enum Color { Red }\n", "enum_item", vec!["Color"]),
-		(
-			"pub trait Render { fn go(&self); }\n",
-			"trait_item",
-			vec!["Render"],
-		),
+		("pub trait Render { fn go(&self); }\n", "trait_item", vec!["Render"]),
 		("pub fn go() {}\n", "function_item", vec!["go"]),
 		("pub const LIMIT: usize = 1;\n", "const_item", vec!["LIMIT"]),
 		("struct Hidden { id: u32 }\n", "struct_item", vec![]),
@@ -710,10 +651,7 @@ fn a_self_path_resolves_back_to_the_source_file_itself() {
 		Some("demo/src/config.rs".to_string())
 	);
 	// A source file the registry has never seen cannot resolve to itself.
-	assert_eq!(
-		lang.resolve_import("self::helpers", "demo/src/absent.rs", &files),
-		None
-	);
+	assert_eq!(lang.resolve_import("self::helpers", "demo/src/absent.rs", &files), None);
 }
 
 #[test]
@@ -769,9 +707,7 @@ fn an_impl_block_yields_one_region_per_method_and_none_for_the_block() {
 	);
 	assert!(regions.iter().all(|r| r.node_kind == "function_item"));
 	assert!(
-		regions
-			.iter()
-			.all(|r| r.symbols.contains(&"Widget".to_string())),
+		regions.iter().all(|r| r.symbols.contains(&"Widget".to_string())),
 		"each method region should carry its receiver type, got {:?}",
 		regions.iter().map(|r| &r.symbols).collect::<Vec<_>>()
 	);

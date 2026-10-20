@@ -89,10 +89,7 @@ pub async fn run_watcher(
 	.map_err(|e| anyhow::anyhow!("Failed to create file watcher: {}", e))?;
 
 	// Watch directory with error handling
-	if let Err(e) = debouncer
-		.watcher()
-		.watch(&working_dir, RecursiveMode::Recursive)
-	{
+	if let Err(e) = debouncer.watcher().watch(&working_dir, RecursiveMode::Recursive) {
 		log_critical_error("Failed to start watching directory", &e);
 		return Err(anyhow::anyhow!("Failed to watch directory: {}", e));
 	}
@@ -122,10 +119,7 @@ pub async fn run_watcher(
 				if consecutive_errors >= MAX_WATCHER_ERRORS {
 					log_critical_anyhow_error(
 						"Too many watcher errors",
-						&anyhow::anyhow!(
-							"Stopping file watcher after {} consecutive errors",
-							consecutive_errors
-						),
+						&anyhow::anyhow!("Stopping file watcher after {} consecutive errors", consecutive_errors),
 					);
 					break;
 				}

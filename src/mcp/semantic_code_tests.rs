@@ -44,44 +44,29 @@ mod tests {
 	#[tokio::test]
 	async fn an_empty_query_array_is_rejected() {
 		let (_dir, provider) = project();
-		let err = provider
-			.execute_search(&json!({"query": []}))
-			.await
-			.unwrap_err();
-		assert!(
-			err.message.contains("at least one non-empty string"),
-			"{err}"
-		);
+		let err = provider.execute_search(&json!({"query": []})).await.unwrap_err();
+		assert!(err.message.contains("at least one non-empty string"), "{err}");
 	}
 
 	#[tokio::test]
 	async fn queries_are_length_bounded() {
 		let (_dir, provider) = project();
 
-		let short = provider
-			.execute_search(&json!({"query": "ab"}))
-			.await
-			.unwrap_err();
+		let short = provider.execute_search(&json!({"query": "ab"})).await.unwrap_err();
 		assert!(short.message.contains("at least 3 characters"), "{short}");
 
 		let long = provider
 			.execute_search(&json!({"query": "x".repeat(501)}))
 			.await
 			.unwrap_err();
-		assert!(
-			long.message.contains("no more than 500 characters"),
-			"{long}"
-		);
+		assert!(long.message.contains("no more than 500 characters"), "{long}");
 	}
 
 	#[tokio::test]
 	async fn too_many_queries_are_rejected() {
 		let (_dir, provider) = project();
 		let queries: Vec<String> = (0..64).map(|i| format!("query number {i}")).collect();
-		let err = provider
-			.execute_search(&json!({"query": queries}))
-			.await
-			.unwrap_err();
+		let err = provider.execute_search(&json!({"query": queries})).await.unwrap_err();
 		assert!(err.message.contains("Too many queries"), "{err}");
 	}
 
@@ -99,10 +84,7 @@ mod tests {
 			.execute_search(&json!({"query": "adding", "detail_level": "verbose"}))
 			.await
 			.unwrap_err();
-		assert!(
-			detail.message.contains("Invalid detail_level 'verbose'"),
-			"{detail}"
-		);
+		assert!(detail.message.contains("Invalid detail_level 'verbose'"), "{detail}");
 	}
 
 	#[tokio::test]
@@ -144,23 +126,15 @@ mod tests {
 			.execute_search(&json!({"query": "adding", "language": 7}))
 			.await
 			.unwrap_err();
-		assert!(
-			wrong_type.message.contains("must be a string"),
-			"{wrong_type}"
-		);
+		assert!(wrong_type.message.contains("must be a string"), "{wrong_type}");
 	}
 
 	#[tokio::test]
 	async fn view_signatures_validates_the_files_array() {
 		let (_dir, provider) = project();
 
-		let missing = provider
-			.execute_view_signatures(&json!({}))
-			.await
-			.unwrap_err();
-		assert!(missing
-			.message
-			.contains("Missing required parameter 'files'"));
+		let missing = provider.execute_view_signatures(&json!({})).await.unwrap_err();
+		assert!(missing.message.contains("Missing required parameter 'files'"));
 
 		let empty = provider
 			.execute_view_signatures(&json!({"files": []}))
@@ -179,10 +153,7 @@ mod tests {
 			.execute_view_signatures(&json!({"files": [7]}))
 			.await
 			.unwrap_err();
-		assert!(
-			wrong_type.message.contains("must be strings"),
-			"{wrong_type}"
-		);
+		assert!(wrong_type.message.contains("must be strings"), "{wrong_type}");
 
 		let blank = provider
 			.execute_view_signatures(&json!({"files": ["  "]}))
@@ -194,10 +165,7 @@ mod tests {
 			.execute_view_signatures(&json!({"files": ["x".repeat(501)]}))
 			.await
 			.unwrap_err();
-		assert!(
-			long.message.contains("no more than 500 characters"),
-			"{long}"
-		);
+		assert!(long.message.contains("no more than 500 characters"), "{long}");
 	}
 
 	#[tokio::test]
@@ -242,11 +210,7 @@ mod tests {
 			.execute_view_signatures(&json!({"files": [secret.to_string_lossy()]}))
 			.await
 			.unwrap_err();
-		assert!(
-			err.message
-				.contains("resolves outside the working directory"),
-			"{err}"
-		);
+		assert!(err.message.contains("resolves outside the working directory"), "{err}");
 	}
 
 	#[tokio::test]

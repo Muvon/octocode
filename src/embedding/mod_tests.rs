@@ -71,10 +71,7 @@ mod tests {
 		let at_top = calculate_content_hash_with_lines("body", "a.rs", 1, 5);
 		let moved = calculate_content_hash_with_lines("body", "a.rs", 20, 24);
 		assert_ne!(at_top, moved);
-		assert_ne!(
-			at_top,
-			calculate_content_hash_with_lines("body", "a.rs", 1, 6)
-		);
+		assert_ne!(at_top, calculate_content_hash_with_lines("body", "a.rs", 1, 6));
 		assert_ne!(at_top, calculate_unique_content_hash("body", "a.rs"));
 	}
 
@@ -156,17 +153,11 @@ mod tests {
 		// about it — it fails later, on the provider, which we never reach here.
 		let config = config_with_models("broken", "also-broken");
 		assert_eq!(
-			generate_embeddings("x", true, &config)
-				.await
-				.unwrap_err()
-				.to_string(),
+			generate_embeddings("x", true, &config).await.unwrap_err().to_string(),
 			"Model format must be 'provider:model' (e.g., 'jina:jina-embeddings-v4')"
 		);
 		assert_eq!(
-			generate_embeddings("x", false, &config)
-				.await
-				.unwrap_err()
-				.to_string(),
+			generate_embeddings("x", false, &config).await.unwrap_err().to_string(),
 			"Model format must be 'provider:model' (e.g., 'jina:jina-embeddings-v4')"
 		);
 	}
@@ -195,10 +186,7 @@ mod tests {
 	async fn an_empty_model_string_is_rejected_as_malformed() {
 		let config = config_with_models("", "");
 		assert_eq!(
-			generate_embeddings("x", true, &config)
-				.await
-				.unwrap_err()
-				.to_string(),
+			generate_embeddings("x", true, &config).await.unwrap_err().to_string(),
 			"Model format must be 'provider:model' (e.g., 'jina:jina-embeddings-v4')"
 		);
 	}

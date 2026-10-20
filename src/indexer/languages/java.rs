@@ -250,12 +250,9 @@ impl Language for Java {
 		// Keep this simple to avoid infinite recursion
 		match (type1, type2) {
 			// Single-line statements that should be merged together
-			("import_declaration", "package_declaration")
-			| ("package_declaration", "import_declaration") => true,
-			("field_declaration", "import_declaration")
-			| ("import_declaration", "field_declaration") => true,
-			("field_declaration", "package_declaration")
-			| ("package_declaration", "field_declaration") => true,
+			("import_declaration", "package_declaration") | ("package_declaration", "import_declaration") => true,
+			("field_declaration", "import_declaration") | ("import_declaration", "field_declaration") => true,
+			("field_declaration", "package_declaration") | ("package_declaration", "field_declaration") => true,
 			// Same types are equivalent
 			("field_declaration", "field_declaration") => true,
 			("import_declaration", "import_declaration") => true,
@@ -323,11 +320,7 @@ impl Language for Java {
 		}
 	}
 
-	fn extract_type_relations(
-		&self,
-		node: Node,
-		contents: &str,
-	) -> Vec<(super::TypeRelationKind, String)> {
+	fn extract_type_relations(&self, node: Node, contents: &str) -> Vec<(super::TypeRelationKind, String)> {
 		let mut out = Vec::new();
 		match node.kind() {
 			// `class Foo extends Bar implements I, J { }`
@@ -336,20 +329,10 @@ impl Language for Java {
 				for child in node.children(&mut cursor) {
 					match child.kind() {
 						"superclass" => {
-							collect_java_clause_types(
-								child,
-								contents,
-								super::TypeRelationKind::Extends,
-								&mut out,
-							);
+							collect_java_clause_types(child, contents, super::TypeRelationKind::Extends, &mut out);
 						}
 						"super_interfaces" => {
-							collect_java_clause_types(
-								child,
-								contents,
-								super::TypeRelationKind::Implements,
-								&mut out,
-							);
+							collect_java_clause_types(child, contents, super::TypeRelationKind::Implements, &mut out);
 						}
 						_ => {}
 					}
@@ -360,12 +343,7 @@ impl Language for Java {
 				let mut cursor = node.walk();
 				for child in node.children(&mut cursor) {
 					if child.kind() == "extends_interfaces" {
-						collect_java_clause_types(
-							child,
-							contents,
-							super::TypeRelationKind::Extends,
-							&mut out,
-						);
+						collect_java_clause_types(child, contents, super::TypeRelationKind::Extends, &mut out);
 					}
 				}
 			}
@@ -374,12 +352,7 @@ impl Language for Java {
 				let mut cursor = node.walk();
 				for child in node.children(&mut cursor) {
 					if child.kind() == "super_interfaces" {
-						collect_java_clause_types(
-							child,
-							contents,
-							super::TypeRelationKind::Implements,
-							&mut out,
-						);
+						collect_java_clause_types(child, contents, super::TypeRelationKind::Implements, &mut out);
 					}
 				}
 			}

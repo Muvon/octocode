@@ -41,11 +41,7 @@ pub(crate) fn use_offline_test_config() {
 		let mut config = Config::default();
 		config.embedding.code_model = "voyage:voyage-code-3".to_string();
 		config.embedding.text_model = "voyage:voyage-3.5-lite".to_string();
-		std::fs::write(
-			&path,
-			toml::to_string_pretty(&config).expect("serialize config"),
-		)
-		.expect("write config");
+		std::fs::write(&path, toml::to_string_pretty(&config).expect("serialize config")).expect("write config");
 		path
 	});
 	std::env::set_var("OCTOCODE_CONFIG_PATH", path);
@@ -74,13 +70,8 @@ pub(crate) fn offline_config() -> Config {
 pub(crate) async fn test_store() -> (TempDir, Store) {
 	use_offline_test_config();
 	let dir = TempDir::new().expect("tempdir");
-	let store = Store::new_with_path(dir.path().join("db"))
-		.await
-		.expect("open store");
-	store
-		.initialize_collections()
-		.await
-		.expect("create collections");
+	let store = Store::new_with_path(dir.path().join("db")).await.expect("open store");
+	store.initialize_collections().await.expect("create collections");
 	(dir, store)
 }
 
@@ -141,11 +132,7 @@ pub(crate) fn document_block(path: &str, hash: &str) -> DocumentBlock {
 	}
 }
 
-pub(crate) fn graph_node(
-	id: &str,
-	kind: &str,
-	seed: usize,
-) -> crate::indexer::graphrag::types::CodeNode {
+pub(crate) fn graph_node(id: &str, kind: &str, seed: usize) -> crate::indexer::graphrag::types::CodeNode {
 	crate::indexer::graphrag::types::CodeNode {
 		id: id.to_string(),
 		name: id.rsplit('/').next().unwrap_or(id).to_string(),
@@ -208,11 +195,7 @@ mod tests {
 	async fn initialising_collections_twice_is_idempotent() {
 		let (_dir, store) = test_store().await;
 		store.initialize_collections().await.unwrap();
-		for table in [
-			tables::CODE_BLOCKS,
-			tables::TEXT_BLOCKS,
-			tables::DOCUMENT_BLOCKS,
-		] {
+		for table in [tables::CODE_BLOCKS, tables::TEXT_BLOCKS, tables::DOCUMENT_BLOCKS] {
 			assert_eq!(store.get_table_row_count(table).await.unwrap(), 0);
 		}
 	}
@@ -225,13 +208,7 @@ mod tests {
 		store.store_code_blocks(&blocks, &embeddings).await.unwrap();
 		store.flush().await.unwrap();
 
-		assert_eq!(
-			store
-				.get_table_row_count(tables::CODE_BLOCKS)
-				.await
-				.unwrap(),
-			2
-		);
+		assert_eq!(store.get_table_row_count(tables::CODE_BLOCKS).await.unwrap(), 2);
 
 		let hits = store
 			.get_code_blocks_with_config(embedding(CODE_DIM, 0), Some(1), None)
@@ -253,12 +230,7 @@ mod tests {
 		store.store_code_blocks(&blocks, &embeddings).await.unwrap();
 
 		let hits = store
-			.get_code_blocks_with_language_filter(
-				embedding(CODE_DIM, 0),
-				Some(10),
-				None,
-				Some("python"),
-			)
+			.get_code_blocks_with_language_filter(embedding(CODE_DIM, 0), Some(10), None, Some("python"))
 			.await
 			.unwrap();
 		assert_eq!(hits.len(), 1);
@@ -290,10 +262,7 @@ mod tests {
 			.await
 			.unwrap();
 		store
-			.store_document_blocks(
-				&[document_block("README.md", "d1")],
-				&[embedding(TEXT_DIM, 0)],
-			)
+			.store_document_blocks(&[document_block("README.md", "d1")], &[embedding(TEXT_DIM, 0)])
 			.await
 			.unwrap();
 		store
@@ -329,28 +298,16 @@ mod tests {
 	#[tokio::test]
 	async fn content_existence_is_reported_per_table() {
 		let (_dir, store) = test_store().await;
-		assert!(!store
-			.content_exists("h1", tables::CODE_BLOCKS)
-			.await
-			.unwrap());
+		assert!(!store.content_exists("h1", tables::CODE_BLOCKS).await.unwrap());
 		// A table that was never created answers false rather than erroring.
-		assert!(!store
-			.content_exists("h1", tables::COMMIT_BLOCKS)
-			.await
-			.unwrap());
+		assert!(!store.content_exists("h1", tables::COMMIT_BLOCKS).await.unwrap());
 
 		store
 			.store_code_blocks(&[code_block("src/a.rs", "h1")], &[embedding(CODE_DIM, 0)])
 			.await
 			.unwrap();
-		assert!(store
-			.content_exists("h1", tables::CODE_BLOCKS)
-			.await
-			.unwrap());
-		assert!(!store
-			.content_exists("nope", tables::CODE_BLOCKS)
-			.await
-			.unwrap());
+		assert!(store.content_exists("h1", tables::CODE_BLOCKS).await.unwrap());
+		assert!(!store.content_exists("nope", tables::CODE_BLOCKS).await.unwrap());
 	}
 
 	#[tokio::test]
@@ -361,10 +318,7 @@ mod tests {
 			.store_code_blocks(&[code_block("src/a.rs", hash)], &[embedding(CODE_DIM, 0)])
 			.await
 			.unwrap();
-		assert!(store
-			.content_exists(hash, tables::CODE_BLOCKS)
-			.await
-			.unwrap());
+		assert!(store.content_exists(hash, tables::CODE_BLOCKS).await.unwrap());
 	}
 
 	#[tokio::test]
@@ -400,10 +354,7 @@ mod tests {
 		assert!(!paths.contains("src/a.rs"));
 		assert!(paths.contains("src/b.rs"));
 
-		store
-			.remove_blocks_by_paths(&["src/b.rs".to_string()])
-			.await
-			.unwrap();
+		store.remove_blocks_by_paths(&["src/b.rs".to_string()]).await.unwrap();
 		assert!(store.get_all_indexed_file_paths().await.unwrap().is_empty());
 	}
 
@@ -474,13 +425,7 @@ mod tests {
 			.await
 			.unwrap();
 		store.remove_blocks_by_paths(&[]).await.unwrap();
-		assert_eq!(
-			store
-				.get_table_row_count(tables::CODE_BLOCKS)
-				.await
-				.unwrap(),
-			1
-		);
+		assert_eq!(store.get_table_row_count(tables::CODE_BLOCKS).await.unwrap(), 1);
 	}
 
 	#[tokio::test]
@@ -495,10 +440,7 @@ mod tests {
 			.await
 			.unwrap();
 		store
-			.store_document_blocks(
-				&[document_block("README.md", "d1")],
-				&[embedding(TEXT_DIM, 0)],
-			)
+			.store_document_blocks(&[document_block("README.md", "d1")], &[embedding(TEXT_DIM, 0)])
 			.await
 			.unwrap();
 		store
@@ -507,29 +449,13 @@ mod tests {
 			.unwrap();
 
 		store.clear_code_table().await.unwrap();
-		assert_eq!(
-			store
-				.get_table_row_count(tables::CODE_BLOCKS)
-				.await
-				.unwrap(),
-			0
-		);
-		assert_eq!(
-			store
-				.get_table_row_count(tables::TEXT_BLOCKS)
-				.await
-				.unwrap(),
-			1
-		);
+		assert_eq!(store.get_table_row_count(tables::CODE_BLOCKS).await.unwrap(), 0);
+		assert_eq!(store.get_table_row_count(tables::TEXT_BLOCKS).await.unwrap(), 1);
 
 		store.clear_text_table().await.unwrap();
 		store.clear_docs_table().await.unwrap();
 		store.clear_commits_table().await.unwrap();
-		for table in [
-			tables::TEXT_BLOCKS,
-			tables::DOCUMENT_BLOCKS,
-			tables::COMMIT_BLOCKS,
-		] {
+		for table in [tables::TEXT_BLOCKS, tables::DOCUMENT_BLOCKS, tables::COMMIT_BLOCKS] {
 			assert_eq!(store.get_table_row_count(table).await.unwrap(), 0);
 		}
 	}
@@ -544,13 +470,7 @@ mod tests {
 		store.store_git_metadata("abc123").await.unwrap();
 
 		store.clear_all_tables().await.unwrap();
-		assert_eq!(
-			store
-				.get_table_row_count(tables::CODE_BLOCKS)
-				.await
-				.unwrap(),
-			0
-		);
+		assert_eq!(store.get_table_row_count(tables::CODE_BLOCKS).await.unwrap(), 0);
 	}
 
 	#[tokio::test]
@@ -559,31 +479,17 @@ mod tests {
 		assert_eq!(store.get_last_commit_hash().await.unwrap(), None);
 
 		store.store_git_metadata("abc123").await.unwrap();
-		assert_eq!(
-			store.get_last_commit_hash().await.unwrap().as_deref(),
-			Some("abc123")
-		);
+		assert_eq!(store.get_last_commit_hash().await.unwrap().as_deref(), Some("abc123"));
 
 		store.store_graphrag_commit_hash("def456").await.unwrap();
 		assert_eq!(
-			store
-				.get_graphrag_last_commit_hash()
-				.await
-				.unwrap()
-				.as_deref(),
+			store.get_graphrag_last_commit_hash().await.unwrap().as_deref(),
 			Some("def456")
 		);
 
-		store
-			.store_commits_last_commit_hash("ghi789")
-			.await
-			.unwrap();
+		store.store_commits_last_commit_hash("ghi789").await.unwrap();
 		assert_eq!(
-			store
-				.get_commits_last_commit_hash()
-				.await
-				.unwrap()
-				.as_deref(),
+			store.get_commits_last_commit_hash().await.unwrap().as_deref(),
 			Some("ghi789")
 		);
 
@@ -604,10 +510,7 @@ mod tests {
 		assert_eq!(store.get_file_mtime("src/a.rs").await.unwrap(), Some(111));
 
 		store
-			.store_file_metadata_batch(&[
-				("src/b.rs".to_string(), 222),
-				("src/c.rs".to_string(), 333),
-			])
+			.store_file_metadata_batch(&[("src/b.rs".to_string(), 222), ("src/c.rs".to_string(), 333)])
 			.await
 			.unwrap();
 		let all = store.get_all_file_metadata().await.unwrap();
@@ -633,13 +536,7 @@ mod tests {
 
 		// Empty mtime batches, by contrast, are a normal incremental-run outcome.
 		store.store_file_metadata_batch(&[]).await.unwrap();
-		assert_eq!(
-			store
-				.get_table_row_count(tables::CODE_BLOCKS)
-				.await
-				.unwrap(),
-			0
-		);
+		assert_eq!(store.get_table_row_count(tables::CODE_BLOCKS).await.unwrap(), 0);
 	}
 
 	#[tokio::test]
@@ -675,13 +572,7 @@ mod tests {
 			store.flush().await.unwrap();
 		}
 		let reopened = Store::new_with_path(path).await.unwrap();
-		assert_eq!(
-			reopened
-				.get_table_row_count(tables::CODE_BLOCKS)
-				.await
-				.unwrap(),
-			1
-		);
+		assert_eq!(reopened.get_table_row_count(tables::CODE_BLOCKS).await.unwrap(), 1);
 	}
 
 	#[test]

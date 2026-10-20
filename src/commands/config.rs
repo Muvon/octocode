@@ -100,11 +100,7 @@ pub fn execute(args: &ConfigArgs, mut config: Config) -> Result<()> {
 		// Show API key status for providers that need them
 		match active_provider {
 			Ok(EmbeddingProviderType::Jina) => {
-				let api_key_status = if config
-					.embedding
-					.get_api_key(&EmbeddingProviderType::Jina)
-					.is_some()
-				{
+				let api_key_status = if config.embedding.get_api_key(&EmbeddingProviderType::Jina).is_some() {
 					"✅ Set"
 				} else {
 					"❌ Not set"
@@ -112,11 +108,7 @@ pub fn execute(args: &ConfigArgs, mut config: Config) -> Result<()> {
 				println!("   Jina API key: {}", api_key_status);
 			}
 			Ok(EmbeddingProviderType::Voyage) => {
-				let api_key_status = if config
-					.embedding
-					.get_api_key(&EmbeddingProviderType::Voyage)
-					.is_some()
-				{
+				let api_key_status = if config.embedding.get_api_key(&EmbeddingProviderType::Voyage).is_some() {
 					"✅ Set"
 				} else {
 					"❌ Not set"
@@ -124,11 +116,7 @@ pub fn execute(args: &ConfigArgs, mut config: Config) -> Result<()> {
 				println!("   Voyage API key: {}", api_key_status);
 			}
 			Ok(EmbeddingProviderType::Google) => {
-				let api_key_status = if config
-					.embedding
-					.get_api_key(&EmbeddingProviderType::Google)
-					.is_some()
-				{
+				let api_key_status = if config.embedding.get_api_key(&EmbeddingProviderType::Google).is_some() {
 					"✅ Set"
 				} else {
 					"❌ Not set"
@@ -145,14 +133,8 @@ pub fn execute(args: &ConfigArgs, mut config: Config) -> Result<()> {
 		// Indexing Configuration
 		println!("📚 Indexing Configuration:");
 		println!("   Chunk size: {} characters", config.index.chunk_size);
-		println!(
-			"   Chunk overlap: {} characters",
-			config.index.chunk_overlap
-		);
-		println!(
-			"   Batch size: {} texts",
-			config.index.embeddings_batch_size
-		);
+		println!("   Chunk overlap: {} characters", config.index.chunk_overlap);
+		println!("   Batch size: {} texts", config.index.embeddings_batch_size);
 		if config.index.file_associations.is_empty() {
 			println!("   File associations: none");
 		} else {
@@ -184,17 +166,11 @@ pub fn execute(args: &ConfigArgs, mut config: Config) -> Result<()> {
 		// Search Configuration
 		println!("🔎 Search Configuration:");
 		println!("   Max results: {}", config.search.max_results);
-		println!(
-			"   Similarity threshold: {:.2}",
-			config.search.similarity_threshold
-		);
+		println!("   Similarity threshold: {:.2}", config.search.similarity_threshold);
 		println!("   Output format: {}", config.search.output_format);
 		println!("   Max files: {}", config.search.max_files);
 		println!("   Context lines: {}", config.search.context_lines);
-		println!(
-			"   Block max chars: {}",
-			config.search.search_block_max_characters
-		);
+		println!("   Block max chars: {}", config.search.search_block_max_characters);
 		println!();
 
 		// Storage Locations
@@ -222,14 +198,8 @@ pub fn execute(args: &ConfigArgs, mut config: Config) -> Result<()> {
 		if config.graphrag.enabled {
 			println!();
 			println!("🕸️  GraphRAG Configuration:");
-			println!(
-				"   Description model: {}",
-				config.graphrag.llm.description_model
-			);
-			println!(
-				"   Relationship model: {}",
-				config.graphrag.llm.relationship_model
-			);
+			println!("   Description model: {}", config.graphrag.llm.description_model);
+			println!("   Relationship model: {}", config.graphrag.llm.relationship_model);
 		}
 
 		return Ok(());
@@ -247,10 +217,7 @@ pub fn execute(args: &ConfigArgs, mut config: Config) -> Result<()> {
 		// Parse provider from the model string and set the code model
 		let (provider, _) = parse_provider_model(code_model)?;
 		config.embedding.code_model = code_model.clone();
-		println!(
-			"Code embedding model set to: {} (provider: {:?})",
-			code_model, provider
-		);
+		println!("Code embedding model set to: {} (provider: {:?})", code_model, provider);
 		updated = true;
 	}
 
@@ -258,10 +225,7 @@ pub fn execute(args: &ConfigArgs, mut config: Config) -> Result<()> {
 		// Parse provider from the model string and set the text model
 		let (provider, _) = parse_provider_model(text_model)?;
 		config.embedding.text_model = text_model.clone();
-		println!(
-			"Text embedding model set to: {} (provider: {:?})",
-			text_model, provider
-		);
+		println!("Text embedding model set to: {} (provider: {:?})", text_model, provider);
 		updated = true;
 	}
 
@@ -291,14 +255,7 @@ pub fn execute(args: &ConfigArgs, mut config: Config) -> Result<()> {
 
 	if let Some(graphrag_enabled) = args.graphrag_enabled {
 		config.graphrag.enabled = graphrag_enabled;
-		println!(
-			"GraphRAG {}",
-			if graphrag_enabled {
-				"enabled"
-			} else {
-				"disabled"
-			}
-		);
+		println!("GraphRAG {}", if graphrag_enabled { "enabled" } else { "disabled" });
 		updated = true;
 	}
 

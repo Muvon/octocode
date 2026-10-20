@@ -120,8 +120,7 @@ impl<'a> MetadataOperations<'a> {
 
 	/// Store git metadata (commit hash, etc.)
 	pub async fn store_git_metadata(&self, commit_hash: &str) -> Result<()> {
-		self.store_commit_marker(tables::GIT_METADATA, commit_hash)
-			.await
+		self.store_commit_marker(tables::GIT_METADATA, commit_hash).await
 	}
 
 	/// Get last indexed git commit hash
@@ -173,18 +172,9 @@ impl<'a> MetadataOperations<'a> {
 		]))
 	}
 
-	fn file_metadata_record_batch(
-		entries: &[(String, u64)],
-		indexed_at: i64,
-	) -> Result<RecordBatch> {
-		let paths = entries
-			.iter()
-			.map(|(path, _)| path.as_str())
-			.collect::<Vec<_>>();
-		let mtimes = entries
-			.iter()
-			.map(|(_, mtime)| *mtime as i64)
-			.collect::<Vec<_>>();
+	fn file_metadata_record_batch(entries: &[(String, u64)], indexed_at: i64) -> Result<RecordBatch> {
+		let paths = entries.iter().map(|(path, _)| path.as_str()).collect::<Vec<_>>();
+		let mtimes = entries.iter().map(|(_, mtime)| *mtime as i64).collect::<Vec<_>>();
 
 		Ok(RecordBatch::try_new(
 			Self::file_metadata_schema(),
@@ -216,10 +206,7 @@ impl<'a> MetadataOperations<'a> {
 		let table = self.db.open_table(tables::FILE_METADATA).execute().await?;
 		let mut existing = Vec::new();
 		for chunk in entries.chunks(DELETE_PATHS_CHUNK) {
-			let paths = chunk
-				.iter()
-				.map(|(path, _)| path.clone())
-				.collect::<Vec<_>>();
+			let paths = chunk.iter().map(|(path, _)| path.clone()).collect::<Vec<_>>();
 			let mut results = table
 				.query()
 				.only_if(in_list_predicate("path", &paths))
@@ -244,9 +231,7 @@ impl<'a> MetadataOperations<'a> {
 		}
 
 		let batch = Self::file_metadata_record_batch(entries, chrono::Utc::now().timestamp())?;
-		self.table_ops
-			.store_batch(tables::FILE_METADATA, batch)
-			.await
+		self.table_ops.store_batch(tables::FILE_METADATA, batch).await
 	}
 
 	/// Store file metadata (modification time, etc.)
@@ -302,10 +287,7 @@ impl<'a> MetadataOperations<'a> {
 		// Query for all file metadata
 		let mut results = table
 			.query()
-			.select(Select::Columns(vec![
-				"path".to_string(),
-				"mtime".to_string(),
-			]))
+			.select(Select::Columns(vec!["path".to_string(), "mtime".to_string()]))
 			.execute()
 			.await?;
 
@@ -326,10 +308,7 @@ impl<'a> MetadataOperations<'a> {
 							if path_array.is_null(i) || mtime_array.is_null(i) {
 								continue;
 							}
-							metadata_map.insert(
-								path_array.value(i).to_string(),
-								mtime_array.value(i) as u64,
-							);
+							metadata_map.insert(path_array.value(i).to_string(), mtime_array.value(i) as u64);
 						}
 					}
 				}

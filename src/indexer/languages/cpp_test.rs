@@ -215,10 +215,7 @@ namespace empty_ns {
 		assert_eq!(cpp.name(), "cpp");
 		assert_eq!(
 			cpp.get_file_extensions(),
-			vec![
-				"cpp", "cc", "cxx", "c++", "c", "h", "hpp", "hxx", "cppm", "ixx", "mxx", "ccm",
-				"cxxm"
-			]
+			vec!["cpp", "cc", "cxx", "c++", "c", "h", "hpp", "hxx", "cppm", "ixx", "mxx", "ccm", "cxxm"]
 		);
 	}
 
@@ -336,21 +333,12 @@ void Widget::resize(int w) {
 		// The declarator of an out-of-line definition is a `qualified_identifier`;
 		// the name is read through its `name` field, so the method name lands in
 		// the symbol list alongside the body locals.
-		assert_eq!(
-			symbols_of(code, "function_definition"),
-			vec!["local_a", "resize"]
-		);
+		assert_eq!(symbols_of(code, "function_definition"), vec!["local_a", "resize"]);
 
 		let tree = parse_cpp(code);
 		let node = first_node(&tree, "function_definition");
-		assert_eq!(
-			Cpp {}.extract_declaration_name(node, code).as_deref(),
-			Some("resize")
-		);
-		assert_eq!(
-			Cpp {}.extract_symbol_owner(node, code).as_deref(),
-			Some("Widget")
-		);
+		assert_eq!(Cpp {}.extract_declaration_name(node, code).as_deref(), Some("resize"));
+		assert_eq!(Cpp {}.extract_symbol_owner(node, code).as_deref(), Some("Widget"));
 	}
 
 	#[test]
@@ -390,19 +378,13 @@ public:
 
 	#[test]
 	fn namespace_symbols_are_the_namespace_name() {
-		assert_eq!(
-			symbols_of("namespace app { }\n", "namespace_definition"),
-			vec!["app"]
-		);
+		assert_eq!(symbols_of("namespace app { }\n", "namespace_definition"), vec!["app"]);
 	}
 
 	#[test]
 	fn unmapped_node_kinds_fall_back_to_sorted_identifiers() {
 		let code = "void run() {\n\thelper(value);\n}\n";
-		assert_eq!(
-			symbols_of(code, "expression_statement"),
-			vec!["helper", "value"]
-		);
+		assert_eq!(symbols_of(code, "expression_statement"), vec!["helper", "value"]);
 	}
 
 	#[test]
@@ -438,11 +420,7 @@ public:
 	#[test]
 	fn function_and_variable_declarations_are_exported_by_name() {
 		for (code, kind, expected) in [
-			(
-				"int main() { return 0; }\n",
-				"function_definition",
-				vec!["main"],
-			),
+			("int main() { return 0; }\n", "function_definition", vec!["main"]),
 			("void free_fn(int a);\n", "declaration", vec!["free_fn"]),
 			("int counter = 0;\n", "declaration", vec!["counter"]),
 			("int p1, p2;\n", "declaration", vec!["p1", "p2"]),
@@ -455,8 +433,7 @@ public:
 
 	#[test]
 	fn out_of_line_member_definition_exports_its_method_name() {
-		let (_, exports) =
-			imports_exports_of("void Widget::resize(int w) { }\n", "function_definition");
+		let (_, exports) = imports_exports_of("void Widget::resize(int w) { }\n", "function_definition");
 		assert_eq!(exports, vec!["resize"]);
 	}
 
@@ -534,10 +511,8 @@ void run() {
 			"class Derived : public ns::Base<int>, private Other { };\n",
 			"class_specifier",
 		);
-		let relations: Vec<(languages::TypeRelationKind, &str)> = extracted
-			.iter()
-			.map(|(kind, name)| (*kind, name.as_str()))
-			.collect();
+		let relations: Vec<(languages::TypeRelationKind, &str)> =
+			extracted.iter().map(|(kind, name)| (*kind, name.as_str())).collect();
 		assert_eq!(
 			relations,
 			vec![
@@ -551,10 +526,7 @@ void run() {
 			.iter()
 			.map(|(kind, name)| (*kind, name.as_str()))
 			.collect();
-		assert_eq!(
-			struct_relations,
-			vec![(languages::TypeRelationKind::Extends, "Base")]
-		);
+		assert_eq!(struct_relations, vec![(languages::TypeRelationKind::Extends, "Base")]);
 	}
 
 	#[test]
@@ -568,16 +540,8 @@ void run() {
 	#[test]
 	fn declaration_names_come_from_the_definition_not_from_type_references() {
 		for (code, kind, expected) in [
-			(
-				"int main() { return 0; }\n",
-				"function_definition",
-				Some("main"),
-			),
-			(
-				"class Widget { int w; };\n",
-				"class_specifier",
-				Some("Widget"),
-			),
+			("int main() { return 0; }\n", "function_definition", Some("main")),
+			("class Widget { int w; };\n", "class_specifier", Some("Widget")),
 			("namespace app { }\n", "namespace_definition", Some("app")),
 			// Bodyless specifiers are forward declarations or type references.
 			("class Fwd;\n", "class_specifier", None),
@@ -634,10 +598,7 @@ void run() {
 			Some("gfx/widget.h".to_string())
 		);
 		// A real system header has no project file to point at.
-		assert_eq!(
-			cpp.resolve_import("<vector>", "src/main.cpp", &registry),
-			None
-		);
+		assert_eq!(cpp.resolve_import("<vector>", "src/main.cpp", &registry), None);
 	}
 
 	#[test]

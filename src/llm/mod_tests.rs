@@ -23,18 +23,14 @@ mod tests {
 		let client = LlmClient::from_config(&config).expect("the shipped default must resolve");
 		assert!(!client.model().is_empty());
 		// The model name loses its provider prefix once the provider is resolved.
-		assert!(
-			config.llm.model.ends_with(client.model()),
-			"{}",
-			client.model()
-		);
+		assert!(config.llm.model.ends_with(client.model()), "{}", client.model());
 	}
 
 	#[test]
 	fn an_explicit_model_overrides_the_configured_one() {
 		let config = Config::default();
-		let client = LlmClient::with_model(&config, "openai:gpt-4o-mini")
-			.expect("a provider-prefixed model must resolve");
+		let client =
+			LlmClient::with_model(&config, "openai:gpt-4o-mini").expect("a provider-prefixed model must resolve");
 		assert_eq!(client.model(), "gpt-4o-mini");
 	}
 
@@ -108,10 +104,7 @@ mod tests {
 			LlmClient::strip_json_from_markdown("[1, 2, 3]"),
 			serde_json::json!([1, 2, 3])
 		);
-		assert_eq!(
-			LlmClient::strip_json_from_markdown("null"),
-			serde_json::Value::Null
-		);
+		assert_eq!(LlmClient::strip_json_from_markdown("null"), serde_json::Value::Null);
 	}
 
 	#[test]
@@ -155,10 +148,7 @@ mod tests {
 	fn a_tilde_fence_is_not_recognised_as_a_code_block() {
 		let content = "~~~json\n{\"a\": 1}\n~~~";
 		let value = LlmClient::strip_json_from_markdown(content);
-		assert_eq!(
-			value["error"],
-			serde_json::json!("Failed to parse JSON from response")
-		);
+		assert_eq!(value["error"], serde_json::json!("Failed to parse JSON from response"));
 		assert_eq!(value["raw_content"], serde_json::json!(content));
 	}
 
@@ -166,20 +156,14 @@ mod tests {
 	fn a_fence_holding_non_json_reports_the_whole_response_as_raw_content() {
 		let content = "```json\nnot actually json\n```";
 		let value = LlmClient::strip_json_from_markdown(content);
-		assert_eq!(
-			value["error"],
-			serde_json::json!("Failed to parse JSON from response")
-		);
+		assert_eq!(value["error"], serde_json::json!("Failed to parse JSON from response"));
 		assert_eq!(value["raw_content"], serde_json::json!(content));
 	}
 
 	#[test]
 	fn an_empty_response_is_reported_as_unparseable() {
 		let value = LlmClient::strip_json_from_markdown("");
-		assert_eq!(
-			value["error"],
-			serde_json::json!("Failed to parse JSON from response")
-		);
+		assert_eq!(value["error"], serde_json::json!("Failed to parse JSON from response"));
 		assert_eq!(value["raw_content"], serde_json::json!(""));
 	}
 }

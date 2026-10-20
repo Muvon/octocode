@@ -27,24 +27,11 @@ pub struct StatsArgs {
 	pub format: OutputFormat,
 }
 
-pub async fn execute(
-	store: &Store,
-	args: &StatsArgs,
-	config: &Config,
-) -> Result<(), anyhow::Error> {
+pub async fn execute(store: &Store, args: &StatsArgs, config: &Config) -> Result<(), anyhow::Error> {
 	let current_dir = std::env::current_dir()?;
 
 	// Gather all stats in parallel
-	let (
-		file_count,
-		code_count,
-		text_count,
-		doc_count,
-		commit_count,
-		graphrag_nodes,
-		graphrag_rels,
-		last_commit,
-	) = tokio::try_join!(
+	let (file_count, code_count, text_count, doc_count, commit_count, graphrag_nodes, graphrag_rels, last_commit) = tokio::try_join!(
 		async { store.get_all_indexed_file_paths().await.map(|f| f.len()) },
 		store.get_table_row_count("code_blocks"),
 		store.get_table_row_count("text_blocks"),
@@ -160,25 +147,16 @@ pub async fn execute(
 	println!("Configuration");
 	println!("  Code model:           {}", config.embedding.code_model);
 	println!("  Text model:           {}", config.embedding.text_model);
-	println!(
-		"  Threshold:            {}",
-		config.search.similarity_threshold
-	);
+	println!("  Threshold:            {}", config.search.similarity_threshold);
 
 	if config.search.reranker.enabled {
-		println!(
-			"  Reranker:             {} (enabled)",
-			config.search.reranker.model
-		);
+		println!("  Reranker:             {} (enabled)", config.search.reranker.model);
 	} else {
 		println!("  Reranker:             disabled");
 	}
 
 	if config.index.contextual_descriptions {
-		println!(
-			"  Contextual:           {} (enabled)",
-			config.index.contextual_model
-		);
+		println!("  Contextual:           {} (enabled)", config.index.contextual_model);
 	} else {
 		println!("  Contextual:           disabled");
 	}

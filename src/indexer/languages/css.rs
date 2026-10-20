@@ -137,12 +137,7 @@ impl Language for Css {
 				"supports_statement",
 			],
 			// Selectors
-			&[
-				"class_selector",
-				"id_selector",
-				"tag_name",
-				"universal_selector",
-			],
+			&["class_selector", "id_selector", "tag_name", "universal_selector"],
 		];
 
 		// Check if both types belong to the same semantic group
@@ -161,9 +156,7 @@ impl Language for Css {
 	fn get_node_type_description(&self, node_type: &str) -> &'static str {
 		match node_type {
 			"rule_set" => "CSS rules",
-			"at_rule" | "keyframes_statement" | "media_statement" | "import_statement" => {
-				"at-rule declarations"
-			}
+			"at_rule" | "keyframes_statement" | "media_statement" | "import_statement" => "at-rule declarations",
 			"selector" | "selectors" | "class_selector" | "id_selector" => "CSS selectors",
 			_ => "CSS declarations",
 		}
@@ -200,24 +193,21 @@ impl Language for Css {
 		if import_path.starts_with("./") || import_path.starts_with("../") {
 			// Relative CSS import
 			if let Some(relative_path) = resolve_relative_path(source_file, import_path) {
-				let relative_path_str =
-					PathNormalizer::normalize_separators(&relative_path.to_string_lossy());
+				let relative_path_str = PathNormalizer::normalize_separators(&relative_path.to_string_lossy());
 				// Check exact match first using cross-platform comparison
 				if let Some(found) = registry.find_normalized(&relative_path_str) {
 					return Some(found.to_string());
 				}
 				// Try without extension and add CSS extensions
 				let without_ext = relative_path.with_extension("");
-				return registry
-					.find_file_with_extensions(&without_ext, &self.get_file_extensions());
+				return registry.find_file_with_extensions(&without_ext, &self.get_file_extensions());
 			}
 		} else {
 			// Simple filename like "base.css" - look in same directory as source
 			let source_path = std::path::Path::new(source_file);
 			if let Some(source_dir) = source_path.parent() {
 				let target_path = source_dir.join(import_path);
-				let target_path_str =
-					PathNormalizer::normalize_separators(&target_path.to_string_lossy());
+				let target_path_str = PathNormalizer::normalize_separators(&target_path.to_string_lossy());
 				// Use cross-platform path comparison
 				if let Some(found) = registry.find_normalized(&target_path_str) {
 					return Some(found.to_string());
@@ -248,9 +238,7 @@ impl Css {
 					"class_selector" | "id_selector" | "tag_name" | "universal_selector" => {
 						if let Ok(selector_text) = child.utf8_text(contents.as_bytes()) {
 							let selector = selector_text.trim();
-							if !selector.is_empty()
-								&& !symbols.iter().any(|s| s.as_str() == selector)
-							{
+							if !selector.is_empty() && !symbols.iter().any(|s| s.as_str() == selector) {
 								symbols.push(selector.to_string());
 							}
 						}
@@ -262,8 +250,7 @@ impl Css {
 						// yielded no symbol at all.
 						for pseudo_child in child.children(&mut child.walk()) {
 							if matches!(pseudo_child.kind(), "class_name" | "identifier") {
-								if let Ok(pseudo_name) = pseudo_child.utf8_text(contents.as_bytes())
-								{
+								if let Ok(pseudo_name) = pseudo_child.utf8_text(contents.as_bytes()) {
 									let name = format!(":{}", pseudo_name.trim());
 									if !symbols.contains(&name) {
 										symbols.push(name);

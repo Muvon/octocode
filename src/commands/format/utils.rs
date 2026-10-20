@@ -274,8 +274,8 @@ pub(super) fn is_likely_text_file(file_path: &Path) -> bool {
 }
 
 pub(super) fn format_file(file_path: &Path, apply: bool, verbose: bool) -> Result<usize> {
-	let content = fs::read_to_string(file_path)
-		.with_context(|| format!("Failed to read file: {}", file_path.display()))?;
+	let content =
+		fs::read_to_string(file_path).with_context(|| format!("Failed to read file: {}", file_path.display()))?;
 
 	// Get EditorConfig properties for this specific file
 	let properties = properties_of(file_path).map_err(|e| {
@@ -357,9 +357,7 @@ pub(super) fn format_file(file_path: &Path, apply: bool, verbose: bool) -> Resul
 	// 3. Handle indentation
 	if let Ok(indent_style) = properties.get::<IndentStyle>() {
 		let indent_size = get_effective_indent_size(&properties);
-		if let Ok(indented_content) =
-			apply_indentation(&new_content, indent_style, indent_size, verbose)
-		{
+		if let Ok(indented_content) = apply_indentation(&new_content, indent_style, indent_size, verbose) {
 			if indented_content != new_content {
 				new_content = indented_content;
 				changes += 1;
@@ -368,9 +366,7 @@ pub(super) fn format_file(file_path: &Path, apply: bool, verbose: bool) -> Resul
 	}
 
 	// 4. Handle trailing whitespace
-	if let Ok(ec4rs::property::TrimTrailingWs::Value(true)) =
-		properties.get::<ec4rs::property::TrimTrailingWs>()
-	{
+	if let Ok(ec4rs::property::TrimTrailingWs::Value(true)) = properties.get::<ec4rs::property::TrimTrailingWs>() {
 		let trimmed_content = trim_trailing_whitespace(&new_content);
 		if trimmed_content != new_content {
 			new_content = trimmed_content;
@@ -412,8 +408,7 @@ pub(super) fn format_file(file_path: &Path, apply: bool, verbose: bool) -> Resul
 
 	// Apply changes if requested
 	if apply && changes > 0 {
-		fs::write(file_path, &new_content)
-			.with_context(|| format!("Failed to write file: {}", file_path.display()))?;
+		fs::write(file_path, &new_content).with_context(|| format!("Failed to write file: {}", file_path.display()))?;
 	}
 
 	Ok(changes)
@@ -458,8 +453,7 @@ pub(super) fn apply_indentation(
 		}
 
 		let (leading_whitespace, rest) = split_leading_whitespace(line);
-		let converted_indent =
-			convert_indentation_smart(&leading_whitespace, indent_style, indent_size);
+		let converted_indent = convert_indentation_smart(&leading_whitespace, indent_style, indent_size);
 
 		if converted_indent != leading_whitespace {
 			indent_changes += 1;
@@ -494,11 +488,7 @@ pub(super) fn split_leading_whitespace(line: &str) -> (String, &str) {
 	(line[..leading_len].to_string(), trimmed)
 }
 
-pub(super) fn convert_indentation_smart(
-	whitespace: &str,
-	target_style: IndentStyle,
-	target_size: usize,
-) -> String {
+pub(super) fn convert_indentation_smart(whitespace: &str, target_style: IndentStyle, target_size: usize) -> String {
 	match target_style {
 		IndentStyle::Tabs => {
 			// Converting TO tabs: determine logical levels and use one tab per level
@@ -554,8 +544,7 @@ pub(super) fn determine_indentation_level(whitespace: &str, reference_size: usiz
 				if space_count > 0 {
 					// Detect the likely indentation size by examining the space count
 					// Common indentations are 2, 4, or 8 spaces
-					let detected_indent_size =
-						detect_space_indent_size(space_count, reference_size);
+					let detected_indent_size = detect_space_indent_size(space_count, reference_size);
 					level += space_count / detected_indent_size;
 				}
 			}
@@ -583,10 +572,7 @@ pub(super) fn detect_space_indent_size(space_count: usize, _reference_size: usiz
 
 pub(super) fn trim_trailing_whitespace(content: &str) -> String {
 	let line_ending = detect_line_ending(content);
-	let lines: Vec<String> = content
-		.lines()
-		.map(|line| line.trim_end().to_string())
-		.collect();
+	let lines: Vec<String> = content.lines().map(|line| line.trim_end().to_string()).collect();
 
 	let result = lines.join(line_ending);
 
@@ -637,12 +623,7 @@ pub(super) fn detect_line_ending(content: &str) -> &str {
 	}
 }
 
-pub(super) fn check_line_length(
-	content: &str,
-	max_line_length: u32,
-	file_path: &Path,
-	verbose: bool,
-) {
+pub(super) fn check_line_length(content: &str, max_line_length: u32, file_path: &Path, verbose: bool) {
 	if !verbose {
 		return;
 	}

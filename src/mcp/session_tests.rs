@@ -87,17 +87,12 @@ fn layout() -> Layout {
 fn router(root: &Path) -> SessionRouter<RootHandler> {
 	let mut config = Config::default();
 	config.index.mcp_index = false;
-	SessionRouter::new(
-		RootHandler,
-		Sessions::new(config, root.to_path_buf(), false, false),
-	)
+	SessionRouter::new(RootHandler, Sessions::new(config, root.to_path_buf(), false, false))
 }
 
 fn context(peer: &Peer<RoleServer>, session: Option<Value>) -> RequestContext<RoleServer> {
 	let mut context = RequestContext::new(RequestId::Number(1), peer.clone());
-	context
-		.meta
-		.set_protocol_version(ProtocolVersion::V_2026_07_28);
+	context.meta.set_protocol_version(ProtocolVersion::V_2026_07_28);
 	if let Some(session) = session {
 		let capabilities: ClientCapabilities =
 			serde_json::from_value(json!({"experimental": {"session": session}})).unwrap();
@@ -111,11 +106,7 @@ fn in_dir(peer: &Peer<RoleServer>, workdir: &Path) -> RequestContext<RoleServer>
 }
 
 fn names(result: &ListToolsResult) -> Vec<String> {
-	result
-		.tools
-		.iter()
-		.map(|tool| tool.name.to_string())
-		.collect()
+	result.tools.iter().map(|tool| tool.name.to_string()).collect()
 }
 
 #[test]
@@ -151,10 +142,7 @@ fn session_directories_resolve_like_auto_mode() {
 	// A multi-repository root serves only its repositories by `project`: a session
 	// inside one of them gets that repository directly.
 	let one = layout.parent.join("one");
-	assert!(matches!(
-		resolve(&layout.parent, false, &layout.parent),
-		Target::Root
-	));
+	assert!(matches!(resolve(&layout.parent, false, &layout.parent), Target::Root));
 	assert!(matches!(resolve(&layout.parent, false, &one), Target::Repo(path) if path == one));
 }
 
@@ -193,27 +181,16 @@ async fn each_session_lists_the_tools_of_its_own_directory() {
 	assert_eq!(names(&shared), ["root_tool"]);
 	assert_eq!(shared.cache_scope, Some(CacheScope::Public));
 
-	let at_root = router
-		.list_tools(None, in_dir(peer, &layout.root))
-		.await
-		.unwrap();
+	let at_root = router.list_tools(None, in_dir(peer, &layout.root)).await.unwrap();
 	assert_eq!(names(&at_root), ["root_tool"]);
 	assert_eq!(at_root.cache_scope, Some(CacheScope::Private));
 
-	let in_repo = router
-		.list_tools(None, in_dir(peer, &layout.repo))
-		.await
-		.unwrap();
+	let in_repo = router.list_tools(None, in_dir(peer, &layout.repo)).await.unwrap();
 	assert!(names(&in_repo).contains(&"semantic_search".to_string()));
-	assert!(in_repo.tools[0].input_schema["properties"]
-		.get("project")
-		.is_none());
+	assert!(in_repo.tools[0].input_schema["properties"].get("project").is_none());
 	assert_eq!(in_repo.cache_scope, Some(CacheScope::Private));
 
-	let in_parent = router
-		.list_tools(None, in_dir(peer, &layout.parent))
-		.await
-		.unwrap();
+	let in_parent = router.list_tools(None, in_dir(peer, &layout.parent)).await.unwrap();
 	assert_eq!(
 		in_parent.tools[0].input_schema["properties"]["project"]["enum"],
 		json!(["one", "two"])
@@ -236,20 +213,14 @@ async fn calls_reach_the_handler_for_the_session_directory() {
 	};
 
 	let at_root = router
-		.call_tool(
-			CallToolRequestParams::new("root_tool"),
-			in_dir(peer, &layout.root),
-		)
+		.call_tool(CallToolRequestParams::new("root_tool"), in_dir(peer, &layout.root))
 		.await
 		.unwrap();
 	assert!(text(at_root).contains("root"));
 
 	let signatures = CallToolRequestParams::new("view_signatures")
 		.with_arguments(json!({"files": ["lib.rs"]}).as_object().unwrap().clone());
-	let in_repo = router
-		.call_tool(signatures, in_dir(peer, &layout.repo))
-		.await
-		.unwrap();
+	let in_repo = router.call_tool(signatures, in_dir(peer, &layout.repo)).await.unwrap();
 	let in_repo = text(in_repo);
 	assert!(in_repo.contains("only_in_repo"), "{in_repo}");
 
@@ -263,9 +234,7 @@ async fn calls_reach_the_handler_for_the_session_directory() {
 		panic!("a call without a project must not run in a directory of projects");
 	};
 	assert!(
-		error
-			.message
-			.contains("Missing required 'project' argument"),
+		error.message.contains("Missing required 'project' argument"),
 		"{}",
 		error.message
 	);

@@ -49,10 +49,7 @@ mod tests {
 
 	#[test]
 	fn chunking_delegates_to_the_shared_text_processor() {
-		let content = (1..=30)
-			.map(|i| format!("line {i}"))
-			.collect::<Vec<_>>()
-			.join("\n");
+		let content = (1..=30).map(|i| format!("line {i}")).collect::<Vec<_>>().join("\n");
 		let chunks = chunk_text(&content, 40, 0);
 		assert!(chunks.len() > 1);
 		assert_eq!(chunks[0].start_line, 1);
@@ -71,16 +68,9 @@ mod tests {
 			.join("\n");
 
 		let mut batch = Vec::new();
-		process_text_file(
-			&store,
-			&content,
-			"notes.txt",
-			&mut batch,
-			&config,
-			state(false),
-		)
-		.await
-		.unwrap();
+		process_text_file(&store, &content, "notes.txt", &mut batch, &config, state(false))
+			.await
+			.unwrap();
 
 		assert!(batch.len() > 1);
 		assert!(batch.iter().all(|b| b.path == "notes.txt"));
@@ -93,45 +83,24 @@ mod tests {
 		let config = Config::default();
 
 		let mut first = Vec::new();
-		process_text_file(
-			&store,
-			"a short note",
-			"notes.txt",
-			&mut first,
-			&config,
-			state(false),
-		)
-		.await
-		.unwrap();
+		process_text_file(&store, "a short note", "notes.txt", &mut first, &config, state(false))
+			.await
+			.unwrap();
 		assert_eq!(first.len(), 1);
 
 		let embeddings = vec![embedding(TEXT_DIM, 0)];
 		store.store_text_blocks(&first, &embeddings).await.unwrap();
 
 		let mut second = Vec::new();
-		process_text_file(
-			&store,
-			"a short note",
-			"notes.txt",
-			&mut second,
-			&config,
-			state(false),
-		)
-		.await
-		.unwrap();
+		process_text_file(&store, "a short note", "notes.txt", &mut second, &config, state(false))
+			.await
+			.unwrap();
 		assert!(second.is_empty());
 
 		let mut forced = Vec::new();
-		process_text_file(
-			&store,
-			"a short note",
-			"notes.txt",
-			&mut forced,
-			&config,
-			state(true),
-		)
-		.await
-		.unwrap();
+		process_text_file(&store, "a short note", "notes.txt", &mut forced, &config, state(true))
+			.await
+			.unwrap();
 		assert_eq!(forced.len(), 1);
 	}
 
@@ -142,16 +111,9 @@ mod tests {
 		let contents = "# Title\n\nIntro paragraph.\n\n## Install\n\nRun the installer.\n";
 
 		let mut batch = Vec::new();
-		process_markdown_file(
-			&store,
-			contents,
-			"README.md",
-			&mut batch,
-			&config,
-			state(false),
-		)
-		.await
-		.unwrap();
+		process_markdown_file(&store, contents, "README.md", &mut batch, &config, state(false))
+			.await
+			.unwrap();
 		assert!(!batch.is_empty());
 		assert!(batch.iter().all(|b| b.path == "README.md"));
 	}
@@ -163,46 +125,22 @@ mod tests {
 		let contents = "# Title\n\nIntro paragraph that is long enough to survive chunking.\n";
 
 		let mut first = Vec::new();
-		process_markdown_file(
-			&store,
-			contents,
-			"README.md",
-			&mut first,
-			&config,
-			state(false),
-		)
-		.await
-		.unwrap();
-		let embeddings: Vec<_> = (0..first.len()).map(|i| embedding(TEXT_DIM, i)).collect();
-		store
-			.store_document_blocks(&first, &embeddings)
+		process_markdown_file(&store, contents, "README.md", &mut first, &config, state(false))
 			.await
 			.unwrap();
+		let embeddings: Vec<_> = (0..first.len()).map(|i| embedding(TEXT_DIM, i)).collect();
+		store.store_document_blocks(&first, &embeddings).await.unwrap();
 
 		let mut second = Vec::new();
-		process_markdown_file(
-			&store,
-			contents,
-			"README.md",
-			&mut second,
-			&config,
-			state(false),
-		)
-		.await
-		.unwrap();
+		process_markdown_file(&store, contents, "README.md", &mut second, &config, state(false))
+			.await
+			.unwrap();
 		assert!(second.is_empty());
 
 		let mut forced = Vec::new();
-		process_markdown_file(
-			&store,
-			contents,
-			"README.md",
-			&mut forced,
-			&config,
-			state(true),
-		)
-		.await
-		.unwrap();
+		process_markdown_file(&store, contents, "README.md", &mut forced, &config, state(true))
+			.await
+			.unwrap();
 		assert_eq!(forced.len(), first.len());
 	}
 
@@ -224,10 +162,7 @@ mod tests {
 		// `chunk_size` is a character budget while `overlap` counts lines: six
 		// "line N" lines do not fit in 40 characters, so chunks are five lines
 		// long and the next one restarts two lines earlier.
-		let content = (1..=20)
-			.map(|i| format!("line {i}"))
-			.collect::<Vec<_>>()
-			.join("\n");
+		let content = (1..=20).map(|i| format!("line {i}")).collect::<Vec<_>>().join("\n");
 
 		let chunks = chunk_text(&content, 40, 2);
 		assert!(chunks.len() > 2, "got {} chunks", chunks.len());

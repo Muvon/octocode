@@ -75,22 +75,13 @@ mod tests {
 			RelationshipDiscovery::determine_file_kind("pkg/api.test.ts"),
 			"test_file"
 		);
-		assert_eq!(
-			RelationshipDiscovery::determine_file_kind("README.md"),
-			"document_file"
-		);
+		assert_eq!(RelationshipDiscovery::determine_file_kind("README.md"), "document_file");
 		assert_eq!(
 			RelationshipDiscovery::determine_file_kind("book.markdown"),
 			"document_file"
 		);
-		assert_eq!(
-			RelationshipDiscovery::determine_file_kind("notes.txt"),
-			"documentation"
-		);
-		assert_eq!(
-			RelationshipDiscovery::determine_file_kind("index.rst"),
-			"documentation"
-		);
+		assert_eq!(RelationshipDiscovery::determine_file_kind("notes.txt"), "documentation");
+		assert_eq!(RelationshipDiscovery::determine_file_kind("index.rst"), "documentation");
 		assert_eq!(
 			RelationshipDiscovery::determine_file_kind("app/config/db.yml"),
 			"config_file"
@@ -103,10 +94,7 @@ mod tests {
 			RelationshipDiscovery::determine_file_kind("root/examples/demo.py"),
 			"example_file"
 		);
-		assert_eq!(
-			RelationshipDiscovery::determine_file_kind("Makefile"),
-			"file"
-		);
+		assert_eq!(RelationshipDiscovery::determine_file_kind("Makefile"), "file");
 	}
 
 	#[test]
@@ -152,9 +140,7 @@ mod tests {
 
 	#[test]
 	fn functions_are_extracted_from_function_prefixed_symbols_only() {
-		let functions =
-			RelationshipDiscovery::extract_functions_from_block(&block(vec!["function_parse"]))
-				.unwrap();
+		let functions = RelationshipDiscovery::extract_functions_from_block(&block(vec!["function_parse"])).unwrap();
 		assert_eq!(functions.len(), 1);
 		assert_eq!(functions[0].name, "parse");
 		assert_eq!(functions[0].signature, "parse(...)");
@@ -164,9 +150,7 @@ mod tests {
 
 	#[test]
 	fn non_function_symbols_yield_nothing() {
-		let functions =
-			RelationshipDiscovery::extract_functions_from_block(&block(vec!["struct_Config"]))
-				.unwrap();
+		let functions = RelationshipDiscovery::extract_functions_from_block(&block(vec!["struct_Config"])).unwrap();
 		assert!(functions.is_empty());
 	}
 
@@ -178,8 +162,7 @@ mod tests {
 			"IMPORT:std::fs".to_string(),
 			"beta".to_string(),
 		];
-		let (imports, exports) =
-			RelationshipDiscovery::extract_imports_exports_efficient(&symbols, "rust", "src/a.rs");
+		let (imports, exports) = RelationshipDiscovery::extract_imports_exports_efficient(&symbols, "rust", "src/a.rs");
 		assert!(imports.is_empty());
 		assert_eq!(exports, vec!["alpha".to_string(), "beta".to_string()]);
 	}
@@ -255,10 +238,9 @@ mod tests {
 		let child = node("src/inner/leaf.rs", "rust");
 		let all = vec![parent.clone(), child];
 
-		let relationships =
-			RelationshipDiscovery::discover_relationships_efficiently(&[parent], &all)
-				.await
-				.unwrap();
+		let relationships = RelationshipDiscovery::discover_relationships_efficiently(&[parent], &all)
+			.await
+			.unwrap();
 		assert!(relationships
 			.iter()
 			.any(|r| r.relation_type == RelationType::ParentModule));
@@ -306,10 +288,9 @@ mod tests {
 		let module = node("pkg/api.py", "python");
 		let all = vec![init.clone(), module];
 
-		let relationships =
-			RelationshipDiscovery::discover_relationships_efficiently(&[init], &all)
-				.await
-				.unwrap();
+		let relationships = RelationshipDiscovery::discover_relationships_efficiently(&[init], &all)
+			.await
+			.unwrap();
 		assert!(relationships
 			.iter()
 			.any(|r| r.target == "pkg/api.py" && r.relation_type == RelationType::ParentModule));
@@ -321,10 +302,9 @@ mod tests {
 		let other = node("web/util.js", "javascript");
 		let all = vec![index.clone(), other];
 
-		let relationships =
-			RelationshipDiscovery::discover_relationships_efficiently(&[index], &all)
-				.await
-				.unwrap();
+		let relationships = RelationshipDiscovery::discover_relationships_efficiently(&[index], &all)
+			.await
+			.unwrap();
 		assert!(relationships
 			.iter()
 			.any(|r| r.target == "web/util.js" && r.relation_type == RelationType::ParentModule));
@@ -336,10 +316,9 @@ mod tests {
 		let child = node("src/api.rs", "rust");
 		let all = vec![root.clone(), child];
 
-		let relationships =
-			RelationshipDiscovery::discover_relationships_efficiently(&[root], &all)
-				.await
-				.unwrap();
+		let relationships = RelationshipDiscovery::discover_relationships_efficiently(&[root], &all)
+			.await
+			.unwrap();
 		let mut keys: Vec<_> = relationships
 			.iter()
 			.map(|r| (&r.source, &r.target, &r.relation_type))
@@ -347,11 +326,7 @@ mod tests {
 		let before = keys.len();
 		keys.sort();
 		keys.dedup();
-		assert_eq!(
-			before,
-			keys.len(),
-			"duplicate edges survived: {relationships:?}"
-		);
+		assert_eq!(before, keys.len(), "duplicate edges survived: {relationships:?}");
 	}
 
 	#[tokio::test]

@@ -147,8 +147,7 @@ mod tests {
 
 		// Should not panic and should return a consistent hash
 		let id1 = get_project_identifier(&temp_dir).expect("Should get project identifier");
-		let id2 =
-			get_project_identifier(&temp_dir).expect("Should get consistent project identifier");
+		let id2 = get_project_identifier(&temp_dir).expect("Should get consistent project identifier");
 
 		assert_eq!(id1, id2);
 		assert_eq!(id1.len(), 16); // Should be 16 characters
@@ -169,8 +168,7 @@ mod tests {
 
 	#[test]
 	fn test_fastembed_cache_dir() {
-		let fastembed_cache =
-			get_fastembed_cache_dir().expect("Should get fastembed cache directory");
+		let fastembed_cache = get_fastembed_cache_dir().expect("Should get fastembed cache directory");
 
 		// Should contain "octocode" and "fastembed" in the path
 		assert!(fastembed_cache.to_string_lossy().contains("octocode"));

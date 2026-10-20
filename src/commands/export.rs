@@ -92,8 +92,7 @@ pub async fn execute(args: &ExportArgs) -> Result<()> {
 /// Index lock files, log files and other transient state are excluded so the
 /// archive only carries the data the importer needs.
 fn write_archive(src_root: &Path, out_path: &Path) -> Result<u64> {
-	let file = std::fs::File::create(out_path)
-		.with_context(|| format!("Failed to create {}", out_path.display()))?;
+	let file = std::fs::File::create(out_path).with_context(|| format!("Failed to create {}", out_path.display()))?;
 	// Level 3 is the zstd default — fast compression with good ratio for
 	// binary LanceDB pages. Higher levels barely help on already-dense data
 	// and make export noticeably slower.

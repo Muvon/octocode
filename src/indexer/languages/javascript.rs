@@ -90,9 +90,7 @@ impl Language for JavaScript {
 		match node.kind() {
 			"function_declaration" | "method_definition" => {
 				// Extract name of the function or method
-				if let Some(name) =
-					super::extract_symbol_by_kinds(node, contents, &["identifier", "name"])
-				{
+				if let Some(name) = super::extract_symbol_by_kinds(node, contents, &["identifier", "name"]) {
 					symbols.push(name);
 				}
 
@@ -122,9 +120,7 @@ impl Language for JavaScript {
 				// Extract parent variable name for arrow functions
 				if let Some(parent) = node.parent() {
 					if parent.kind() == "variable_declarator" {
-						if let Some(name) =
-							super::extract_symbol_by_kind(parent, contents, "identifier")
-						{
+						if let Some(name) = super::extract_symbol_by_kind(parent, contents, "identifier") {
 							symbols.push(name);
 						}
 					}
@@ -164,11 +160,7 @@ impl Language for JavaScript {
 		// JavaScript-specific semantic groups
 		let semantic_groups = [
 			// Functions and methods
-			&[
-				"function_declaration",
-				"method_definition",
-				"arrow_function",
-			] as &[&str],
+			&["function_declaration", "method_definition", "arrow_function"] as &[&str],
 			// Classes and constructors
 			&["class_declaration", "method_definition"],
 			// Import/export statements
@@ -182,9 +174,7 @@ impl Language for JavaScript {
 
 	fn get_node_type_description(&self, node_type: &str) -> &'static str {
 		match node_type {
-			"function_declaration" | "method_definition" | "arrow_function" => {
-				"function declarations"
-			}
+			"function_declaration" | "method_definition" | "arrow_function" => "function declarations",
 			"class_declaration" => "class declarations",
 			"import_statement" | "export_statement" => "import/export statements",
 			"variable_declaration" | "lexical_declaration" => "variable declarations",
@@ -247,11 +237,7 @@ impl Language for JavaScript {
 		}
 	}
 
-	fn extract_type_relations(
-		&self,
-		node: Node,
-		contents: &str,
-	) -> Vec<(super::TypeRelationKind, String)> {
+	fn extract_type_relations(&self, node: Node, contents: &str) -> Vec<(super::TypeRelationKind, String)> {
 		// Vanilla JS only has class inheritance: `class Foo extends Bar { }`.
 		// Tree-sitter-javascript's `class_heritage` is a single-target wrapper
 		// around an `extends` keyword + identifier.
@@ -262,10 +248,7 @@ impl Language for JavaScript {
 				if child.kind() == "class_heritage" {
 					let mut hcursor = child.walk();
 					for h in child.children(&mut hcursor) {
-						if matches!(
-							h.kind(),
-							"identifier" | "member_expression" | "call_expression"
-						) {
+						if matches!(h.kind(), "identifier" | "member_expression" | "call_expression") {
 							if let Ok(text) = h.utf8_text(contents.as_bytes()) {
 								if let Some(name) = super::simple_type_name(text) {
 									out.push((super::TypeRelationKind::Extends, name));
@@ -344,13 +327,7 @@ impl JavaScript {
 		}
 
 		// Try index files in directory
-		let index_candidates = [
-			"index.js",
-			"index.jsx",
-			"index.mjs",
-			"index.ts",
-			"index.tsx",
-		];
+		let index_candidates = ["index.js", "index.jsx", "index.mjs", "index.ts", "index.tsx"];
 		for index_file in &index_candidates {
 			// `join` uses the platform separator, so on Windows the candidate is
 			// `src\components\index.js` while the registry holds the `/` form every
@@ -406,12 +383,7 @@ impl JavaScript {
 
 	/// Extract JavaScript variable declarations within a block
 	#[allow(clippy::only_used_in_recursion)]
-	pub fn extract_js_variable_declarations(
-		&self,
-		node: Node,
-		contents: &str,
-		symbols: &mut Vec<String>,
-	) {
+	pub fn extract_js_variable_declarations(&self, node: Node, contents: &str, symbols: &mut Vec<String>) {
 		let mut cursor = node.walk();
 		// Look through all children
 		if cursor.goto_first_child() {
@@ -427,8 +399,7 @@ impl JavaScript {
 								if decl_child.kind() == "identifier" {
 									if let Ok(name) = decl_child.utf8_text(contents.as_bytes()) {
 										let t = name.trim();
-										if !t.is_empty() && !symbols.iter().any(|s| s.as_str() == t)
-										{
+										if !t.is_empty() && !symbols.iter().any(|s| s.as_str() == t) {
 											symbols.push(t.to_string());
 										}
 									}

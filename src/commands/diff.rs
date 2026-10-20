@@ -121,10 +121,7 @@ pub async fn execute(store: &Store, args: &DiffArgs, config: &Config) -> Result<
 }
 
 /// Get diff content and changed file list based on target
-fn get_diff(
-	repo_path: &Path,
-	args: &DiffArgs,
-) -> Result<(String, Vec<String>, String), anyhow::Error> {
+fn get_diff(repo_path: &Path, args: &DiffArgs) -> Result<(String, Vec<String>, String), anyhow::Error> {
 	match &args.target {
 		None => {
 			// Working directory changes
@@ -172,12 +169,7 @@ fn get_diff(
 				// "diff this single commit" and silently drop everything before its tip.
 				let is_branch = ["refs/heads/", "refs/remotes/"].iter().any(|prefix| {
 					Command::new("git")
-						.args([
-							"show-ref",
-							"--verify",
-							"--quiet",
-							&format!("{}{}", prefix, target),
-						])
+						.args(["show-ref", "--verify", "--quiet", &format!("{}{}", prefix, target)])
 						.current_dir(repo_path)
 						.status()
 						.map(|s| s.success())
@@ -186,21 +178,16 @@ fn get_diff(
 
 				if !is_branch {
 					// Try as commit hash
-					let diff_result =
-						run_git(repo_path, &["diff", &format!("{}^..{}", target, target)]);
+					let diff_result = run_git(repo_path, &["diff", &format!("{}^..{}", target, target)]);
 					if let Ok(diff) = diff_result {
-						let files = run_git(
-							repo_path,
-							&["diff", "--name-only", &format!("{}^..{}", target, target)],
-						)?
-						.lines()
-						.filter(|l| !l.trim().is_empty())
-						.map(|l| l.to_string())
-						.collect();
+						let files = run_git(repo_path, &["diff", "--name-only", &format!("{}^..{}", target, target)])?
+							.lines()
+							.filter(|l| !l.trim().is_empty())
+							.map(|l| l.to_string())
+							.collect();
 
 						// Get commit message
-						let msg = run_git(repo_path, &["log", "-1", "--format=%s", target])
-							.unwrap_or_default();
+						let msg = run_git(repo_path, &["log", "-1", "--format=%s", target]).unwrap_or_default();
 						let label = format!(
 							"Commit: {} {}",
 							octocode::utils::truncate_at_char_boundary(target, 7),
@@ -214,12 +201,7 @@ fn get_diff(
 					// falling through to the branch path below, which would be empty
 					// for any commit that's an ancestor of the default branch.
 					let is_commit = Command::new("git")
-						.args([
-							"rev-parse",
-							"--verify",
-							"--quiet",
-							&format!("{}^{{commit}}", target),
-						])
+						.args(["rev-parse", "--verify", "--quiet", &format!("{}^{{commit}}", target)])
 						.current_dir(repo_path)
 						.status()
 						.map(|s| s.success())
@@ -233,8 +215,7 @@ fn get_diff(
 							.filter(|l| !l.trim().is_empty())
 							.map(|l| l.to_string())
 							.collect();
-						let msg = run_git(repo_path, &["log", "-1", "--format=%s", target])
-							.unwrap_or_default();
+						let msg = run_git(repo_path, &["log", "-1", "--format=%s", target]).unwrap_or_default();
 						let label = format!(
 							"Commit: {} {}",
 							octocode::utils::truncate_at_char_boundary(target, 7),
@@ -245,8 +226,7 @@ fn get_diff(
 				}
 
 				// Branch name (or anything else) — diff against default branch
-				let default_branch =
-					octocode::indexer::git_utils::GitUtils::get_default_branch(repo_path)?;
+				let default_branch = octocode::indexer::git_utils::GitUtils::get_default_branch(repo_path)?;
 				let range = format!("{}...{}", default_branch, target);
 				let diff = run_git(repo_path, &["diff", &range])?;
 				let files = run_git(repo_path, &["diff", "--name-only", &range])?
@@ -255,21 +235,14 @@ fn get_diff(
 					.map(|l| l.to_string())
 					.collect();
 
-				Ok((
-					diff,
-					files,
-					format!("Branch: {} vs {}", target, default_branch),
-				))
+				Ok((diff, files, format!("Branch: {} vs {}", target, default_branch)))
 			}
 		}
 	}
 }
 
 fn run_git(repo_path: &Path, args: &[&str]) -> Result<String, anyhow::Error> {
-	let output = Command::new("git")
-		.args(args)
-		.current_dir(repo_path)
-		.output()?;
+	let output = Command::new("git").args(args).current_dir(repo_path).output()?;
 
 	if !output.status.success() {
 		let stderr = String::from_utf8_lossy(&output.stderr);
@@ -304,12 +277,7 @@ async fn gather_diff_context(store: &Store, changed_files: &[String], config: &C
 
 	// Try semantic search for broader context
 	if !changed_files.is_empty() {
-		let query = changed_files
-			.iter()
-			.take(3)
-			.cloned()
-			.collect::<Vec<_>>()
-			.join(" ");
+		let query = changed_files.iter().take(3).cloned().collect::<Vec<_>>().join(" ");
 		if let Ok(related) = indexer::search::search_codebase_with_details_text(
 			&query,
 			&indexer::search::DetailSearchOptions {
@@ -421,10 +389,7 @@ async fn analyze_single_diff(
 		user_prompt.push('\n');
 	}
 
-	let messages = vec![
-		Message::system(DIFF_SYSTEM_PROMPT),
-		Message::user(&user_prompt),
-	];
+	let messages = vec![Message::system(DIFF_SYSTEM_PROMPT), Message::user(&user_prompt)];
 
 	let schema = serde_json::json!({
 		"type": "object",
@@ -457,11 +422,7 @@ fn print_cli(analysis: &DiffAnalysis, label: &str) {
 	};
 
 	println!("Diff: {}", label);
-	println!(
-		"Risk: {} | Changes: {}\n",
-		risk_icon,
-		analysis.changes.len()
-	);
+	println!("Risk: {} | Changes: {}\n", risk_icon, analysis.changes.len());
 	println!("{}\n", analysis.summary);
 
 	// Triage table
@@ -473,24 +434,14 @@ fn print_cli(analysis: &DiffAnalysis, label: &str) {
 			"medium" => "MED",
 			_ => "LOW",
 		};
-		println!(
-			"{:<4} {:<50} {}",
-			i + 1,
-			truncate_str(&card.title, 48),
-			risk
-		);
+		println!("{:<4} {:<50} {}", i + 1, truncate_str(&card.title, 48), risk);
 	}
 
 	println!();
 
 	// Cards
 	for (i, card) in analysis.changes.iter().enumerate() {
-		println!(
-			"--- Card {}/{}: {} ---",
-			i + 1,
-			analysis.changes.len(),
-			card.title
-		);
+		println!("--- Card {}/{}: {} ---", i + 1, analysis.changes.len(), card.title);
 
 		println!("  What changed:");
 		for bullet in &card.what_changed {
@@ -515,11 +466,7 @@ fn print_markdown(analysis: &DiffAnalysis, label: &str) {
 	};
 
 	println!("## Diff: {}", label);
-	println!(
-		"**Risk:** {} | **Changes:** {}\n",
-		risk_icon,
-		analysis.changes.len()
-	);
+	println!("**Risk:** {} | **Changes:** {}\n", risk_icon, analysis.changes.len());
 	println!("{}\n", analysis.summary);
 
 	println!("| # | Change | Risk |");
@@ -530,12 +477,7 @@ fn print_markdown(analysis: &DiffAnalysis, label: &str) {
 	println!();
 
 	for (i, card) in analysis.changes.iter().enumerate() {
-		println!(
-			"### Card {}/{}: {}\n",
-			i + 1,
-			analysis.changes.len(),
-			card.title
-		);
+		println!("### Card {}/{}: {}\n", i + 1, analysis.changes.len(), card.title);
 
 		println!("**What changed:**");
 		for bullet in &card.what_changed {

@@ -196,11 +196,7 @@ impl<'a> TableOperations<'a> {
 	}
 
 	/// Get file metadata (hashes) for a specific file path from a table
-	pub async fn get_file_blocks_metadata(
-		&self,
-		file_path: &str,
-		table_name: &str,
-	) -> Result<Vec<String>> {
+	pub async fn get_file_blocks_metadata(&self, file_path: &str, table_name: &str) -> Result<Vec<String>> {
 		let mut hashes = Vec::new();
 
 		if !self.table_exists(table_name).await? {
@@ -221,9 +217,7 @@ impl<'a> TableOperations<'a> {
 		while let Some(batch) = results.try_next().await? {
 			if batch.num_rows() > 0 {
 				if let Some(column) = batch.column_by_name("hash") {
-					if let Some(hash_array) =
-						column.as_any().downcast_ref::<arrow::array::StringArray>()
-					{
+					if let Some(hash_array) = column.as_any().downcast_ref::<arrow::array::StringArray>() {
 						for i in 0..hash_array.len() {
 							hashes.push(hash_array.value(i).to_string());
 						}
@@ -236,10 +230,7 @@ impl<'a> TableOperations<'a> {
 	}
 
 	/// Get all indexed file paths from multiple tables
-	pub async fn get_all_indexed_file_paths(
-		&self,
-		table_names: &[&str],
-	) -> Result<std::collections::HashSet<String>> {
+	pub async fn get_all_indexed_file_paths(&self, table_names: &[&str]) -> Result<std::collections::HashSet<String>> {
 		let mut all_paths = std::collections::HashSet::new();
 
 		let existing_tables = self.db.table_names().execute().await?;
@@ -259,9 +250,7 @@ impl<'a> TableOperations<'a> {
 				while let Some(batch) = results.try_next().await? {
 					if batch.num_rows() > 0 {
 						if let Some(column) = batch.column_by_name("path") {
-							if let Some(path_array) =
-								column.as_any().downcast_ref::<arrow::array::StringArray>()
-							{
+							if let Some(path_array) = column.as_any().downcast_ref::<arrow::array::StringArray>() {
 								for i in 0..path_array.len() {
 									all_paths.insert(path_array.value(i).to_string());
 								}
@@ -276,16 +265,8 @@ impl<'a> TableOperations<'a> {
 	}
 
 	/// Create a table with the given schema
-	pub async fn create_table_with_schema(
-		&self,
-		table_name: &str,
-		schema: Arc<Schema>,
-	) -> Result<()> {
-		let _table = self
-			.db
-			.create_empty_table(table_name, schema)
-			.execute()
-			.await?;
+	pub async fn create_table_with_schema(&self, table_name: &str, schema: Arc<Schema>) -> Result<()> {
+		let _table = self.db.create_empty_table(table_name, schema).execute().await?;
 		Ok(())
 	}
 
@@ -304,10 +285,7 @@ impl<'a> TableOperations<'a> {
 			table.add(batch_reader).execute().await?;
 		} else {
 			// Table doesn't exist, create it with the batch
-			self.db
-				.create_table(table_name, batch_reader)
-				.execute()
-				.await?;
+			self.db.create_table(table_name, batch_reader).execute().await?;
 		}
 
 		Ok(())
@@ -338,16 +316,15 @@ impl<'a> TableOperations<'a> {
 		if !index_params.should_create_index {
 			tracing::debug!(
 				"Skipping index creation for table '{}' with {} rows - brute force search will be faster",
-				table_name, row_count
+				table_name,
+				row_count
 			);
 			return Ok(());
 		}
 
 		// Check if index already exists
 		let existing_indices = table.list_indices().await?;
-		let has_embedding_index = existing_indices
-			.iter()
-			.any(|idx| idx.columns == vec![column_name]);
+		let has_embedding_index = existing_indices.iter().any(|idx| idx.columns == vec![column_name]);
 
 		if has_embedding_index {
 			// For dynamic datasets, we should periodically check if index parameters are still optimal
@@ -436,18 +413,11 @@ impl<'a> TableOperations<'a> {
 
 		let row_count = table.count_rows(None).await?;
 		if row_count == 0 {
-			tracing::debug!(
-				"Table '{}' is empty, skipping FTS index creation",
-				table_name
-			);
+			tracing::debug!("Table '{}' is empty, skipping FTS index creation", table_name);
 			return Ok(());
 		}
 
-		tracing::info!(
-			"Creating FTS index for table '{}' ({} rows)",
-			table_name,
-			row_count
-		);
+		tracing::info!("Creating FTS index for table '{}' ({} rows)", table_name, row_count);
 		let start = std::time::Instant::now();
 
 		// Code-tuned FTS. The default tokenizer is built for prose and is hostile
@@ -469,9 +439,7 @@ impl<'a> TableOperations<'a> {
 			.create_index(&["content"], Index::FTS(fts))
 			.execute()
 			.await
-			.map_err(|e| {
-				anyhow::anyhow!("Failed to create FTS index on '{}': {}", table_name, e)
-			})?;
+			.map_err(|e| anyhow::anyhow!("Failed to create FTS index on '{}': {}", table_name, e))?;
 
 		tracing::info!(
 			"FTS index created for '{}' in {:.2}s",

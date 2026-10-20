@@ -51,23 +51,11 @@ mod tests {
 		let (_db, store) = test_store().await;
 		let dir = TempDir::new().unwrap();
 
-		index_commits(
-			&Config::default(),
-			&store,
-			dir.path(),
-			create_shared_state(),
-			true,
-		)
-		.await
-		.expect("a missing default branch is not fatal");
+		index_commits(&Config::default(), &store, dir.path(), create_shared_state(), true)
+			.await
+			.expect("a missing default branch is not fatal");
 
-		assert_eq!(
-			store
-				.get_table_row_count(tables::COMMIT_BLOCKS)
-				.await
-				.unwrap(),
-			0
-		);
+		assert_eq!(store.get_table_row_count(tables::COMMIT_BLOCKS).await.unwrap(), 0);
 		assert_eq!(store.get_commits_last_commit_hash().await.unwrap(), None);
 	}
 
@@ -84,17 +72,11 @@ mod tests {
 			.unwrap();
 
 		assert_eq!(
-			store
-				.get_table_row_count(tables::COMMIT_BLOCKS)
-				.await
-				.unwrap(),
+			store.get_table_row_count(tables::COMMIT_BLOCKS).await.unwrap(),
 			0,
 			"nothing new to index means no embedding work"
 		);
-		assert_eq!(
-			store.get_commits_last_commit_hash().await.unwrap(),
-			Some(head)
-		);
+		assert_eq!(store.get_commits_last_commit_hash().await.unwrap(), Some(head));
 		// The early return happens before any progress message is set.
 		assert!(state.read().status_message.is_empty());
 	}

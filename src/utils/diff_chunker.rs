@@ -395,8 +395,7 @@ pub fn combine_review_results(responses: Vec<serde_json::Value>) -> Result<serde
 	};
 
 	// Remove duplicate recommendations efficiently
-	let unique_recommendations: std::collections::HashSet<String> =
-		all_recommendations.into_iter().collect();
+	let unique_recommendations: std::collections::HashSet<String> = all_recommendations.into_iter().collect();
 	let final_recommendations: Vec<String> = unique_recommendations.into_iter().collect();
 
 	// If no valid data was extracted, return fallback
@@ -472,14 +471,10 @@ mod tests {
 		// Filename with a space: the "diff --git" line is ambiguous
 		// (git doesn't quote spaces there), but "+++ b/" carries the full path.
 		let spaced_diff = "diff --git a/my file.rs b/my file.rs\nindex 123..456\n--- a/my file.rs\n+++ b/my file.rs\n";
-		assert_eq!(
-			extract_filename(spaced_diff),
-			Some("my file.rs".to_string())
-		);
+		assert_eq!(extract_filename(spaced_diff), Some("my file.rs".to_string()));
 
 		// Deleted file: "+++ /dev/null" must not be treated as the filename.
-		let deleted_diff =
-			"diff --git a/old.rs b/old.rs\nindex 123..000\n--- a/old.rs\n+++ /dev/null\n";
+		let deleted_diff = "diff --git a/old.rs b/old.rs\nindex 123..000\n--- a/old.rs\n+++ /dev/null\n";
 		assert_eq!(extract_filename(deleted_diff), Some("old.rs".to_string()));
 	}
 
@@ -491,10 +486,7 @@ mod tests {
 
 		// Multiple files
 		let multi_files = "diff --git a/file1.rs b/file1.rs\n+line1\ndiff --git a/file2.rs b/file2.rs\n+line2\ndiff --git a/file3.rs b/file3.rs\n+line3\n";
-		assert_eq!(
-			extract_file_summary(multi_files),
-			"file1.rs, file2.rs, file3.rs"
-		);
+		assert_eq!(extract_file_summary(multi_files), "file1.rs, file2.rs, file3.rs");
 
 		// Many files (should show count)
 		let many_files = (0..10)
@@ -640,8 +632,7 @@ mod tests {
 	fn test_combine_review_results() {
 		// Empty responses
 		let empty: Vec<serde_json::Value> = vec![];
-		let result =
-			combine_review_results(empty).expect("Empty responses should produce valid result");
+		let result = combine_review_results(empty).expect("Empty responses should produce valid result");
 		assert!(result.to_string().contains("Review Analysis Incomplete"));
 
 		// Single valid JSON response
@@ -650,8 +641,7 @@ mod tests {
 			"issues": [{"severity": "HIGH", "category": "Security", "title": "Test Issue", "description": "Test description"}],
 			"recommendations": ["Test recommendation"]
 		})];
-		let result = combine_review_results(single)
-			.expect("Single valid response should produce valid result");
+		let result = combine_review_results(single).expect("Single valid response should produce valid result");
 		assert!(result.to_string().contains("Test Issue"));
 		assert!(result.to_string().contains("Test recommendation"));
 
@@ -668,19 +658,12 @@ mod tests {
 				"recommendations": ["Rec 2"]
 			}),
 		];
-		let result = combine_review_results(multiple)
-			.expect("Multiple valid responses should produce valid result");
+		let result = combine_review_results(multiple).expect("Multiple valid responses should produce valid result");
 		// Result is now serde_json::Value directly
 		assert_eq!(result["summary"]["total_files"], 3); // 1 + 2
 		assert_eq!(result["summary"]["total_issues"], 2); // Combined issues
 		assert_eq!(result["summary"]["overall_score"], 85); // Average of 80 and 90
-		assert_eq!(
-			result["issues"]
-				.as_array()
-				.expect("issues should be an array")
-				.len(),
-			2
-		);
+		assert_eq!(result["issues"].as_array().expect("issues should be an array").len(), 2);
 		assert_eq!(
 			result["recommendations"]
 				.as_array()
@@ -714,8 +697,7 @@ mod tests {
 	fn test_invalid_json_handling() {
 		let invalid_responses = vec![serde_json::json!({"invalid": "json structure"})];
 
-		let result = combine_review_results(invalid_responses)
-			.expect("Invalid JSON should still produce a result");
+		let result = combine_review_results(invalid_responses).expect("Invalid JSON should still produce a result");
 		// Should return the invalid JSON back (single response is returned as-is)
 		// Since it's a single response, it's returned as-is
 		assert_eq!(result["invalid"], "json structure");

@@ -84,9 +84,8 @@ pub async fn execute(args: &BranchArgs) -> Result<(), anyhow::Error> {
 		BranchCommand::Info { name } => {
 			let branch_name = match name {
 				Some(n) => n.clone(),
-				None => indexer::branch::get_current_branch(&current_dir).ok_or_else(|| {
-					anyhow::anyhow!("Not on a branch (detached HEAD?). Specify a branch name.")
-				})?,
+				None => indexer::branch::get_current_branch(&current_dir)
+					.ok_or_else(|| anyhow::anyhow!("Not on a branch (detached HEAD?). Specify a branch name."))?,
 			};
 
 			let (_, manifest) = indexer::branch::resolve_branch_state(&current_dir, &branch_name)?;
@@ -95,14 +94,8 @@ pub async fn execute(args: &BranchArgs) -> Result<(), anyhow::Error> {
 				Some(m) => {
 					println!("Branch: {}", m.branch_name);
 					println!("Base branch: {}", m.base_branch);
-					println!(
-						"Base commit: {}",
-						&m.base_commit[..12.min(m.base_commit.len())]
-					);
-					println!(
-						"Branch commit: {}",
-						&m.branch_commit[..12.min(m.branch_commit.len())]
-					);
+					println!("Base commit: {}", &m.base_commit[..12.min(m.base_commit.len())]);
+					println!("Branch commit: {}", &m.branch_commit[..12.min(m.branch_commit.len())]);
 					println!("Changed files: {}", m.changed_paths.len());
 					for path in &m.changed_paths {
 						println!("  M {}", path);

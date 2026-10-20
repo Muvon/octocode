@@ -29,9 +29,7 @@ pub async fn execute(store: &Store, args: &ClearArgs) -> Result<(), anyhow::Erro
 			println!("Clearing all database tables...");
 			store.clear_all_tables().await?;
 			println!("Successfully dropped all tables and schemas.");
-			println!(
-				"Note: Tables will be recreated with current schema on next indexing operation."
-			);
+			println!("Note: Tables will be recreated with current schema on next indexing operation.");
 		}
 		"code" => {
 			println!("Clearing code blocks table...");

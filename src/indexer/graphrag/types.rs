@@ -85,10 +85,7 @@ impl RelationType {
 
 			// Medium importance - structural dependencies
 			Self::Imports | Self::Calls | Self::Uses => 0.7,
-			Self::FactoryCreates
-			| Self::ObserverPattern
-			| Self::StrategyPattern
-			| Self::AdapterPattern => 0.8,
+			Self::FactoryCreates | Self::ObserverPattern | Self::StrategyPattern | Self::AdapterPattern => 0.8,
 			Self::References => 0.6,
 
 			// Low importance - organizational structure
@@ -190,19 +187,19 @@ impl Provenance {
 // A node in the code graph - represents a file/module with efficient storage
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CodeNode {
-	pub id: String,           // Relative path from project root (efficient storage)
-	pub name: String,         // File name or module name
-	pub kind: String,         // Type of the node (file, module, package, function)
-	pub path: String,         // Relative file path from project root
-	pub description: String,  // Description/summary of what the file/module does
-	pub symbols: Vec<String>, // All symbols from this file (functions, classes, etc.)
-	pub hash: String,         // Content hash to detect changes
-	pub embedding: Vec<f32>,  // Vector embedding of the file content
-	pub imports: Vec<String>, // List of imported modules (relative paths or external)
-	pub exports: Vec<String>, // List of exported symbols
+	pub id: String,                   // Relative path from project root (efficient storage)
+	pub name: String,                 // File name or module name
+	pub kind: String,                 // Type of the node (file, module, package, function)
+	pub path: String,                 // Relative file path from project root
+	pub description: String,          // Description/summary of what the file/module does
+	pub symbols: Vec<String>,         // All symbols from this file (functions, classes, etc.)
+	pub hash: String,                 // Content hash to detect changes
+	pub embedding: Vec<f32>,          // Vector embedding of the file content
+	pub imports: Vec<String>,         // List of imported modules (relative paths or external)
+	pub exports: Vec<String>,         // List of exported symbols
 	pub functions: Vec<FunctionInfo>, // Function-level information for better granularity
-	pub size_lines: u32,      // Number of lines in the file
-	pub language: String,     // Programming language
+	pub size_lines: u32,              // Number of lines in the file
+	pub language: String,             // Programming language
 }
 
 impl CodeNode {
@@ -271,12 +268,7 @@ pub struct CodeRelationship {
 
 impl CodeRelationship {
 	/// Create a new relationship with default values
-	pub fn new(
-		source: String,
-		target: String,
-		relation_type: RelationType,
-		description: String,
-	) -> Self {
+	pub fn new(source: String, target: String, relation_type: RelationType, description: String) -> Self {
 		Self {
 			source,
 			target,
@@ -338,10 +330,7 @@ mod tests {
 		assert_eq!(RelationType::Implements.importance_weight(), 1.0);
 		assert_eq!(RelationType::Extends.importance_weight(), 1.0);
 		assert_eq!(RelationType::Configures.importance_weight(), 1.0);
-		assert_eq!(
-			RelationType::ArchitecturalDependency.importance_weight(),
-			0.9
-		);
+		assert_eq!(RelationType::ArchitecturalDependency.importance_weight(), 0.9);
 
 		// Medium importance relationships
 		assert_eq!(RelationType::Imports.importance_weight(), 0.7);
@@ -361,68 +350,33 @@ mod tests {
 	#[test]
 	fn test_relationship_type_ordering() {
 		// Verify architectural relationships have higher weight than structural
-		assert!(
-			RelationType::Implements.importance_weight()
-				> RelationType::Imports.importance_weight()
-		);
-		assert!(
-			RelationType::Extends.importance_weight() > RelationType::Calls.importance_weight()
-		);
+		assert!(RelationType::Implements.importance_weight() > RelationType::Imports.importance_weight());
+		assert!(RelationType::Extends.importance_weight() > RelationType::Calls.importance_weight());
 
 		// Verify structural relationships have higher weight than organizational
-		assert!(
-			RelationType::Imports.importance_weight()
-				> RelationType::SiblingModule.importance_weight()
-		);
-		assert!(
-			RelationType::Calls.importance_weight()
-				> RelationType::ParentModule.importance_weight()
-		);
+		assert!(RelationType::Imports.importance_weight() > RelationType::SiblingModule.importance_weight());
+		assert!(RelationType::Calls.importance_weight() > RelationType::ParentModule.importance_weight());
 
 		// Verify references sit between structural imports and organizational
-		assert!(
-			RelationType::Imports.importance_weight()
-				> RelationType::References.importance_weight()
-		);
-		assert!(
-			RelationType::References.importance_weight()
-				> RelationType::SiblingModule.importance_weight()
-		);
+		assert!(RelationType::Imports.importance_weight() > RelationType::References.importance_weight());
+		assert!(RelationType::References.importance_weight() > RelationType::SiblingModule.importance_weight());
 	}
 
 	#[test]
 	fn test_relationship_type_from_str() {
 		// Test all enum variants
-		assert_eq!(
-			"implements".parse::<RelationType>().unwrap(),
-			RelationType::Implements
-		);
-		assert_eq!(
-			"extends".parse::<RelationType>().unwrap(),
-			RelationType::Extends
-		);
-		assert_eq!(
-			"imports".parse::<RelationType>().unwrap(),
-			RelationType::Imports
-		);
-		assert_eq!(
-			"calls".parse::<RelationType>().unwrap(),
-			RelationType::Calls
-		);
+		assert_eq!("implements".parse::<RelationType>().unwrap(), RelationType::Implements);
+		assert_eq!("extends".parse::<RelationType>().unwrap(), RelationType::Extends);
+		assert_eq!("imports".parse::<RelationType>().unwrap(), RelationType::Imports);
+		assert_eq!("calls".parse::<RelationType>().unwrap(), RelationType::Calls);
 		assert_eq!(
 			"sibling_module".parse::<RelationType>().unwrap(),
 			RelationType::SiblingModule
 		);
-		assert_eq!(
-			"references".parse::<RelationType>().unwrap(),
-			RelationType::References
-		);
+		assert_eq!("references".parse::<RelationType>().unwrap(), RelationType::References);
 
 		// Test unknown type defaults to Imports
-		assert_eq!(
-			"unknown_type".parse::<RelationType>().unwrap(),
-			RelationType::Imports
-		);
+		assert_eq!("unknown_type".parse::<RelationType>().unwrap(), RelationType::Imports);
 		assert_eq!("".parse::<RelationType>().unwrap(), RelationType::Imports);
 	}
 
@@ -561,10 +515,7 @@ mod tests {
 	#[test]
 	fn test_relation_type_contains_roundtrip() {
 		assert_eq!(RelationType::Contains.as_str(), "contains");
-		assert_eq!(
-			"contains".parse::<RelationType>().unwrap(),
-			RelationType::Contains
-		);
+		assert_eq!("contains".parse::<RelationType>().unwrap(), RelationType::Contains);
 		assert_eq!(RelationType::Contains.importance_weight(), 0.3);
 	}
 
@@ -587,24 +538,12 @@ mod tests {
 
 	#[test]
 	fn test_provenance_parse_or_default() {
-		assert_eq!(
-			Provenance::parse_or_default("extracted"),
-			Provenance::Extracted
-		);
-		assert_eq!(
-			Provenance::parse_or_default("inferred"),
-			Provenance::Inferred
-		);
-		assert_eq!(
-			Provenance::parse_or_default("ambiguous"),
-			Provenance::Ambiguous
-		);
+		assert_eq!(Provenance::parse_or_default("extracted"), Provenance::Extracted);
+		assert_eq!(Provenance::parse_or_default("inferred"), Provenance::Inferred);
+		assert_eq!(Provenance::parse_or_default("ambiguous"), Provenance::Ambiguous);
 		// Unknown values (rows written before the column existed) default to Extracted
 		assert_eq!(Provenance::parse_or_default(""), Provenance::Extracted);
-		assert_eq!(
-			Provenance::parse_or_default("legacy"),
-			Provenance::Extracted
-		);
+		assert_eq!(Provenance::parse_or_default("legacy"), Provenance::Extracted);
 	}
 
 	#[test]

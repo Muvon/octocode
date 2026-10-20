@@ -44,10 +44,7 @@ mod tests {
 	}
 
 	fn lines(count: usize) -> String {
-		(1..=count)
-			.map(|i| format!("line {i}"))
-			.collect::<Vec<_>>()
-			.join("\n")
+		(1..=count).map(|i| format!("line {i}")).collect::<Vec<_>>().join("\n")
 	}
 
 	#[test]
@@ -67,14 +64,10 @@ mod tests {
 
 	#[test]
 	fn queries_are_length_bounded() {
-		let short = validate_queries(&["ab".to_string()])
-			.unwrap_err()
-			.to_string();
+		let short = validate_queries(&["ab".to_string()]).unwrap_err().to_string();
 		assert!(short.contains("at least 3 characters"), "{short}");
 
-		let long = validate_queries(&["x".repeat(501)])
-			.unwrap_err()
-			.to_string();
+		let long = validate_queries(&["x".repeat(501)]).unwrap_err().to_string();
 		assert!(long.contains("no more than 500 characters"), "{long}");
 
 		validate_queries(&["a valid query".to_string()]).expect("a normal query is accepted");

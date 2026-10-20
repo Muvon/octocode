@@ -119,10 +119,7 @@ async fn show_logs_from_directory(log_dir: &PathBuf, args: &LogsArgs) -> Result<
 
 		// Use tail -f equivalent
 		let mut cmd = Command::new("tail");
-		cmd.arg("-f")
-			.arg("-n")
-			.arg(args.lines.to_string())
-			.arg(log_file);
+		cmd.arg("-f").arg("-n").arg(args.lines.to_string()).arg(log_file);
 
 		if args.errors_only {
 			// Filter tail's stream in-process. A shell `|` can't be expressed via
@@ -163,8 +160,7 @@ async fn show_logs_from_directory(log_dir: &PathBuf, args: &LogsArgs) -> Result<
 
 		for line in &lines[start_idx..] {
 			if args.errors_only {
-				if line.to_lowercase().contains("error") || line.to_lowercase().contains("critical")
-				{
+				if line.to_lowercase().contains("error") || line.to_lowercase().contains("critical") {
 					println!("{}", line);
 				}
 			} else {

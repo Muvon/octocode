@@ -82,18 +82,12 @@ impl Language for Ruby {
 					"constant" => Some(child),
 					"scope_resolution" => {
 						let mut inner = child.walk();
-						child
-							.children(&mut inner)
-							.filter(|c| c.kind() == "constant")
-							.last()
+						child.children(&mut inner).filter(|c| c.kind() == "constant").last()
 					}
 					_ => None,
 				};
 				if let Some(name_node) = name_node {
-					return name_node
-						.utf8_text(contents.as_bytes())
-						.ok()
-						.map(String::from);
+					return name_node.utf8_text(contents.as_bytes()).ok().map(String::from);
 				}
 			}
 			return None;
@@ -252,11 +246,7 @@ impl Language for Ruby {
 		Vec::new()
 	}
 
-	fn extract_type_relations(
-		&self,
-		node: Node,
-		contents: &str,
-	) -> Vec<(super::TypeRelationKind, String)> {
+	fn extract_type_relations(&self, node: Node, contents: &str) -> Vec<(super::TypeRelationKind, String)> {
 		// `class Foo < Bar` → Foo extends Bar.
 		// Module mixins (`include M`, `extend M`) are call expressions and
 		// would require pattern-matching on call sites; deferred for now.
@@ -335,9 +325,7 @@ impl Ruby {
 						if assign_child.kind() == "identifier" {
 							if let Ok(name) = assign_child.utf8_text(contents.as_bytes()) {
 								// Skip instance/class variables (starting with @ or @@)
-								if !name.starts_with('@')
-									&& !symbols.iter().any(|s| s.as_str() == name)
-								{
+								if !name.starts_with('@') && !symbols.iter().any(|s| s.as_str() == name) {
 									symbols.push(name.to_string());
 								}
 							}
@@ -393,8 +381,7 @@ impl Ruby {
 	fn extract_ruby_string_literal(text: &str) -> Option<String> {
 		let text = text.trim();
 		if text.len() >= 2
-			&& ((text.starts_with('"') && text.ends_with('"'))
-				|| (text.starts_with('\'') && text.ends_with('\'')))
+			&& ((text.starts_with('"') && text.ends_with('"')) || (text.starts_with('\'') && text.ends_with('\'')))
 		{
 			Some(text[1..text.len() - 1].to_string())
 		} else {
@@ -426,8 +413,7 @@ impl Ruby {
 		let path = std::path::Path::new(import_path);
 
 		// Try direct path first
-		if let Some(result) = registry.find_file_with_extensions(path, &self.get_file_extensions())
-		{
+		if let Some(result) = registry.find_file_with_extensions(path, &self.get_file_extensions()) {
 			return Some(result);
 		}
 
@@ -435,9 +421,7 @@ impl Ruby {
 		let load_paths = ["lib", "app", "config"];
 		for load_path in &load_paths {
 			let full_path = std::path::Path::new(load_path).join(path);
-			if let Some(result) =
-				registry.find_file_with_extensions(&full_path, &self.get_file_extensions())
-			{
+			if let Some(result) = registry.find_file_with_extensions(&full_path, &self.get_file_extensions()) {
 				return Some(result);
 			}
 		}

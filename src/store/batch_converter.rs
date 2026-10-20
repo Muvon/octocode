@@ -19,8 +19,7 @@ use uuid::Uuid;
 
 // Arrow imports
 use arrow_array::{
-	Array, FixedSizeListArray, Float32Array, Int64Array, ListArray, RecordBatch, StringArray,
-	UInt32Array,
+	Array, FixedSizeListArray, Float32Array, Int64Array, ListArray, RecordBatch, StringArray, UInt32Array,
 };
 use arrow_schema::{DataType, Field, Schema};
 
@@ -90,16 +89,10 @@ impl BatchConverter {
 	}
 
 	// Convert a CodeBlock to a RecordBatch
-	pub fn code_block_to_batch(
-		&self,
-		blocks: &[CodeBlock],
-		embeddings: &[Vec<f32>],
-	) -> Result<RecordBatch> {
+	pub fn code_block_to_batch(&self, blocks: &[CodeBlock], embeddings: &[Vec<f32>]) -> Result<RecordBatch> {
 		// Ensure we have the same number of blocks and embeddings
 		if blocks.len() != embeddings.len() {
-			return Err(anyhow::anyhow!(
-				"Number of blocks and embeddings must match"
-			));
+			return Err(anyhow::anyhow!("Number of blocks and embeddings must match"));
 		}
 
 		if blocks.is_empty() {
@@ -170,33 +163,13 @@ impl BatchConverter {
 		let expected_len = blocks.len();
 		assert_eq!(ids.len(), expected_len, "ids array length mismatch");
 		assert_eq!(paths.len(), expected_len, "paths array length mismatch");
-		assert_eq!(
-			languages.len(),
-			expected_len,
-			"languages array length mismatch"
-		);
-		assert_eq!(
-			contents.len(),
-			expected_len,
-			"contents array length mismatch"
-		);
+		assert_eq!(languages.len(), expected_len, "languages array length mismatch");
+		assert_eq!(contents.len(), expected_len, "contents array length mismatch");
 		assert_eq!(symbols.len(), expected_len, "symbols array length mismatch");
-		assert_eq!(
-			start_lines.len(),
-			expected_len,
-			"start_lines array length mismatch"
-		);
-		assert_eq!(
-			end_lines.len(),
-			expected_len,
-			"end_lines array length mismatch"
-		);
+		assert_eq!(start_lines.len(), expected_len, "start_lines array length mismatch");
+		assert_eq!(end_lines.len(), expected_len, "end_lines array length mismatch");
 		assert_eq!(hashes.len(), expected_len, "hashes array length mismatch");
-		assert_eq!(
-			embedding_array.len(),
-			expected_len,
-			"embedding array length mismatch"
-		);
+		assert_eq!(embedding_array.len(), expected_len, "embedding array length mismatch");
 
 		// Create batch
 		let batch = RecordBatch::try_new(
@@ -218,16 +191,10 @@ impl BatchConverter {
 	}
 
 	// Convert a TextBlock to a RecordBatch
-	pub fn text_block_to_batch(
-		&self,
-		blocks: &[TextBlock],
-		embeddings: &[Vec<f32>],
-	) -> Result<RecordBatch> {
+	pub fn text_block_to_batch(&self, blocks: &[TextBlock], embeddings: &[Vec<f32>]) -> Result<RecordBatch> {
 		// Ensure we have the same number of blocks and embeddings
 		if blocks.len() != embeddings.len() {
-			return Err(anyhow::anyhow!(
-				"Number of blocks and embeddings must match"
-			));
+			return Err(anyhow::anyhow!("Number of blocks and embeddings must match"));
 		}
 
 		if blocks.is_empty() {
@@ -293,32 +260,12 @@ impl BatchConverter {
 		let expected_len = blocks.len();
 		assert_eq!(ids.len(), expected_len, "ids array length mismatch");
 		assert_eq!(paths.len(), expected_len, "paths array length mismatch");
-		assert_eq!(
-			languages.len(),
-			expected_len,
-			"languages array length mismatch"
-		);
-		assert_eq!(
-			contents.len(),
-			expected_len,
-			"contents array length mismatch"
-		);
-		assert_eq!(
-			start_lines.len(),
-			expected_len,
-			"start_lines array length mismatch"
-		);
-		assert_eq!(
-			end_lines.len(),
-			expected_len,
-			"end_lines array length mismatch"
-		);
+		assert_eq!(languages.len(), expected_len, "languages array length mismatch");
+		assert_eq!(contents.len(), expected_len, "contents array length mismatch");
+		assert_eq!(start_lines.len(), expected_len, "start_lines array length mismatch");
+		assert_eq!(end_lines.len(), expected_len, "end_lines array length mismatch");
 		assert_eq!(hashes.len(), expected_len, "hashes array length mismatch");
-		assert_eq!(
-			embedding_array.len(),
-			expected_len,
-			"embedding array length mismatch"
-		);
+		assert_eq!(embedding_array.len(), expected_len, "embedding array length mismatch");
 
 		// Create batch
 		let batch = RecordBatch::try_new(
@@ -339,16 +286,10 @@ impl BatchConverter {
 	}
 
 	// Convert a DocumentBlock to a RecordBatch
-	pub fn document_block_to_batch(
-		&self,
-		blocks: &[DocumentBlock],
-		embeddings: &[Vec<f32>],
-	) -> Result<RecordBatch> {
+	pub fn document_block_to_batch(&self, blocks: &[DocumentBlock], embeddings: &[Vec<f32>]) -> Result<RecordBatch> {
 		// Ensure we have the same number of blocks and embeddings
 		if blocks.len() != embeddings.len() {
-			return Err(anyhow::anyhow!(
-				"Number of blocks and embeddings must match"
-			));
+			return Err(anyhow::anyhow!("Number of blocks and embeddings must match"));
 		}
 
 		if blocks.is_empty() {
@@ -439,33 +380,13 @@ impl BatchConverter {
 		assert_eq!(ids.len(), expected_len, "ids array length mismatch");
 		assert_eq!(paths.len(), expected_len, "paths array length mismatch");
 		assert_eq!(titles.len(), expected_len, "titles array length mismatch");
-		assert_eq!(
-			contents.len(),
-			expected_len,
-			"contents array length mismatch"
-		);
+		assert_eq!(contents.len(), expected_len, "contents array length mismatch");
 		assert_eq!(levels.len(), expected_len, "levels array length mismatch");
-		assert_eq!(
-			start_lines.len(),
-			expected_len,
-			"start_lines array length mismatch"
-		);
-		assert_eq!(
-			end_lines.len(),
-			expected_len,
-			"end_lines array length mismatch"
-		);
+		assert_eq!(start_lines.len(), expected_len, "start_lines array length mismatch");
+		assert_eq!(end_lines.len(), expected_len, "end_lines array length mismatch");
 		assert_eq!(hashes.len(), expected_len, "hashes array length mismatch");
-		assert_eq!(
-			embedding_array.len(),
-			expected_len,
-			"embedding array length mismatch"
-		);
-		assert_eq!(
-			embedding_array.len(),
-			expected_len,
-			"embedding array length mismatch"
-		);
+		assert_eq!(embedding_array.len(), expected_len, "embedding array length mismatch");
+		assert_eq!(embedding_array.len(), expected_len, "embedding array length mismatch");
 
 		// Create batch
 		let batch = RecordBatch::try_new(
@@ -756,15 +677,9 @@ impl BatchConverter {
 		Ok(document_blocks)
 	}
 
-	pub fn commit_block_to_batch(
-		&self,
-		blocks: &[CommitBlock],
-		embeddings: &[Vec<f32>],
-	) -> Result<RecordBatch> {
+	pub fn commit_block_to_batch(&self, blocks: &[CommitBlock], embeddings: &[Vec<f32>]) -> Result<RecordBatch> {
 		if blocks.len() != embeddings.len() {
-			return Err(anyhow::anyhow!(
-				"Number of blocks and embeddings must match"
-			));
+			return Err(anyhow::anyhow!("Number of blocks and embeddings must match"));
 		}
 
 		if blocks.is_empty() {
@@ -945,9 +860,7 @@ mod tests {
 		let embeddings = vec![vec![0.1, 0.2, 0.3, 0.4], vec![0.5, 0.6, 0.7, 0.8]];
 
 		let converter = BatchConverter::new(dim);
-		let batch = converter
-			.commit_block_to_batch(&blocks, &embeddings)
-			.unwrap();
+		let batch = converter.commit_block_to_batch(&blocks, &embeddings).unwrap();
 
 		assert_eq!(batch.num_rows(), 2);
 
@@ -993,11 +906,7 @@ mod tests {
 	}
 
 	fn make_score_batch(column_name: &str, scores: Vec<f32>) -> RecordBatch {
-		let schema = Arc::new(Schema::new(vec![Field::new(
-			column_name,
-			DataType::Float32,
-			false,
-		)]));
+		let schema = Arc::new(Schema::new(vec![Field::new(column_name, DataType::Float32, false)]));
 		RecordBatch::try_new(schema, vec![Arc::new(Float32Array::from(scores))]).unwrap()
 	}
 
@@ -1026,8 +935,7 @@ mod tests {
 	#[test]
 	fn test_extract_distance_array_no_score_columns_returns_empty() {
 		let schema = Arc::new(Schema::new(vec![Field::new("path", DataType::Utf8, false)]));
-		let batch = RecordBatch::try_new(schema, vec![Arc::new(StringArray::from(vec!["a", "b"]))])
-			.unwrap();
+		let batch = RecordBatch::try_new(schema, vec![Arc::new(StringArray::from(vec!["a", "b"]))]).unwrap();
 		assert!(extract_distance_array(&batch).is_empty());
 	}
 }

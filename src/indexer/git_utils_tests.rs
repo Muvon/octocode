@@ -71,10 +71,7 @@ mod tests {
 		let nested = dir.path().join("a/b");
 		std::fs::create_dir_all(&nested).unwrap();
 		assert!(GitUtils::is_git_repo_root(dir.path()));
-		assert_eq!(
-			GitUtils::find_git_root(&nested).as_deref(),
-			Some(dir.path())
-		);
+		assert_eq!(GitUtils::find_git_root(&nested).as_deref(), Some(dir.path()));
 	}
 
 	#[test]
@@ -118,10 +115,7 @@ mod tests {
 		let dir = repo();
 		let head = GitUtils::resolve_ref(dir.path(), "HEAD").expect("HEAD resolves");
 		assert_eq!(head.len(), 40);
-		assert_eq!(
-			GitUtils::resolve_ref(dir.path(), "main").map(|h| h.len()),
-			Some(40)
-		);
+		assert_eq!(GitUtils::resolve_ref(dir.path(), "main").map(|h| h.len()), Some(40));
 		assert_eq!(GitUtils::resolve_ref(dir.path(), "no-such-ref"), None);
 	}
 
@@ -137,14 +131,8 @@ mod tests {
 	#[test]
 	fn commits_ahead_counts_only_the_branch_side() {
 		let dir = repo();
-		assert_eq!(
-			GitUtils::commits_ahead(dir.path(), "main", "feature").unwrap(),
-			1
-		);
-		assert_eq!(
-			GitUtils::commits_ahead(dir.path(), "feature", "main").unwrap(),
-			0
-		);
+		assert_eq!(GitUtils::commits_ahead(dir.path(), "main", "feature").unwrap(), 1);
+		assert_eq!(GitUtils::commits_ahead(dir.path(), "feature", "main").unwrap(), 0);
 	}
 
 	#[test]
@@ -221,10 +209,7 @@ mod tests {
 		std::fs::write(path.join("fourth.txt"), "four\n").unwrap();
 		git(path, &["add", "."]);
 		git(path, &["commit", "-q", "-m", "fourth commit"]);
-		git(
-			path,
-			&["merge", "-q", "--no-ff", "-m", "merge feature", "feature"],
-		);
+		git(path, &["merge", "-q", "--no-ff", "-m", "merge feature", "feature"]);
 		std::fs::create_dir_all(path.join("sub dir")).unwrap();
 		std::fs::write(path.join("sub dir/a.txt"), "a\n").unwrap();
 		std::fs::write(path.join("first.txt"), "changed\n").unwrap();

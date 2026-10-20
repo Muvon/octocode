@@ -210,10 +210,7 @@ async fn get_model_info(model_spec: &str) -> Result<()> {
 			let supported = provider_impl.is_model_supported();
 
 			if !supported {
-				println!(
-					"❌ Model '{}' is not supported by provider {:?}",
-					model_name, provider
-				);
+				println!("❌ Model '{}' is not supported by provider {:?}", model_name, provider);
 				return Err(anyhow::anyhow!(
 					"Model '{}' is not supported by provider {:?}",
 					model_name,

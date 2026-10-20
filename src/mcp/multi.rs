@@ -29,8 +29,8 @@ use anyhow::Result;
 use rmcp::{
 	handler::server::ServerHandler,
 	model::{
-		CallToolRequestParams, CallToolResponse, Implementation, ListToolsResult,
-		PaginatedRequestParams, ProtocolVersion, ServerCapabilities, ServerConfig, Tool,
+		CallToolRequestParams, CallToolResponse, Implementation, ListToolsResult, PaginatedRequestParams,
+		ProtocolVersion, ServerCapabilities, ServerConfig, Tool,
 	},
 	service::RequestContext,
 	ErrorData, RoleServer, ServiceExt,
@@ -111,9 +111,7 @@ impl RepoPool {
 		// outside a git repository root only with --no-git or require_git = false.
 		// Otherwise serve the existing per-repo index without a watcher/indexer.
 		let index = self.config.index.mcp_index
-			&& (self.no_git
-				|| !self.config.index.require_git
-				|| indexer::git::is_git_repo_root(repo_path));
+			&& (self.no_git || !self.config.index.require_git || indexer::git::is_git_repo_root(repo_path));
 		let bg = if index {
 			McpServer::start_repo_services(
 				self.config.clone(),
@@ -125,11 +123,7 @@ impl RepoPool {
 			.await
 			.map_err(|e| {
 				ErrorData::internal_error(
-					format!(
-						"Failed to start services for '{}': {}",
-						repo_path.display(),
-						e
-					),
+					format!("Failed to start services for '{}': {}", repo_path.display(), e),
 					None,
 				)
 			})?
@@ -138,13 +132,11 @@ impl RepoPool {
 		};
 
 		let mut guard = self.instances.lock().await;
-		let inst = guard
-			.entry(repo_path.to_path_buf())
-			.or_insert(RepoInstance {
-				server,
-				last_accessed: Instant::now(),
-				_bg: bg,
-			});
+		let inst = guard.entry(repo_path.to_path_buf()).or_insert(RepoInstance {
+			server,
+			last_accessed: Instant::now(),
+			_bg: bg,
+		});
 		inst.last_accessed = Instant::now();
 		Ok(inst.server.clone())
 	}
@@ -153,15 +145,12 @@ impl RepoPool {
 	pub(crate) fn spawn_idle_cleanup(&self) {
 		let instances = self.instances.clone();
 		tokio::spawn(async move {
-			let mut interval =
-				tokio::time::interval(Duration::from_millis(INSTANCE_CLEANUP_INTERVAL_MS));
+			let mut interval = tokio::time::interval(Duration::from_millis(INSTANCE_CLEANUP_INTERVAL_MS));
 			loop {
 				interval.tick().await;
 				let mut guard = instances.lock().await;
 				let before = guard.len();
-				guard.retain(|_, inst| {
-					inst.last_accessed.elapsed() <= Duration::from_millis(INSTANCE_IDLE_TIMEOUT_MS)
-				});
+				guard.retain(|_, inst| inst.last_accessed.elapsed() <= Duration::from_millis(INSTANCE_IDLE_TIMEOUT_MS));
 				let removed = before - guard.len();
 				if removed > 0 {
 					debug!("Cleaned up {} idle repo instance(s)", removed);
@@ -263,12 +252,7 @@ pub struct MultiServer {
 impl MultiServer {
 	/// Discover repositories one level under `root_path`, build the injected
 	/// tool list, and prepare logging. Per-repo handlers are built on demand.
-	pub async fn new(
-		config: Config,
-		root_path: PathBuf,
-		no_git: bool,
-		debug: bool,
-	) -> Result<Self> {
+	pub async fn new(config: Config, root_path: PathBuf, no_git: bool, debug: bool) -> Result<Self> {
 		init_mcp_logging(root_path.clone(), debug)?;
 
 		// Build the base tool set from a template handler over the root path,
@@ -286,10 +270,7 @@ impl MultiServer {
 	/// This server behind session routing; sessions in other directories share
 	/// its repo pool.
 	fn routed(&self) -> SessionRouter<Self> {
-		SessionRouter::new(
-			self.clone(),
-			Sessions::with_pool(self.root.clone(), self.pool.clone()),
-		)
+		SessionRouter::new(self.clone(), Sessions::with_pool(self.root.clone(), self.pool.clone()))
 	}
 
 	/// Serve over stdio (default MCP transport).
@@ -306,9 +287,7 @@ impl MultiServer {
 	pub async fn run_http(self, bind_addr: &str) -> Result<()> {
 		use hyper_util::rt::TokioIo;
 		use hyper_util::service::TowerToHyperService;
-		use rmcp::transport::streamable_http_server::{
-			session::local::LocalSessionManager, StreamableHttpService,
-		};
+		use rmcp::transport::streamable_http_server::{session::local::LocalSessionManager, StreamableHttpService};
 
 		self.pool.spawn_idle_cleanup();
 
@@ -371,9 +350,8 @@ impl ServerHandler for MultiServer {
 		ServerConfig::new(capabilities)
 			.with_protocol_version(ProtocolVersion::V_2026_07_28)
 			.with_server_info(
-				Implementation::new("octocode-mcp", env!("CARGO_PKG_VERSION")).with_description(
-					"Multi-repository semantic code search server with per-repo routing",
-				),
+				Implementation::new("octocode-mcp", env!("CARGO_PKG_VERSION"))
+					.with_description("Multi-repository semantic code search server with per-repo routing"),
 			)
 			.with_instructions(instructions)
 	}
