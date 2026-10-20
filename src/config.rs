@@ -366,6 +366,10 @@ impl Default for ReasoningConfig {
 pub struct CommitsConfig {
 	/// Use LLM to generate rich descriptions of commit diffs
 	pub use_llm: bool,
+
+	/// Co-authors appended as `Co-authored-by:` trailers to every commit message octocode creates
+	#[serde(default)]
+	pub co_authored_by: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -685,6 +689,28 @@ mod tests {
 			.contains("ROLE and PURPOSE"));
 	}
 
+	#[test]
+	fn template_defaults_co_authored_by_to_empty() {
+		let config = Config::load_from_template().expect("template should load");
+		assert!(config.commits.co_authored_by.is_empty());
+		assert!(Config::default().commits.co_authored_by.is_empty());
+	}
+
+	#[test]
+	fn parses_commits_co_authored_by() {
+		let config: Config = toml::from_str(
+			r#"version = 3
+[commits]
+use_llm = false
+co_authored_by = ["Ava <ava@muvon.io>", "Don <don@muvon.io>"]"#,
+		)
+		.expect("co_authored_by should parse");
+
+		assert_eq!(
+			config.commits.co_authored_by,
+			vec!["Ava <ava@muvon.io>".to_string(), "Don <don@muvon.io>".to_string()]
+		);
+	}
 	#[test]
 	fn test_config_default_matches_template() {
 		// `Config::default()` (used by e.g. `octocode config --reset`) must never panic,

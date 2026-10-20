@@ -199,3 +199,4 @@ Avoid listing specific functions/classes. Instead, describe the file's architect
 
 [commits]
 use_llm = false
+co_authored_by = []

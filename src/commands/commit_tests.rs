@@ -206,4 +206,80 @@ index 111..222 100644
 		assert!(code_only.docs_restriction.contains("must not be docs"));
 		assert!(code_only.guidance_section.is_empty());
 	}
+	#[test]
+	fn apply_co_author_trailers_empty_list_returns_message_unchanged() {
+		assert_eq!(apply_co_author_trailers("feat: add thing", &[]), "feat: add thing");
+	}
+
+	#[test]
+	fn apply_co_author_trailers_appends_single_entry_after_blank_line() {
+		let co_authors = vec!["Ava <ava@muvon.io>".to_string()];
+		assert_eq!(
+			apply_co_author_trailers("feat: add thing", &co_authors),
+			"feat: add thing\n\nCo-authored-by: Ava <ava@muvon.io>"
+		);
+	}
+
+	#[test]
+	fn apply_co_author_trailers_appends_multiple_entries_one_per_line() {
+		let co_authors = vec!["Ava <ava@muvon.io>".to_string(), "Don <don@muvon.io>".to_string()];
+		assert_eq!(
+			apply_co_author_trailers("feat: add thing", &co_authors),
+			"feat: add thing\n\nCo-authored-by: Ava <ava@muvon.io>\nCo-authored-by: Don <don@muvon.io>"
+		);
+	}
+
+	#[test]
+	fn apply_co_author_trailers_is_idempotent_for_existing_trailer() {
+		let message = "feat: add thing\n\nCo-authored-by: Ava <ava@muvon.io>";
+		let co_authors = vec!["Ava <ava@muvon.io>".to_string()];
+		assert_eq!(apply_co_author_trailers(message, &co_authors), message);
+	}
+
+	#[test]
+	fn apply_co_author_trailers_skips_whitespace_only_entries_and_trims() {
+		let co_authors = vec!["   ".to_string(), " Don <don@muvon.io> ".to_string()];
+		assert_eq!(
+			apply_co_author_trailers("feat: add thing", &co_authors),
+			"feat: add thing\n\nCo-authored-by: Don <don@muvon.io>"
+		);
+	}
+
+	#[test]
+	#[ignore = "e2e: shells out to the real git binary; run with cargo test -- --ignored"]
+	fn e2e_git_commit_carries_co_author_trailer_once() {
+		let dir = TempDir::new().unwrap();
+		let run = |args: &[&str]| {
+			let out = std::process::Command::new("git")
+				.args(args)
+				.current_dir(dir.path())
+				.output()
+				.unwrap();
+			assert!(
+				out.status.success(),
+				"git {args:?} failed: {}",
+				String::from_utf8_lossy(&out.stderr)
+			);
+			String::from_utf8_lossy(&out.stdout).to_string()
+		};
+		run(&["init"]);
+		run(&["config", "user.name", "Tester"]);
+		run(&["config", "user.email", "t@example.com"]);
+		std::fs::write(dir.path().join("f.txt"), "hello").unwrap();
+		run(&["add", "f.txt"]);
+
+		let co_authors = vec!["Ava <ava@muvon.io>".to_string()];
+		let message = apply_co_author_trailers("feat: add f.txt", &co_authors);
+		run(&["commit", "-m", &message]);
+		let log = run(&["log", "-1", "--format=%B"]);
+		println!("--- git log -1 --format=%B ---\n{log}");
+		assert!(log.contains("Co-authored-by: Ava <ava@muvon.io>"));
+
+		// Amend path is idempotent: re-applying the helper must not duplicate the trailer.
+		let amended = apply_co_author_trailers(&log, &co_authors);
+		run(&["commit", "--amend", "-m", &amended, "--no-edit"]);
+		let log2 = run(&["log", "-1", "--format=%B"]);
+		println!("--- after amend ---\n{log2}");
+		assert_eq!(log2.matches("Co-authored-by:").count(), 1);
+	}
 }
