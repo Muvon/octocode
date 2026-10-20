@@ -702,13 +702,16 @@ mod tests {
 			r#"version = 3
 [commits]
 use_llm = false
-co_authored_by = ["Ava <ava@muvon.io>", "Don <don@muvon.io>"]"#,
+co_authored_by = ["Alice <alice@example.com>", "Bob <bob@example.com>"]"#,
 		)
 		.expect("co_authored_by should parse");
 
 		assert_eq!(
 			config.commits.co_authored_by,
-			vec!["Ava <ava@muvon.io>".to_string(), "Don <don@muvon.io>".to_string()]
+			vec![
+				"Alice <alice@example.com>".to_string(),
+				"Bob <bob@example.com>".to_string()
+			]
 		);
 	}
 	#[test]
