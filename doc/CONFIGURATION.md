@@ -359,7 +359,7 @@ Indexing behavior settings.
 ### [commits]
 
 - `use_llm`: Generate rich AI descriptions of commit diffs during commit indexing (default: false)
-- `co_authored_by`: List of co-authors appended as `Co-authored-by:` trailers to every commit message octocode creates, e.g. `["Ava <ava@muvon.io>"]` (default: `[]`)
+- `co_authored_by`: List of co-authors appended as `Co-authored-by:` trailers to every commit message octocode creates, e.g. `["Alice <alice@example.com>"]` (default: `[]`)
 
 ## Command Line Configuration
 

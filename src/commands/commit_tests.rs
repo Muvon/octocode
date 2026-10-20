@@ -213,35 +213,38 @@ index 111..222 100644
 
 	#[test]
 	fn apply_co_author_trailers_appends_single_entry_after_blank_line() {
-		let co_authors = vec!["Ava <ava@muvon.io>".to_string()];
+		let co_authors = vec!["Alice <alice@example.com>".to_string()];
 		assert_eq!(
 			apply_co_author_trailers("feat: add thing", &co_authors),
-			"feat: add thing\n\nCo-authored-by: Ava <ava@muvon.io>"
+			"feat: add thing\n\nCo-authored-by: Alice <alice@example.com>"
 		);
 	}
 
 	#[test]
 	fn apply_co_author_trailers_appends_multiple_entries_one_per_line() {
-		let co_authors = vec!["Ava <ava@muvon.io>".to_string(), "Don <don@muvon.io>".to_string()];
+		let co_authors = vec![
+			"Alice <alice@example.com>".to_string(),
+			"Bob <bob@example.com>".to_string(),
+		];
 		assert_eq!(
 			apply_co_author_trailers("feat: add thing", &co_authors),
-			"feat: add thing\n\nCo-authored-by: Ava <ava@muvon.io>\nCo-authored-by: Don <don@muvon.io>"
+			"feat: add thing\n\nCo-authored-by: Alice <alice@example.com>\nCo-authored-by: Bob <bob@example.com>"
 		);
 	}
 
 	#[test]
 	fn apply_co_author_trailers_is_idempotent_for_existing_trailer() {
-		let message = "feat: add thing\n\nCo-authored-by: Ava <ava@muvon.io>";
-		let co_authors = vec!["Ava <ava@muvon.io>".to_string()];
+		let message = "feat: add thing\n\nCo-authored-by: Alice <alice@example.com>";
+		let co_authors = vec!["Alice <alice@example.com>".to_string()];
 		assert_eq!(apply_co_author_trailers(message, &co_authors), message);
 	}
 
 	#[test]
 	fn apply_co_author_trailers_skips_whitespace_only_entries_and_trims() {
-		let co_authors = vec!["   ".to_string(), " Don <don@muvon.io> ".to_string()];
+		let co_authors = vec!["   ".to_string(), " Bob <bob@example.com> ".to_string()];
 		assert_eq!(
 			apply_co_author_trailers("feat: add thing", &co_authors),
-			"feat: add thing\n\nCo-authored-by: Don <don@muvon.io>"
+			"feat: add thing\n\nCo-authored-by: Bob <bob@example.com>"
 		);
 	}
 
@@ -268,12 +271,12 @@ index 111..222 100644
 		std::fs::write(dir.path().join("f.txt"), "hello").unwrap();
 		run(&["add", "f.txt"]);
 
-		let co_authors = vec!["Ava <ava@muvon.io>".to_string()];
+		let co_authors = vec!["Alice <alice@example.com>".to_string()];
 		let message = apply_co_author_trailers("feat: add f.txt", &co_authors);
 		run(&["commit", "-m", &message]);
 		let log = run(&["log", "-1", "--format=%B"]);
 		println!("--- git log -1 --format=%B ---\n{log}");
-		assert!(log.contains("Co-authored-by: Ava <ava@muvon.io>"));
+		assert!(log.contains("Co-authored-by: Alice <alice@example.com>"));
 
 		// Amend path is idempotent: re-applying the helper must not duplicate the trailer.
 		let amended = apply_co_author_trailers(&log, &co_authors);
