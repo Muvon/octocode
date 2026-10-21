@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.27.0] - 2026-10-21
+
+### 📋 Release Summary
+
+Co-authored-by trailers are now configurable, and co-authored-by examples use generic names and email addresses.
+
+### ✨ New Features & Enhancements
+
+- **commits**: configurable Co-authored-by trailers `7a1ed25e`
+
+### 🔧 Improvements & Optimizations
+
+- **dependencies**: update Rust dependency lockfile `85446295`
+- format Rust code at 120 columns `08c752a0`
+- **dependencies**: upgrade octolib requirement to 0.43.1 `37edec01`
+- **release**: inherit secrets in release workflow `eea3a187`
+- **dependencies**: refresh locked Rust dependencies `938e9fef`
+
+### 🔄 Other Changes
+
+1 maintenance, dependency, and tooling update not listed individually.
+
 ## [0.26.7] - 2026-10-11
 
 ### 📋 Release Summary
