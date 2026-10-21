@@ -74,7 +74,7 @@ use self::file_utils::FileUtils;
 // Re-export for external use
 pub use self::git_utils::GitUtils;
 pub use self::path_utils::PathUtils;
-use crate::llm::LlmClient;
+use crate::llm::{LlmClient, ModelPurpose};
 use std::fs;
 // We're using ignore::WalkBuilder instead of walkdir::WalkDir
 use anyhow::Result;
@@ -1010,18 +1010,26 @@ pub async fn index_branch_delta(
 /// Validate that all configured LLM models support structured output before indexing.
 /// Fails fast with a clear error instead of discovering the problem mid-indexing.
 fn validate_llm_structured_output(config: &Config, quiet: bool) -> Result<()> {
-	let mut models_to_check: Vec<(&str, &str)> = Vec::new();
+	let mut models_to_check: Vec<(&str, &str, ModelPurpose)> = Vec::new();
 
 	if config.graphrag.enabled && config.graphrag.use_llm {
-		models_to_check.push((&config.graphrag.llm.description_model, "graphrag.llm.description_model"));
+		models_to_check.push((
+			&config.graphrag.llm.description_model,
+			"graphrag.llm.description_model",
+			ModelPurpose::IndexGraphrag,
+		));
 	}
 
 	if config.index.contextual_descriptions {
-		models_to_check.push((&config.index.contextual_model, "index.contextual_model"));
+		models_to_check.push((
+			&config.index.contextual_model,
+			"index.contextual_model",
+			ModelPurpose::IndexContextual,
+		));
 	}
 
-	for (model_str, config_key) in models_to_check {
-		match LlmClient::with_model(config, model_str) {
+	for (model_str, config_key, purpose) in models_to_check {
+		match LlmClient::with_model(config, model_str, purpose) {
 			Ok(client) => {
 				if !client.supports_structured_output() {
 					return Err(anyhow::anyhow!(

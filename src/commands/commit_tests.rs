@@ -249,6 +249,33 @@ index 111..222 100644
 	}
 
 	#[test]
+	fn apply_co_author_trailers_dedupes_repeated_entries() {
+		let co_authors = vec![
+			"Alice <alice@example.com>".to_string(),
+			" Alice <alice@example.com>".to_string(),
+		];
+		assert_eq!(
+			apply_co_author_trailers("feat: add thing", &co_authors),
+			"feat: add thing\n\nCo-authored-by: Alice <alice@example.com>"
+		);
+	}
+
+	#[test]
+	fn resolve_co_authors_appends_cli_entries_after_config() {
+		let mut config = Config::default();
+		config.commits.co_authored_by = vec!["Alice <alice@example.com>".to_string()];
+		let cli = vec!["Bob <bob@example.com>".to_string()];
+		assert_eq!(
+			resolve_co_authors(&config, &cli),
+			vec![
+				"Alice <alice@example.com>".to_string(),
+				"Bob <bob@example.com>".to_string()
+			]
+		);
+		assert_eq!(resolve_co_authors(&Config::default(), &cli), cli);
+	}
+
+	#[test]
 	#[ignore = "e2e: shells out to the real git binary; run with cargo test -- --ignored"]
 	fn e2e_git_commit_carries_co_author_trailer_once() {
 		let dir = TempDir::new().unwrap();

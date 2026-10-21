@@ -21,7 +21,7 @@ use tokio::task::JoinSet;
 
 use octocode::config::Config;
 use octocode::indexer::git_utils::GitUtils;
-use octocode::llm::{LlmClient, Message};
+use octocode::llm::{LlmClient, Message, ModelPurpose};
 use octocode::utils::{diff_chunker, plain_line};
 
 /// Retry configuration for failed chunk processing
@@ -93,20 +93,31 @@ pub struct CommitArgs {
 	/// HEAD commits are amended directly; older commits are rewritten via git rebase.
 	#[arg(short, long, value_name = "HASH")]
 	pub commit: Option<String>,
+
+	/// Add a `Co-authored-by:` trailer (repeatable), e.g. --co-author "Alice <alice@example.com>".
+	/// Added on top of `commits.co_authored_by` from config.
+	#[arg(long = "co-author", value_name = "NAME <EMAIL>")]
+	pub co_author: Vec<String>,
 }
 
-/// Append `Co-authored-by:` trailers from config to a commit message.
+/// Merge co-authors from config with ones passed on the command line (config first).
+pub(crate) fn resolve_co_authors(config: &Config, cli: &[String]) -> Vec<String> {
+	config.commits.co_authored_by.iter().chain(cli).cloned().collect()
+}
+
+/// Append `Co-authored-by:` trailers to a commit message.
 ///
-/// Returns the message unchanged when no co-authors are configured. Existing
-/// trailer lines are not duplicated, so amend/reword paths stay idempotent.
-fn apply_co_author_trailers(message: &str, co_authors: &[String]) -> String {
-	let trailers: Vec<String> = co_authors
-		.iter()
-		.map(|a| a.trim())
-		.filter(|a| !a.is_empty())
-		.map(|a| format!("Co-authored-by: {a}"))
-		.filter(|t| !message.lines().any(|l| l == t))
-		.collect();
+/// Returns the message unchanged when no co-authors are given. Trailer lines
+/// already in the message or repeated in the list are not duplicated, so
+/// amend/reword paths stay idempotent.
+pub(crate) fn apply_co_author_trailers(message: &str, co_authors: &[String]) -> String {
+	let mut trailers: Vec<String> = Vec::new();
+	for author in co_authors.iter().map(|a| a.trim()).filter(|a| !a.is_empty()) {
+		let trailer = format!("Co-authored-by: {author}");
+		if !message.lines().any(|l| l == trailer) && !trailers.contains(&trailer) {
+			trailers.push(trailer);
+		}
+	}
 	if trailers.is_empty() {
 		return message.to_string();
 	}
@@ -128,6 +139,7 @@ fn apply_co_author_trailers(message: &str, co_authors: &[String]) -> String {
 /// generating the commit message with AI.
 pub async fn execute(config: &Config, args: &CommitArgs) -> Result<()> {
 	let current_dir = std::env::current_dir()?;
+	let co_authors = resolve_co_authors(config, &args.co_author);
 
 	// Find git repository root
 	let git_root =
@@ -138,7 +150,15 @@ pub async fn execute(config: &Config, args: &CommitArgs) -> Result<()> {
 
 	// -c/--commit mode: rewrite an existing commit's message
 	if let Some(ref hash) = args.commit {
-		return rewrite_commit_message(&current_dir, config, hash, args.message.as_deref(), args.yes).await;
+		return rewrite_commit_message(
+			&current_dir,
+			config,
+			hash,
+			args.message.as_deref(),
+			&co_authors,
+			args.yes,
+		)
+		.await;
 	}
 
 	// Add all files if requested
@@ -220,7 +240,7 @@ pub async fn execute(config: &Config, args: &CommitArgs) -> Result<()> {
 	println!("\n🤖 Generating commit message...");
 	let commit_message = apply_co_author_trailers(
 		&generate_commit_message_chunked(&current_dir, config, args.message.as_deref()).await?,
-		&config.commits.co_authored_by,
+		&co_authors,
 	);
 
 	println!("\n📝 Generated commit message:");
@@ -284,6 +304,7 @@ async fn rewrite_commit_message(
 	config: &Config,
 	hash: &str,
 	extra_context: Option<&str>,
+	co_authors: &[String],
 	skip_confirm: bool,
 ) -> Result<()> {
 	// Resolve the hash to a full SHA so we can compare with HEAD
@@ -351,7 +372,7 @@ async fn rewrite_commit_message(
 	println!("\n🤖 Generating commit message...");
 	let commit_message = apply_co_author_trailers(
 		&generate_commit_message_from_diff(&diff, config, extra_context).await?,
-		&config.commits.co_authored_by,
+		co_authors,
 	);
 
 	println!("\n📝 Generated commit message:");
@@ -882,7 +903,7 @@ Added lines inside this chunk may belong to files marked M (modified); do not as
 /// statuses, author guidance) and never a rejected draft, so it cannot be led.
 /// Transport retries live inside `chat_completion_json`.
 async fn draft_commit_message(prompt: &str, config: &Config) -> Result<String> {
-	let client = LlmClient::from_config(config)?.with_temperature(LLM_TEMPERATURE);
+	let client = LlmClient::from_config(config, ModelPurpose::Commit)?.with_temperature(LLM_TEMPERATURE);
 	let mut draft_prompt = prompt.to_string();
 	let mut rejected = Vec::new();
 	for _ in 0..MAX_AUDIT_ROUNDS {
@@ -920,7 +941,7 @@ async fn draft_once(client: &LlmClient, prompt: &str) -> Result<String> {
 
 /// One LLM call that turns a diff chunk into a plain change list.
 async fn summarise_chunk(prompt: &str, config: &Config) -> Result<String> {
-	let client = LlmClient::from_config(config)?;
+	let client = LlmClient::from_config(config, ModelPurpose::Commit)?;
 	let messages = vec![Message::system(CHUNK_SYSTEM_PROMPT), Message::user(prompt)];
 	client.chat_completion_with_temperature(messages, LLM_TEMPERATURE).await
 }

@@ -24,7 +24,7 @@
 //! input order so search never breaks.
 
 use crate::config::Config;
-use crate::llm::{LlmClient, Message};
+use crate::llm::{LlmClient, Message, ModelPurpose};
 use crate::store::CodeBlock;
 use anyhow::Result;
 
@@ -49,7 +49,7 @@ pub async fn reason_rank_code_blocks(query: &str, blocks: Vec<CodeBlock>, config
 	let mut pool = blocks;
 	pool.truncate(rc.max_candidates.max(1));
 
-	let client = match LlmClient::with_model(config, &rc.model) {
+	let client = match LlmClient::with_model(config, &rc.model, ModelPurpose::Search) {
 		Ok(c) => c.with_reasoning_effort(rc.reasoning_effort),
 		Err(e) => {
 			tracing::warn!("reasoning: cannot build LLM client ({e}); keeping input order");

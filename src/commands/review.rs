@@ -544,9 +544,9 @@ fn should_show_issue(issue_severity: &str, filter: &str) -> bool {
 }
 
 async fn call_llm_for_review(prompt: &str, config: &Config) -> Result<serde_json::Value> {
-	use octocode::llm::{LlmClient, Message};
+	use octocode::llm::{LlmClient, Message, ModelPurpose};
 
-	let client = LlmClient::from_config(config)?;
+	let client = LlmClient::from_config(config, ModelPurpose::Review)?;
 	let messages = vec![Message::user(prompt)];
 
 	let schema = serde_json::json!({

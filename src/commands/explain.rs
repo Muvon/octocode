@@ -17,7 +17,7 @@ use std::path::Path;
 
 use octocode::config::Config;
 use octocode::indexer;
-use octocode::llm::{LlmClient, Message};
+use octocode::llm::{LlmClient, Message, ModelPurpose};
 use octocode::store::Store;
 use octocode::utils::truncate_at_char_boundary;
 
@@ -78,7 +78,7 @@ pub async fn execute(store: &Store, args: &ExplainArgs, config: &Config) -> Resu
 	);
 
 	// Step 3: Call LLM
-	let client = LlmClient::from_config(config)?;
+	let client = LlmClient::from_config(config, ModelPurpose::Explain)?;
 	let messages = vec![Message::system(EXPLAIN_SYSTEM_PROMPT), Message::user(&user_prompt)];
 
 	let explanation = client.chat_completion(messages).await?;

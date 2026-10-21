@@ -23,7 +23,7 @@
 //! queries and code tokens.
 
 use crate::config::Config;
-use crate::llm::{LlmClient, Message};
+use crate::llm::{LlmClient, Message, ModelPurpose};
 use crate::store::CodeBlock;
 use anyhow::Result;
 use std::collections::HashMap;
@@ -137,13 +137,14 @@ pub async fn generate_contextual_descriptions(
 	let mut descriptions = HashMap::new();
 
 	// When contextual descriptions are enabled, LLM is required — no silent fallback.
-	let client = LlmClient::with_model(config, &config.index.contextual_model).map_err(|e| {
-		anyhow::anyhow!(
-			"LLM required for contextual descriptions but unavailable (model: {}): {}",
-			config.index.contextual_model,
-			e
-		)
-	})?;
+	let client =
+		LlmClient::with_model(config, &config.index.contextual_model, ModelPurpose::IndexContextual).map_err(|e| {
+			anyhow::anyhow!(
+				"LLM required for contextual descriptions but unavailable (model: {}): {}",
+				config.index.contextual_model,
+				e
+			)
+		})?;
 
 	// Build per-file sibling symbols from blocks in this batch
 	// (complements file_context which has symbols from all regions in the file)

@@ -18,7 +18,7 @@ use std::path::Path;
 use crate::config::Config;
 use crate::embedding;
 use crate::indexer::git_utils::{CommitEntry, GitUtils};
-use crate::llm::{LlmClient, Message};
+use crate::llm::{LlmClient, Message, ModelPurpose};
 use crate::state::SharedState;
 use crate::store::{CommitBlock, Store};
 
@@ -170,7 +170,7 @@ async fn generate_descriptions(
 ) -> Result<std::collections::HashMap<String, String>> {
 	let mut descriptions = std::collections::HashMap::new();
 
-	let client = match LlmClient::from_config(config) {
+	let client = match LlmClient::from_config(config, ModelPurpose::IndexCommits) {
 		Ok(c) => c,
 		Err(e) => {
 			if !quiet {

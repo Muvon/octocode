@@ -16,7 +16,7 @@
 
 use crate::config::Config;
 use crate::indexer::graphrag::types::{CodeNode, CodeRelationship};
-use crate::llm::{LlmClient, Message};
+use crate::llm::{LlmClient, Message, ModelPurpose};
 use anyhow::Result;
 use serde::Deserialize;
 use serde_json::json;
@@ -57,13 +57,15 @@ impl AIEnhancements {
 	pub fn new(config: Config, quiet: bool) -> Result<Self> {
 		// When GraphRAG LLM is enabled, LLM is required — no silent fallback.
 		let llm_client = if config.graphrag.use_llm {
-			Some(LlmClient::from_config(&config).map_err(|e| {
-				anyhow::anyhow!(
-					"LLM required for GraphRAG but unavailable: {}. \
+			Some(
+				LlmClient::from_config(&config, ModelPurpose::IndexGraphrag).map_err(|e| {
+					anyhow::anyhow!(
+						"LLM required for GraphRAG but unavailable: {}. \
 					 Disable graphrag.use_llm or fix LLM configuration.",
-					e
-				)
-			})?)
+						e
+					)
+				})?,
+			)
 		} else {
 			None
 		};
@@ -532,7 +534,7 @@ impl AIEnhancements {
 
 	fn create_llm_client(&self, model_name: &str) -> Result<LlmClient> {
 		if self.llm_client.is_some() {
-			LlmClient::with_model(&self.config, model_name)
+			LlmClient::with_model(&self.config, model_name, ModelPurpose::IndexGraphrag)
 		} else {
 			Err(anyhow::anyhow!("LLM client not initialized"))
 		}

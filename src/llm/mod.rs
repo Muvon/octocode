@@ -20,6 +20,7 @@
 use crate::config::{Config, ReasoningEffortConfig};
 use anyhow::Result;
 use serde::de::DeserializeOwned;
+use std::collections::HashMap;
 use std::time::Duration;
 
 // Re-export octolib types for convenience
@@ -27,6 +28,53 @@ pub use octolib::llm::{
 	AiProvider, ChatCompletionParams, Message, MessageBuilder, ProviderFactory, ProviderResponse, ReasoningEffort,
 	StructuredOutputRequest, TokenUsage,
 };
+
+/// The header carrying [`ModelPurpose`] to the octohub proxy.
+pub const MODEL_PURPOSE_HEADER: &str = "X-Model-Purpose";
+
+/// Where in octocode a model call originates. Sent on every completion as the
+/// `X-Model-Purpose` header so octohub's virtual `auto` model can route each
+/// purpose to a different real model; providers that aren't octohub ignore it.
+///
+/// Values are hierarchical by dash segment: octohub falls back from
+/// `octocode-index-graphrag` to `octocode-index`, then `octocode`, then its default.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ModelPurpose {
+	/// Commit message generation.
+	Commit,
+	/// Code review of staged changes.
+	Review,
+	/// Release notes and version calculation.
+	Release,
+	/// Diff summaries.
+	Diff,
+	/// Explanations of search results.
+	Explain,
+	/// Reasoning rerank of search results.
+	Search,
+	/// Per-chunk contextual descriptions at index time.
+	IndexContextual,
+	/// GraphRAG file descriptions and relationships at index time.
+	IndexGraphrag,
+	/// Commit descriptions at index time.
+	IndexCommits,
+}
+
+impl ModelPurpose {
+	pub fn as_str(&self) -> &'static str {
+		match self {
+			Self::Commit => "octocode-commit",
+			Self::Review => "octocode-review",
+			Self::Release => "octocode-release",
+			Self::Diff => "octocode-diff",
+			Self::Explain => "octocode-explain",
+			Self::Search => "octocode-search",
+			Self::IndexContextual => "octocode-index-contextual",
+			Self::IndexGraphrag => "octocode-index-graphrag",
+			Self::IndexCommits => "octocode-index-commits",
+		}
+	}
+}
 
 /// LLM client wrapper that integrates octolib with octocode configuration
 /// LLM client wrapper that integrates octolib with octocode configuration
@@ -38,11 +86,13 @@ pub struct LlmClient {
 	/// Thinking budget for every call this client makes. `None` leaves it to the
 	/// provider default.
 	reasoning_effort: Option<ReasoningEffort>,
+	/// Sent as [`MODEL_PURPOSE_HEADER`] on every call this client makes.
+	purpose: ModelPurpose,
 }
 
 impl LlmClient {
 	/// Create LlmClient from octocode Config
-	pub fn from_config(config: &Config) -> Result<Self> {
+	pub fn from_config(config: &Config, purpose: ModelPurpose) -> Result<Self> {
 		let (provider, model) = ProviderFactory::get_provider_for_model(&config.llm.model)?;
 
 		Ok(Self {
@@ -51,11 +101,12 @@ impl LlmClient {
 			temperature: config.llm.temperature,
 			max_tokens: config.llm.max_tokens,
 			reasoning_effort: None,
+			purpose,
 		})
 	}
 
 	/// Create LlmClient with custom model (overrides config)
-	pub fn with_model(config: &Config, model_str: &str) -> Result<Self> {
+	pub fn with_model(config: &Config, model_str: &str, purpose: ModelPurpose) -> Result<Self> {
 		let (provider, model) = ProviderFactory::get_provider_for_model(model_str)?;
 
 		Ok(Self {
@@ -64,6 +115,7 @@ impl LlmClient {
 			temperature: config.llm.temperature,
 			max_tokens: config.llm.max_tokens,
 			reasoning_effort: None,
+			purpose,
 		})
 	}
 
@@ -79,8 +131,21 @@ impl LlmClient {
 		self
 	}
 
-	/// Apply this client's thinking budget, if it has one.
-	fn with_effort(&self, params: ChatCompletionParams) -> ChatCompletionParams {
+	/// Build the request params every call shares: this client's model, token
+	/// limits, thinking budget and purpose header.
+	fn params(&self, messages: &[Message], temperature: f32) -> ChatCompletionParams {
+		let params = ChatCompletionParams::new(
+			messages,
+			&self.model,
+			temperature,
+			1.0,                    // top_p
+			50,                     // min_tokens
+			self.max_tokens as u32, // max_tokens (convert usize to u32)
+		)
+		.with_extra_headers(HashMap::from([(
+			MODEL_PURPOSE_HEADER.to_string(),
+			self.purpose.as_str().to_string(),
+		)]));
 		match self.reasoning_effort {
 			Some(effort) => params.with_reasoning_effort(effort),
 			None => params,
@@ -106,14 +171,7 @@ impl LlmClient {
 				tokio::time::sleep(delay).await;
 			}
 
-			let params = self.with_effort(ChatCompletionParams::new(
-				&messages,
-				&self.model,
-				self.temperature,
-				1.0,                    // top_p
-				50,                     // min_tokens
-				self.max_tokens as u32, // max_tokens (convert usize to u32)
-			));
+			let params = self.params(&messages, self.temperature);
 
 			match self.provider.chat_completion(params).await {
 				Ok(response) => {
@@ -153,17 +211,9 @@ impl LlmClient {
 		}
 
 		let structured_request = StructuredOutputRequest::json();
-		let params = self.with_effort(
-			ChatCompletionParams::new(
-				&messages,
-				&self.model,
-				self.temperature,
-				1.0,                    // top_p
-				50,                     // min_tokens
-				self.max_tokens as u32, // max_tokens (convert usize to u32)
-			)
-			.with_structured_output(structured_request),
-		);
+		let params = self
+			.params(&messages, self.temperature)
+			.with_structured_output(structured_request);
 
 		let response = self.provider.chat_completion(params).await?;
 
@@ -194,14 +244,7 @@ impl LlmClient {
 
 	/// Chat completion with custom temperature
 	pub async fn chat_completion_with_temperature(&self, messages: Vec<Message>, temperature: f32) -> Result<String> {
-		let params = self.with_effort(ChatCompletionParams::new(
-			&messages,
-			&self.model,
-			temperature,
-			1.0,                    // top_p
-			50,                     // min_tokens
-			self.max_tokens as u32, // max_tokens (convert usize to u32)
-		));
+		let params = self.params(&messages, temperature);
 
 		let response = self.provider.chat_completion(params).await?;
 
@@ -291,17 +334,9 @@ impl LlmClient {
 					Some(s) => StructuredOutputRequest::json_schema(s.clone()).with_strict_mode(),
 					None => StructuredOutputRequest::json(),
 				};
-				let params = self.with_effort(
-					ChatCompletionParams::new(
-						&messages,
-						&self.model,
-						self.temperature,
-						1.0,
-						50,
-						self.max_tokens as u32,
-					)
-					.with_structured_output(structured_request),
-				);
+				let params = self
+					.params(&messages, self.temperature)
+					.with_structured_output(structured_request);
 
 				match self.provider.chat_completion(params).await {
 					Ok(response) => {

@@ -245,6 +245,15 @@ For `local:`, `LOCAL_API_URL` must point to the full
 sent as a bearer token. See the [API Keys guide](API_KEYS.md#openai-compatible-endpoints)
 for unauthenticated and authenticated examples.
 
+**OctoHub `auto`:** every LLM request carries an `X-Model-Purpose` header so a
+model slot set to `octohub:auto` (in `[llm]`, `index.contextual_model`,
+`graphrag.llm.*` or `search.reasoning.model`) can be routed per task. Values:
+`octocode-commit`, `octocode-review`, `octocode-release`, `octocode-diff`,
+`octocode-explain`, `octocode-search`, `octocode-index-contextual`,
+`octocode-index-graphrag`, `octocode-index-commits`. OctoHub matches them
+hierarchically by dash: `octocode-index-graphrag` falls back to
+`octocode-index`, then `octocode`, then its default. Other providers ignore the header.
+
 ### [embedding]
 Core embedding configuration.
 
@@ -359,7 +368,7 @@ Indexing behavior settings.
 ### [commits]
 
 - `use_llm`: Generate rich AI descriptions of commit diffs during commit indexing (default: false)
-- `co_authored_by`: List of co-authors appended as `Co-authored-by:` trailers to every commit message octocode creates, e.g. `["Alice <alice@example.com>"]` (default: `[]`)
+- `co_authored_by`: List of co-authors appended as `Co-authored-by:` trailers to every commit message octocode creates (`octocode commit` and the `octocode release` commit), e.g. `["Alice <alice@example.com>"]` (default: `[]`). Add more per run with repeatable `--co-author "Name <email>"`; CLI entries are appended to the configured ones, duplicates dropped
 
 ## Command Line Configuration
 

@@ -22,8 +22,10 @@ use std::process::Command;
 
 use octocode::config::Config;
 use octocode::indexer::git_utils::GitUtils;
-use octocode::llm::{LlmClient, Message};
+use octocode::llm::{LlmClient, Message, ModelPurpose};
 use octocode::utils::plain_line;
+
+use super::commit::{apply_co_author_trailers, resolve_co_authors};
 
 #[cfg(test)]
 #[path = "release_tests.rs"]
@@ -46,6 +48,11 @@ pub struct ReleaseArgs {
 	/// Force a specific version instead of the conventional-commit bump
 	#[arg(short, long)]
 	pub force_version: Option<String>,
+
+	/// Add a `Co-authored-by:` trailer to the release commit (repeatable), e.g.
+	/// --co-author "Alice <alice@example.com>". Added on top of `commits.co_authored_by` from config.
+	#[arg(long = "co-author", value_name = "NAME <EMAIL>")]
+	pub co_author: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -213,7 +220,10 @@ pub async fn execute(config: &Config, args: &ReleaseArgs) -> Result<()> {
 	println!("✅ Staged release files");
 
 	// Create release commit
-	let commit_message = format!("chore(release): {}", version_calculation.new_version);
+	let commit_message = apply_co_author_trailers(
+		&format!("chore(release): {}", version_calculation.new_version),
+		&resolve_co_authors(config, &args.co_author),
+	);
 	create_commit(&commit_message).await?;
 	println!("✅ Created release commit");
 
@@ -864,7 +874,7 @@ async fn generate_ai_changelog_summary(
 		prompt.push('\n');
 	}
 
-	let client = LlmClient::from_config(config)?.with_temperature(LLM_TEMPERATURE);
+	let client = LlmClient::from_config(config, ModelPurpose::Release)?.with_temperature(LLM_TEMPERATURE);
 	let schema = serde_json::json!({
 		"type": "object",
 		"properties": {"summary": {"type": "string"}},

@@ -330,6 +330,9 @@ octocode commit --no-verify
 # Rewrite the message of an existing commit by hash
 # (HEAD commits are amended in place; older commits are rewritten via rebase)
 octocode commit --commit abc1234
+
+# Add Co-authored-by trailers (repeatable; adds to commits.co_authored_by in config)
+octocode commit --co-author "Alice <alice@example.com>" --co-author "Bob <bob@example.com>"
 ```
 
 **How the message is produced:**
@@ -388,6 +391,9 @@ octocode release --yes
 
 # Custom changelog file
 octocode release --changelog "HISTORY.md"
+
+# Add Co-authored-by trailers to the release commit (repeatable; adds to commits.co_authored_by)
+octocode release --co-author "Alice <alice@example.com>"
 ```
 
 **Supported project types:**

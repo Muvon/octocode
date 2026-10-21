@@ -15,12 +15,12 @@
 #[cfg(test)]
 mod tests {
 	use super::super::*;
-	use crate::config::Config;
+	use crate::config::{Config, ReasoningEffortConfig};
 
 	#[test]
 	fn a_client_is_built_from_the_configured_model() {
 		let config = Config::default();
-		let client = LlmClient::from_config(&config).expect("the shipped default must resolve");
+		let client = LlmClient::from_config(&config, ModelPurpose::Commit).expect("the shipped default must resolve");
 		assert!(!client.model().is_empty());
 		// The model name loses its provider prefix once the provider is resolved.
 		assert!(config.llm.model.ends_with(client.model()), "{}", client.model());
@@ -29,24 +29,24 @@ mod tests {
 	#[test]
 	fn an_explicit_model_overrides_the_configured_one() {
 		let config = Config::default();
-		let client =
-			LlmClient::with_model(&config, "openai:gpt-4o-mini").expect("a provider-prefixed model must resolve");
+		let client = LlmClient::with_model(&config, "openai:gpt-4o-mini", ModelPurpose::Commit)
+			.expect("a provider-prefixed model must resolve");
 		assert_eq!(client.model(), "gpt-4o-mini");
 	}
 
 	#[test]
 	fn a_model_without_a_provider_is_rejected() {
 		let config = Config::default();
-		assert!(LlmClient::with_model(&config, "gpt-4o-mini").is_err());
+		assert!(LlmClient::with_model(&config, "gpt-4o-mini", ModelPurpose::Commit).is_err());
 		// A slash is not the separator — only `provider:model` is accepted.
-		assert!(LlmClient::with_model(&config, "openai/gpt-4o-mini").is_err());
-		assert!(LlmClient::with_model(&config, "").is_err());
+		assert!(LlmClient::with_model(&config, "openai/gpt-4o-mini", ModelPurpose::Commit).is_err());
+		assert!(LlmClient::with_model(&config, "", ModelPurpose::Commit).is_err());
 	}
 
 	#[test]
 	fn structured_output_support_is_reported_per_provider() {
 		let config = Config::default();
-		let client = LlmClient::with_model(&config, "openai:gpt-4o-mini").unwrap();
+		let client = LlmClient::with_model(&config, "openai:gpt-4o-mini", ModelPurpose::Commit).unwrap();
 		// Only asserts the call is wired through to the provider; the answer is
 		// the provider's to decide.
 		let _ = client.supports_structured_output();
@@ -90,7 +90,7 @@ mod tests {
 	fn a_configured_model_without_a_provider_prefix_fails_to_build_a_client() {
 		let mut config = Config::default();
 		config.llm.model = "gpt-4o-mini".to_string();
-		assert!(LlmClient::from_config(&config).is_err());
+		assert!(LlmClient::from_config(&config, ModelPurpose::Commit).is_err());
 	}
 
 	#[test]
@@ -165,5 +165,52 @@ mod tests {
 		let value = LlmClient::strip_json_from_markdown("");
 		assert_eq!(value["error"], serde_json::json!("Failed to parse JSON from response"));
 		assert_eq!(value["raw_content"], serde_json::json!(""));
+	}
+
+	#[test]
+	fn every_purpose_is_an_octocode_value_for_octohub_auto_routing() {
+		// octohub matches these against its purpose map, falling back by dash
+		// segment, so the exact strings are a contract.
+		let expected = [
+			(ModelPurpose::Commit, "octocode-commit"),
+			(ModelPurpose::Review, "octocode-review"),
+			(ModelPurpose::Release, "octocode-release"),
+			(ModelPurpose::Diff, "octocode-diff"),
+			(ModelPurpose::Explain, "octocode-explain"),
+			(ModelPurpose::Search, "octocode-search"),
+			(ModelPurpose::IndexContextual, "octocode-index-contextual"),
+			(ModelPurpose::IndexGraphrag, "octocode-index-graphrag"),
+			(ModelPurpose::IndexCommits, "octocode-index-commits"),
+		];
+		for (purpose, value) in expected {
+			assert_eq!(purpose.as_str(), value);
+		}
+		assert_eq!(MODEL_PURPOSE_HEADER, "X-Model-Purpose");
+	}
+
+	#[test]
+	fn every_request_carries_the_client_purpose_header() {
+		let config = Config::default();
+		for purpose in [ModelPurpose::Search, ModelPurpose::IndexGraphrag] {
+			let client = LlmClient::with_model(&config, "openai:gpt-4o-mini", purpose).unwrap();
+			let params = client.params(&[Message::user("hi")], 0.3);
+			let headers = params.extra_headers.expect("the purpose header must be set");
+			assert_eq!(headers.len(), 1);
+			assert_eq!(
+				headers.get(MODEL_PURPOSE_HEADER).map(String::as_str),
+				Some(purpose.as_str())
+			);
+		}
+	}
+
+	#[test]
+	fn the_purpose_header_survives_reasoning_effort_and_temperature_overrides() {
+		let config = Config::default();
+		let client = LlmClient::from_config(&config, ModelPurpose::Release)
+			.unwrap()
+			.with_temperature(0.9)
+			.with_reasoning_effort(ReasoningEffortConfig::High);
+		let headers = client.params(&[], client.temperature).extra_headers.unwrap();
+		assert_eq!(headers[MODEL_PURPOSE_HEADER], "octocode-release");
 	}
 }

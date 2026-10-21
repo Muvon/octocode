@@ -19,7 +19,7 @@ use std::process::Command;
 
 use octocode::config::Config;
 use octocode::indexer;
-use octocode::llm::{LlmClient, Message};
+use octocode::llm::{LlmClient, Message, ModelPurpose};
 use octocode::store::Store;
 use octocode::utils::diff_chunker;
 
@@ -310,7 +310,7 @@ async fn analyze_diff(
 	_label: &str,
 	config: &Config,
 ) -> Result<DiffAnalysis, anyhow::Error> {
-	let client = LlmClient::from_config(config)?;
+	let client = LlmClient::from_config(config, ModelPurpose::Diff)?;
 
 	// Check if diff needs chunking
 	let max_diff_chars = 12000;
