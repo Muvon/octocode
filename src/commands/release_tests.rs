@@ -67,6 +67,41 @@ mod tests {
 	}
 
 	#[test]
+	fn a_plain_version_file_is_used_only_without_a_manifest() {
+		let dir = TempDir::new().unwrap();
+		std::fs::write(dir.path().join("version.txt"), "1.0.0\n").unwrap();
+		let detected = detect_project_type(dir.path()).unwrap();
+		assert_eq!(format_project_type(&detected), "Version file (version.txt)");
+
+		// VERSION wins over version.txt, and any manifest wins over both
+		std::fs::write(dir.path().join("VERSION"), "1.0.0\n").unwrap();
+		let detected = detect_project_type(dir.path()).unwrap();
+		assert_eq!(format_project_type(&detected), "Version file (VERSION)");
+
+		std::fs::write(dir.path().join("package.json"), "").unwrap();
+		assert!(matches!(detect_project_type(dir.path()).unwrap(), ProjectType::Node(_)));
+	}
+
+	#[test]
+	fn version_file_content_keeps_its_line_ending() {
+		assert_eq!(update_version_file_content("1.0.0", "1.1.0"), "1.1.0");
+		assert_eq!(update_version_file_content("1.0.0\n", "1.1.0"), "1.1.0\n");
+		assert_eq!(update_version_file_content("1.0.0\r\n", "1.1.0"), "1.1.0\r\n");
+	}
+
+	#[tokio::test]
+	async fn a_version_file_is_read_trimmed_and_bumped_in_place() {
+		let dir = TempDir::new().unwrap();
+		let path = dir.path().join("VERSION");
+		std::fs::write(&path, "2.5.0\n").unwrap();
+		let project = ProjectType::VersionFile(path.clone());
+
+		assert_eq!(get_current_version(&project).await.unwrap(), "2.5.0");
+		update_project_version(&project, "2.6.0").await.unwrap();
+		assert_eq!(std::fs::read_to_string(&path).unwrap(), "2.6.0\n");
+	}
+
+	#[test]
 	fn a_quoted_version_is_extracted_from_a_manifest_line() {
 		assert_eq!(
 			extract_version_from_line("version = \"1.2.3\"").as_deref(),

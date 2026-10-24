@@ -92,6 +92,7 @@ pub enum ProjectType {
 	Go(PathBuf),              // go.mod
 	Python(PathBuf),          // pyproject.toml
 	ChromeExtension(PathBuf), // manifest.json
+	VersionFile(PathBuf),     // VERSION or version.txt holding only the version
 	Unknown,
 }
 
@@ -260,9 +261,33 @@ fn detect_project_type(dir: &Path) -> Result<ProjectType> {
 		Ok(ProjectType::Python(dir.join("pyproject.toml")))
 	} else if is_extension_manifest(&dir.join("manifest.json")) {
 		Ok(ProjectType::ChromeExtension(dir.join("manifest.json")))
+	} else if let Some(version_file) = find_version_file(dir) {
+		Ok(ProjectType::VersionFile(version_file))
 	} else {
 		Ok(ProjectType::Unknown)
 	}
+}
+
+/// A plain version file at the project root: the convention for projects with no
+/// manifest (shell tools, Makefile or Docker projects), like release-please's
+/// `simple` strategy. Only used when no language manifest is present.
+fn find_version_file(dir: &Path) -> Option<PathBuf> {
+	["VERSION", "version.txt"]
+		.iter()
+		.map(|name| dir.join(name))
+		.find(|path| path.is_file())
+}
+
+/// Version file content with the version replaced, keeping a trailing newline if there was one
+fn update_version_file_content(content: &str, new_version: &str) -> String {
+	let newline = if content.ends_with("\r\n") {
+		"\r\n"
+	} else if content.ends_with('\n') {
+		"\n"
+	} else {
+		""
+	};
+	format!("{}{}", new_version, newline)
 }
 
 fn format_project_type(project_type: &ProjectType) -> String {
@@ -273,6 +298,10 @@ fn format_project_type(project_type: &ProjectType) -> String {
 		ProjectType::Go(_) => "Go (go.mod)".to_string(),
 		ProjectType::Python(_) => "Python (pyproject.toml)".to_string(),
 		ProjectType::ChromeExtension(_) => "Chrome extension (manifest.json)".to_string(),
+		ProjectType::VersionFile(path) => format!(
+			"Version file ({})",
+			path.file_name().unwrap_or_default().to_string_lossy()
+		),
 		ProjectType::Unknown => "Unknown (no project file detected)".to_string(),
 	}
 }
@@ -344,6 +373,13 @@ async fn get_current_version(project_type: &ProjectType) -> Result<String> {
 			let content = fs::read_to_string(manifest_path)?;
 			let manifest: serde_json::Value = serde_json::from_str(&content)?;
 			if let Some(version) = manifest.get("version").and_then(|v| v.as_str()) {
+				return Ok(version.to_string());
+			}
+		}
+		ProjectType::VersionFile(version_path) => {
+			let content = fs::read_to_string(version_path)?;
+			let version = content.trim();
+			if !version.is_empty() {
 				return Ok(version.to_string());
 			}
 		}
@@ -785,6 +821,15 @@ async fn gather_project_context(project_type: &ProjectType) -> Result<(String, S
 				("Unknown Project".to_string(), "Chrome extension".to_string())
 			}
 		}
+		ProjectType::VersionFile(version_path) => {
+			// No manifest to read: the project directory name is the best name we have
+			let name = version_path
+				.parent()
+				.and_then(|dir| dir.file_name())
+				.map(|name| name.to_string_lossy().into_owned())
+				.unwrap_or("Unknown Project".to_string());
+			(name, "Software project".to_string())
+		}
 		ProjectType::Unknown => ("Unknown Project".to_string(), "Software project".to_string()),
 	};
 	Ok((name, description))
@@ -923,7 +968,8 @@ async fn update_project_version(project_type: &ProjectType, new_version: &str) -
 		| ProjectType::Php(p)
 		| ProjectType::Go(p)
 		| ProjectType::Python(p)
-		| ProjectType::ChromeExtension(p) => p.parent().unwrap().to_path_buf(),
+		| ProjectType::ChromeExtension(p)
+		| ProjectType::VersionFile(p) => p.parent().unwrap().to_path_buf(),
 		ProjectType::Unknown => std::env::current_dir()?,
 	};
 
@@ -966,6 +1012,10 @@ async fn update_project_version(project_type: &ProjectType, new_version: &str) -
 		ProjectType::ChromeExtension(_) => {
 			// The root manifest is rewritten below with any nested extension manifests
 		}
+		ProjectType::VersionFile(version_path) => {
+			let content = fs::read_to_string(version_path)?;
+			fs::write(version_path, update_version_file_content(&content, new_version))?;
+		}
 		ProjectType::Unknown => {
 			// No project file to update
 		}
@@ -978,7 +1028,8 @@ async fn update_project_version(project_type: &ProjectType, new_version: &str) -
 		| ProjectType::Php(p)
 		| ProjectType::Go(p)
 		| ProjectType::Python(p)
-		| ProjectType::ChromeExtension(p) => p.parent().unwrap().join("server.json"),
+		| ProjectType::ChromeExtension(p)
+		| ProjectType::VersionFile(p) => p.parent().unwrap().join("server.json"),
 		ProjectType::Unknown => std::env::current_dir()?.join("server.json"),
 	};
 	if server_json_path.exists() {
@@ -1108,7 +1159,7 @@ async fn update_lock_files(project_type: &ProjectType) -> Result<()> {
 				}
 			}
 		}
-		ProjectType::ChromeExtension(_) | ProjectType::Unknown => {
+		ProjectType::ChromeExtension(_) | ProjectType::VersionFile(_) | ProjectType::Unknown => {
 			// No lock file to update
 		}
 	}
@@ -1462,7 +1513,8 @@ async fn stage_release_files(changelog_path: &str, project_type: &ProjectType) -
 		| ProjectType::Php(p)
 		| ProjectType::Go(p)
 		| ProjectType::Python(p)
-		| ProjectType::ChromeExtension(p) => p.parent().unwrap_or(Path::new(".")).to_path_buf(),
+		| ProjectType::ChromeExtension(p)
+		| ProjectType::VersionFile(p) => p.parent().unwrap_or(Path::new(".")).to_path_buf(),
 		ProjectType::Unknown => std::env::current_dir()?,
 	};
 	match project_type {
@@ -1515,6 +1567,9 @@ async fn stage_release_files(changelog_path: &str, project_type: &ProjectType) -
 			if uv_lock.exists() {
 				files_to_stage.push(uv_lock.to_string_lossy().to_string());
 			}
+		}
+		ProjectType::VersionFile(path) => {
+			files_to_stage.push(path.to_string_lossy().to_string());
 		}
 		ProjectType::ChromeExtension(_) | ProjectType::Unknown => {}
 	}

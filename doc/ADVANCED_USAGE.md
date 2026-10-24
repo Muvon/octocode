@@ -144,7 +144,7 @@ octocode release --changelog "HISTORY.md"
 
 **How it works:**
 
-1. **Project Detection**: Automatically detects project type (Rust, Node.js, PHP, Go, Python)
+1. **Project Detection**: Automatically detects project type (Rust, Node.js, PHP, Go, Python, Chrome extension, or a plain `VERSION` file)
 2. **Version Analysis**: Extracts current version from project files or git tags
 3. **Commit Analysis**: Analyzes commits since last release using conventional commit format
 4. **AI Calculation**: Uses LLM to determine appropriate semantic version bump

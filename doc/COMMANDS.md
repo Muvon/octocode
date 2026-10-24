@@ -403,6 +403,7 @@ octocode release --co-author "Alice <alice@example.com>"
 - Go (go.mod)
 - Python (pyproject.toml)
 - Chrome extension (manifest.json with `manifest_version`; also synced in root/`public/`/`src/` alongside any other project type)
+- Plain version file (`VERSION` or `version.txt` at the root; used when no manifest above is present, e.g. Bash tools)
 
 ## MCP Server Commands
 

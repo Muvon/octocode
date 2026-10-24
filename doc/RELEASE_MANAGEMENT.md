@@ -124,6 +124,20 @@ Chrome accepts only 1-4 dot-separated integers, so a pre-release version (e.g. `
 - `manifest.json` - Extension version (each one found)
 - `CHANGELOG.md` - Release notes
 
+### Plain Version File (VERSION or version.txt)
+
+For projects without a language manifest (Bash tools, Makefile or Docker projects), put the version alone in a `VERSION` (or `version.txt`) file at the project root:
+
+```text
+1.4.0
+```
+
+It is used only when none of the manifests above is present; `VERSION` wins over `version.txt`. Have your tool read the version from this file at runtime so it stays the single source of truth. The version must be a full semver (`1.4.0`, not `1.4`).
+
+**Files updated:**
+- `VERSION` / `version.txt` - Version string (trailing newline kept)
+- `CHANGELOG.md` - Release notes
+
 ## How It Works
 
 ### 1. Project Detection
@@ -135,6 +149,7 @@ Octocode automatically detects your project type by scanning for:
 - `go.mod` → Go project
 - `pyproject.toml` → Python project
 - `manifest.json` with `manifest_version` → Chrome extension
+- `VERSION` or `version.txt` → Plain version file (only when no manifest is found)
 
 ### 2. Version Analysis
 
