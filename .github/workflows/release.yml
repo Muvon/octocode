@@ -270,6 +270,10 @@ jobs:
           cargo build --release --target ${{ matrix.target }}
         else
           # Native build for other macOS targets (aarch64) — pyke ships prebuilts.
+          # Pyke's ort-sys 2.0.0-rc.15 prebuilt calls ___isPlatformVersionAtLeast
+          # (CoreML @available checks). It lives only in clang's compiler-rt
+          # archive, which rustc does not link on macOS, so pass it explicitly.
+          export RUSTFLAGS="-C link-arg=$(xcrun clang --print-resource-dir)/lib/darwin/libclang_rt.osx.a"
           cargo build --release --target ${{ matrix.target }}
         fi
     - name: Create archive directory
