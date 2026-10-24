@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.28.0] - 2026-10-24
+
+### 📋 Release Summary
+
+Release versioning now supports plain version files.
+
+### 🚨 Breaking Changes
+
+- support model-purpose routing and CLI co-authors `02c6bf18`
+
+### ✨ New Features & Enhancements
+
+- **release**: support plain version files `4c0800fe`
+
+### 🔧 Improvements & Optimizations
+
+- **dependencies**: refresh locked dependency versions `7e24a9df`
+
 ## [0.27.0] - 2026-10-21
 
 ### 📋 Release Summary
