@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.28.1] - 2026-10-25
+
+### 🔧 Improvements & Optimizations
+
+- **dependencies**: update locked dependency versions `b6c92319`
+- **mcp**: update rmcp and clarify transport comment `d340fd93`
+- **dependencies**: refresh locked dependency versions `06168e8e`
+
+### 🔄 Other Changes
+
+1 maintenance, dependency, and tooling update not listed individually.
+
 ## [0.28.0] - 2026-10-24
 
 ### 📋 Release Summary
