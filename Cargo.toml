@@ -113,7 +113,7 @@ zstd = { version = "0.13", default-features = false, features = ["zstdmt"] }
 octolib = { version = "0.45.1", default-features = false, features = ["llm", "embeddings", "reranker"] }
 
 # MCP SDK - official Rust implementation
-rmcp = { version = "3.0.0", features = ["server", "macros", "transport-io", "transport-streamable-http-server"] }
+rmcp = { version = "3.7.0", features = ["server", "macros", "transport-io", "transport-streamable-http-server"] }
 schemars = "1"  # Required for rmcp schema generation (must match rmcp's version)
 hyper = { version = "1", features = ["server", "http1"] }  # Required for HTTP mode connection handling
 hyper-util = { version = "0.1", features = ["server", "tokio", "service"] }  # Required for HTTP mode connection handling

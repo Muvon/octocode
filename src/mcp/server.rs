@@ -1416,7 +1416,8 @@ impl McpServer {
 		Ok(())
 	}
 
-	/// Run the server using Streamable HTTP transport (MCP 2025-03-26 spec).
+	/// Run the server using Streamable HTTP transport (advertises MCP 2026-07-28;
+	/// rmcp's legacy `initialize` fallback serves older clients).
 	///
 	/// Uses rmcp's `StreamableHttpService` with `LocalSessionManager` for
 	/// proper session management. Supports both SSE and plain JSON responses
