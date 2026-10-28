@@ -272,20 +272,13 @@ impl<'a> TableOperations<'a> {
 
 	/// Store a record batch in a table (create table if it doesn't exist)
 	pub async fn store_batch(&self, table_name: &str, batch: RecordBatch) -> Result<()> {
-		use std::iter::once;
-
-		// Capture the schema before moving `batch` into the reader; the reader
-		// consumes a single owned batch, so there's no need to clone it.
-		let schema = batch.schema();
-		let batch_reader = arrow::record_batch::RecordBatchIterator::new(once(Ok(batch)), schema);
-
 		if self.table_exists(table_name).await? {
 			// Table exists, append data
 			let table = self.db.open_table(table_name).execute().await?;
-			table.add(batch_reader).execute().await?;
+			table.add(batch).execute().await?;
 		} else {
 			// Table doesn't exist, create it with the batch
-			self.db.create_table(table_name, batch_reader).execute().await?;
+			self.db.create_table(table_name, batch).execute().await?;
 		}
 
 		Ok(())

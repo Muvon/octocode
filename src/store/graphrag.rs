@@ -547,14 +547,13 @@ impl<'a> GraphRagOperations<'a> {
 			let schema = table.schema().await?;
 			if schema.field_with_name("provenance").is_err() {
 				table
-					.add_columns(
-						NewColumnTransform::AllNulls(Arc::new(Schema::new(vec![Field::new(
-							"provenance",
-							DataType::Utf8,
-							true,
-						)]))),
-						None,
-					)
+					.add_columns()
+					.transform(NewColumnTransform::AllNulls(Arc::new(Schema::new(vec![Field::new(
+						"provenance",
+						DataType::Utf8,
+						true,
+					)]))))
+					.execute()
 					.await?;
 			}
 		}

@@ -249,7 +249,7 @@ pub fn calculate_unique_content_hash(contents: &str, file_path: &str) -> String 
 	let mut hasher = Sha256::new();
 	hasher.update(contents.as_bytes());
 	hasher.update(file_path.as_bytes());
-	format!("{:x}", hasher.finalize())
+	hex::encode(hasher.finalize())
 }
 
 /// Calculate a unique hash for content including file path and line ranges (octocode-specific)
@@ -266,7 +266,7 @@ pub fn calculate_content_hash_with_lines(
 	hasher.update(file_path.as_bytes());
 	hasher.update(start_line.to_string().as_bytes());
 	hasher.update(end_line.to_string().as_bytes());
-	format!("{:x}", hasher.finalize())
+	hex::encode(hasher.finalize())
 }
 
 /// Calculate content hash without file path (octocode-specific)
@@ -274,7 +274,7 @@ pub fn calculate_content_hash(contents: &str) -> String {
 	use sha2::{Digest, Sha256};
 	let mut hasher = Sha256::new();
 	hasher.update(contents.as_bytes());
-	format!("{:x}", hasher.finalize())
+	hex::encode(hasher.finalize())
 }
 
 #[cfg(test)]
