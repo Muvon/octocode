@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.29.0] - 2026-10-28
+
+### 📋 Release Summary
+
+Remote LanceDB support is now enabled. Graph table handles refresh after appends, and MCP structural search source rendering is corrected.
+
+### ✨ New Features & Enhancements
+
+- **lancedb**: enable remote LanceDB support `051fcd27`
+
+### 🔧 Improvements & Optimizations
+
+- **store**: cover graph and batch append behavior `45b40370`
+- **dependencies**: upgrade project dependencies `e88e283c`
+- **dependencies**: update registry dependencies `ca64a302`
+
+### 🐛 Bug Fixes & Stability
+
+- **graphrag**: refresh table handles after graph appends `7652d045`
+- **mcp**: fix structural search source rendering `e63a5c19`
+
 ## [0.28.1] - 2026-10-25
 
 ### 🔧 Improvements & Optimizations
