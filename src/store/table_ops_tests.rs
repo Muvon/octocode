@@ -68,6 +68,25 @@ mod tests {
 	}
 
 	#[tokio::test]
+	async fn storing_another_batch_appends_without_replacing_existing_rows() {
+		let (_dir, db) = test_connection().await;
+		let ops = TableOperations::new(&db);
+		ops.store_batch("blocks", batch(&[("src/a.rs", "h1")])).await.unwrap();
+		ops.store_batch("blocks", batch(&[("src/b.rs", "h2"), ("src/c.rs", "h3")]))
+			.await
+			.unwrap();
+
+		let table = db.open_table("blocks").execute().await.unwrap();
+		assert_eq!(table.count_rows(None).await.unwrap(), 3);
+		for (path, hash) in [("src/a.rs", "h1"), ("src/b.rs", "h2"), ("src/c.rs", "h3")] {
+			assert_eq!(
+				ops.get_file_blocks_metadata(path, "blocks").await.unwrap(),
+				vec![hash.to_string()]
+			);
+		}
+	}
+
+	#[tokio::test]
 	async fn content_existence_is_looked_up_by_hash() {
 		let (_dir, db) = test_connection().await;
 		let ops = TableOperations::new(&db);

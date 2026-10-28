@@ -160,6 +160,91 @@ mod tests {
 	}
 
 	#[tokio::test]
+	async fn appending_to_a_legacy_graph_preserves_rows_and_adds_provenance() {
+		use crate::indexer::graphrag::types::Provenance;
+		use crate::store::tables;
+		use arrow_array::{Array, ArrayRef, Float32Array, RecordBatch, StringArray};
+
+		let (dir, store) = test_store().await;
+		let db = connect(&dir).await;
+		let old = graph_relationship("src/old.rs", "src/shared.rs", RelationType::Imports);
+		let legacy = RecordBatch::try_from_iter([
+			("id", Arc::new(StringArray::from(vec!["legacy-edge"])) as ArrayRef),
+			("source", Arc::new(StringArray::from(vec![old.source.as_str()]))),
+			("target", Arc::new(StringArray::from(vec![old.target.as_str()]))),
+			(
+				"relation_type",
+				Arc::new(StringArray::from(vec![old.relation_type.as_str()])),
+			),
+			(
+				"description",
+				Arc::new(StringArray::from(vec![old.description.as_str()])),
+			),
+			("confidence", Arc::new(Float32Array::from(vec![old.confidence]))),
+			("weight", Arc::new(Float32Array::from(vec![old.weight]))),
+		])
+		.unwrap();
+		assert!(legacy.schema().field_with_name("provenance").is_err());
+		db.create_table(tables::GRAPHRAG_RELATIONSHIPS, legacy)
+			.execute()
+			.await
+			.unwrap();
+		assert_eq!(store.get_graph_relationships().await.unwrap().num_rows(), 1);
+
+		let mut new = graph_relationship("src/new.rs", "src/shared.rs", RelationType::Calls);
+		new.provenance = Provenance::Inferred;
+		DatabaseOperations::new(&store)
+			.save_graph_incremental(&[], std::slice::from_ref(&new))
+			.await
+			.unwrap();
+
+		let rows = store.get_graph_relationships().await.unwrap();
+		assert_eq!(rows.num_rows(), 2);
+		let sources = rows
+			.column_by_name("source")
+			.unwrap()
+			.as_any()
+			.downcast_ref::<StringArray>()
+			.unwrap();
+		let old_index = sources
+			.iter()
+			.position(|value| value == Some(old.source.as_str()))
+			.unwrap();
+		let new_index = sources
+			.iter()
+			.position(|value| value == Some(new.source.as_str()))
+			.unwrap();
+		let ids = rows
+			.column_by_name("id")
+			.unwrap()
+			.as_any()
+			.downcast_ref::<StringArray>()
+			.unwrap();
+		assert_eq!(ids.value(old_index), "legacy-edge");
+		let provenance = rows
+			.column_by_name("provenance")
+			.unwrap()
+			.as_any()
+			.downcast_ref::<StringArray>()
+			.unwrap();
+		assert!(provenance.is_null(old_index));
+		assert_eq!(provenance.value(new_index), "inferred");
+
+		let relationships = store.get_all_relationships_efficient().await.unwrap();
+		assert_eq!(relationships.len(), 2);
+		for expected in [&old, &new] {
+			let actual = relationships
+				.iter()
+				.find(|relationship| relationship.source == expected.source)
+				.unwrap();
+			assert_eq!(
+				serde_json::to_value(actual).unwrap(),
+				serde_json::to_value(expected).unwrap()
+			);
+		}
+	}
+
+	#[tokio::test]
 	async fn node_relationships_respect_the_requested_direction() {
 		let dir = TempDir::new().unwrap();
 		let store = populated_store(&dir).await;
