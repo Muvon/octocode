@@ -229,6 +229,8 @@ For agent use, `search` selects likely file or symbol nodes; it does not automat
 
 Search or rewrite code by AST structure using ast-grep pattern syntax. Complements `semantic_search`: use this for structural/syntactic patterns, `semantic_search` for meaning-based queries.
 
+Source lines render as `N:hh|content`: N is the 1-based line number and hh a hash of the whole original line, indentation included. The IDs match OctoFS `view` line ids, so OctoFS edit tools can target them without another read; the `N:hh|` prefix is not code and must be stripped when quoting code or using a plain-text edit tool. An exact-name `symbol` query returns the complete definition when it is up to 32 lines; longer definitions, wildcard symbols, `pattern` and `references` show a bounded preview (first 4 lines, an omitted-lines marker, last line). Read omitted lines with a file reader instead of re-running the search. `context` surrounds the whole matched range. Each page has a 16 KiB source budget; the footer gives the next `offset`.
+
 **Parameters:**
 - `pattern` (string) - AST pattern to search for (e.g. `$FUNC.unwrap()`, `if let Some($X) = $Y { $$$ }`)
 - `symbol` (string) - Find symbol DEFINITIONS by name, `*` wildcards supported (e.g. `handle_*`)
@@ -238,7 +240,7 @@ Search or rewrite code by AST structure using ast-grep pattern syntax. Complemen
 - `inside` (string, optional) - Only keep matches inside a node matching this kind or pattern (e.g. `function_item`)
 - `has` (string, optional) - Only keep matches containing a node matching this kind or pattern (e.g. `$X.unwrap()`)
 - `constraints` (object, optional) - Regex constraints on captured metavariables, e.g. `{"NAME": "^handle_"}`
-- `context` (integer, optional) - Number of context lines around matches (default: 0)
+- `context` (integer, optional) - Number of source lines before the match start and after the match end (default: 0)
 - `max_results` (integer, optional) - Maximum number of matches to return (default: 50)
 - `offset` (integer, optional) - Pagination offset into the full result set (default: 0)
 - `rewrite` (string, optional) - Rewrite template with metavariable substitution (e.g. `$VAR.expect("reason")`)

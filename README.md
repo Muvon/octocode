@@ -239,7 +239,7 @@ Octocode includes a **built-in MCP server** that exposes your codebase as tools 
 | `semantic_search` | Find code by meaning — "authentication flow", "error handling", "database queries" |
 | `view_signatures` | View file structure — function signatures, class definitions, imports |
 | `graphrag` | Always-on file/symbol graph — search nodes, inspect relationships, and find paths without indexing |
-| `structural_search` | AST pattern matching — find `.unwrap()` calls, `new` instantiations, specific patterns |
+| `structural_search` | AST patterns, definitions, and usages, with OctoFS-compatible source line IDs |
 | `lsp_goto_definition` | Jump to a symbol's definition (requires `--with-lsp`) |
 | `lsp_find_references` | Find all usages of a symbol across the workspace (requires `--with-lsp`) |
 | `lsp_hover` | Type info and documentation for a symbol (requires `--with-lsp`) |
@@ -273,6 +273,16 @@ AI: *uses structural_search* "Found 23 error handling patterns in src/api/:
     - 3 use .expect() with custom messages"
 ```
 
+### Use Octocode with OctoFS
+
+The shared-ID workflow requires the next Octocode release or a build of the updated source. OctoFS’s existing line-ID format is unchanged.
+
+[Octocode](https://github.com/muvon/octocode) finds definitions, usages, and code relationships; [OctoFS](https://github.com/muvon/octofs) reads files and applies atomic edits. Run both MCP servers against the same checkout.
+
+Octocode's `structural_search` returns source lines as `N:hh|content`, using the same line-hash utility as OctoFS. An agent can pass a returned ID directly to OctoFS `batch_edit` without reading the same lines again just to obtain edit targets. Exact-name lookups include complete small definitions; larger results identify the omitted ranges for a targeted `view`.
+
+The IDs hash the whole original line, including indentation. If the file changes after the lookup, OctoFS checks the ID against the new content and reports stale targets. Combine known edits to one file in one atomic batch; use the fresh IDs in its result for follow-up edits. Read ranges still accept plain line numbers.
+
 ### Quick Setup
 
 **Octomind (Recommended)** — Zero setup, Octocode pre-configured:
@@ -281,10 +291,20 @@ curl -fsSL https://raw.githubusercontent.com/muvon/octomind/master/install.sh | 
 octomind run developer:rust
 ```
 
-**Claude Code (CLI)** — Command-line setup:
+**Claude Code (CLI)** — Register both servers for the same project:
 ```bash
 claude mcp add octocode -- octocode mcp --path /path/to/your/project
+claude mcp add octofs -- octofs mcp --path /path/to/your/project
 ```
+
+**Codex CLI** — Register stdio servers:
+```bash
+codex mcp add octocode -- octocode mcp --path /path/to/your/project
+codex mcp add octofs -- octofs mcp --path /path/to/your/project
+codex mcp list
+```
+
+OctoFS is optional. For the paired workflow, install both binaries and replace `/path/to/your/project` with the same absolute checkout path in each command. See the [official Codex MCP documentation](https://developers.openai.com/codex/mcp).
 
 **Claude Desktop / Cursor / Windsurf** — Add to config:
 ```json

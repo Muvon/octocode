@@ -41,14 +41,50 @@ mod tests {
 		}
 	}
 
+	fn source_files(matches: &[GrepMatch]) -> Vec<FileData> {
+		let mut files = std::collections::BTreeMap::<&str, Vec<&str>>::new();
+		for found in matches {
+			let lines = files.entry(&found.file).or_default();
+			let content: Vec<&str> = found.text.lines().collect();
+			lines.resize((found.line - 1 + content.len()).max(lines.len()), "");
+			for (offset, line) in content.into_iter().enumerate() {
+				lines[found.line - 1 + offset] = line;
+			}
+		}
+		files
+			.into_iter()
+			.map(|(path, lines)| file_data(path, &lines.join("\n")))
+			.collect()
+	}
+
 	#[test]
 	fn an_empty_match_set_reports_the_diagnostic_or_a_default() {
 		assert_eq!(
-			format_structural_response(&[], None, None, 0, 50, 0, &[]),
+			format_structural_response(
+				&[],
+				None,
+				None,
+				&structural(
+					json!({"language":"rust","pattern":"function_item","offset":0,"max_results":50,"context":0})
+				)
+				.0,
+				&[]
+			)
+			.expect("render structural results"),
 			"No matches found."
 		);
 		assert_eq!(
-			format_structural_response(&[], None, Some("bad pattern"), 0, 50, 0, &[]),
+			format_structural_response(
+				&[],
+				None,
+				Some("bad pattern"),
+				&structural(
+					json!({"language":"rust","pattern":"function_item","offset":0,"max_results":50,"context":0})
+				)
+				.0,
+				&[]
+			)
+			.expect("render structural results"),
 			"bad pattern"
 		);
 	}
@@ -59,7 +95,14 @@ mod tests {
 			grep_match("src/a.rs", 1, "fn a() {}"),
 			grep_match("src/b.rs", 2, "fn b() {}"),
 		];
-		let out = format_structural_response(&matches, None, None, 0, 50, 0, &[]);
+		let out = format_structural_response(
+			&matches,
+			None,
+			None,
+			&structural(json!({"language":"rust","pattern":"function_item","offset":0,"max_results":50,"context":0})).0,
+			&source_files(&matches),
+		)
+		.expect("render structural results");
 		assert!(out.ends_with("2 matches in 2 files."), "{out}");
 		assert!(out.contains("src/a.rs"));
 	}
@@ -67,7 +110,14 @@ mod tests {
 	#[test]
 	fn a_note_is_prepended_and_a_diagnostic_appended() {
 		let matches = vec![grep_match("src/a.rs", 1, "fn a() {}")];
-		let out = format_structural_response(&matches, Some("note line"), Some("diagnostic line"), 0, 50, 0, &[]);
+		let out = format_structural_response(
+			&matches,
+			Some("note line"),
+			Some("diagnostic line"),
+			&structural(json!({"language":"rust","pattern":"function_item","offset":0,"max_results":50,"context":0})).0,
+			&source_files(&matches),
+		)
+		.expect("render structural results");
 		assert!(out.starts_with("note line\n"), "{out}");
 		assert!(out.ends_with("diagnostic line"), "{out}");
 	}
@@ -75,7 +125,14 @@ mod tests {
 	#[test]
 	fn a_truncated_page_points_at_the_next_offset() {
 		let matches: Vec<_> = (1..=10).map(|i| grep_match("src/a.rs", i, "hit")).collect();
-		let out = format_structural_response(&matches, None, None, 0, 3, 0, &[]);
+		let out = format_structural_response(
+			&matches,
+			None,
+			None,
+			&structural(json!({"language":"rust","pattern":"function_item","offset":0,"max_results":3,"context":0})).0,
+			&source_files(&matches),
+		)
+		.expect("render structural results");
 		assert!(out.contains("Showing 1–3 of 10 matches across 1 files."), "{out}");
 		assert!(out.contains("Next page: offset=3."), "{out}");
 	}
@@ -83,7 +140,14 @@ mod tests {
 	#[test]
 	fn the_last_page_reports_the_range_without_a_next_offset() {
 		let matches: Vec<_> = (1..=10).map(|i| grep_match("src/a.rs", i, "hit")).collect();
-		let out = format_structural_response(&matches, None, None, 8, 5, 0, &[]);
+		let out = format_structural_response(
+			&matches,
+			None,
+			None,
+			&structural(json!({"language":"rust","pattern":"function_item","offset":8,"max_results":5,"context":0})).0,
+			&source_files(&matches),
+		)
+		.expect("render structural results");
 		assert!(out.contains("Showing 9–10 of 10"), "{out}");
 		assert!(!out.contains("Next page"), "{out}");
 	}
@@ -92,7 +156,17 @@ mod tests {
 	fn an_offset_past_the_end_says_so_instead_of_panicking() {
 		let matches = vec![grep_match("src/a.rs", 1, "hit")];
 		assert_eq!(
-			format_structural_response(&matches, None, None, 5, 50, 0, &[]),
+			format_structural_response(
+				&matches,
+				None,
+				None,
+				&structural(
+					json!({"language":"rust","pattern":"function_item","offset":5,"max_results":50,"context":0})
+				)
+				.0,
+				&source_files(&matches)
+			)
+			.expect("render structural results"),
 			"Offset 5 is beyond the result set (1 total matches)."
 		);
 	}
@@ -105,11 +179,10 @@ mod tests {
 			&matches,
 			None,
 			None,
-			0,
-			50,
-			1,
+			&structural(json!({"language":"rust","pattern":"function_item","offset":0,"max_results":50,"context":1})).0,
 			&[file_data("src/a.rs", content), file_data("src/other.rs", "unused")],
-		);
+		)
+		.expect("render structural results");
 		assert!(out.contains("line one"), "{out}");
 		assert!(out.contains("line three"), "{out}");
 	}
@@ -244,7 +317,14 @@ mod tests {
 		let matches: Vec<_> = (1..=crate::mcp::structural::MAX_TOTAL_MATCHES)
 			.map(|i| grep_match("src/a.rs", i, "hit"))
 			.collect();
-		let out = format_structural_response(&matches, None, None, 0, 5, 0, &[]);
+		let out = format_structural_response(
+			&matches,
+			None,
+			None,
+			&structural(json!({"language":"rust","pattern":"function_item","offset":0,"max_results":5,"context":0})).0,
+			&source_files(&matches),
+		)
+		.expect("render structural results");
 		let footer = out.lines().next_back().unwrap_or_default();
 		assert_eq!(
 			footer,
@@ -475,13 +555,13 @@ mod tests {
 			let mut cache = server.structural_cache.write();
 			let entry = cache.as_mut().expect("the first call fills the cache");
 			assert_eq!(entry.matches.len(), 1);
-			entry.matches = vec![grep_match("cached.rs", 42, "fn from_the_cache() {}")];
+			entry.matches[0].breadcrumb = Some("cached match".to_string());
 			entry.note = Some("replayed".to_string());
 		}
 
 		let second = server.structural_search(structural(arguments)).await.unwrap();
 		assert!(second.starts_with("replayed\n"), "{second}");
-		assert!(second.contains("cached.rs"), "{second}");
+		assert!(second.contains("cached match"), "{second}");
 	}
 
 	// -----------------------------------------------------------------------
@@ -645,6 +725,135 @@ mod tests {
 		assert_eq!(
 			outcome.expect("the channel must close once every task is aborted"),
 			None
+		);
+	}
+	#[tokio::test]
+	async fn exact_symbol_lookup_returns_the_whole_small_definition_with_octofs_ids() {
+		let definition = "export enum EffectFlags {\n  /**\n   * ReactiveEffect only\n   */\n  ALLOW_RECURSE = 1 << 7,\n  PAUSED = 1 << 8,\n  STOP = 1 << 10,\n}\n";
+		let source = format!("{}{definition}", "\n".repeat(50));
+		let mut outputs = Vec::new();
+		for content in [source.clone(), source.replace('\n', "\r\n")] {
+			let (_dir, server) = repo_server(&[("effect.ts", &content)]);
+			let output = server
+				.structural_search(structural(json!({"language":"typescript","symbol":"EffectFlags"})))
+				.await
+				.expect("exact enum lookup");
+			assert!(output.contains("51:9f|export enum EffectFlags {"), "{output}");
+			assert!(output.contains("55:30|  ALLOW_RECURSE = 1 << 7,"), "{output}");
+			assert!(output.contains("56:06|  PAUSED = 1 << 8,"), "{output}");
+			assert!(output.contains("57:36|  STOP = 1 << 10,"), "{output}");
+			assert!(!output.contains("source lines omitted"), "{output}");
+			let source_lines: Vec<&str> = content.lines().collect();
+			for rendered in output.lines().filter(|line| line.contains('|')) {
+				let (id, line) = rendered.split_once('|').unwrap();
+				let position: usize = id.split_once(':').unwrap().0.parse().unwrap();
+				assert_eq!(line, source_lines[position - 1]);
+				assert_eq!(rendered, octolib::utils::line_hash::format_line(position, line));
+			}
+			outputs.push(output);
+		}
+		assert_eq!(outputs[0], outputs[1], "CRLF and LF yield the same physical-line IDs");
+	}
+
+	#[tokio::test]
+	async fn context_surrounds_the_entire_definition_and_preserves_indentation_and_unicode() {
+		let source = "// before\nimpl Demo {\n    fn café(&self) {\n        let text = \"界\";\n        println!(\"{text}\");\n    }\n}\n// after\n";
+		let (_dir, server) = repo_server(&[("demo.rs", source)]);
+		let output = server
+			.structural_search(structural(json!({"language":"rust","symbol":"café","context":1})))
+			.await
+			.expect("method lookup");
+		for (position, line) in source.lines().enumerate().skip(1).take(6) {
+			assert!(
+				output.contains(&octolib::utils::line_hash::format_line(position + 1, line)),
+				"{output}"
+			);
+		}
+		assert!(!output.contains("// before"));
+		assert!(!output.contains("// after"));
+	}
+
+	#[tokio::test]
+	async fn large_definitions_stay_bounded_and_name_the_omitted_range() {
+		let source = format!("fn large() {{\n{}}}\n", "    work();\n".repeat(100));
+		let (_dir, server) = repo_server(&[("large.rs", &source)]);
+		let output = server
+			.structural_search(structural(json!({"language":"rust","symbol":"large"})))
+			.await
+			.expect("large function lookup");
+		assert!(output.contains("source lines omitted; read lines 5–101"), "{output}");
+		assert!(
+			output.contains(&octolib::utils::line_hash::format_line(102, "}")),
+			"{output}"
+		);
+		assert_eq!(output.lines().filter(|line| line.contains('|')).count(), 5);
+	}
+
+	#[tokio::test]
+	async fn a_source_change_with_the_same_size_and_mtime_invalidates_cached_matches() {
+		let (dir, server) = repo_server(&[("item.rs", "struct Old;\n")]);
+		let arguments = json!({"language":"rust","symbol":"Old"});
+		assert!(server
+			.structural_search(structural(arguments.clone()))
+			.await
+			.unwrap()
+			.contains("struct Old;"));
+		let file = dir.path().join("item.rs");
+		let modified = std::fs::metadata(&file).unwrap().modified().unwrap();
+		std::fs::write(&file, "struct New;\n").unwrap();
+		std::fs::File::options()
+			.write(true)
+			.open(&file)
+			.unwrap()
+			.set_times(std::fs::FileTimes::new().set_modified(modified))
+			.unwrap();
+		let output = server.structural_search(structural(arguments)).await.unwrap();
+		assert!(output.starts_with("No symbol definitions"), "{output}");
+		let output = server
+			.structural_search(structural(json!({"language":"rust","symbol":"New"})))
+			.await
+			.unwrap();
+		assert!(output.contains("|struct New;"), "{output}");
+	}
+
+	#[test]
+	fn a_missing_source_snapshot_is_an_error_instead_of_fabricated_edit_ids() {
+		let found = grep_match("missing.rs", 1, "fn absent() {}");
+		let error = format_structural_response(
+			&[found],
+			None,
+			None,
+			&structural(json!({"language":"rust","symbol":"definition","offset":0,"max_results":50,"context":0})).0,
+			&[],
+		)
+		.unwrap_err();
+		assert!(error.contains("missing.rs"), "{error}");
+	}
+
+	#[tokio::test]
+	async fn the_source_byte_budget_preserves_pagination_progress() {
+		let source = format!("fn same() {{\n{}}}\n", "    let value = \"a sufficiently long line of source code to exercise the combined output budget without oversized nodes\";\n".repeat(28));
+		let names: Vec<String> = (0..10).map(|i| format!("item_{i}.rs")).collect();
+		let files: Vec<(&str, &str)> = names.iter().map(|name| (name.as_str(), source.as_str())).collect();
+		let (_dir, server) = repo_server(&files);
+		let mut offset = 0;
+		loop {
+			let output = server
+				.structural_search(structural(json!({"language":"rust","symbol":"same","offset":offset})))
+				.await
+				.expect("bounded page");
+			assert!(output.len() < STRUCTURAL_SOURCE_BYTES + 1024, "{} bytes", output.len());
+			let Some(next) = output.split("Next page: offset=").nth(1) else {
+				break;
+			};
+			let next: usize = next.split('.').next().unwrap().parse().unwrap();
+			assert!(next > offset, "{output}");
+			offset = next;
+			assert!(offset < files.len());
+		}
+		assert!(
+			offset > 0,
+			"the response budget paginates before all definitions are emitted"
 		);
 	}
 }

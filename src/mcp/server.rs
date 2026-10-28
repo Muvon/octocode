@@ -255,7 +255,7 @@ pub struct StructuralSearchParams {
 	/// Keys are metavariable names without `$`.
 	#[serde(default, skip_serializing_if = "Option::is_none")]
 	pub constraints: Option<std::collections::HashMap<String, String>>,
-	/// Number of context lines around matches
+	/// Number of source lines before the match start and after the match end (the whole matched range, not each line)
 	#[serde(default, skip_serializing_if = "Option::is_none")]
 	#[schemars(range(min = 0, max = 10))]
 	pub context: Option<usize>,
@@ -704,9 +704,9 @@ impl McpServer {
 	#[tool(
 		description = "Search or rewrite code by AST structure, or look up real symbols by name. Three query modes (provide exactly one): \
 		`pattern` — ast-grep pattern (`$X` = one node, `$$$` = sequence), bare tree-sitter kind name (`function_item`), or literal snippet; \
-		`symbol` — find symbol DEFINITIONS by name, `*` wildcards supported (e.g. `handle_*`) — use this to locate where a function/type/class is defined; \
+		`symbol` — find symbol DEFINITIONS by name, `*` wildcards supported (e.g. `handle_*`). An exact name (no `*`) returns the complete definition when it is up to 32 lines; longer definitions, wildcard symbols, `pattern` and `references` show a bounded preview (first 4 lines, an omitted-lines marker, last line); \
 		`references` — find all usages of a name, grouped by enclosing symbol, definition sites tagged `[def]`. \
-		\n\nEvery match carries an enclosing-symbol breadcrumb (e.g. `[impl Store › fn flush]`). \
+		\n\nEvery match carries an enclosing-symbol breadcrumb (e.g. `[impl Store › fn flush]`). Source lines render as `N:hh|content`: N is the 1-based line number, hh a hash of the whole original line including indentation. The IDs match OctoFS `view` line ids, so OctoFS edit tools can target them without another read. The `N:hh|` prefix is not code: strip it when quoting code or using a plain-text edit tool. Each page has a 16 KiB source budget; continue with the footer's `offset` rather than a bigger `max_results`. An omitted-lines marker means those lines were not shown: read exactly them with a file reader, do not re-run this search. `context` surrounds the whole matched range. \
 		Refine with: `inside` (only matches inside a kind/pattern), `has` (only matches containing a kind/pattern), \
 		`constraints` (regex per metavariable, e.g. {\"NAME\": \"^handle_\"}), `offset` (pagination). \
 		\n\nCommon LLM traps to avoid: \
@@ -823,10 +823,6 @@ impl McpServer {
 			);
 		}
 
-		let max_results = params.max_results.unwrap_or(50);
-		let offset = params.offset.unwrap_or(0);
-		let context = params.context.unwrap_or(0);
-
 		// Cache key: everything that defines the result set (not pagination).
 		let constraint_key = constraints
 			.iter()
@@ -834,7 +830,7 @@ impl McpServer {
 			.collect::<Vec<_>>()
 			.join(";");
 		let paths_key = params.paths.clone().unwrap_or_default().join(";");
-		let fp = crate::mcp::structural::fingerprint_request(&[
+		let mut fingerprint_parts = vec![
 			params.pattern.as_deref().unwrap_or(""),
 			params.symbol.as_deref().unwrap_or(""),
 			params.references.as_deref().unwrap_or(""),
@@ -843,7 +839,13 @@ impl McpServer {
 			params.has.as_deref().unwrap_or(""),
 			&constraint_key,
 			&paths_key,
-		]);
+		];
+		fingerprint_parts.extend(
+			files
+				.iter()
+				.flat_map(|file| [file.display.as_str(), file.content.as_str()]),
+		);
+		let fp = crate::mcp::structural::fingerprint_request(&fingerprint_parts);
 
 		// Serve repeat/paginated queries from the cache — skips all parsing
 		// and strategy evaluation while the candidate file set is unchanged.
@@ -851,15 +853,13 @@ impl McpServer {
 			let cache = self.structural_cache.read();
 			if let Some(qc) = cache.as_ref() {
 				if qc.fingerprint == fp && qc.stamp == stamp {
-					return Ok(format_structural_response(
+					return format_structural_response(
 						&qc.matches,
 						qc.note.as_deref(),
 						qc.diagnostic.as_deref(),
-						offset,
-						max_results,
-						context,
+						&params,
 						&files,
-					));
+					);
 				}
 			}
 		}
@@ -884,11 +884,9 @@ impl McpServer {
 			&outcome.matches,
 			outcome.note.as_deref(),
 			outcome.diagnostic.as_deref(),
-			offset,
-			max_results,
-			context,
+			&params,
 			&files,
-		);
+		)?;
 
 		*self.structural_cache.write() = Some(crate::mcp::structural::QueryCache {
 			fingerprint: fp,
@@ -902,6 +900,57 @@ impl McpServer {
 	}
 }
 
+const SMALL_DEFINITION_LINES: usize = 32;
+const STRUCTURAL_PREVIEW_LINES: usize = 4;
+const STRUCTURAL_SOURCE_BYTES: usize = 16 * 1024;
+
+fn render_structural_source(
+	found: &crate::grep::GrepMatch,
+	lines: &[&str],
+	context: usize,
+	complete_definition: bool,
+) -> Result<String, String> {
+	let matched_lines = found.text.lines().count();
+	if found.line == 0 || matched_lines == 0 {
+		return Err(format!(
+			"Invalid structural source range: {}:{}",
+			found.file, found.line
+		));
+	}
+	let start = found.line - 1;
+	let end = start + matched_lines;
+	if end > lines.len() {
+		return Err(format!(
+			"Structural source range exceeds snapshot: {}:{}–{}",
+			found.file, found.line, end
+		));
+	}
+	let from = start.saturating_sub(context);
+	let through = end.saturating_add(context).min(lines.len());
+	let complete = complete_definition && matched_lines <= SMALL_DEFINITION_LINES;
+	let preview_end = if complete {
+		end
+	} else {
+		(start + STRUCTURAL_PREVIEW_LINES).min(end)
+	};
+	let mut output: Vec<String> = (from..preview_end)
+		.map(|i| octolib::utils::line_hash::format_line(i + 1, lines[i]))
+		.collect();
+	if preview_end < end {
+		if preview_end + 1 < end {
+			output.push(format!(
+				"[... {} source lines omitted; read lines {}–{}]",
+				end - preview_end - 1,
+				preview_end + 1,
+				end - 1
+			));
+		}
+		output.push(octolib::utils::line_hash::format_line(end, lines[end - 1]));
+	}
+	output.extend((end..through).map(|i| octolib::utils::line_hash::format_line(i + 1, lines[i])));
+	Ok(output.join("\n"))
+}
+
 /// Render the final structural_search response: optional strategy note,
 /// formatted match page, steering footer with totals and the next offset,
 /// optional diagnostic. Truncation always tells the LLM how to continue.
@@ -909,17 +958,22 @@ fn format_structural_response(
 	matches: &[crate::grep::GrepMatch],
 	note: Option<&str>,
 	diagnostic: Option<&str>,
-	offset: usize,
-	max_results: usize,
-	context: usize,
+	params: &StructuralSearchParams,
 	files: &[crate::mcp::structural::FileData],
-) -> String {
+) -> Result<String, String> {
+	let offset = params.offset.unwrap_or(0);
+	let max_results = params.max_results.unwrap_or(50);
+	let context = params.context.unwrap_or(0);
+	let complete_definitions = params.symbol.as_ref().is_some_and(|symbol| !symbol.contains('*'));
 	if matches.is_empty() {
-		return diagnostic.unwrap_or("No matches found.").to_string();
+		return Ok(diagnostic.unwrap_or("No matches found.").to_string());
 	}
 	let total = matches.len();
 	if offset >= total {
-		return format!("Offset {} is beyond the result set ({} total matches).", offset, total);
+		return Ok(format!(
+			"Offset {} is beyond the result set ({} total matches).",
+			offset, total
+		));
 	}
 	let file_count = {
 		let files_hit: std::collections::HashSet<&str> = matches.iter().map(|m| m.file.as_str()).collect();
@@ -928,20 +982,46 @@ fn format_structural_response(
 	let end = (offset + max_results).min(total);
 	let page = &matches[offset..end];
 
-	let body = if context > 0 {
-		// Collect the set of files actually on this page once, then scan `files`
-		// a single time — avoids the O(files × page) membership re-scan per file.
-		let needed: std::collections::HashSet<&str> = page.iter().map(|m| m.file.as_str()).collect();
-		let mut source_map = std::collections::HashMap::with_capacity(needed.len());
-		for fd in files {
-			if needed.contains(fd.display.as_str()) {
-				source_map.insert(fd.display.clone(), fd.content.clone());
-			}
+	let needed: std::collections::HashSet<&str> = page.iter().map(|m| m.file.as_str()).collect();
+	let sources: std::collections::HashMap<&str, Vec<&str>> = files
+		.iter()
+		.filter(|file| needed.contains(file.display.as_str()))
+		.map(|file| (file.display.as_str(), file.content.lines().collect()))
+		.collect();
+	let mut body = String::new();
+	let mut shown = 0;
+	let mut previous_file = None;
+	for (index, found) in page.iter().enumerate() {
+		let lines = sources
+			.get(found.file.as_str())
+			.ok_or_else(|| format!("Structural result has no source snapshot: {}", found.file))?;
+		let mut fragment = String::new();
+		if previous_file != Some(found.file.as_str()) {
+			fragment.push_str(&found.file);
+			fragment.push('\n');
 		}
-		crate::grep::format_matches_with_context(page, &source_map, context)
-	} else {
-		crate::grep::format_matches_grouped(page)
-	};
+		fragment.push_str(&format!("match at line {}, column {}", found.line, found.column));
+		if let Some(breadcrumb) = &found.breadcrumb {
+			fragment.push_str(&format!(" [{breadcrumb}]"));
+		}
+		fragment.push('\n');
+		fragment.push_str(&render_structural_source(found, lines, context, complete_definitions)?);
+		fragment.push('\n');
+		if body.len() + fragment.len() > STRUCTURAL_SOURCE_BYTES {
+			if shown > 0 {
+				break;
+			}
+			body.push_str(&format!(
+				"{}\n[source exceeds the {} byte preview budget; read the file from line {}]\n",
+				found.file, STRUCTURAL_SOURCE_BYTES, found.line
+			));
+		} else {
+			body.push_str(&fragment);
+		}
+		shown = index + 1;
+		previous_file = Some(found.file.as_str());
+	}
+	let end = offset + shown;
 
 	let mut out = String::new();
 	if let Some(n) = note {
@@ -976,7 +1056,7 @@ fn format_structural_response(
 		out.push_str("\n\n");
 		out.push_str(d);
 	}
-	out
+	Ok(out)
 }
 
 /// Collapse `"type": [T, "null"]` to `T` and `anyOf: [X, {"type": "null"}]` to
@@ -1062,7 +1142,7 @@ impl ServerHandler for McpServer {
 				Implementation::new("octocode-mcp", env!("CARGO_PKG_VERSION"))
 					.with_description("Semantic and structural code intelligence with an always-available code graph"),
 			)
-			.with_instructions(instructions)
+			.with_instructions(format!("{instructions} Structural-search source lines are `N:hh|content`, with IDs matching OctoFS `view` line ids; the `N:hh|` prefix is not code. Only exact-name `symbol` lookups show complete definitions, up to 32 lines; wildcard symbols, `pattern`, `references` and longer definitions show a preview and name the omitted line range."))
 	}
 
 	async fn list_tools(

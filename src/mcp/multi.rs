@@ -342,7 +342,7 @@ impl ServerHandler for MultiServer {
 			 every tool requires a `project` argument naming the target repository. \
 			 Use 'semantic_search' for conceptual lookups, 'structural_search' for \
 			 syntax and occurrences, and the always-available 'graphrag' for symbol \
-			 relationships and dependency paths.",
+			 relationships and dependency paths. Structural-search source lines are `N:hh|content`, with IDs matching OctoFS `view` line ids; the `N:hh|` prefix is not code. Only exact-name `symbol` lookups show complete definitions, up to 32 lines; wildcard symbols, `pattern`, `references` and longer definitions show a preview and name the omitted line range.",
 			self.projects.repos.len(),
 			self.projects.project_list()
 		);
