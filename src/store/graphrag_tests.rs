@@ -136,6 +136,40 @@ mod tests {
 	}
 
 	#[tokio::test]
+	async fn appending_nodes_refreshes_a_previously_read_table() {
+		use crate::store::tables;
+		use arrow_array::StringArray;
+
+		let (dir, store) = test_store().await;
+		let operations = DatabaseOperations::new(&store);
+		operations
+			.save_graph_incremental(&[graph_node("src/a.rs", "file", 0)], &[])
+			.await
+			.unwrap();
+		assert_eq!(store.get_all_graph_nodes().await.unwrap().num_rows(), 1);
+		operations
+			.save_graph_incremental(&[graph_node("src/b.rs", "file", 1)], &[])
+			.await
+			.unwrap();
+
+		let db = connect(&dir).await;
+		let persisted = db.open_table(tables::GRAPHRAG_NODES).execute().await.unwrap();
+		assert_eq!(persisted.count_rows(None).await.unwrap(), 2);
+		let rows = store.get_all_graph_nodes().await.unwrap();
+		assert_eq!(rows.num_rows(), 2);
+		let ids = rows
+			.column_by_name("id")
+			.unwrap()
+			.as_any()
+			.downcast_ref::<StringArray>()
+			.unwrap();
+		let mut ids: Vec<_> = ids.iter().collect();
+		ids.sort_unstable();
+		assert_eq!(ids, vec![Some("src/a.rs"), Some("src/b.rs")]);
+		assert_eq!(store.get_all_nodes_paginated(0, 10).await.unwrap().len(), 2);
+	}
+
+	#[tokio::test]
 	async fn a_vector_search_ranks_the_closest_node_first() {
 		let dir = TempDir::new().unwrap();
 		let store = populated_store(&dir).await;
@@ -198,6 +232,8 @@ mod tests {
 			.await
 			.unwrap();
 
+		let persisted = db.open_table(tables::GRAPHRAG_RELATIONSHIPS).execute().await.unwrap();
+		assert_eq!(persisted.count_rows(None).await.unwrap(), 2);
 		let rows = store.get_graph_relationships().await.unwrap();
 		assert_eq!(rows.num_rows(), 2);
 		let sources = rows

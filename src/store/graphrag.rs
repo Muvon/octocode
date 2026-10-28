@@ -506,6 +506,7 @@ impl<'a> GraphRagOperations<'a> {
 	pub async fn store_graph_nodes(&self, node_batch: RecordBatch) -> Result<()> {
 		// Use the same proven pattern as code_blocks, text_blocks, document_blocks
 		self.table_ops.store_batch(tables::GRAPHRAG_NODES, node_batch).await?;
+		self.invalidate_table_handle(tables::GRAPHRAG_NODES).await;
 
 		// Create the vector index once the table is large enough to benefit (the
 		// optimizer skips indexing small datasets where brute-force is faster).
@@ -562,6 +563,7 @@ impl<'a> GraphRagOperations<'a> {
 		self.table_ops
 			.store_batch(tables::GRAPHRAG_RELATIONSHIPS, rel_batch.clone())
 			.await?;
+		self.invalidate_table_handle(tables::GRAPHRAG_RELATIONSHIPS).await;
 
 		// Update adjacency cache with new relationships
 		self.update_cache_from_batch(&rel_batch)?;
