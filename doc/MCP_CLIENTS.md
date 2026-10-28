@@ -21,25 +21,20 @@ When connected, your AI assistant can:
 
 ---
 
-## Octomind (Recommended)
+## Octomind
 
-[Octomind](https://octomind.run) is our companion AI agent runtime. It comes with Octocode pre-configured — zero setup required.
+[Octomind](https://github.com/Muvon/octomind) is a companion AI agent runtime. Its `developer:general` agent includes Octocode search and graph tools alongside OctoFS file tools.
 
 ```bash
 # Install Octomind
 curl -fsSL https://raw.githubusercontent.com/muvon/octomind/master/install.sh | bash
 
-# Run with Octocode pre-wired
-octomind run developer:rust
+# Start the developer agent in your project
+cd /path/to/your/project
+octomind run developer:general
 ```
 
-Octomind automatically:
-- ✅ Installs and configures Octocode
-- ✅ Manages API keys (asks once, stores permanently)
-- ✅ Spins up the MCP server for your project
-- ✅ Loads specialist prompts for your domain
-
-No config files to edit. No MCP setup. Just run and start coding.
+The first run may install required tools and ask for model credentials. See the [Octomind quick start](https://github.com/Muvon/octomind#quick-start) for installation and model access.
 
 ---
 
