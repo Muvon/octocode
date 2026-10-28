@@ -108,7 +108,7 @@ dotenvy = "0.15"
 tar = "0.4"
 zstd = { version = "0.13", default-features = false, features = ["zstdmt"] }
 
-octolib = { version = "0.46.4", git = "https://github.com/muvon/octolib.git", rev = "36e7857cdd542b3d4973268a204314e668ba601c", default-features = false, features = ["llm", "embeddings", "reranker"] }
+octolib = { version = "0.47.0", default-features = false, features = ["llm", "embeddings", "reranker"] }
 
 # MCP SDK - official Rust implementation
 rmcp = { version = "3.7.0", features = ["server", "macros", "transport-io", "transport-streamable-http-server"] }
