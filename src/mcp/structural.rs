@@ -31,7 +31,10 @@
 //! repeat and pagination calls skip parsing entirely.
 
 use crate::grep::{self, GrepMatch, MetavarConstraint};
-use std::path::{Path, PathBuf};
+use crate::indexer::PathUtils;
+use crate::utils::path::PathNormalizer;
+use std::borrow::Cow;
+use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::SystemTime;
 
@@ -93,13 +96,19 @@ pub fn fingerprint_request(parts: &[&str]) -> u64 {
 	h.finish()
 }
 
-/// One compiled `paths` filter entry: glob when the spec contains glob
-/// metacharacters, plain substring otherwise. Substring keeps the forgiving
-/// "src/mcp" style working; glob honors the documented `src/**/*.rs` style,
-/// which a substring check would silently reject (zero files, zero matches).
+/// One compiled in-root `paths` filter entry, matched against the
+/// root-relative display path. Bare entries keep the forgiving "src/mcp"
+/// substring style; entries with glob metacharacters honor the documented
+/// `src/**/*.rs` style, which a substring check would silently reject (zero
+/// files, zero matches). Entries written as filesystem paths (`./src`,
+/// `/abs/repo/src`) are anchored at that directory or file instead.
 enum PathSpec {
 	Substring(String),
 	Glob(globset::GlobMatcher),
+	Anchored {
+		prefix: String,
+		rest: Option<globset::GlobMatcher>,
+	},
 }
 
 impl PathSpec {
@@ -120,34 +129,182 @@ impl PathSpec {
 		match self {
 			PathSpec::Substring(s) => display.contains(s.as_str()),
 			PathSpec::Glob(g) => g.is_match(display),
+			PathSpec::Anchored { prefix, rest } => {
+				let below_prefix = if prefix.is_empty() {
+					Some(display)
+				} else {
+					display.strip_prefix(prefix.as_str()).and_then(|r| {
+						if r.is_empty() {
+							Some(r)
+						} else {
+							r.strip_prefix('/')
+						}
+					})
+				};
+				below_prefix.is_some_and(|r| glob_accepts(rest, r))
+			}
 		}
 	}
 }
 
+/// A `paths` entry resolving outside the root: walked on its own, with
+/// `rest` matched against paths relative to `base`.
+struct OutsideScope {
+	base: PathBuf,
+	rest: Option<globset::GlobMatcher>,
+}
+
+/// `paths` entries split by where their files live.
+struct PathScopes {
+	in_root: Vec<PathSpec>,
+	outside: Vec<OutsideScope>,
+}
+
+impl PathScopes {
+	/// `canonical_root` must be canonical so filesystem-path entries, which
+	/// are canonicalized, compare against it component by component.
+	fn resolve(specs: &[String], canonical_root: &Path) -> Self {
+		let mut scopes = PathScopes {
+			in_root: Vec::new(),
+			outside: Vec::new(),
+		};
+		for raw in specs {
+			let spec = PathNormalizer::normalize_separators(raw.trim());
+			let (literal, rest) = split_glob(&spec);
+			if !is_filesystem_path(literal) {
+				scopes.in_root.push(PathSpec::compile(&spec));
+				continue;
+			}
+			// A path that does not exist selects no files.
+			let Ok(base) = canonical_root.join(literal).canonicalize() else {
+				continue;
+			};
+			if base.starts_with(canonical_root) {
+				scopes.in_root.push(PathSpec::Anchored {
+					prefix: PathUtils::to_relative_string(&base, canonical_root),
+					rest,
+				});
+			} else {
+				scopes.outside.push(OutsideScope { base, rest });
+			}
+		}
+		scopes
+	}
+}
+
+/// Split a spec before its first glob segment into the literal directory or
+/// file part and the compiled glob remainder. A remainder that fails to
+/// compile keeps the whole spec literal, so a stray `[` never silently
+/// empties the candidate set.
+fn split_glob(spec: &str) -> (&str, Option<globset::GlobMatcher>) {
+	let Some(first_meta) = spec.find(['*', '?', '[']) else {
+		return (spec, None);
+	};
+	let split = spec[..first_meta].rfind('/').map_or(0, |i| i + 1);
+	match globset::Glob::new(&spec[split..]) {
+		Ok(g) => (&spec[..split], Some(g.compile_matcher())),
+		Err(_) => (spec, None),
+	}
+}
+
+/// Absolute paths and paths with `.`/`..` segments name a location on disk;
+/// anything else is a substring or glob over root-relative paths.
+fn is_filesystem_path(literal: &str) -> bool {
+	Path::new(literal).has_root() || literal.split('/').any(|s| s == "." || s == "..")
+}
+
+fn glob_accepts(glob: &Option<globset::GlobMatcher>, rel: &str) -> bool {
+	glob.as_ref().is_none_or(|g| g.is_match(rel))
+}
+
+/// Display path for a file outside the root: `../`-relative when both share
+/// a directory below the filesystem root, absolute otherwise (a `../../..`
+/// chain up to `/` says less than the absolute path).
+fn display_outside_root(path: &Path, canonical_root: &Path) -> String {
+	let path_parts: Vec<Component> = path.components().collect();
+	let root_parts: Vec<Component> = canonical_root.components().collect();
+	let shared = path_parts.iter().zip(&root_parts).take_while(|(a, b)| a == b).count();
+	let filesystem_root_len = root_parts
+		.iter()
+		.take_while(|c| matches!(c, Component::Prefix(_) | Component::RootDir))
+		.count();
+	if shared <= filesystem_root_len {
+		return PathNormalizer::normalize_separators(&path.to_string_lossy());
+	}
+	let ups = std::iter::repeat_n(Cow::Borrowed(".."), root_parts.len() - shared);
+	let downs = path_parts[shared..].iter().map(|c| c.as_os_str().to_string_lossy());
+	ups.chain(downs).collect::<Vec<_>>().join("/")
+}
+
+type FileAccumulator = parking_lot::Mutex<(Vec<FileData>, RepoStamp)>;
+
 /// Collect candidate files via a parallel gitignore-aware walk. Reads file
 /// contents (needed by every later stage) and evaluates the literal-token
-/// prefilter inline. Returns files sorted by display path plus the repo stamp.
+/// prefilter inline. `paths` entries that resolve outside `root` are walked
+/// as roots of their own. Returns files sorted by display path plus the
+/// repo stamp.
 pub fn collect_file_data(
 	root: &Path,
 	language: &str,
 	paths_filter: Option<&[String]>,
 	prefilter_tokens: &[String],
 ) -> (Vec<FileData>, RepoStamp) {
-	let compiled_filter: Option<Vec<PathSpec>> =
-		paths_filter.map(|ps| ps.iter().map(|p| PathSpec::compile(p)).collect());
-	// `Option<&[PathSpec]>` is Copy — safe to move into each per-thread closure.
-	let filter_ref = compiled_filter.as_deref();
-	let acc: parking_lot::Mutex<(Vec<FileData>, RepoStamp)> =
-		parking_lot::Mutex::new((Vec::new(), RepoStamp::default()));
+	let acc: FileAccumulator = parking_lot::Mutex::new((Vec::new(), RepoStamp::default()));
+	let root_display = |path: &Path| PathUtils::to_relative_string(path, root);
 
-	let walker = ignore::WalkBuilder::new(root)
+	match paths_filter {
+		None => walk_files(
+			root,
+			language,
+			prefilter_tokens,
+			&|path: &Path| Some(root_display(path)),
+			&acc,
+		),
+		Some(specs) => {
+			let Ok(canonical_root) = root.canonicalize() else {
+				return acc.into_inner();
+			};
+			let scopes = PathScopes::resolve(specs, &canonical_root);
+			if !scopes.in_root.is_empty() {
+				let select = |path: &Path| {
+					let display = root_display(path);
+					scopes.in_root.iter().any(|s| s.matches(&display)).then_some(display)
+				};
+				walk_files(root, language, prefilter_tokens, &select, &acc);
+			}
+			for scope in &scopes.outside {
+				let select = |path: &Path| {
+					glob_accepts(&scope.rest, &PathUtils::to_relative_string(path, &scope.base))
+						.then(|| display_outside_root(path, &canonical_root))
+				};
+				walk_files(&scope.base, language, prefilter_tokens, &select, &acc);
+			}
+		}
+	}
+
+	let (mut files, stamp) = acc.into_inner();
+	files.sort_by(|a, b| a.display.cmp(&b.display));
+	// Overlapping outside entries (`../a`, `../a/b`) walk the same file twice.
+	files.dedup_by(|a, b| a.path == b.path);
+	(files, stamp)
+}
+
+/// Walk `base` in parallel, loading every `language` file that `select`
+/// gives a display path into `acc`.
+fn walk_files(
+	base: &Path,
+	language: &str,
+	prefilter_tokens: &[String],
+	select: &(dyn Fn(&Path) -> Option<String> + Sync),
+	acc: &FileAccumulator,
+) {
+	let walker = ignore::WalkBuilder::new(base)
 		.git_ignore(true)
 		.git_global(true)
 		.git_exclude(true)
 		.hidden(true)
 		.build_parallel();
 
-	let acc_ref = &acc;
 	walker.run(|| {
 		Box::new(move |result| {
 			let entry = match result {
@@ -161,12 +318,9 @@ pub fn collect_file_data(
 			if grep::language_from_extension(path) != Some(language) {
 				return ignore::WalkState::Continue;
 			}
-			let display = crate::indexer::PathUtils::to_relative_string(path, root);
-			if let Some(filter) = filter_ref {
-				if !filter.iter().any(|p| p.matches(&display)) {
-					return ignore::WalkState::Continue;
-				}
-			}
+			let Some(display) = select(path) else {
+				return ignore::WalkState::Continue;
+			};
 			let (size, mtime) = entry
 				.metadata()
 				.map(|m| (m.len(), m.modified().ok()))
@@ -181,7 +335,7 @@ pub fn collect_file_data(
 			let prefilter_hit =
 				prefilter_tokens.is_empty() || prefilter_tokens.iter().all(|t| content.contains(t.as_str()));
 
-			let mut guard = acc_ref.lock();
+			let mut guard = acc.lock();
 			guard.1.file_count += 1;
 			guard.1.total_size += size;
 			if let Some(mt) = mtime {
@@ -198,10 +352,6 @@ pub fn collect_file_data(
 			ignore::WalkState::Continue
 		})
 	});
-
-	let (mut files, stamp) = acc.into_inner();
-	files.sort_by(|a, b| a.display.cmp(&b.display));
-	(files, stamp)
 }
 
 /// Map `work` over (a filtered subset of) files on all cores, preserving
@@ -1041,6 +1191,71 @@ mod tests {
 		assert!(spec.matches("src/supervisor/mod.rs"));
 		assert!(spec.matches("src/supervisor/nested/worker.rs"));
 		assert!(!spec.matches("src/mcp/server.rs"));
+	}
+
+	/// `<dir>/repo` is the root; `<dir>/other` is a sibling outside it.
+	fn sibling_layout() -> tempfile::TempDir {
+		let dir = tempfile::TempDir::new().unwrap();
+		for file in ["repo/src/a.rs", "repo/lib/b.rs", "other/app/c.rs", "other/app/x/d.rs"] {
+			let path = dir.path().join(file);
+			std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+			std::fs::write(path, "fn f() {}\n").unwrap();
+		}
+		dir
+	}
+
+	fn displays(root: &Path, paths: &[&str]) -> Vec<String> {
+		let paths: Vec<String> = paths.iter().map(|p| p.to_string()).collect();
+		collect_file_data(root, "rust", Some(&paths), &[])
+			.0
+			.into_iter()
+			.map(|f| f.display)
+			.collect()
+	}
+
+	#[test]
+	fn test_collect_file_data_anchors_filesystem_paths_inside_root() {
+		let dir = sibling_layout();
+		let root = dir.path().join("repo");
+		let absolute_lib = root.join("lib").to_string_lossy().into_owned();
+
+		assert_eq!(displays(&root, &["./src"]), ["src/a.rs"]);
+		assert_eq!(displays(&root, &["src/../lib/"]), ["lib/b.rs"]);
+		assert_eq!(displays(&root, &[&absolute_lib]), ["lib/b.rs"]);
+		assert_eq!(displays(&root, &["."]), ["lib/b.rs", "src/a.rs"]);
+		assert_eq!(displays(&root, &["./src/*.rs"]), ["src/a.rs"]);
+		assert_eq!(displays(&root, &[" src\\a.rs "]), ["src/a.rs"]);
+	}
+
+	#[test]
+	fn test_collect_file_data_walks_paths_outside_root() {
+		let dir = sibling_layout();
+		let root = dir.path().join("repo");
+		let absolute_x = dir.path().join("other/app/x").to_string_lossy().into_owned();
+
+		assert_eq!(
+			displays(&root, &["../other/app"]),
+			["../other/app/c.rs", "../other/app/x/d.rs"]
+		);
+		assert_eq!(displays(&root, &[&absolute_x]), ["../other/app/x/d.rs"]);
+		assert_eq!(displays(&root, &["../other/**/d.rs"]), ["../other/app/x/d.rs"]);
+		assert_eq!(
+			displays(&root, &["../other/app", "../other/app/x", "src"]),
+			["../other/app/c.rs", "../other/app/x/d.rs", "src/a.rs"]
+		);
+		assert!(displays(&root, &["../missing"]).is_empty());
+	}
+
+	#[test]
+	fn test_display_outside_root_falls_back_to_absolute_without_shared_dir() {
+		assert_eq!(
+			display_outside_root(Path::new("/work/other/f.rs"), Path::new("/work/repo")),
+			"../other/f.rs"
+		);
+		assert_eq!(
+			display_outside_root(Path::new("/opt/f.rs"), Path::new("/work/repo")),
+			"/opt/f.rs"
+		);
 	}
 
 	#[test]

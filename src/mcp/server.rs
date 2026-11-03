@@ -234,9 +234,11 @@ pub struct StructuralSearchParams {
 	pub references: Option<String>,
 	/// Language to search (required: rust, javascript, typescript, python, go, java, cpp, php, ruby, swift, lua, bash, css, json, elixir)
 	pub language: String,
-	/// Narrow the search to matching files. Each entry is either a path
-	/// substring (`src/mcp`, `server.rs`) or a glob (`src/**/*.rs`), relative
-	/// to the repo root. Default: all files of the language.
+	/// Narrow the search to matching files. Each entry is a path substring
+	/// (`src/mcp`, `server.rs`), a glob (`src/**/*.rs`) over repo-relative paths,
+	/// or a filesystem path (`./src`, `../other-repo/app`, absolute, optionally
+	/// ending in a glob) anchored at that directory or file, which may lie
+	/// outside the repo root. Default: all files of the language.
 	#[serde(
 		default,
 		deserialize_with = "optional_string_or_vec",
@@ -807,7 +809,8 @@ impl McpServer {
 			return Ok(format!(
 				"No {} files found{}. Check that `language` matches the file extensions \
 				 (e.g. .ts → typescript, .tsx → typescript) and that `paths` entries are \
-				 substrings or globs relative to the repo root (e.g. `src/mcp` or `src/**/*.rs`).",
+				 substrings or globs relative to the repo root (e.g. `src/mcp` or `src/**/*.rs`) \
+				 or existing directories/files (e.g. `./src` or `../other-repo/app`).",
 				language, paths_desc
 			));
 		}

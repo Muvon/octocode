@@ -236,7 +236,7 @@ Source lines render as `N:hh|content`: N is the 1-based line number and hh a has
 - `symbol` (string) - Find symbol DEFINITIONS by name, `*` wildcards supported (e.g. `handle_*`)
 - `references` (string) - Find symbol USAGES by name, `*` wildcards supported
 - `language` (string, required) - Language to search: rust, javascript, typescript, python, go, java, cpp, php, ruby, swift, lua, bash, css, json, elixir
-- `paths` (array or string, optional) - File path substrings or globs to narrow results (e.g. `src/mcp`, `src/**/*.rs`)
+- `paths` (array or string, optional) - File path substrings or globs to narrow results (e.g. `src/mcp`, `src/**/*.rs`), or filesystem paths anchored at a directory or file, including outside the repo root (e.g. `./src`, `../other-repo/app`, absolute paths, `../other-repo/**/*.php`)
 - `inside` (string, optional) - Only keep matches inside a node matching this kind or pattern (e.g. `function_item`)
 - `has` (string, optional) - Only keep matches containing a node matching this kind or pattern (e.g. `$X.unwrap()`)
 - `constraints` (object, optional) - Regex constraints on captured metavariables, e.g. `{"NAME": "^handle_"}`
