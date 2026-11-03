@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.29.1] - 2026-11-03
+
+### 📋 Release Summary
+
+Structural searches through MCP now support paths outside the repository. Project and MCP documentation has been refreshed.
+
+### 🔧 Improvements & Optimizations
+
+- **dependencies**: refresh locked dependency versions `d006f2b3`
+- **workflows**: pin selected workflow action references `eb7f496f`
+
+### 🐛 Bug Fixes & Stability
+
+- **mcp**: support structural search paths outside the repository `cc06ab42`
+
+### 📚 Documentation & Examples
+
+- **docs**: refresh project and MCP documentation `65266c4f`
+
+### 🔄 Other Changes
+
+1 maintenance, dependency, and tooling update not listed individually.
+
 ## [0.29.0] - 2026-10-28
 
 ### 📋 Release Summary
