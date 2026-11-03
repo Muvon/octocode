@@ -20,7 +20,7 @@ jobs:
         token: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Install Rust
-      uses: dtolnay/rust-toolchain@1.99.1
+      uses: dtolnay/rust-toolchain@d124f86f28ff42855784ff3319f48ac182c248f8 # 1.99.1
 
     - name: Install protobuf compiler
       run: |
@@ -55,7 +55,7 @@ jobs:
 
     - name: Create Pull Request
       if: steps.changes.outputs.has_changes == 'true'
-      uses: peter-evans/create-pull-request@v5
+      uses: peter-evans/create-pull-request@4e1beaa7521e8b457b572c090b25bd3db56bf1c5 # v5
       with:
         token: ${{ secrets.GITHUB_TOKEN }}
         commit-message: 'chore: update dependencies'
