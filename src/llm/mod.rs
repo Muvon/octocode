@@ -29,6 +29,8 @@ pub use octolib::llm::{
 	StructuredOutputRequest, TokenUsage,
 };
 
+pub mod retry;
+
 /// The header carrying [`ModelPurpose`] to the octohub proxy.
 pub const MODEL_PURPOSE_HEADER: &str = "X-Model-Purpose";
 
@@ -186,12 +188,16 @@ impl LlmClient {
 
 						if let Some(cost) = usage.cost {
 							tracing::debug!("LLM cost: ${:.6}", cost);
+							retry::record_cost(cost);
 						}
 					}
 
 					return Ok(response.content);
 				}
 				Err(e) => {
+					if attempt == Self::MAX_RETRIES || !retry::allow_retry(&e) {
+						return Err(e);
+					}
 					last_error = Some(e);
 				}
 			}
@@ -347,6 +353,9 @@ impl LlmClient {
 								usage.output_tokens,
 								usage.total_tokens
 							);
+							if let Some(cost) = usage.cost {
+								retry::record_cost(cost);
+							}
 						}
 
 						if let Some(structured) = response.structured_output {
@@ -364,6 +373,9 @@ impl LlmClient {
 						));
 					}
 					Err(e) => {
+						if attempt == Self::MAX_RETRIES || !retry::allow_retry(&e) {
+							return Err(e);
+						}
 						last_error = Some(e);
 					}
 				}

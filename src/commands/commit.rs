@@ -44,6 +44,9 @@ where
 		match operation().await {
 			Ok(response) => return Ok(response),
 			Err(e) => {
+				if !crate::llm::retry::should_retry(&e) {
+					return Err(anyhow::anyhow!("{} failed: {}", context, e));
+				}
 				last_error = Some(e);
 				if attempt <= MAX_RETRIES {
 					eprintln!(
