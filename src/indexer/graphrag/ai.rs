@@ -401,6 +401,10 @@ impl AIEnhancements {
 					}
 				},
 				Err(e) => {
+					// A 400/401/403 from the provider fails the same way on every attempt.
+					if !crate::llm::retry::should_retry(&e) {
+						return Err(e);
+					}
 					last_error = Some(e);
 				}
 			}

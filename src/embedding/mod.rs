@@ -162,7 +162,12 @@ pub async fn generate_embeddings(contents: &str, is_code: bool, config: &Config)
 					.next()
 					.ok_or_else(|| anyhow::anyhow!("No embeddings generated"));
 			}
-			Err(e) => last_error = Some(e),
+			Err(e) => {
+				if attempt == MAX_EMBEDDING_RETRIES || !crate::llm::retry::should_retry(&e) {
+					return Err(e);
+				}
+				last_error = Some(e);
+			}
 		}
 	}
 
@@ -209,7 +214,12 @@ pub async fn generate_embeddings_batch(
 		.await
 		{
 			Ok(result) => return Ok(result),
-			Err(e) => last_error = Some(e),
+			Err(e) => {
+				if attempt == MAX_EMBEDDING_RETRIES || !crate::llm::retry::should_retry(&e) {
+					return Err(e);
+				}
+				last_error = Some(e);
+			}
 		}
 	}
 
