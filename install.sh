@@ -33,7 +33,8 @@ log_warning() {
 }
 
 log_error() {
-    echo -e "${RED}[ERROR]${NC} $1"
+    # To stderr: detect_platform runs inside $(...), where stdout is its result and never reaches the screen.
+    echo -e "${RED}[ERROR]${NC} $1" >&2
 }
 
 # Check if a command exists
@@ -60,11 +61,19 @@ detect_platform() {
         *)              log_error "Unsupported architecture: $(uname -m)"; exit 1 ;;
     esac
 
+    # A shell running under Rosetta on Apple Silicon reports x86_64.
+    if [ "$os" = "apple-darwin" ] && [ "$arch" = "x86_64" ]; then
+        if [ "$(sysctl -n hw.optional.arm64 2>/dev/null)" = "1" ]; then
+            arch="aarch64"
+        else
+            log_error "Macs with an Intel processor are not supported (supported: Apple Silicon)"; exit 1
+        fi
+    fi
+
     # Determine target triple and preferred variant
     case "$os-$arch" in
         unknown-linux-x86_64)    echo "x86_64-unknown-linux-musl" ;;   # Static musl binary
         unknown-linux-aarch64)   echo "aarch64-unknown-linux-musl" ;;  # ARM64 Linux support
-        apple-darwin-x86_64)     echo "x86_64-apple-darwin" ;;
         apple-darwin-aarch64)    echo "aarch64-apple-darwin" ;;
         pc-windows-x86_64)       echo "x86_64-pc-windows-msvc" ;;       # MSVC for better compatibility
         pc-windows-aarch64)      echo "aarch64-pc-windows-msvc" ;;      # ARM64 Windows support
@@ -313,7 +322,6 @@ EXAMPLES:
 SUPPORTED TARGETS:
     x86_64-unknown-linux-musl    Linux x86_64 (static, recommended)
     aarch64-unknown-linux-musl   Linux ARM64 (static)
-    x86_64-apple-darwin          macOS x86_64
     aarch64-apple-darwin         macOS ARM64
     x86_64-pc-windows-msvc       Windows x86_64
     aarch64-pc-windows-msvc      Windows ARM64

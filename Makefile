@@ -17,7 +17,6 @@ TARGETS := x86_64-unknown-linux-musl \
 					aarch64-unknown-linux-musl \
 					x86_64-pc-windows-msvc \
 					aarch64-pc-windows-msvc \
-					x86_64-apple-darwin \
 					aarch64-apple-darwin
 
 # Colors for output
@@ -75,7 +74,6 @@ build-static: ## Build static binary for current platform
 	@echo "$(YELLOW)Building static binary...$(NC)"
 ifeq ($(shell uname),Darwin)
 	# macOS doesn't support fully static linking, but we can optimize
-	cargo build --release --target x86_64-apple-darwin
 	cargo build --release --target aarch64-apple-darwin
 else ifeq ($(shell uname),Linux)
 	# Linux static build with musl - native compilation

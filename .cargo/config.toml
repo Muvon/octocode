@@ -37,9 +37,6 @@ rustflags = [
 [target.aarch64-apple-darwin]
 rustflags = []
 
-[target.x86_64-apple-darwin]
-rustflags = []
-
 # Registry configuration
 [registry]
 default = "crates-io"

@@ -153,15 +153,16 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
 
-    # Cache the static ONNX Runtime build (45–60 min cold) between runs.
-    # Cache full source+build tree because ort-sys's static-link branch
-    # walks build/_deps/ for re2/abseil/protobuf — flattening .a files
-    # into one dir breaks linking.
-    - name: Cache ONNX Runtime static build
-      uses: actions/cache@v4
-      with:
-        path: onnxruntime-src
-        key: onnxruntime-1.24.2-${{ matrix.target }}-alpine3.22-v6
+    # Pyke ships no musl prebuilt of ONNX Runtime, so the musl targets link the
+    # static library published by Muvon/onnxruntime-builds.
+    - name: Download ONNX Runtime static library
+      run: |
+        asset="onnxruntime-1.24.2-${{ matrix.target }}.tar.gz"
+        base="https://github.com/Muvon/onnxruntime-builds/releases/download/v1.24.2"
+        curl -fsSL --retry 3 -O "$base/$asset" -O "$base/$asset.sha256"
+        shasum -a 256 -c "$asset.sha256"
+        mkdir onnxruntime
+        tar -xzf "$asset" -C onnxruntime
 
     - name: Cache cargo registry and target
       uses: actions/cache@v4
@@ -176,9 +177,8 @@ jobs:
 
     - name: Build in Alpine (mirrors release pipeline)
       run: |
-        mkdir -p onnxruntime-src
-        chmod -R 777 onnxruntime-src
-
+        # The image must stay on the Alpine release the ONNX Runtime library was
+        # built on (3.22), because the archive links against this image's C++ runtime.
         docker run --rm \
           --user 0:0 \
           -v "$(pwd):/workspace" \
@@ -191,59 +191,14 @@ jobs:
               pkgconfig gcc g++ \
               cmake make linux-headers python3 py3-pip patch
 
-            mkdir -p /tmp/include
-            cat > /tmp/include/execinfo.h << "EOF"
-        #ifndef _EXECINFO_H
-        #define _EXECINFO_H
-        #include <stddef.h>
-        static inline int backtrace(void **buffer, int size) { (void)buffer; (void)size; return 0; }
-        static inline char **backtrace_symbols(void *const *buffer, int size) { (void)buffer; (void)size; return NULL; }
-        static inline void backtrace_symbols_fd(void *const *buffer, int size, int fd) { (void)buffer; (void)size; (void)fd; }
-        #endif
-        EOF
-            export C_INCLUDE_PATH=/tmp/include
-            export CPLUS_INCLUDE_PATH=/tmp/include
-
             rustup target add ${{ matrix.target }}
 
-            ORT_SRC=/workspace/onnxruntime-src
-            ORT_LIB_LOCATION="$ORT_SRC/build/Release"
-            if [ ! -f "$ORT_LIB_LOCATION/_deps/re2-build/libre2.a" ]; then
-              echo "==> Building ONNX Runtime 1.24.2 from source (static, musl)"
-              rm -rf "$ORT_SRC"
-              git clone --single-branch --branch v1.24.2 --recursive \
-                https://github.com/microsoft/onnxruntime.git "$ORT_SRC"
-              cd "$ORT_SRC"
-              ./build.sh \
-                --config Release \
-                --build_dir build \
-                --parallel \
-                --skip_tests \
-                --skip_submodule_sync \
-                --allow_running_as_root \
-                --compile_no_warning_as_error \
-                --no_kleidiai \
-                --no_sve \
-                --cmake_extra_defines \
-                  CMAKE_POSITION_INDEPENDENT_CODE=ON \
-                  onnxruntime_BUILD_UNIT_TESTS=OFF \
-                  onnxruntime_BUILD_SHARED_LIB=OFF \
-                  onnxruntime_USE_KLEIDIAI=OFF
-              cmake --build "$ORT_LIB_LOCATION" --target re2 -j
-              cd /workspace
-            else
-              echo "==> Using cached ONNX Runtime static build"
-            fi
-
-            # Install protobuf-dev AFTER ORT build: lance-encoding build.rs
-            # needs the well-known .proto includes (google/protobuf/empty.proto)
-            # which only ship in protobuf-dev. Installing it earlier would pull
-            # abseil-cpp-dev and make ORT CMake skip its bundled abseil + drop
-            # re2. By this point ORT artifacts already exist, and cargo only
-            # links pre-built .a files via ORT_LIB_LOCATION.
+            # lance-encoding build.rs needs the well-known .proto includes
+            # (google/protobuf/empty.proto), which only ship in protobuf-dev.
             apk add --no-cache protobuf-dev
 
-            export ORT_LIB_LOCATION="$ORT_LIB_LOCATION"
+            # A directory holding libonnxruntime.a makes ort-sys link that one archive.
+            export ORT_LIB_LOCATION=/workspace/onnxruntime
             export RUSTFLAGS="-C link-arg=-lgcc"
             cargo build --target ${{ matrix.target }}
           '

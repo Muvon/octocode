@@ -9,7 +9,7 @@ curl -fsSL https://raw.githubusercontent.com/muvon/octocode/master/install.sh | 
 
 **Works on:**
 - Linux (any distribution, x86_64 and ARM64)
-- macOS (Intel and Apple Silicon)
+- macOS (Apple Silicon)
 - Windows (x86_64 and ARM64 via Git Bash, WSL, MSYS2, Cygwin)
 - Any Unix-like system with `/bin/sh`
 
@@ -41,8 +41,7 @@ Download the appropriate binary for your platform from the [latest release](http
 | Linux | ARM64 (static) | `octocode-VERSION-aarch64-unknown-linux-musl.tar.gz` |
 | Windows | x86_64 | `octocode-VERSION-x86_64-pc-windows-msvc.zip` |
 | Windows | ARM64 | `octocode-VERSION-aarch64-pc-windows-msvc.zip` |
-| macOS | x86_64 | `octocode-VERSION-x86_64-apple-darwin.tar.gz` |
-| macOS | ARM64 | `octocode-VERSION-aarch64-apple-darwin.tar.gz` |
+| macOS (Apple Silicon) | ARM64 | `octocode-VERSION-aarch64-apple-darwin.tar.gz` |
 
 ### Extract and Install
 
