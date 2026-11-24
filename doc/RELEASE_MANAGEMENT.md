@@ -175,7 +175,7 @@ The bump is derived deterministically from the conventional commit types since t
 ### 5. Changelog Generation
 
 Creates structured changelog with:
-- A short LLM-written summary, only when the release contains `feat`, `fix`, `perf` or breaking commits; it never carries commit hashes, and is audited against the commit list: claims no commit supports are rejected and redrafted, and the release aborts if they persist
+- A short LLM-written headline, rendered directly under the version/date heading, only when the release contains `feat`, `fix`, `perf` or breaking commits; it is one plain-text line of at most 24 words with no commit hashes, and is audited against the commit list: claims no commit supports, or an empty or overlong line, are rejected and redrafted, and the release aborts if they persist
 - Categorized changes (Features, Bug Fixes, etc.) rendered from git, with exact commit hashes
 - Breaking change highlights
 - Release date
@@ -330,6 +330,8 @@ octocode release  # AI determines minor bump (e.g., 1.0.0 → 1.1.0)
 # Changelog
 
 ## [1.2.0] - 2025-01-27
+
+Adds OAuth2 authentication, user dashboards with analytics, and data export.
 
 ### ✨ Features
 

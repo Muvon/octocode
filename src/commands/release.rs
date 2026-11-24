@@ -704,7 +704,7 @@ fn format_enhanced_commit_entry(commit: &CommitInfo) -> String {
 	entry
 }
 
-/// Build the changelog entry: header, an LLM summary when the release has
+/// Build the changelog entry: header, an LLM headline when the release has
 /// user-facing changes, then the deterministic per-commit sections.
 async fn generate_changelog_entry(
 	config: &Config,
@@ -713,21 +713,32 @@ async fn generate_changelog_entry(
 	project_type: &ProjectType,
 ) -> Result<String> {
 	let date = chrono::Utc::now().format("%Y-%m-%d").to_string();
-	let mut entry = format!("## [{}] - {}\n\n", version.new_version, date);
 
-	// Dependency bumps, CI and docs-only releases get no prose: the model can
-	// only produce filler ("keeps the project current") for them.
-	if has_user_facing_changes(analysis) {
-		let summary = generate_ai_changelog_summary(config, analysis, project_type).await?;
-		if !summary.is_empty() {
-			entry.push_str("### 📋 Release Summary\n\n");
-			entry.push_str(&summary);
-			entry.push_str("\n\n");
-		}
+	// Dependency bumps, CI and docs-only releases get no headline: the model
+	// can only produce filler ("keeps the project current") for them.
+	let headline = if has_user_facing_changes(analysis) {
+		Some(generate_ai_changelog_summary(config, analysis, project_type).await?)
+	} else {
+		None
+	};
+	Ok(render_changelog_entry(
+		&version.new_version,
+		&date,
+		headline.as_deref(),
+		analysis,
+	))
+}
+
+/// Render the final entry around an already-audited headline. Pure so the tests
+/// can pin the exact header/blank line/headline/blank line/sections ordering.
+fn render_changelog_entry(new_version: &str, date: &str, headline: Option<&str>, analysis: &CommitAnalysis) -> String {
+	let mut entry = format!("## [{}] - {}\n\n", new_version, date);
+	if let Some(headline) = headline {
+		entry.push_str(headline);
+		entry.push_str("\n\n");
 	}
-
 	entry.push_str(&changelog_sections(analysis));
-	Ok(entry)
+	entry
 }
 
 fn has_user_facing_changes(analysis: &CommitAnalysis) -> bool {
@@ -859,19 +870,43 @@ const SUMMARY_AUDIT_RULES: &str =
 - states a benefit, motivation or improvement that no commit message gives;
 - names a component or area that no commit mentions.";
 
-const SUMMARY_SYSTEM_PROMPT: &str = "You write the summary paragraph of a software changelog entry. Respond with a single JSON object and nothing else: {\"summary\": string}
+/// Upper bound on the rendered headline, in words. Enforced on the exact
+/// normalized string that is audited and rendered — drafts are never truncated.
+const HEADLINE_MAX_WORDS: usize = 24;
+
+const SUMMARY_SYSTEM_PROMPT: &str = "You write the headline of a software changelog entry. Respond with a single JSON object and nothing else: {\"summary\": string}
 
 Rules:
-- One to three plain sentences, at most 60 words. Written for people who use the project, not for its developers.
+- One plain text line, at most 24 words, covering the most meaningful changes of the release rather than everything in it.
+- Written for people who use the project, not for its developers.
 - Cover only the commits listed. Never state a benefit, capability or motivation that a commit does not say.
 - Only commits under NEW FEATURES may be called new, added or introduced. Fixes and refactors are changes to existing behavior.
-- Group related commits into one clause instead of listing each.
+- No commit hashes, file names, markdown, labels, emoji, or opening filler such as \"This release\".
 - Ignore dependency bumps, CI, formatting and release chores.
-- No commit hashes, file names, markdown, emoji, or opening filler such as \"This release\".
 
-Example: \"Indexing now checkpoints after each stored batch, so an interrupted run resumes instead of restarting. Search results can be reranked with a configurable thinking budget.\"";
+Example: \"Indexing now checkpoints after each stored batch, so an interrupted run resumes instead of restarting.\"";
 
-/// Ask the model for the prose summary. Commit hashes are deliberately left out
+/// Shape gate on the normalized headline: one nonempty line of at most
+/// HEADLINE_MAX_WORDS words. Applied to the same string that is rendered and
+/// audited, so an invalid draft is redrafted rather than truncated.
+fn headline_rejection(headline: &str) -> Option<String> {
+	let words = headline.split_whitespace().count();
+	if words == 0 {
+		return Some(format!(
+			"the headline is empty; write one line of at most {} words",
+			HEADLINE_MAX_WORDS
+		));
+	}
+	if words > HEADLINE_MAX_WORDS {
+		return Some(format!(
+			"the headline is {} words long; rewrite it as one line of at most {} words",
+			words, HEADLINE_MAX_WORDS
+		));
+	}
+	None
+}
+
+/// Ask the model for the headline. Commit hashes are deliberately left out
 /// of the prompt: the per-commit sections already carry exact hashes, and a
 /// model asked to repeat them shortens or invents them.
 async fn generate_ai_changelog_summary(
@@ -936,24 +971,32 @@ async fn generate_ai_changelog_summary(
 			.and_then(|s| s.as_str())
 			.map(plain_line)
 			.ok_or_else(|| anyhow::anyhow!("LLM returned no summary field: {}", value))?;
-		rejected = client
-			.unsupported_claims(SUMMARY_AUDIT_RULES, &prompt, &summary)
-			.await?;
+
+		// Shape failures (empty or overlong line) reuse the same redraft budget
+		// as claim failures: the rejection is actionable feedback for the next draft.
+		rejected = match headline_rejection(&summary) {
+			Some(rejection) => vec![rejection],
+			None => {
+				client
+					.unsupported_claims(SUMMARY_AUDIT_RULES, &prompt, &summary)
+					.await?
+			}
+		};
 		if rejected.is_empty() {
 			return Ok(summary);
 		}
-		println!("🔍 Audit rejected the summary; redrafting without these claims:");
+		println!("🔍 Draft rejected; redrafting:");
 		for claim in &rejected {
 			println!("  • {}", claim);
 		}
 		draft_prompt.push_str(&format!(
-			"\n\nA previous summary was rejected because the commits do not support these claims. Do not repeat them; state only what the commits say:\n- {}\n\nRejected summary:\n{}",
+			"\n\nA previous summary was rejected. Do not repeat it; write a new one that fixes every issue:\n- {}\n\nRejected summary:\n{}",
 			rejected.join("\n- "),
 			summary
 		));
 	}
 	Err(anyhow::anyhow!(
-		"Release summary still claims more than the commits say after {} drafts: {}",
+		"Release headline still fails audit after {} drafts: {}",
 		MAX_AUDIT_ROUNDS,
 		rejected.join("; ")
 	))

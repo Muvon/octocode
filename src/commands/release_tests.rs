@@ -442,7 +442,40 @@ mod tests {
 	}
 
 	#[test]
-	fn only_feat_fix_perf_or_breaking_commits_earn_a_prose_summary() {
+	fn changelog_entry_puts_the_headline_between_header_and_sections() {
+		let mut a = analysis(&[], &[], &[], &[]);
+		a.commits = vec![typed("feat", "feat(api): add", Some("api"), "add")];
+		assert_eq!(
+			render_changelog_entry("0.3.1", "2026-11-24", Some("Adds API export"), &a),
+			"## [0.3.1] - 2026-11-24\n\nAdds API export\n\n\
+			### ✨ New Features & Enhancements\n\n- **api**: add `01234567`\n\n"
+		);
+	}
+
+	#[test]
+	fn quiet_releases_skip_the_headline_entirely() {
+		let mut a = analysis(&[], &[], &[], &[]);
+		a.commits = vec![
+			typed("chore", "chore(deps): bump serde", Some("deps"), "bump serde"),
+			typed("docs", "docs: refresh", None, "refresh"),
+		];
+		assert_eq!(
+			render_changelog_entry("0.3.1", "2026-11-24", None, &a),
+			"## [0.3.1] - 2026-11-24\n\n\
+			### 📚 Documentation & Examples\n\n- refresh `01234567`\n\n\
+			### 🔄 Other Changes\n\n1 maintenance, dependency, and tooling update not listed individually.\n\n"
+		);
+	}
+
+	#[test]
+	fn blank_or_overlong_headline_drafts_are_rejected_not_truncated() {
+		assert!(headline_rejection("  \n ").is_some());
+		assert!(headline_rejection(&"word ".repeat(HEADLINE_MAX_WORDS + 1)).is_some());
+		assert_eq!(headline_rejection("Short headline summary"), None);
+	}
+
+	#[test]
+	fn only_feat_fix_perf_or_breaking_commits_earn_a_headline() {
 		let mut quiet = analysis(&[], &[], &[], &[]);
 		quiet.commits = vec![
 			typed("chore", "chore(deps): bump serde", Some("deps"), "bump serde"),
