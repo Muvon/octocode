@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.30.0] - 2026-11-24
+
+### 📋 Release Summary
+
+LLM requests now use the client’s default temperature, and the v3 config migration no longer preserves the obsolete temperature setting. Intel macOS builds are no longer provided, and musl ONNX is fetched during builds.
+
+### 🚨 Breaking Changes
+
+- **llm**: use client defaults for LLM temperature `63767961`
+- **build**: drop Intel macOS builds and fetch musl ONNX `4a1d980a`
+
+### 🐛 Bug Fixes & Stability
+
+- **config**: remove obsolete temperature in v3 migration `37533e43`
+
+### 🔄 Other Changes
+
+1 maintenance, dependency, and tooling update not listed individually.
+
 ## [0.29.2] - 2026-11-08
 
 ### 🔄 Other Changes
