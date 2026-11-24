@@ -81,7 +81,6 @@ impl ModelPurpose {
 pub struct LlmClient {
 	provider: Box<dyn AiProvider>,
 	model: String,
-	temperature: f32,
 	max_tokens: usize,
 	/// Thinking budget for every call this client makes. `None` leaves it to the
 	/// provider default.
@@ -98,7 +97,6 @@ impl LlmClient {
 		Ok(Self {
 			provider,
 			model,
-			temperature: config.llm.temperature,
 			max_tokens: config.llm.max_tokens,
 			reasoning_effort: None,
 			purpose,
@@ -112,7 +110,6 @@ impl LlmClient {
 		Ok(Self {
 			provider,
 			model,
-			temperature: config.llm.temperature,
 			max_tokens: config.llm.max_tokens,
 			reasoning_effort: None,
 			purpose,
@@ -125,27 +122,14 @@ impl LlmClient {
 		self
 	}
 
-	/// Override the sampling temperature for every call this client makes.
-	pub fn with_temperature(mut self, temperature: f32) -> Self {
-		self.temperature = temperature;
-		self
-	}
-
 	/// Build the request params every call shares: this client's model, token
 	/// limits, thinking budget and purpose header.
-	fn params(&self, messages: &[Message], temperature: f32) -> ChatCompletionParams {
-		let params = ChatCompletionParams::new(
-			messages,
-			&self.model,
-			temperature,
-			1.0,                    // top_p
-			50,                     // min_tokens
-			self.max_tokens as u32, // max_tokens (convert usize to u32)
-		)
-		.with_extra_headers(HashMap::from([(
-			MODEL_PURPOSE_HEADER.to_string(),
-			self.purpose.as_str().to_string(),
-		)]));
+	fn params(&self, messages: &[Message]) -> ChatCompletionParams {
+		let params = ChatCompletionParams::new(messages, &self.model, self.max_tokens as u32)
+			.with_extra_headers(HashMap::from([(
+				MODEL_PURPOSE_HEADER.to_string(),
+				self.purpose.as_str().to_string(),
+			)]));
 		match self.reasoning_effort {
 			Some(effort) => params.with_reasoning_effort(effort),
 			None => params,
@@ -171,7 +155,7 @@ impl LlmClient {
 				tokio::time::sleep(delay).await;
 			}
 
-			let params = self.params(&messages, self.temperature);
+			let params = self.params(&messages);
 
 			match self.provider.chat_completion(params).await {
 				Ok(response) => {
@@ -211,9 +195,7 @@ impl LlmClient {
 		}
 
 		let structured_request = StructuredOutputRequest::json();
-		let params = self
-			.params(&messages, self.temperature)
-			.with_structured_output(structured_request);
+		let params = self.params(&messages).with_structured_output(structured_request);
 
 		let response = self.provider.chat_completion(params).await?;
 
@@ -240,29 +222,6 @@ impl LlmClient {
 			let result: T = serde_json::from_str(&response.content)?;
 			Ok(result)
 		}
-	}
-
-	/// Chat completion with custom temperature
-	pub async fn chat_completion_with_temperature(&self, messages: Vec<Message>, temperature: f32) -> Result<String> {
-		let params = self.params(&messages, temperature);
-
-		let response = self.provider.chat_completion(params).await?;
-
-		// Log token usage
-		if let Some(usage) = &response.exchange.usage {
-			tracing::debug!(
-				"LLM tokens: input={}, output={}, total={}",
-				usage.input_tokens,
-				usage.output_tokens,
-				usage.total_tokens
-			);
-
-			if let Some(cost) = usage.cost {
-				tracing::debug!("LLM cost: ${:.6}", cost);
-			}
-		}
-
-		Ok(response.content)
 	}
 
 	/// Get the model name
@@ -334,9 +293,7 @@ impl LlmClient {
 					Some(s) => StructuredOutputRequest::json_schema(s.clone()).with_strict_mode(),
 					None => StructuredOutputRequest::json(),
 				};
-				let params = self
-					.params(&messages, self.temperature)
-					.with_structured_output(structured_request);
+				let params = self.params(&messages).with_structured_output(structured_request);
 
 				match self.provider.chat_completion(params).await {
 					Ok(response) => {

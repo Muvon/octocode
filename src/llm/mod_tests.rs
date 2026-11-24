@@ -193,7 +193,7 @@ mod tests {
 		let config = Config::default();
 		for purpose in [ModelPurpose::Search, ModelPurpose::IndexGraphrag] {
 			let client = LlmClient::with_model(&config, "openai:gpt-4o-mini", purpose).unwrap();
-			let params = client.params(&[Message::user("hi")], 0.3);
+			let params = client.params(&[Message::user("hi")]);
 			let headers = params.extra_headers.expect("the purpose header must be set");
 			assert_eq!(headers.len(), 1);
 			assert_eq!(
@@ -204,13 +204,12 @@ mod tests {
 	}
 
 	#[test]
-	fn the_purpose_header_survives_reasoning_effort_and_temperature_overrides() {
+	fn the_purpose_header_survives_reasoning_effort_override() {
 		let config = Config::default();
 		let client = LlmClient::from_config(&config, ModelPurpose::Release)
 			.unwrap()
-			.with_temperature(0.9)
 			.with_reasoning_effort(ReasoningEffortConfig::High);
-		let headers = client.params(&[], client.temperature).extra_headers.unwrap();
+		let headers = client.params(&[]).extra_headers.unwrap();
 		assert_eq!(headers[MODEL_PURPOSE_HEADER], "octocode-release");
 	}
 }

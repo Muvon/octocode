@@ -482,8 +482,6 @@ async fn rewrite_commit_message(
 	Ok(())
 }
 
-/// Sampling temperature for commit drafting; low keeps output factual and stable.
-const LLM_TEMPERATURE: f32 = 0.1;
 /// Hard ceiling for the subject line. The prompt asks for 50; git convention tolerates 72.
 const SUBJECT_MAX_CHARS: usize = 72;
 /// Body lines are wrapped at the git convention width.
@@ -903,7 +901,7 @@ Added lines inside this chunk may belong to files marked M (modified); do not as
 /// statuses, author guidance) and never a rejected draft, so it cannot be led.
 /// Transport retries live inside `chat_completion_json`.
 async fn draft_commit_message(prompt: &str, config: &Config) -> Result<String> {
-	let client = LlmClient::from_config(config, ModelPurpose::Commit)?.with_temperature(LLM_TEMPERATURE);
+	let client = LlmClient::from_config(config, ModelPurpose::Commit)?;
 	let mut draft_prompt = prompt.to_string();
 	let mut rejected = Vec::new();
 	for _ in 0..MAX_AUDIT_ROUNDS {
@@ -943,7 +941,7 @@ async fn draft_once(client: &LlmClient, prompt: &str) -> Result<String> {
 async fn summarise_chunk(prompt: &str, config: &Config) -> Result<String> {
 	let client = LlmClient::from_config(config, ModelPurpose::Commit)?;
 	let messages = vec![Message::system(CHUNK_SYSTEM_PROMPT), Message::user(prompt)];
-	client.chat_completion_with_temperature(messages, LLM_TEMPERATURE).await
+	client.chat_completion(messages).await
 }
 
 /// Check if pre-commit binary is available in PATH

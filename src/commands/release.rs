@@ -849,8 +849,6 @@ fn extract_field_from_toml(content: &str, field: &str) -> Option<String> {
 	None
 }
 
-/// Sampling temperature for the release summary; low keeps it factual.
-const LLM_TEMPERATURE: f32 = 0.1;
 /// Rounds of draft, audit, redraft-with-feedback before the release aborts.
 const MAX_AUDIT_ROUNDS: usize = 2;
 
@@ -919,7 +917,7 @@ async fn generate_ai_changelog_summary(
 		prompt.push('\n');
 	}
 
-	let client = LlmClient::from_config(config, ModelPurpose::Release)?.with_temperature(LLM_TEMPERATURE);
+	let client = LlmClient::from_config(config, ModelPurpose::Release)?;
 	let schema = serde_json::json!({
 		"type": "object",
 		"properties": {"summary": {"type": "string"}},

@@ -86,7 +86,6 @@ pub fn execute(args: &ConfigArgs, mut config: Config) -> Result<()> {
 		// LLM Configuration
 		println!("🤖 LLM Configuration:");
 		println!("   Model: {}", config.llm.model);
-		println!("   Temperature: {}", config.llm.temperature);
 		println!("   Max Tokens: {}", config.llm.max_tokens);
 		println!("   Timeout: {}s", config.llm.timeout);
 

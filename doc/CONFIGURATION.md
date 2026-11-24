@@ -58,7 +58,6 @@ version = 3
 [llm]
 model = "openrouter:openai/gpt-4o-mini"
 timeout = 120
-temperature = 0.7
 max_tokens = 4000
 
 [embedding]
@@ -219,14 +218,12 @@ export TOGETHER_API_KEY="your-together-key"
 # Model in provider:model format
 model = "openrouter:openai/gpt-4o-mini"
 timeout = 120
-temperature = 0.7
 max_tokens = 4000
 ```
 
 **Fields:**
 - `model`: LLM model in `provider:model` format (e.g., "openai:gpt-4o-mini", "anthropic:claude-3-5-haiku-20241022")
 - `timeout`: Request timeout in seconds (default: 120)
-- `temperature`: Sampling temperature 0.0-1.0 (default: 0.7)
 - `max_tokens`: Maximum tokens in response (default: 4000)
 
 **Supported Providers:**
@@ -435,7 +432,6 @@ version = 3
 [llm]
 model = "openrouter:openai/gpt-4o-mini"
 timeout = 120
-temperature = 0.7
 max_tokens = 4000
 
 [index]

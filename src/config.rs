@@ -103,7 +103,6 @@ pub struct GraphRAGConfig {
 pub struct LlmConfig {
 	pub model: String,
 	pub timeout: u64,
-	pub temperature: f32,
 	pub max_tokens: usize,
 }
 
@@ -112,7 +111,6 @@ impl Default for LlmConfig {
 		Self {
 			model: "openrouter:openai/gpt-4o-mini".to_string(),
 			timeout: 120,
-			temperature: 0.7,
 			max_tokens: 4000,
 		}
 	}
@@ -496,10 +494,6 @@ impl Config {
 
 	pub fn get_timeout(&self) -> u64 {
 		self.llm.timeout
-	}
-
-	pub fn get_temperature(&self) -> f32 {
-		self.llm.temperature
 	}
 
 	pub fn get_max_tokens(&self) -> usize {

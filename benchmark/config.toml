@@ -2,7 +2,6 @@ version = 1
 
 [llm]
 model = "ollama:gemini-3-flash-preview"
-temperature = 1.0
 max_tokens = 4000
 timeout = 120
 
