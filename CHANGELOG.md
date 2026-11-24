@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.30.1] - 2026-11-24
+
+### 📋 Release Summary
+
+Changelogs now include concise headlines.
+
+### ✨ New Features & Enhancements
+
+- **release**: add concise changelog headlines `a789880f`
+
 ## [0.30.0] - 2026-11-24
 
 ### 📋 Release Summary
