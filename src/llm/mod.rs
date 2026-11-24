@@ -125,11 +125,9 @@ impl LlmClient {
 	/// Build the request params every call shares: this client's model, token
 	/// limits, thinking budget and purpose header.
 	fn params(&self, messages: &[Message]) -> ChatCompletionParams {
-		let params = ChatCompletionParams::new(messages, &self.model, self.max_tokens as u32)
-			.with_extra_headers(HashMap::from([(
-				MODEL_PURPOSE_HEADER.to_string(),
-				self.purpose.as_str().to_string(),
-			)]));
+		let params = ChatCompletionParams::new(messages, &self.model, self.max_tokens as u32).with_extra_headers(
+			HashMap::from([(MODEL_PURPOSE_HEADER.to_string(), self.purpose.as_str().to_string())]),
+		);
 		match self.reasoning_effort {
 			Some(effort) => params.with_reasoning_effort(effort),
 			None => params,

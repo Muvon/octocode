@@ -53,7 +53,7 @@ octocode config \
 ## Configuration File Structure
 
 ```toml
-version = 3
+version = 4
 
 [llm]
 model = "openrouter:openai/gpt-4o-mini"
@@ -427,7 +427,7 @@ The MCP server uses command-line arguments rather than configuration file settin
 
 ```toml
 # Octocode configuration (config-templates/default.toml)
-version = 3
+version = 4
 
 [llm]
 model = "openrouter:openai/gpt-4o-mini"

@@ -608,7 +608,7 @@ mod tests {
 	#[test]
 	fn test_default_config() {
 		let config = Config::load_from_template().expect("Failed to load template config");
-		assert_eq!(config.version, 3);
+		assert_eq!(config.version, 4);
 		assert_eq!(config.llm.model, "openrouter:openai/gpt-4o-mini");
 		assert_eq!(config.index.chunk_size, 2000);
 		assert_eq!(config.search.max_results, 20);
@@ -650,7 +650,7 @@ mod tests {
 		assert!(result.is_ok(), "Should be able to load from template");
 
 		let config = result.expect("Template config should load successfully");
-		assert_eq!(config.version, 3);
+		assert_eq!(config.version, 4);
 		assert_eq!(config.llm.model, "openrouter:openai/gpt-4o-mini");
 		assert_eq!(config.index.chunk_size, 2000);
 		assert_eq!(config.search.max_results, 20);
@@ -693,7 +693,7 @@ mod tests {
 	#[test]
 	fn parses_commits_co_authored_by() {
 		let config: Config = toml::from_str(
-			r#"version = 3
+			r#"version = 4
 [commits]
 use_llm = false
 co_authored_by = ["Alice <alice@example.com>", "Bob <bob@example.com>"]"#,
@@ -739,7 +739,7 @@ co_authored_by = ["Alice <alice@example.com>", "Bob <bob@example.com>"]"#,
 	fn test_toml_missing_optional_sections_uses_defaults() {
 		// A config.toml that omits whole tables (legal TOML) must fall back to
 		// sane defaults instead of panicking via serde's #[serde(default)].
-		let minimal = "version = 3\n";
+		let minimal = "version = 4\n";
 		let config: Config = toml::from_str(minimal).expect("should deserialize with defaults");
 		assert_eq!(config.search.max_results, 20);
 		assert!(!config.graphrag.enabled);
@@ -752,7 +752,7 @@ co_authored_by = ["Alice <alice@example.com>", "Bob <bob@example.com>"]"#,
 
 		let config = Config::load_from_path(&config_path).expect("config should be created");
 
-		assert_eq!(config.version, 3);
+		assert_eq!(config.version, 4);
 		assert_eq!(fs::read_to_string(&config_path).unwrap(), DEFAULT_CONFIG_TEMPLATE);
 		assert!(siblings(&config_path, "bak").is_empty());
 	}
@@ -765,7 +765,7 @@ co_authored_by = ["Alice <alice@example.com>", "Bob <bob@example.com>"]"#,
 
 		let config = Config::load_from_path(&config_path).expect("current config should load");
 
-		assert_eq!(config.version, 3);
+		assert_eq!(config.version, 4);
 		assert!(siblings(&config_path, "lock").is_empty());
 	}
 
@@ -779,7 +779,7 @@ co_authored_by = ["Alice <alice@example.com>", "Bob <bob@example.com>"]"#,
 		let config = Config::load_from_path(&config_path).expect("v1 config should migrate");
 		let migrated = fs::read_to_string(&config_path).unwrap();
 
-		assert_eq!(config.version, 3);
+		assert_eq!(config.version, 4);
 		assert_eq!(config.search.hybrid.default_vector_weight, 0.73);
 		assert_eq!(config.search.hybrid.rrf_k, 60.0);
 		assert!(!config.search.reasoning.enabled);
@@ -797,7 +797,7 @@ co_authored_by = ["Alice <alice@example.com>", "Bob <bob@example.com>"]"#,
 	fn future_version_is_rejected_without_modifying_file() {
 		let temp = TempConfigDir::new();
 		let config_path = temp.config_path();
-		let future = DEFAULT_CONFIG_TEMPLATE.replacen("version = 3", "version = 4", 1);
+		let future = DEFAULT_CONFIG_TEMPLATE.replacen("version = 4", "version = 5", 1);
 		fs::write(&config_path, &future).unwrap();
 
 		let error = Config::load_from_path(&config_path).expect_err("future config should fail");
@@ -830,7 +830,7 @@ co_authored_by = ["Alice <alice@example.com>", "Bob <bob@example.com>"]"#,
 
 		let config = Config::load_from_path(&config_path).expect("v1 config should migrate");
 
-		assert_eq!(config.version, 3);
+		assert_eq!(config.version, 4);
 		assert_eq!(
 			fs::read_to_string(&stale_backup).unwrap(),
 			"backup of an earlier config"
@@ -856,11 +856,11 @@ co_authored_by = ["Alice <alice@example.com>", "Bob <bob@example.com>"]"#,
 			.collect();
 
 		for thread in threads {
-			assert_eq!(thread.join().expect("loader should not panic").unwrap().version, 3);
+			assert_eq!(thread.join().expect("loader should not panic").unwrap().version, 4);
 		}
 
 		let migrated = fs::read_to_string(config_path.as_ref()).unwrap();
 		let config: Config = toml::from_str(&migrated).expect("final config should be valid");
-		assert_eq!(config.version, 3);
+		assert_eq!(config.version, 4);
 	}
 }

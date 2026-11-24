@@ -38,6 +38,11 @@ fn plan() -> MigrationPlan {
 				to: 3,
 				apply: migrate_v2_to_v3,
 			},
+			VersionMigration {
+				from: 3,
+				to: 4,
+				apply: migrate_v3_to_v4,
+			},
 		],
 	)
 }
@@ -117,6 +122,19 @@ fn migrate_v2_to_v3(document: &mut toml_edit::DocumentMut, template: &toml_edit:
 	Ok(())
 }
 
+/// v4 drops `llm.temperature`: octolib no longer accepts sampling parameters,
+/// so the key would sit in the file without any effect.
+fn migrate_v3_to_v4(document: &mut toml_edit::DocumentMut, _template: &toml_edit::DocumentMut) -> Result<()> {
+	if let Some(llm) = document
+		.as_table_mut()
+		.get_mut("llm")
+		.and_then(toml_edit::Item::as_table_like_mut)
+	{
+		llm.remove("temperature");
+	}
+	Ok(())
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
@@ -152,14 +170,14 @@ default_keyword_weight = 0.3
 			.expect("v1 should require migration");
 
 		assert_eq!(migration.from_version, 1);
-		assert_eq!(migration.to_version, 3);
+		assert_eq!(migration.to_version, 4);
 		assert!(migration
 			.content
 			.contains("# User values and comments must survive migration."));
 		assert!(migration.content.contains("# PageIndex-style reasoning retrieval"));
 
 		let migrated: toml::Value = toml::from_str(&migration.content).expect("migrated config should be valid TOML");
-		assert_eq!(migrated["version"].as_integer(), Some(3));
+		assert_eq!(migrated["version"].as_integer(), Some(4));
 		assert_eq!(
 			migrated["search"]["hybrid"]["default_vector_weight"].as_float(),
 			Some(0.7)
@@ -193,7 +211,7 @@ default_keyword_weight = 0.3
 			.expect("v1 should require migration");
 		let migrated: toml::Value = toml::from_str(&migration.content).unwrap();
 
-		assert_eq!(migrated["version"].as_integer(), Some(3));
+		assert_eq!(migrated["version"].as_integer(), Some(4));
 		assert_eq!(migrated["search"]["hybrid"]["rrf_k"].as_float(), Some(60.0));
 		assert_eq!(migrated["search"]["reasoning"]["enabled"].as_bool(), Some(false));
 	}
@@ -206,10 +224,10 @@ default_keyword_weight = 0.3
 			.expect("v2 should require migration");
 
 		assert_eq!(migration.from_version, 2);
-		assert_eq!(migration.to_version, 3);
+		assert_eq!(migration.to_version, 4);
 
 		let migrated: toml::Value = toml::from_str(&migration.content).unwrap();
-		assert_eq!(migrated["version"].as_integer(), Some(3));
+		assert_eq!(migrated["version"].as_integer(), Some(4));
 		assert_eq!(
 			migrated["search"]["reasoning"]["reasoning_effort"].as_str(),
 			Some("low")
@@ -233,6 +251,36 @@ default_keyword_weight = 0.3
 	}
 
 	#[test]
+	fn v3_drops_llm_temperature_and_keeps_other_llm_values() {
+		let existing = "# Keep me.\nversion = 3\n\n[llm]\nmodel = \"openrouter:custom/model\"\ntimeout = 30\ntemperature = 0.7\nmax_tokens = 1234\n";
+		let migration = migrate(existing, super::super::DEFAULT_CONFIG_TEMPLATE)
+			.expect("v3 migration should succeed")
+			.expect("v3 should require migration");
+
+		assert_eq!(migration.from_version, 3);
+		assert_eq!(migration.to_version, 4);
+		assert!(migration.content.contains("# Keep me."));
+
+		let migrated: toml::Value = toml::from_str(&migration.content).unwrap();
+		assert_eq!(migrated["version"].as_integer(), Some(4));
+		assert!(migrated["llm"].get("temperature").is_none());
+		assert_eq!(migrated["llm"]["model"].as_str(), Some("openrouter:custom/model"));
+		assert_eq!(migrated["llm"]["timeout"].as_integer(), Some(30));
+		assert_eq!(migrated["llm"]["max_tokens"].as_integer(), Some(1234));
+	}
+
+	#[test]
+	fn v3_without_llm_table_migrates() {
+		let migration = migrate("version = 3\n", super::super::DEFAULT_CONFIG_TEMPLATE)
+			.expect("minimal v3 config should migrate")
+			.expect("v3 should require migration");
+		let migrated: toml::Value = toml::from_str(&migration.content).unwrap();
+
+		assert_eq!(migrated["version"].as_integer(), Some(4));
+		assert!(migrated.get("llm").is_none());
+	}
+
+	#[test]
 	fn current_version_is_not_rewritten() {
 		assert!(migrate(
 			super::super::DEFAULT_CONFIG_TEMPLATE,
@@ -244,7 +292,7 @@ default_keyword_weight = 0.3
 
 	#[test]
 	fn rejects_future_versions_without_migrating() {
-		let future = super::super::DEFAULT_CONFIG_TEMPLATE.replacen("version = 3", "version = 4", 1);
+		let future = super::super::DEFAULT_CONFIG_TEMPLATE.replacen("version = 4", "version = 5", 1);
 		let error = migrate(&future, super::super::DEFAULT_CONFIG_TEMPLATE).expect_err("future version should fail");
 		assert!(error.to_string().contains("newer than this octocode binary"));
 	}
