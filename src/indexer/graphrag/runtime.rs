@@ -815,5 +815,16 @@ mod tests {
 		let rebuilt = cache.graph(dir.path()).await.unwrap();
 		assert!(rebuilt.nodes.contains_key("a/src/lib.rs::replaced"));
 		assert!(!rebuilt.nodes.contains_key("a/src/lib.rs::call"));
+		let rebuilt_edges = rebuilt
+			.relationships
+			.iter()
+			.filter(|edge| matches!(edge.relation_type, RelationType::Imports | RelationType::Calls))
+			.map(|edge| (edge.source.clone(), edge.target.clone(), edge.relation_type.clone()))
+			.collect::<std::collections::HashSet<_>>();
+		let expected_rebuilt_edges = expected_edges
+			.into_iter()
+			.filter(|(source, _, _)| source.starts_with("b/"))
+			.collect::<std::collections::HashSet<_>>();
+		assert_eq!(rebuilt_edges, expected_rebuilt_edges);
 	}
 }

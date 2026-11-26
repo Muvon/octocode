@@ -41,12 +41,27 @@ for i in range(int(sys.argv[2]) - 2):
 PYTHON
 ```
 
-For end-to-end measurements, build with `cargo build --no-default-features`,
-use a dedicated config with `index.mcp_index = false` and `graphrag.enabled = false`,
-and run `target/debug/octocode mcp --path /absolute/path/to/scratch-project --no-git`
-from the fixture directory. Use a new directory outside any Git repository so its
-path-derived project ID cannot share an existing index. Keep embedding model
+For end-to-end measurements, create a dedicated copy of your config with
+`index.mcp_index = false` and `graphrag.enabled = false`. Keep embedding model
 settings unchanged: MCP startup opens the store even with indexing disabled.
+Build with default features for the stock FastEmbed/local-model config. A
+`--no-default-features` build requires a compatible remote-provider config (for
+example both embedding models set to `openai:text-embedding-3-small`); it cannot
+initialize the stock FastEmbed models.
+
+Capture the executable path in the checkout before switching to the fixture:
+
+```sh
+# In the Octocode checkout; use --no-default-features only for a compatible config.
+cargo build
+octocode_bin="$(pwd)/target/debug/octocode"
+export OCTOCODE_CONFIG_PATH="/absolute/path/to/dedicated-config.toml"
+cd /absolute/path/to/scratch-project
+"$octocode_bin" mcp --path "$PWD" --no-git
+```
+
+Use a new directory outside any Git repository so its path-derived project ID
+cannot share an existing index.
 After JSON-RPC `initialize` and `notifications/initialized`, send
 `tools/call` with `{"name":"graphrag","arguments":{"operation":"overview","format":"json"}}`.
 Measure from that request to its matching result. A cold sample is a new MCP

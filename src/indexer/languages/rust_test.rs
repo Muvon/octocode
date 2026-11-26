@@ -796,11 +796,12 @@ fn crate_root_preserves_lexical_precedence_and_missing_roots() {
 		(vec!["demo\\src\\lib.rs"], Some("demo\\src\\lib.rs")),
 	] {
 		let registry = FileRegistry::new(&files.into_iter().map(str::to_string).collect::<Vec<_>>());
-		assert_eq!(
-			parser
-				.resolve_import("crate::RootType", "demo/src/feature.rs", &registry)
-				.as_deref(),
-			expected
-		);
+		let (resolved, count) = super::rust::count_crate_root_canonicalizations(|| {
+			parser.resolve_import("crate::RootType", "demo/src/feature.rs", &registry)
+		});
+		assert_eq!(resolved.as_deref(), expected);
+		if expected.is_some_and(|path| path.contains('\\')) {
+			assert_eq!(count, 0, "normalized separators must still use the lexical fast path");
+		}
 	}
 }
