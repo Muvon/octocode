@@ -1,3 +1,17 @@
+// Copyright 2026 Muvon Un Limited
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 use crate::indexer::code_region_extractor::extract_meaningful_regions;
 use crate::indexer::languages::resolution_utils::FileRegistry;
 use crate::indexer::languages::rust::Rust;
@@ -711,4 +725,82 @@ fn an_impl_block_yields_one_region_per_method_and_none_for_the_block() {
 		"each method region should carry its receiver type, got {:?}",
 		regions.iter().map(|r| &r.symbols).collect::<Vec<_>>()
 	);
+}
+
+#[test]
+fn lexical_crate_root_does_not_canonicalize_registry_files() {
+	let mut files = vec!["demo/src/lib.rs".to_string(), "demo/src/feature.rs".to_string()];
+	files.extend((0..256).map(|i| format!("demo/src/filler_{i}.rs")));
+	let registry = FileRegistry::new(&files);
+	let (resolved, count) = super::rust::count_crate_root_canonicalizations(|| {
+		Rust {}.resolve_import("crate::RootType", "demo/src/feature.rs", &registry)
+	});
+	assert_eq!(resolved.as_deref(), Some("demo/src/lib.rs"));
+	assert_eq!(count, 0, "lexical root lookup must not touch the filesystem");
+}
+
+#[test]
+fn canonical_crate_root_returns_original_registry_spelling() {
+	let dir = tempfile::tempdir().unwrap();
+	let src = dir.path().join("src");
+	std::fs::create_dir_all(&src).unwrap();
+	std::fs::write(src.join("lib.rs"), "pub struct RootType;").unwrap();
+	let alias = src.join("../src/lib.rs").to_string_lossy().into_owned();
+	let source = src.join("feature.rs").to_string_lossy().into_owned();
+	let registry = FileRegistry::new(&[alias.clone(), source.clone()]);
+	assert_eq!(
+		Rust {}.resolve_import("crate::RootType", &source, &registry),
+		Some(alias)
+	);
+}
+
+#[test]
+fn nearest_canonical_root_wins_over_outer_lexical_root() {
+	let dir = tempfile::tempdir().unwrap();
+	let inner = dir.path().join("nested");
+	std::fs::create_dir_all(&inner).unwrap();
+	std::fs::write(inner.join("lib.rs"), "").unwrap();
+	let alias = inner.join("../nested/lib.rs").to_string_lossy().into_owned();
+	let outer = dir.path().join("lib.rs").to_string_lossy().into_owned();
+	let source = inner.join("feature.rs").to_string_lossy().into_owned();
+	let registry = FileRegistry::new(&[outer, alias.clone(), source.clone()]);
+	assert_eq!(
+		Rust {}.resolve_import("crate::RootType", &source, &registry),
+		Some(alias)
+	);
+}
+
+#[cfg(unix)]
+#[test]
+fn canonical_crate_root_follows_symlink_to_registered_file() {
+	let dir = tempfile::tempdir().unwrap();
+	let target = dir.path().join("actual.rs");
+	std::fs::write(&target, "").unwrap();
+	std::os::unix::fs::symlink(&target, dir.path().join("lib.rs")).unwrap();
+	let source = dir.path().join("feature.rs").to_string_lossy().into_owned();
+	let target = target.to_string_lossy().into_owned();
+	let registry = FileRegistry::new(&[target.clone(), source.clone()]);
+	assert_eq!(
+		Rust {}.resolve_import("crate::RootType", &source, &registry),
+		Some(target)
+	);
+}
+
+#[test]
+fn crate_root_preserves_lexical_precedence_and_missing_roots() {
+	let parser = Rust {};
+	for (files, expected) in [
+		(vec!["demo/src/main.rs", "demo/src/lib.rs"], Some("demo/src/lib.rs")),
+		(vec!["demo/src/main.rs"], Some("demo/src/main.rs")),
+		(vec!["demo/src/other.rs"], None),
+		(vec!["demo\\src\\lib.rs"], Some("demo\\src\\lib.rs")),
+	] {
+		let registry = FileRegistry::new(&files.into_iter().map(str::to_string).collect::<Vec<_>>());
+		assert_eq!(
+			parser
+				.resolve_import("crate::RootType", "demo/src/feature.rs", &registry)
+				.as_deref(),
+			expected
+		);
+	}
 }
