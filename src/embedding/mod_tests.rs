@@ -394,6 +394,58 @@ mod tests {
 	}
 
 	#[tokio::test]
+	async fn openai_requests_obey_the_api_token_cap_with_larger_configured_budgets() {
+		let input = " a".repeat(310_000);
+		let provider = RecordingProvider::default();
+		let result = embed_batches_with_provider(
+			&provider,
+			vec![input.clone()],
+			"openai:text-embedding-3-small",
+			InputType::Document,
+			128,
+			500_000,
+		)
+		.await
+		.unwrap();
+		assert_eq!(result.len(), 1);
+		let requests = provider.requests.lock().unwrap();
+		let tokenizer = tiktoken_rs::cl100k_base().unwrap();
+		assert!(requests.iter().all(|batch| batch
+			.iter()
+			.map(|text| tokenizer.encode_ordinary(text).len())
+			.sum::<usize>()
+			<= 300_000));
+		let prefix = InputType::Document.get_prefix().unwrap();
+		assert_eq!(
+			requests
+				.iter()
+				.flatten()
+				.map(|text| text.strip_prefix(prefix).unwrap())
+				.collect::<String>(),
+			input
+		);
+	}
+
+	#[tokio::test]
+	async fn openai_requests_obey_the_api_item_cap_with_larger_configured_batches() {
+		let provider = RecordingProvider::default();
+		let result = embed_batches_with_provider(
+			&provider,
+			vec!["input".into(); 2049],
+			"openai:text-embedding-3-small",
+			InputType::None,
+			4096,
+			100_000,
+		)
+		.await
+		.unwrap();
+		assert_eq!(result.len(), 2049);
+		let requests = provider.requests.lock().unwrap();
+		assert!(requests.iter().all(|batch| batch.len() <= 2048));
+		assert_eq!(requests.iter().map(Vec::len).sum::<usize>(), 2049);
+	}
+
+	#[tokio::test]
 	async fn zero_openai_batch_limits_fail_before_any_provider_request() {
 		let provider = RecordingProvider::default();
 		for (batch_size, budget) in [(0, 100), (16, 0)] {

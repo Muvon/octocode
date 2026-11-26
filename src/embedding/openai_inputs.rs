@@ -25,6 +25,8 @@ use tiktoken_rs::{cl100k_base, CoreBPE};
 
 // https://developers.openai.com/api/reference/resources/embeddings/methods/create
 const MAX_INPUT_TOKENS: usize = 8192;
+const MAX_REQUEST_TOKENS: usize = 300_000;
+const MAX_REQUEST_INPUTS: usize = 2048;
 static TOKENIZER: LazyLock<CoreBPE> = LazyLock::new(|| cl100k_base().expect("cl100k_base tokenizer must load"));
 
 struct InputPart {
@@ -88,6 +90,8 @@ pub(super) async fn embed(
 		max_tokens_per_batch > 0,
 		"embedding batch token budget must be positive"
 	);
+	let batch_size = batch_size.min(MAX_REQUEST_INPUTS);
+	let max_tokens_per_batch = max_tokens_per_batch.min(MAX_REQUEST_TOKENS);
 	let limit = MAX_INPUT_TOKENS.min(max_tokens_per_batch);
 	let mut parts = Vec::new();
 	for (source, text) in texts.iter().enumerate() {
