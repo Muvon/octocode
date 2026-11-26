@@ -760,4 +760,60 @@ mod tests {
 				&& relationship.relation_type == RelationType::Calls
 		}));
 	}
+
+	#[tokio::test]
+	async fn runtime_rust_imports_preserve_edges_after_lazy_root_lookup() {
+		let dir = tempfile::tempdir().unwrap();
+		for name in ["a", "b"] {
+			let src = dir.path().join(name).join("src");
+			std::fs::create_dir_all(&src).unwrap();
+			std::fs::write(
+				src.join("lib.rs"),
+				"use crate::dep::run as execute; use std::sync::Arc; pub fn call() { execute(); }",
+			)
+			.unwrap();
+			std::fs::write(src.join("dep.rs"), "pub fn run() {}").unwrap();
+		}
+		let cache = RuntimeGraphCache::default();
+		let first = cache.graph(dir.path()).await.unwrap();
+		let expected_edges = ["a", "b"]
+			.into_iter()
+			.flat_map(|name| {
+				[
+					(
+						format!("{name}/src/lib.rs"),
+						format!("{name}/src/dep.rs"),
+						RelationType::Imports,
+					),
+					(
+						format!("{name}/src/lib.rs::call"),
+						format!("{name}/src/dep.rs::run"),
+						RelationType::Calls,
+					),
+				]
+			})
+			.collect::<std::collections::HashSet<_>>();
+		let actual_edges = first
+			.relationships
+			.iter()
+			.filter(|edge| matches!(edge.relation_type, RelationType::Imports | RelationType::Calls))
+			.map(|edge| (edge.source.clone(), edge.target.clone(), edge.relation_type.clone()))
+			.collect::<std::collections::HashSet<_>>();
+		assert_eq!(actual_edges, expected_edges);
+		assert!(first
+			.relationships
+			.iter()
+			.all(|edge| edge.source.starts_with("a/") == edge.target.starts_with("a/")));
+		assert_eq!(
+			first.nodes.values().filter(|node| node.kind == "source_file").count(),
+			4
+		);
+		let warm = cache.graph(dir.path()).await.unwrap();
+		assert!(Arc::ptr_eq(&first, &warm));
+		std::fs::write(dir.path().join("a/src/lib.rs"), "pub fn replaced() {}").unwrap();
+		cache.invalidate();
+		let rebuilt = cache.graph(dir.path()).await.unwrap();
+		assert!(rebuilt.nodes.contains_key("a/src/lib.rs::replaced"));
+		assert!(!rebuilt.nodes.contains_key("a/src/lib.rs::call"));
+	}
 }
