@@ -1,5 +1,102 @@
 # Performance Guide
 
+## Rust crate-root lookup in runtime GraphRAG
+
+Rust import resolution first compares each crate-root candidate (`lib.rs`, then
+`main.rs`, walking nearest ancestors first) with the registered paths. Previously
+it canonicalized **every Rust registry path before trying any candidate**. For
+`R` Rust files and `Q` qualified imports, repeated resolution in the graph builder
+made this filesystem work grow roughly with `R × Q`, including external imports.
+
+Canonical registry paths are now computed lazily, once per lookup, only when a
+candidate exists and needs the canonical fallback. First-candidate lexical matches perform no
+canonicalization. The fallback still returns the original registry spelling and
+preserves candidate precedence, including symlinks and `..` aliases.
+
+Run the deterministic regression and compatibility checks:
+
+```sh
+cargo test --no-default-features crate_root
+cargo test --no-default-features runtime_rust_imports_preserve_edges_after_lazy_root_lookup
+```
+
+`lexical_crate_root_does_not_canonicalize_registry_files` uses 258 virtual
+registry entries: the eager algorithm performs 258 unnecessary canonicalization
+attempts; the lazy algorithm performs zero. The test counts calls rather than
+asserting a machine-dependent time limit.
+
+A public scaling fixture can be generated without private source files:
+
+```sh
+python3 - /absolute/path/to/scratch-project 200 <<'PYTHON'
+from pathlib import Path
+import sys
+src = Path(sys.argv[1]) / "src"
+src.mkdir(parents=True, exist_ok=True)
+(src / "lib.rs").write_text("pub mod dep;\n")
+(src / "dep.rs").write_text("pub struct Thing;\n")
+for i in range(int(sys.argv[2]) - 2):
+    (src / f"m{i:04}.rs").write_text(
+        "use crate::dep::Thing;\nuse std::sync::Arc;\npub fn run() {}\n")
+PYTHON
+```
+
+For end-to-end measurements, create a dedicated copy of your config with
+`index.mcp_index = false` and `graphrag.enabled = false`. Keep embedding model
+settings unchanged: MCP startup opens the store even with indexing disabled.
+Build with default features for the stock FastEmbed/local-model config. A
+`--no-default-features` build requires a compatible remote-provider config (for
+example both embedding models set to `openai:text-embedding-3-small`); it cannot
+initialize the stock FastEmbed models.
+
+Capture the executable path in the checkout before switching to the fixture:
+
+```sh
+# In the Octocode checkout; use --no-default-features only for a compatible config.
+cargo build
+octocode_bin="$(pwd)/target/debug/octocode"
+export OCTOCODE_CONFIG_PATH="/absolute/path/to/dedicated-config.toml"
+cd /absolute/path/to/scratch-project
+"$octocode_bin" mcp --path "$PWD" --no-git
+```
+
+Use a new directory outside any Git repository so its path-derived project ID
+cannot share an existing index.
+After JSON-RPC `initialize` and `notifications/initialized`, send
+`tools/call` with `{"name":"graphrag","arguments":{"operation":"overview","format":"json"}}`.
+Measure from that request to its matching result. A cold sample is a new MCP
+process; warm samples repeat the request in the same process. Confirm
+`mode = "runtime_structural"`, nonzero counts and no `isError`.
+
+A separate Rust-only diagnostic harness on macOS ARM64, using upstream
+`a789880` before/after this change, produced these cold graph-build measurements
+(debug profile; not full MCP latency):
+
+| Rust files | Eager | Lazy | Unchanged nodes / relationships |
+|---|---:|---:|---:|
+| 50 | 574 ms | 44 ms | 100 / 99 |
+| 100 | 2111 ms | 91 ms | 200 / 199 |
+| 200 | 8591 ms | 197 ms | 400 / 399 |
+
+The graph node IDs and relationship triples matched at every size. These are
+local diagnostic observations, not CI timing thresholds. Canonical alias-heavy
+projects can still take the expensive fallback; this change removes the eager
+work on ordinary lexical matches rather than changing resolution semantics.
+
+Full stdin MCP acceptance on an immutable private mixed-language project snapshot
+(754 Rust files, 1047 parsed source files; same macOS ARM64 machine and debug
+binary) returned `runtime_structural` over three independent processes in
+14.701 / 16.275 / 11.796 seconds. Each process then served three warm overviews
+in 19–62 ms. Every cold response contained 18480 nodes and 44752 relationships;
+`get-node` and `get-relationships` succeeded through JSON-RPC as well.
+An imported copy of the existing index, with network access denied at the OS
+level, returned `persisted_enriched` in 9.635 seconds (warm: 79–83 ms),
+44959 relationships and a persisted description distinct from the structural
+one. Automatic indexing and LLM generation were disabled. The original index,
+installed binary and user config were not changed. These mixed-language MCP
+measurements are separate from the Rust-only diagnostic table above; baseline
+full MCP had timed out, so full-project graph parity is not claimed.
+
 ## Performance Metrics
 
 ### Typical Performance Characteristics

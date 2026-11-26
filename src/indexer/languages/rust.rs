@@ -641,16 +641,9 @@ impl Rust {
 		let source_path = std::path::Path::new(source_file);
 		let mut current_dir = source_path.parent()?;
 
-		// Normalize all rust_files paths for comparison
-		let normalized_files: Vec<String> = rust_files
-			.iter()
-			.filter_map(|f| {
-				std::path::Path::new(f)
-					.canonicalize()
-					.ok()
-					.and_then(|p| p.to_str().map(|s| s.to_string()))
-			})
-			.collect();
+		// Most roots match lexically. Resolve registry paths only when a real
+		// candidate needs canonical comparison, and reuse them across ancestors.
+		let normalized_files = std::cell::OnceCell::<Vec<String>>::new();
 
 		loop {
 			// Look for lib.rs or main.rs with proper path normalization
@@ -669,13 +662,25 @@ impl Rust {
 				}
 
 				// Try normalized path comparison for cross-platform compatibility
-				// Try normalized path comparison for cross-platform compatibility
-				if let Ok(canonical_root) = root_path.canonicalize() {
+				if let Ok(canonical_root) = canonicalize_crate_path(&root_path) {
 					let canonical_str = canonical_root.to_string_lossy().to_string();
-					if normalized_files.iter().any(|f| f == &canonical_str) {
+					if normalized_files
+						.get_or_init(|| {
+							rust_files
+								.iter()
+								.filter_map(|f| {
+									canonicalize_crate_path(std::path::Path::new(f))
+										.ok()
+										.and_then(|p| p.to_str().map(|s| s.to_string()))
+								})
+								.collect()
+						})
+						.iter()
+						.any(|f| f == &canonical_str)
+					{
 						// Return the original path format from rust_files
 						for original in rust_files {
-							if let Ok(canonical_f) = std::path::Path::new(original).canonicalize() {
+							if let Ok(canonical_f) = canonicalize_crate_path(std::path::Path::new(original)) {
 								if canonical_f.to_string_lossy() == canonical_str {
 									return Some(original.clone());
 								}
@@ -689,4 +694,28 @@ impl Rust {
 			current_dir = current_dir.parent()?;
 		}
 	}
+}
+
+fn canonicalize_crate_path(path: &std::path::Path) -> std::io::Result<std::path::PathBuf> {
+	#[cfg(test)]
+	CRATE_CANONICALIZATIONS.with(|count| count.set(count.get() + 1));
+	path.canonicalize()
+}
+
+#[cfg(test)]
+thread_local! {
+	static CRATE_CANONICALIZATIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
+pub(super) fn count_crate_root_canonicalizations<T>(run: impl FnOnce() -> T) -> (T, usize) {
+	struct Restore(usize);
+	impl Drop for Restore {
+		fn drop(&mut self) {
+			CRATE_CANONICALIZATIONS.with(|count| count.set(self.0));
+		}
+	}
+	let _restore = Restore(CRATE_CANONICALIZATIONS.with(|count| count.replace(0)));
+	let result = run();
+	(result, CRATE_CANONICALIZATIONS.with(|count| count.get()))
 }
