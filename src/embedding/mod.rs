@@ -39,6 +39,7 @@ pub mod provider {
 	pub use octolib::embedding::provider::*;
 }
 
+mod openai_inputs;
 mod shared;
 
 /// Loaded local model providers cached per model string. Local ONNX weights
@@ -227,6 +228,28 @@ async fn embed_batches(
 	max_tokens_per_batch: usize,
 ) -> Result<Vec<Vec<f32>>> {
 	let provider = create_shared_provider(model_string).await?;
+	embed_batches_with_provider(
+		provider.as_ref(),
+		texts,
+		model_string,
+		input_type,
+		batch_size,
+		max_tokens_per_batch,
+	)
+	.await
+}
+
+async fn embed_batches_with_provider(
+	provider: &dyn EmbeddingProvider,
+	texts: Vec<String>,
+	model_string: &str,
+	input_type: InputType,
+	batch_size: usize,
+	max_tokens_per_batch: usize,
+) -> Result<Vec<Vec<f32>>> {
+	if parse_provider_model(model_string)?.0 == EmbeddingProviderType::OpenAI {
+		return openai_inputs::embed(provider, texts, input_type, batch_size, max_tokens_per_batch).await;
+	}
 	let batches = split_texts_into_token_limited_batches(texts, batch_size, max_tokens_per_batch);
 	let mut all_embeddings = Vec::new();
 	for batch in batches {

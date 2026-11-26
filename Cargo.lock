@@ -5379,6 +5379,7 @@ dependencies = [
  "sha2 0.11.1",
  "tar",
  "tempfile",
+ "tiktoken-rs",
  "tokio",
  "toml",
  "toml_edit",
