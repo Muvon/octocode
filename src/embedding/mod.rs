@@ -118,7 +118,7 @@ impl From<&Config> for EmbeddingGenerationConfig {
 	}
 }
 
-/// Maximum number of retries for embedding calls with exponential backoff
+/// Maximum retries for legacy untyped embedding failures.
 const MAX_EMBEDDING_RETRIES: u32 = 3;
 
 /// Generate embeddings based on configured provider (supports provider:model format)
@@ -134,39 +134,19 @@ pub async fn generate_embeddings(contents: &str, is_code: bool, config: &Config)
 		&embedding_config.text_model
 	};
 
-	let mut last_error = None;
-	for attempt in 0..=MAX_EMBEDDING_RETRIES {
-		if attempt > 0 {
-			let delay = Duration::from_secs(5 * (1 << (attempt - 1)));
-			tracing::warn!(
-				"Embedding call failed (attempt {}/{}), retrying in {:?}...",
-				attempt,
-				MAX_EMBEDDING_RETRIES + 1,
-				delay
-			);
-			tokio::time::sleep(delay).await;
-		}
-
-		match embed_batches(
+	retry_embedding_operation(|| {
+		embed_batches(
 			vec![contents.to_string()],
 			model_string,
 			InputType::Query,
 			1,
 			embedding_config.max_tokens_per_batch,
 		)
-		.await
-		{
-			Ok(results) => {
-				return results
-					.into_iter()
-					.next()
-					.ok_or_else(|| anyhow::anyhow!("No embeddings generated"));
-			}
-			Err(e) => last_error = Some(e),
-		}
-	}
-
-	Err(last_error.unwrap_or_else(|| anyhow::anyhow!("Embedding generation failed after retries")))
+	})
+	.await?
+	.into_iter()
+	.next()
+	.ok_or_else(|| anyhow::anyhow!("No embeddings generated"))
 }
 
 /// Generate batch embeddings based on configured provider (supports provider:model format)
@@ -186,34 +166,42 @@ pub async fn generate_embeddings_batch(
 		&embedding_config.text_model
 	};
 
-	let mut last_error = None;
-	for attempt in 0..=MAX_EMBEDDING_RETRIES {
-		if attempt > 0 {
-			let delay = Duration::from_secs(5 * (1 << (attempt - 1)));
-			tracing::warn!(
-				"Embedding batch failed (attempt {}/{}), retrying in {:?}...",
-				attempt,
-				MAX_EMBEDDING_RETRIES + 1,
-				delay
-			);
-			tokio::time::sleep(delay).await;
-		}
-
-		match embed_batches(
+	retry_embedding_operation(|| {
+		embed_batches(
 			texts.to_vec(),
 			model_string,
 			input_type.clone(),
 			embedding_config.batch_size,
 			embedding_config.max_tokens_per_batch,
 		)
-		.await
-		{
+	})
+	.await
+}
+
+/// Retain the legacy fallback for errors from local providers and older octolib versions.
+async fn retry_embedding_operation<T, F, Fut>(mut operation: F) -> Result<T>
+where
+	F: FnMut() -> Fut,
+	Fut: std::future::Future<Output = Result<T>>,
+{
+	let mut attempt = 0;
+	loop {
+		match operation().await {
 			Ok(result) => return Ok(result),
-			Err(e) => last_error = Some(e),
+			Err(error) => {
+				// Octolib owns retries for typed provider failures. Starting this
+				// operation again would reset its limits and replay earlier batches.
+				if error.downcast_ref::<octolib::errors::ProviderError>().is_some() || attempt == MAX_EMBEDDING_RETRIES
+				{
+					return Err(error);
+				}
+				let delay = Duration::from_secs(5 * (1 << attempt));
+				tracing::warn!(attempt = attempt + 1, ?delay, "retrying embedding operation");
+				tokio::time::sleep(delay).await;
+				attempt += 1;
+			}
 		}
 	}
-
-	Err(last_error.unwrap_or_else(|| anyhow::anyhow!("Embedding batch generation failed after retries")))
 }
 
 /// One shared-provider attempt: token-limited batching over a provider that
