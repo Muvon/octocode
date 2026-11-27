@@ -123,7 +123,7 @@ mod tests {
 		config
 	}
 
-	#[tokio::test]
+	#[tokio::test(start_paused = true)]
 	async fn a_code_model_without_a_provider_prefix_is_rejected_before_any_request() {
 		let config = config_with_models("voyage-code-3", "voyage:voyage-3.5-lite");
 		let err = generate_embeddings("fn main() {}", true, &config)
@@ -135,7 +135,7 @@ mod tests {
 		);
 	}
 
-	#[tokio::test]
+	#[tokio::test(start_paused = true)]
 	async fn a_text_model_without_a_provider_prefix_is_rejected_before_any_request() {
 		let config = config_with_models("voyage:voyage-code-3", "plain-text-model");
 		let err = generate_embeddings("some prose", false, &config)
@@ -147,7 +147,7 @@ mod tests {
 		);
 	}
 
-	#[tokio::test]
+	#[tokio::test(start_paused = true)]
 	async fn the_is_code_flag_selects_which_model_string_is_validated() {
 		// Only the code model is malformed, so the text path must not complain
 		// about it — it fails later, on the provider, which we never reach here.
@@ -162,7 +162,7 @@ mod tests {
 		);
 	}
 
-	#[tokio::test]
+	#[tokio::test(start_paused = true)]
 	async fn the_batch_entry_point_applies_the_same_model_validation() {
 		let config = config_with_models("no-colon", "still-no-colon");
 		let texts = vec!["a".to_string(), "b".to_string()];
@@ -182,12 +182,61 @@ mod tests {
 		);
 	}
 
-	#[tokio::test]
+	#[tokio::test(start_paused = true)]
 	async fn an_empty_model_string_is_rejected_as_malformed() {
 		let config = config_with_models("", "");
 		assert_eq!(
 			generate_embeddings("x", true, &config).await.unwrap_err().to_string(),
 			"Model format must be 'provider:model' (e.g., 'jina:jina-embeddings-v4')"
 		);
+	}
+	#[tokio::test(start_paused = true)]
+	async fn provider_failure_does_not_replay_previously_completed_batches() {
+		for status in [400, 401, 429, 503] {
+			let mut completed_batches = 0;
+			let error = retry_embedding_operation(|| {
+				// The first sub-batch succeeded before the provider handled an error
+				// from the second. An outer retry would send the first one again.
+				completed_batches += 1;
+				std::future::ready(Err::<(), _>(
+					anyhow::Error::new(octolib::errors::ProviderError::ApiError {
+						provider: "fixture".into(),
+						status,
+						message: "provider response".into(),
+					})
+					.context("embedding request failed"),
+				))
+			})
+			.await
+			.unwrap_err();
+			assert_eq!(completed_batches, 1, "HTTP {status} must not replay completed batches");
+			assert!(matches!(error.downcast_ref::<octolib::errors::ProviderError>(),
+				Some(octolib::errors::ProviderError::ApiError {status: s, ..}) if *s == status));
+		}
+	}
+
+	#[tokio::test(start_paused = true)]
+	async fn untyped_legacy_errors_keep_the_bounded_fallback() {
+		let mut calls = 0;
+		let result = retry_embedding_operation(|| {
+			calls += 1;
+			std::future::ready(if calls < 3 {
+				Err(anyhow::anyhow!("legacy failure"))
+			} else {
+				Ok(42)
+			})
+		})
+		.await
+		.unwrap();
+		assert_eq!(result, 42);
+		assert_eq!(calls, 3);
+		let mut calls = 0;
+		assert!(retry_embedding_operation(|| {
+			calls += 1;
+			std::future::ready(Err::<(), _>(anyhow::anyhow!("legacy failure")))
+		})
+		.await
+		.is_err());
+		assert_eq!(calls, 4);
 	}
 }
