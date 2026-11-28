@@ -738,10 +738,15 @@ mod tests {
 				.structural_search(structural(json!({"language":"typescript","symbol":"EffectFlags"})))
 				.await
 				.expect("exact enum lookup");
-			assert!(output.contains("51:9f|export enum EffectFlags {"), "{output}");
-			assert!(output.contains("55:30|  ALLOW_RECURSE = 1 << 7,"), "{output}");
-			assert!(output.contains("56:06|  PAUSED = 1 << 8,"), "{output}");
-			assert!(output.contains("57:36|  STOP = 1 << 10,"), "{output}");
+			for (position, line) in [
+				(51, "export enum EffectFlags {"),
+				(55, "  ALLOW_RECURSE = 1 << 7,"),
+				(56, "  PAUSED = 1 << 8,"),
+				(57, "  STOP = 1 << 10,"),
+			] {
+				let rendered = octolib::utils::line_hash::format_line(position, line);
+				assert!(output.contains(&rendered), "{rendered} missing from {output}");
+			}
 			assert!(!output.contains("source lines omitted"), "{output}");
 			let source_lines: Vec<&str> = content.lines().collect();
 			for rendered in output.lines().filter(|line| line.contains('|')) {
@@ -786,7 +791,11 @@ mod tests {
 			output.contains(&octolib::utils::line_hash::format_line(102, "}")),
 			"{output}"
 		);
-		assert_eq!(output.lines().filter(|line| line.contains('|')).count(), 5);
+		let id_lines = output
+			.lines()
+			.filter(|line| octolib::utils::line_hash::parse_line(line).is_some())
+			.count();
+		assert_eq!(id_lines, 5, "{output}");
 	}
 
 	#[tokio::test]
@@ -813,7 +822,10 @@ mod tests {
 			.structural_search(structural(json!({"language":"rust","symbol":"New"})))
 			.await
 			.unwrap();
-		assert!(output.contains("|struct New;"), "{output}");
+		assert!(
+			output.contains(&octolib::utils::line_hash::format_line(1, "struct New;")),
+			"{output}"
+		);
 	}
 
 	#[test]
